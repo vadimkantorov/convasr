@@ -3,6 +3,7 @@ import gzip
 import numpy as np
 import torch.utils.data
 import scipy.io.wavfile
+import scipy.signal
 import librosa
 
 import data.labels
@@ -24,7 +25,6 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
-		
 		signal, sample_rate = read_wav(audio_path); 
 		if sample_rate != self.sample_rate:
 			signal, sample_rate = librosa.resample(y, sample_rate, self.sample_rate), self.sample_rate
@@ -67,8 +67,9 @@ def spectrogram(signal, sample_rate, window_size, window_stride, window):
 	n_fft = int(sample_rate * (window_size + 1e-8))
 	win_length = n_fft
 	hop_length = int(sample_rate * (window_stride + 1e-8))
-	D = librosa.stft(signal.numpy(), n_fft=n_fft, hop_length=hop_length, win_length=win_length, window=window)
-	spect = np.abs(D)
+	#D = librosa.stft(signal.numpy(), n_fft=n_fft, hop_length=hop_length, win_length=win_length, window=window)
+	#spect = np.abs(D); print(spect.shape)
+	spect = np.zeros((1601, 22))
 
 	if spect.shape[0] < 161:
 		spect.resize((161, *spect.shape[1:]))
