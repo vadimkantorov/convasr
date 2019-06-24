@@ -36,6 +36,26 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 	def __len__(self):
 		return len(self.ids)
 
+def get_cer_wer(decoder, transcript, reference):
+    reference = reference.strip()
+    transcript = transcript.strip()
+    wer_ref = float(len(reference.split()) or 1)
+    cer_ref = float(len(reference.replace(' ','')) or 1)
+    if reference == transcript:
+        return 0, 0, wer_ref, cer_ref
+    else:
+        wer = decoder.wer(transcript, reference)
+        cer = decoder.cer(transcript, reference)
+    return wer, cer, wer_ref, cer_ref
+
+def unpack_targets(targets, target_sizes):
+    unpacked = []
+    offset = 0
+    for size in target_sizes:
+        unpacked.append(targets[offset:offset + size])
+        offset += size
+    return unpacked
+
 def collate_fn(batch):
     def func(p):
         return p[0].size(1)

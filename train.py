@@ -7,6 +7,7 @@ import torch.utils.data
 
 import data.dataset
 import model
+import decoder
 from warpctc_pytorch import CTCLoss
 
 parser = argparse.ArgumentParser()
@@ -33,11 +34,12 @@ audio_conf = dict(
 )
 
 if __name__ == '__main__':
-    torch.multiprocessing.set_start_method('spawn', force = True)
+    #torch.multiprocessing.set_start_method('spawn', force = True) # https://github.com/pytorch/pytorch/issues/22131
 
+    labels = data.labels.RU_LABELS
     train_dataset = data.dataset.SpectrogramDataset(audio_conf = audio_conf, data_path = args.train_data_path)
     train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = True)
-    num_classes = len(train_dataset.labels.labels)
+    num_classes = len(labels)
 
     val_dataset = data.dataset.SpectrogramDataset(audio_conf = audio_conf, data_path = args.val_data_path)
     val_loader = torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size)
@@ -48,22 +50,21 @@ if __name__ == '__main__':
     model = model.to(device)
     optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay)
     criterion = CTCLoss()
-    for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
-        print(i, inputs.shape)
-        input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
-        inputs = inputs.to(device)
-        input_sizes = input_sizes.to(device)
-        logits, probs, output_sizes = model(inputs, input_sizes)
+    decoder = decoder.GreedyDecoder(labels)
 
-        split_targets = []
-        offset = 0
-        for size in target_sizes:
-            split_targets.append(targets[offset:offset + size])
-            offset += size
+    for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
+        input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
+        logits, probs, output_sizes = model(inputs.to(device), input_sizes.to(device))
+        decoded_output, _ = decoder.decode(probs, output_sizes)
+        target_strings = decoder.convert_to_strings(data.dataset.unpack_targets(targets, target_sizes))
+        for x in range(len(target_strings)):
+            transcript, reference = decoded_output[x][0], target_strings[x][0]
+            wer, cer, wer_ref, cer_ref = data.dataset.get_cer_wer(decoder, transcript, reference)
+            print('TRANSCRIPT:', transcript, 'REF:', reference, 'CER:', cer)
 
         logits = logits.transpose(0, 1)  # TxNxH
         loss = criterion(logits, targets, output_sizes.cpu(), target_sizes)
-        loss = loss / inputs.size(0)  # average the loss by minibatch
+        loss = loss / len(inputs)  # average the loss by minibatch
         loss = loss.to(device)
 
         optimizer.zero_grad()
