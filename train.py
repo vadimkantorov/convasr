@@ -22,6 +22,7 @@ parser.add_argument('--weight-decay', type = float, default = 0.0)
 parser.add_argument('--momentum', type = float, default = 0.9)
 parser.add_argument('--train-batch-size', type = int, default = 40)
 parser.add_argument('--val-batch-size', type = int, default = 80)
+parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 args = parser.parse_args()
 
 audio_conf = dict(
@@ -36,18 +37,19 @@ if __name__ == '__main__':
 
     train_dataset = data.dataset.SpectrogramDataset(audio_conf = audio_conf, data_path = args.train_data_path)
     train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = True)
+    num_classes = len(train_dataset.labels.labels)
 
     val_dataset = data.dataset.SpectrogramDataset(audio_conf = audio_conf, data_path = args.val_data_path)
     val_loader = torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size)
 
-    device = torch.device("cuda" if args.cuda else "cpu")
+    device = torch.device(args.device)
 
-    model = torch.nn.Module().to(device)
+    model = model.Speech2TextModel(model.Wav2LetterVanilla(num_classes))
+    model = model.to(device)
     optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay)
     criterion = CTCLoss()
     for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
         print(i, inputs.shape)
-        break
         input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
         inputs = inputs.to(device)
         input_sizes = input_sizes.to(device)
@@ -67,3 +69,4 @@ if __name__ == '__main__':
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        break
