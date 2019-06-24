@@ -1,4 +1,3 @@
-import torch
 import gc
 import time
 import argparse
@@ -8,6 +7,7 @@ import torch.utils.data
 
 import data.dataset
 import model
+from warpctc_pytorch import CTCLoss
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--train-data-path', default = '../open_stt_splits/audiobooks_train.csv.gz')
@@ -17,6 +17,11 @@ parser.add_argument('--window-size', type = float, default = 0.2)
 parser.add_argument('--window-stride', type = float, default = 0.1)
 parser.add_argument('--window', default = 'hann', choices = ['hann', 'hamming'])
 parser.add_argument('--num-workers', type = int, default = 1)
+parser.add_argument('--lr', type = float, default = 3e-4)
+parser.add_argument('--weight-decay', type = float, default = 0.0)
+parser.add_argument('--momentum', type = float, default = 0.9)
+parser.add_argument('--train-batch-size', type = int, default = 40)
+parser.add_argument('--val-batch-size', type = int, default = 80)
 args = parser.parse_args()
 
 audio_conf = dict(
@@ -33,8 +38,32 @@ if __name__ == '__main__':
     train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = True)
 
     val_dataset = data.dataset.SpectrogramDataset(audio_conf = audio_conf, data_path = args.val_data_path)
-    val_loader = torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = False)
+    val_loader = torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size)
 
+    device = torch.device("cuda" if args.cuda else "cpu")
+
+    model = torch.nn.Module().to(device)
+    optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay)
+    criterion = CTCLoss()
     for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
         print(i, inputs.shape)
         break
+        input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
+        inputs = inputs.to(device)
+        input_sizes = input_sizes.to(device)
+        logits, probs, output_sizes = model(inputs, input_sizes)
+
+        split_targets = []
+        offset = 0
+        for size in target_sizes:
+            split_targets.append(targets[offset:offset + size])
+            offset += size
+
+        logits = logits.transpose(0, 1)  # TxNxH
+        loss = criterion(logits, targets, output_sizes.cpu(), target_sizes)
+        loss = loss / inputs.size(0)  # average the loss by minibatch
+        loss = loss.to(device)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
