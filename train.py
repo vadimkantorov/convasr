@@ -29,22 +29,18 @@ parser.add_argument('--checkpoint')
 parser.add_argument('--checkpoint-dir', default = 'data/checkpoints')
 args = parser.parse_args()
 
-audio_conf = dict(
-	sample_rate = args.sample_rate,
-	window_size = args.window_size,
-	window_stride = args.window_stride,
-	window = args.window
-)
-
 if __name__ == '__main__':
     #torch.multiprocessing.set_start_method('spawn', force = True) # https://github.com/pytorch/pytorch/issues/22131
 
     labels = data.labels.RU_LABELS
-    train_dataset = data.dataset.SpectrogramDataset(audio_conf = audio_conf, data_path = args.train_data_path)
-    train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = True)
     num_classes = len(labels)
 
-    val_dataset = data.dataset.SpectrogramDataset(audio_conf = audio_conf, data_path = args.val_data_path)
+    train_sampler = BucketingSampler(train_dataset, batch_size=args.batch_size)
+    train_sampler.bins = train_sampler.bins[from_iter:]
+    train_dataset = data.dataset.SpectrogramDataset(sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, data_path = args.train_data_path, labels = labels)
+    train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = True, batch_sampler = train_sampler)
+
+    val_dataset = data.dataset.SpectrogramDataset(sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, data_path = args.val_data_path, labels = labels)
     val_loader = torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size)
 
     device = torch.device(args.device)
@@ -63,17 +59,15 @@ if __name__ == '__main__':
             input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
             logits, probs, output_sizes = model(inputs.to(device), input_sizes.to(device))
 
-            logits = logits.transpose(0, 1)  # TxNxH
-            loss = criterion(logits, targets, output_sizes.cpu(), target_sizes)
-            loss = loss / len(inputs)  # average the loss by minibatch
+            loss = criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes) # logits -> TxNxH
+            loss = loss / len(inputs) 
             loss = loss.to(device)
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-        val_wer_sum, val_cer_sum = 0.0, 0.0
-        num_words, num_chars = 0, 0
+        num_words, num_chars, val_wer_sum, val_cer_sum = 0, 0, 0.0, 0.0
 
         for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
             input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
@@ -87,9 +81,7 @@ if __name__ == '__main__':
                 val_cer_sum += cer
                 num_words += wer_ref
                 num_chars += cer_ref
-        val_wer = 100 * val_wer_sum / num_words
-        val_cer = 100 * val_cer_sum / num_chars
-        print('WER:', val_wer, 'CER:', val_cer)
+        print('WER: {:.02%} CER: {:.02%}'.format(val_wer_sum / num_words, val_cer_sum / num_chars))
 
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)

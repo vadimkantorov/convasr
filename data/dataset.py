@@ -9,14 +9,13 @@ import librosa
 import data.labels
 
 class SpectrogramDataset(torch.utils.data.Dataset):
-	def __init__(self, audio_conf, data_path, labels_path = None, max_duration = 20):
-		self.window_stride = audio_conf['window_stride']
-		self.window_size = audio_conf['window_size']
-		self.sample_rate = audio_conf['sample_rate']
-		self.window = getattr(scipy.signal, audio_conf['window'])
-		self.labels = data.labels.Labels(labels_path)
+	def __init__(self, sample_rate, window_size, window_stride, window, data_path, labels, max_duration = 20):
+		self.window_stride = window_stride
+		self.window_size = window_size
+		self.sample_rate = sample_rate
+		self.window = getattr(scipy.signal, window)
+		self.labels = data.labels.Labels(labels)
 		self.transforms = []
-		# TODO: max_duration
 
 		if data_path.endswith('.gz'):
 			self.ids = [(row[-2], row[-1], float(row[4])) for row in csv.reader(gzip.open(data_path, 'rt')) if float(row[4]) < max_duration]
@@ -35,6 +34,27 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 
 	def __len__(self):
 		return len(self.ids)
+
+class BucketingSampler(Sampler):
+    def __init__(self, data_source, batch_size=1):
+        """
+        Samples batches assuming they are in order of size to batch similarly sized samples together.
+        """
+        super(BucketingSampler, self).__init__(data_source)
+        self.data_source = data_source
+        ids = list(range(0, len(data_source)))
+        self.bins = [ids[i:i + batch_size] for i in range(0, len(ids), batch_size)]
+
+    def __iter__(self):
+        for ids in self.bins:
+            np.random.shuffle(ids)
+            yield ids
+
+    def __len__(self):
+        return len(self.bins)
+
+    def shuffle(self, epoch):
+        np.random.shuffle(self.bins)
 
 def get_cer_wer(decoder, transcript, reference):
     reference = reference.strip()
