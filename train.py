@@ -27,6 +27,7 @@ parser.add_argument('--epochs', type = int, default = 20)
 parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 parser.add_argument('--checkpoint')
 parser.add_argument('--checkpoint-dir', default = 'data/checkpoints')
+parser.add_argument('--model', default = 'Wav2LetterVanilla')
 args = parser.parse_args()
 
 if __name__ == '__main__':
@@ -45,7 +46,7 @@ if __name__ == '__main__':
 
     device = torch.device(args.device)
 
-    model = model.Speech2TextModel(model.Wav2LetterVanilla(num_classes))
+    model = model.Speech2TextModel(getattr(model, args.model)(num_classes))
     if args.checkpoint:
         model.load_checkpoint(args.checkpoint)
 
