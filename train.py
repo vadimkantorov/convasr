@@ -23,7 +23,10 @@ parser.add_argument('--weight-decay', type = float, default = 0.0)
 parser.add_argument('--momentum', type = float, default = 0.9)
 parser.add_argument('--train-batch-size', type = int, default = 40)
 parser.add_argument('--val-batch-size', type = int, default = 80)
+parser.add_argument('--epochs', type = int, default = 20)
 parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
+parser.add_argument('--checkpoint')
+parser.add_argument('--checkpoint-dir', default = 'data/checkpoints')
 args = parser.parse_args()
 
 audio_conf = dict(
@@ -47,27 +50,47 @@ if __name__ == '__main__':
     device = torch.device(args.device)
 
     model = model.Speech2TextModel(model.Wav2LetterVanilla(num_classes))
+    if args.checkpoint:
+        model.load_checkpoint(args.checkpoint)
+
     model = model.to(device)
     optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay)
     criterion = CTCLoss()
     decoder = decoder.GreedyDecoder(labels)
 
-    for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
-        input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
-        logits, probs, output_sizes = model(inputs.to(device), input_sizes.to(device))
-        decoded_output, _ = decoder.decode(probs, output_sizes)
-        target_strings = decoder.convert_to_strings(data.dataset.unpack_targets(targets, target_sizes))
-        for x in range(len(target_strings)):
-            transcript, reference = decoded_output[x][0], target_strings[x][0]
-            wer, cer, wer_ref, cer_ref = data.dataset.get_cer_wer(decoder, transcript, reference)
-            print('TRANSCRIPT:', transcript, 'REF:', reference, 'CER:', cer)
+    for epoch in range(args.epochs):
+        for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
+            input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
+            logits, probs, output_sizes = model(inputs.to(device), input_sizes.to(device))
 
-        logits = logits.transpose(0, 1)  # TxNxH
-        loss = criterion(logits, targets, output_sizes.cpu(), target_sizes)
-        loss = loss / len(inputs)  # average the loss by minibatch
-        loss = loss.to(device)
+            logits = logits.transpose(0, 1)  # TxNxH
+            loss = criterion(logits, targets, output_sizes.cpu(), target_sizes)
+            loss = loss / len(inputs)  # average the loss by minibatch
+            loss = loss.to(device)
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        break
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        val_wer_sum, val_cer_sum = 0.0, 0.0
+        num_words, num_chars = 0, 0
+
+        for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
+            input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
+            logits, probs, output_sizes = model(inputs.to(device), input_sizes.to(device))
+            decoded_output, _ = decoder.decode(probs, output_sizes)
+            target_strings = decoder.convert_to_strings(data.dataset.unpack_targets(targets, target_sizes))
+            for x in range(len(target_strings)):
+                transcript, reference = decoded_output[x][0], target_strings[x][0]
+                wer, cer, wer_ref, cer_ref = data.dataset.get_cer_wer(decoder, transcript, reference)
+                val_wer_sum += wer
+                val_cer_sum += cer
+                num_words += wer_ref
+                num_chars += cer_ref
+        val_wer = 100 * val_wer_sum / num_words
+        val_cer = 100 * val_cer_sum / num_chars
+        print('WER:', val_wer, 'CER:', val_cer)
+
+        if not os.path.exists(checkpoint_dir):
+            os.makedirs(checkpoint_dir)
+        model.save_checkpoint(arg.checkpoint_dir)

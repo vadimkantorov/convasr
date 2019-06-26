@@ -41,6 +41,15 @@ class Speech2TextModel(nn.Module):
         x = x.transpose(0, 1)
         outs = F.softmax(x, dim=-1)
         return x, outs, output_lengths
+
+    def load_checkpoint(self, checkpoint_path):
+        state_dict = torch.load(checkpoint_path)
+        self.model.load_state_dict(state_dict)
+
+    def save_checkpoint(self, checkpoint_dir):
+        state_dict = self.model.state_dict()
+        checkpoint_path = os.path.join(checkpoint_dir, 'checkpoint.pt')
+        torch.save(state_dict, checkpoint_path)
  
 class Conv1dSamePadding(nn.Conv1d):
     """ 2D Convolutions like TensorFlow """
