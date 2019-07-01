@@ -3,7 +3,7 @@ import time
 import argparse
 import torch
 import torch.utils.data
-#import torch.utils.tensorboard
+import torch.utils.tensorboard
 
 import data.dataset
 import model
@@ -32,14 +32,12 @@ args = parser.parse_args()
 
 if __name__ == '__main__':
     #torch.multiprocessing.set_start_method('spawn', force = True) # https://github.com/pytorch/pytorch/issues/22131
-
     labels = data.labels.RU_LABELS
     num_classes = len(labels)
 
-    train_sampler = BucketingSampler(train_dataset, batch_size=args.batch_size)
-    train_sampler.bins = train_sampler.bins[from_iter:]
     train_dataset = data.dataset.SpectrogramDataset(sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, data_path = args.train_data_path, labels = labels)
-    train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = True, batch_sampler = train_sampler)
+    train_sampler = data.dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
+    train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
 
     val_dataset = data.dataset.SpectrogramDataset(sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, data_path = args.val_data_path, labels = labels)
     val_loader = torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size)
@@ -54,7 +52,8 @@ if __name__ == '__main__':
     optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay)
     criterion = CTCLoss()
     decoder = decoder.GreedyDecoder(labels)
-
+    
+    print('Dataset loaded')
     for epoch in range(args.epochs):
         for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
             input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
@@ -67,6 +66,7 @@ if __name__ == '__main__':
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            print('Iteration', i, 'loss:', float(loss))
 
         num_words, num_chars, val_wer_sum, val_cer_sum = 0, 0, 0.0, 0.0
 
