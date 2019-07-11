@@ -1,7 +1,30 @@
+import os
 import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+class Wav2LetterRu(nn.Sequential):
+    def __init__(self, num_classes):
+        def conv_block(kernel_size, num_channels, stride = 1, padding = 0):
+            return nn.Sequential(
+                nn.Conv1d(num_channels[0], num_channels[1], kernel_size=kernel_size, stride=stride, padding=padding),
+                nn.ReLU(inplace = True)
+            )
+
+        layers = [
+            conv_block(kernel_size = 13, num_channels = (161, 768), stride = 2, padding = 6),
+            conv_block(kernel_size = 13, num_channels = (768, 768), stride = 1, padding = 6),
+            conv_block(kernel_size = 13, num_channels = (768, 768), stride = 1, padding = 6),
+            conv_block(kernel_size = 13, num_channels = (768, 768), stride = 1, padding = 6),
+            conv_block(kernel_size = 13, num_channels = (768, 768), stride = 1, padding = 6),
+            conv_block(kernel_size = 13, num_channels = (768, 768), stride = 1, padding = 6),
+            conv_block(kernel_size = 13, num_channels = (768, 768), stride = 1, padding = 6),
+            conv_block(kernel_size = 31, num_channels = (768, 2048), stride = 1, padding = 15),
+            conv_block(kernel_size = 1,  num_channels = (2048, 2048), stride = 1, padding = 0),
+            nn.Conv1d(2048, num_classes, kernel_size=1, stride=1)
+        ]
+        super(Wav2LetterRu, self).__init__(*layers)
 
 class Wav2LetterVanilla(nn.Sequential):
     def __init__(self, num_classes):

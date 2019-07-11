@@ -1,3 +1,4 @@
+import os
 import csv
 import gzip
 import numpy as np
@@ -9,7 +10,7 @@ import librosa
 import data.labels
 
 class SpectrogramDataset(torch.utils.data.Dataset):
-	def __init__(self, sample_rate, window_size, window_stride, window, data_path, labels, max_duration = 20):
+	def __init__(self, sample_rate, window_size, window_stride, window, data_path, labels, base_dir = '', max_duration = 20):
 		self.window_stride = window_stride
 		self.window_size = window_size
 		self.sample_rate = sample_rate
@@ -18,15 +19,15 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 		self.transforms = []
 
 		if data_path.endswith('.gz'):
-			self.ids = [(row[-2], row[-1], float(row[4])) for row in csv.reader(gzip.open(data_path, 'rt')) if float(row[4]) < max_duration]
+			self.ids = [(row[-1], row[-2], float(row[3])) for row in csv.reader(gzip.open(data_path, 'rt')) if float(row[4]) < max_duration]
 		else:
-			self.ids = [('sample_ok/sample_ok/' + row[0], row[-1], 5) for row in csv.reader(data_path) if 'wav' in row[0]]
+			self.ids = [(os.path.join(base_dir, row[0]), row[-1], 5) for row in csv.reader(open(data_path)) if 'wav' in row[0]]
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
-		signal, sample_rate = read_wav(audio_path); 
+		signal, sample_rate = read_wav(audio_path)
 		if sample_rate != self.sample_rate:
-			signal, sample_rate = librosa.resample(y, sample_rate, self.sample_rate), self.sample_rate
+			signal, sample_rate = torch.from_numpy(librosa.resample(signal.numpy(), sample_rate, self.sample_rate)), self.sample_rate
 		# TODO: apply self.transforms 
 		spect = spectrogram(signal, sample_rate, self.window_size, self.window_stride, self.window)
 		transcript = self.labels.parse(transcript)
@@ -107,14 +108,8 @@ def spectrogram(signal, sample_rate, window_size, window_stride, window):
 	n_fft = int(sample_rate * (window_size + 1e-8))
 	win_length = n_fft
 	hop_length = int(sample_rate * (window_stride + 1e-8))
-	#D = librosa.stft(signal.numpy(), n_fft=n_fft, hop_length=hop_length, win_length=win_length, window=window)
-	#spect = np.abs(D); print(spect.shape)
-	spect = np.zeros((1601, 22))
-
-	if spect.shape[0] < 161:
-		spect.resize((161, *spect.shape[1:]))
-		spect[81:] = spect[80:0:-1]
-	spect = spect[:161]
+	D = librosa.stft(signal.numpy(), n_fft=n_fft, hop_length=hop_length, win_length=win_length, window=window)
+	spect = np.abs(D)
 	return torch.from_numpy(spect)
 
 def read_wav(path, channel=-1):

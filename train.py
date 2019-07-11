@@ -1,3 +1,4 @@
+import os
 import gc
 import time
 import argparse
@@ -12,10 +13,12 @@ from warpctc_pytorch import CTCLoss
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--train-data-path', default = '../open_stt_splits/audiobooks_train.csv.gz')
-parser.add_argument('--val-data-path', default = '../open_stt_splits/audiobooks_val.csv.gz')
+parser.add_argument('--val-data-path', default = '../sample_ok/sample_ok_.txt')
+parser.add_argument('--val-base-dir', default = '../sample_ok/sample_ok')
+parser.add_argument('--skip-training', action = 'store_true')
 parser.add_argument('--sample-rate', type = int, default = 16000)
-parser.add_argument('--window-size', type = float, default = 0.2)
-parser.add_argument('--window-stride', type = float, default = 0.1)
+parser.add_argument('--window-size', type = float, default = 0.02)
+parser.add_argument('--window-stride', type = float, default = 0.01)
 parser.add_argument('--window', default = 'hann', choices = ['hann', 'hamming'])
 parser.add_argument('--num-workers', type = int, default = 1)
 parser.add_argument('--lr', type = float, default = 3e-4)
@@ -27,7 +30,7 @@ parser.add_argument('--epochs', type = int, default = 20)
 parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 parser.add_argument('--checkpoint')
 parser.add_argument('--checkpoint-dir', default = 'data/checkpoints')
-parser.add_argument('--model', default = 'Wav2LetterVanilla')
+parser.add_argument('--model', default = 'Wav2LetterRu')
 parser.add_argument('--log-dir')
 parser.add_argument('--max-norm', type = float, default = 0.0)
 args = parser.parse_args()
@@ -38,44 +41,44 @@ tb = torch.utils.tensorboard.SummaryWriter(args.log_dir)
 labels = data.labels.RU_LABELS
 num_classes = len(labels)
 
-train_dataset = data.dataset.SpectrogramDataset(sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, data_path = args.train_data_path, labels = labels)
-train_sampler = data.dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
-train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
-
-val_dataset = data.dataset.SpectrogramDataset(sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, data_path = args.val_data_path, labels = labels)
-val_loader = torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size)
-
-device = torch.device(args.device)
-
 model = model.Speech2TextModel(getattr(model, args.model)(num_classes))
 if args.checkpoint:
     model.load_checkpoint(args.checkpoint)
 
+if not args.skip_training:
+    train_dataset = data.dataset.SpectrogramDataset(sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, data_path = args.train_data_path, labels = labels)
+    train_sampler = data.dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
+    train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
+
+val_dataset = data.dataset.SpectrogramDataset(sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, data_path = args.val_data_path, labels = labels, base_dir = args.val_base_dir)
+val_loader = torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size)
+
+device = torch.device(args.device)
 model = model.to(device)
 optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay)
 criterion = CTCLoss()
 decoder = decoder.GreedyDecoder(labels)
 
-print('Dataset loaded')
-for epoch in range(args.epochs):
-    for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
-        input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
-        logits, probs, output_sizes = model(inputs.to(device), input_sizes.to(device))
+for epoch in range(args.epochs if not args.skip_training else 1):
+    if not args.skip_training:
+        for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
+            input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
+            logits, probs, output_sizes = model(inputs.to(device), input_sizes.to(device))
 
-        loss = criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes) # logits -> TxNxH
-        loss = loss / len(inputs) 
-        loss = loss.to(device)
+            loss = criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes) # logits -> TxNxH
+            loss = loss / len(inputs) 
+            loss = loss.to(device)
 
-        optimizer.zero_grad()
-        loss.backward()
-        if args.max_norm > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
-        optimizer.step()
-        print('Iteration', i, 'loss:', float(loss))
+            optimizer.zero_grad()
+            loss.backward()
+            if args.max_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+            optimizer.step()
+            print('Iteration', i, 'loss:', float(loss))
 
     num_words, num_chars, val_wer_sum, val_cer_sum = 0, 0, 0.0, 0.0
-
-    for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
+    cer_ = []
+    for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(val_loader):
         input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
         logits, probs, output_sizes = model(inputs.to(device), input_sizes.to(device))
         decoded_output, _ = decoder.decode(probs, output_sizes)
@@ -87,8 +90,9 @@ for epoch in range(args.epochs):
             val_cer_sum += cer
             num_words += wer_ref
             num_chars += cer_ref
-    print('WER: {:.02%} CER: {:.02%}'.format(val_wer_sum / num_words, val_cer_sum / num_chars))
+            cer_.append(cer / cer_ref)
+    print('WER: {:.02%} CER: {:.02%} | {:.02%}'.format(val_wer_sum / num_words, val_cer_sum / num_chars, torch.tensor(cer_).mean()))
 
-    if not os.path.exists(checkpoint_dir):
-        os.makedirs(checkpoint_dir)
-    model.save_checkpoint(arg.checkpoint_dir)
+    if args.checkpoint_dir:
+        os.makedirs(args.checkpoint_dir, exist_ok = True)
+        model.save_checkpoint(args.checkpoint_dir)
