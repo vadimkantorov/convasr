@@ -18,13 +18,13 @@ class ReLUDropoutInplace(torch.nn.Module):
         else:
             return input.clamp_(min = 0)
 
-
 class Wav2LetterRu(nn.Sequential):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, dropout = 0.0):
         def conv_block(kernel_size, num_channels, stride = 1, padding = 0):
             return nn.Sequential(
                 nn.Conv1d(num_channels[0], num_channels[1], kernel_size=kernel_size, stride=stride, padding=padding),
-                ReLUDropoutInplace(p = 0.2)
+                # Missing batchnorm
+                ReLUDropoutInplace(p = dropout)
             )
 
         layers = [
@@ -72,13 +72,10 @@ class Speech2TextModel(nn.Module):
 
     def forward(self, x, lengths):
         output_lengths = lengths.cpu().int() // 2
+        logits = self.model(x.squeeze(1))
+        logits = logits.permute(2, 0, 1).contiguous().transpose(0, 1)
 
-        x = x.squeeze(1)
-        x = self.model(x)
-        x = x.transpose(1, 2).transpose(0, 1).contiguous()
-        x = x.transpose(0, 1)
-        outs = F.softmax(x, dim=-1)
-        return x, outs, output_lengths
+        return logits, F.softmax(logits, dim=-1), output_lengths
 
     def load_checkpoint(self, checkpoint_path):
         state_dict = torch.load(checkpoint_path)
