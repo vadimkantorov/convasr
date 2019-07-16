@@ -12,7 +12,7 @@ import decoder
 from warpctc_pytorch import CTCLoss
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--train-data-path', default = '../open_stt_splits/audiobooks_train.csv.gz')
+parser.add_argument('--train-data-path', default = '../open_stt_splits/splits/clean_train.csv.gz')
 parser.add_argument('--val-data-path', default = '../sample_ok/sample_ok_.txt')
 parser.add_argument('--val-base-dir', default = '../sample_ok/sample_ok')
 parser.add_argument('--skip-training', action = 'store_true')
@@ -21,9 +21,11 @@ parser.add_argument('--window-size', type = float, default = 0.02)
 parser.add_argument('--window-stride', type = float, default = 0.01)
 parser.add_argument('--window', default = 'hann', choices = ['hann', 'hamming'])
 parser.add_argument('--num-workers', type = int, default = 1)
-parser.add_argument('--lr', type = float, default = 3e-4)
-parser.add_argument('--weight-decay', type = float, default = 0.0)
-parser.add_argument('--momentum', type = float, default = 0.9)
+
+parser.add_argument('--lr', type = float, default = 5e-3)
+parser.add_argument('--weight-decay', type = float, default = 1e-5)
+parser.add_argument('--momentum', type = float, default = 0.5)
+
 parser.add_argument('--train-batch-size', type = int, default = 40)
 parser.add_argument('--val-batch-size', type = int, default = 80)
 parser.add_argument('--epochs', type = int, default = 20)
@@ -61,6 +63,7 @@ decoder = decoder.GreedyDecoder(labels)
 
 for epoch in range(args.epochs if not args.skip_training else 1):
     if not args.skip_training:
+        model.train()
         for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
             input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
             logits, probs, output_sizes = model(inputs.to(device), input_sizes.to(device))
@@ -76,6 +79,8 @@ for epoch in range(args.epochs if not args.skip_training else 1):
             optimizer.step()
             print('Iteration', i, 'loss:', float(loss))
 
+    model.eval()
+    torch.set_grad_enabled(False)
     num_words, num_chars, val_wer_sum, val_cer_sum = 0, 0, 0.0, 0.0
     cer_ = []
     for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(val_loader):
@@ -92,6 +97,7 @@ for epoch in range(args.epochs if not args.skip_training else 1):
             num_chars += cer_ref
             cer_.append(cer / cer_ref)
     print('WER: {:.02%} CER: {:.02%} | {:.02%}'.format(val_wer_sum / num_words, val_cer_sum / num_chars, torch.tensor(cer_).mean()))
+    torch.set_grad_enabled(True)
 
     if args.checkpoint_dir:
         os.makedirs(args.checkpoint_dir, exist_ok = True)

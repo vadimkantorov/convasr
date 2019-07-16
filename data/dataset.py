@@ -19,7 +19,7 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 		self.transforms = []
 
 		if data_path.endswith('.gz'):
-			self.ids = [(row[-1], row[-2], float(row[3])) for row in csv.reader(gzip.open(data_path, 'rt')) if float(row[4]) < max_duration]
+			self.ids = [(row[-1], row[-2], float(row[3])) for row in csv.reader(gzip.open(data_path, 'rt')) if float(row[3]) < max_duration]
 		else:
 			self.ids = [(os.path.join(base_dir, row[0]), row[-1], 5) for row in csv.reader(open(data_path)) if 'wav' in row[0]]
 

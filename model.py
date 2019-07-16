@@ -4,12 +4,27 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class ReLUDropoutInplace(torch.nn.Module):
+    def __init__(self, p):
+        super(ReLUDropoutInplace, self).__init__()
+        self.p = p
+
+    def forward(self, input):
+        if self.training:
+            p1m = 1. - self.p
+            mask = torch.rand_like(input) < p1m
+            mask *= (input > 0)
+            return input.masked_fill_(~mask, 0).mul_(1.0 / p1m)
+        else:
+            return input.clamp_(min = 0)
+
+
 class Wav2LetterRu(nn.Sequential):
     def __init__(self, num_classes):
         def conv_block(kernel_size, num_channels, stride = 1, padding = 0):
             return nn.Sequential(
                 nn.Conv1d(num_channels[0], num_channels[1], kernel_size=kernel_size, stride=stride, padding=padding),
-                nn.ReLU(inplace = True)
+                ReLUDropoutInplace(p = 0.2)
             )
 
         layers = [
