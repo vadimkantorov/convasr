@@ -15,9 +15,8 @@ import decoder
 import warpctc_pytorch
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--train-data-path', required = True)
-parser.add_argument('--val-data-path', required = True)
-parser.add_argument('--skip-training', action = 'store_true')
+parser.add_argument('--train-data-path')
+parser.add_argument('--val-data-path')
 parser.add_argument('--sample-rate', type = int, default = 16000)
 parser.add_argument('--window-size', type = float, default = 0.02)
 parser.add_argument('--window-stride', type = float, default = 0.01)
@@ -31,7 +30,6 @@ parser.add_argument('--checkpoint')
 parser.add_argument('--checkpoint-dir', default = 'data/checkpoints')
 parser.add_argument('--model', default = 'Wav2LetterRu')
 parser.add_argument('--log-dir')
-parser.add_argument('--data-parallel', action = 'store_true')
 parser.add_argument('--seed', default = 1)
 parser.add_argument('--id', default = time.strftime('%Y-%m-%d_%H-%M-%S'))
 parser.add_argument('--lang', default = 'ru')
@@ -49,7 +47,7 @@ tb = torch.utils.tensorboard.SummaryWriter(args.log_dir)
 lang = importlib.import_module(args.lang)
 labels = dataset.Labels(lang.LABELS, preprocess_text = lang.preprocess_text, preprocess_word = lang.preprocess_word)
 
-if not args.skip_training:
+if args.train_data_path:
     train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels)
     train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
     train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
@@ -67,8 +65,8 @@ decoder = decoder.GreedyDecoder(labels.char_labels)
 
 optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov)
 
-for epoch in range(args.epochs if not args.skip_training else 1):
-    if not args.skip_training:
+for epoch in range(args.epochs if args.train_data_path else 1):
+    if args.train_data_path:
         model.train()
         for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
             input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
