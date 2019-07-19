@@ -19,11 +19,11 @@ class ReLUDropoutInplace(torch.nn.Module):
             return input.clamp_(min = 0)
 
 class Wav2LetterRu(nn.Sequential):
-    def __init__(self, num_classes, dropout = 0.0):
+    def __init__(self, num_classes, dropout = 0.0, batch_norm_momentum = 0.1):
         def conv_block(kernel_size, num_channels, stride = 1, padding = 0):
             return nn.Sequential(
-                nn.Conv1d(num_channels[0], num_channels[1], kernel_size=kernel_size, stride=stride, padding=padding),
-                # Missing batchnorm
+                nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, padding = padding, bias = False),
+                nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum),
                 ReLUDropoutInplace(p = dropout)
             )
 
@@ -37,9 +37,9 @@ class Wav2LetterRu(nn.Sequential):
             conv_block(kernel_size = 13, num_channels = (768, 768), stride = 1, padding = 6),
             conv_block(kernel_size = 31, num_channels = (768, 2048), stride = 1, padding = 15),
             conv_block(kernel_size = 1,  num_channels = (2048, 2048), stride = 1, padding = 0),
-            nn.Conv1d(2048, num_classes, kernel_size=1, stride=1)
+            nn.Conv1d(2048, num_classes, kernel_size = 1, stride = 1)
         ]
-        super(Wav2LetterRu, self).__init__(*layers)
+        super(Wav2LetterRu, self).__init__(nn.Sequential(*[l for s in layers[:-1] for l in s]), layers[-1])
 
 class Wav2LetterVanilla(nn.Sequential):
     def __init__(self, num_classes):
@@ -71,7 +71,7 @@ class Speech2TextModel(nn.Module):
         self.model = model
 
     def forward(self, x, lengths):
-        output_lengths = lengths.cpu().int() // 2
+        output_lengths = lengths.int() // 2
         logits = self.model(x.squeeze(1))
         logits = logits.permute(2, 0, 1).contiguous().transpose(0, 1)
 

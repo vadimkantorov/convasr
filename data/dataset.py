@@ -17,92 +17,92 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 		self.window = getattr(scipy.signal, window)
 		self.labels = data.labels.Labels(labels)
 		self.transforms = []
-
 		if data_path.endswith('.gz'):
-			self.ids = [(row[-1], row[-2], float(row[3])) for row in csv.reader(gzip.open(data_path, 'rt')) if float(row[3]) < max_duration]
+			self.ids = [(row[-1], row[-3].upper(), float(row[3])) for row in csv.reader(gzip.open(data_path, 'rt')) if float(row[3]) < max_duration]
 		else:
-			self.ids = [(os.path.join(base_dir, row[0]), row[-1], 5) for row in csv.reader(open(data_path)) if 'wav' in row[0]]
+			self.ids = [(os.path.join(base_dir, row[0]), row[-1].upper(), 5) for row in csv.reader(open(data_path)) if 'wav' in row[0]]
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
-		signal, sample_rate = read_wav(audio_path)
-		if sample_rate != self.sample_rate:
-			signal, sample_rate = torch.from_numpy(librosa.resample(signal.numpy(), sample_rate, self.sample_rate)), self.sample_rate
-		# TODO: apply self.transforms 
-		spect = spectrogram(signal, sample_rate, self.window_size, self.window_stride, self.window)
-		transcript = self.labels.parse(transcript)
-		return spect, transcript, audio_path
+		return load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.labels.parse)
 
 	def __len__(self):
 		return len(self.ids)
 
 class BucketingSampler(torch.utils.data.Sampler):
-    def __init__(self, data_source, batch_size=1):
-        """
-        Samples batches assuming they are in order of size to batch similarly sized samples together.
-        """
-        super(BucketingSampler, self).__init__(data_source)
-        self.data_source = data_source
-        ids = list(range(0, len(data_source)))
-        self.bins = [ids[i:i + batch_size] for i in range(0, len(ids), batch_size)]
+	def __init__(self, data_source, batch_size=1):
+		"""
+		Samples batches assuming they are in order of size to batch similarly sized samples together.
+		"""
+		super(BucketingSampler, self).__init__(data_source)
+		self.data_source = data_source
+		ids = list(range(0, len(data_source)))
+		self.bins = [ids[i:i + batch_size] for i in range(0, len(ids), batch_size)]
 
-    def __iter__(self):
-        for ids in self.bins:
-            np.random.shuffle(ids)
-            yield ids
+	def __iter__(self):
+		for ids in self.bins:
+			np.random.shuffle(ids)
+			yield ids
 
-    def __len__(self):
-        return len(self.bins)
+	def __len__(self):
+		return len(self.bins)
 
-    def shuffle(self, epoch):
-        np.random.shuffle(self.bins)
+	def shuffle(self, epoch):
+		np.random.shuffle(self.bins)
 
 def get_cer_wer(decoder, transcript, reference):
-    reference = reference.strip()
-    transcript = transcript.strip()
-    wer_ref = float(len(reference.split()) or 1)
-    cer_ref = float(len(reference.replace(' ','')) or 1)
-    if reference == transcript:
-        return 0, 0, wer_ref, cer_ref
-    else:
-        wer = decoder.wer(transcript, reference)
-        cer = decoder.cer(transcript, reference)
-    return wer, cer, wer_ref, cer_ref
+	reference = reference.strip()
+	transcript = transcript.strip()
+	wer_ref = float(len(reference.split()) or 1)
+	cer_ref = float(len(reference.replace(' ','')) or 1)
+	if reference == transcript:
+		return 0, 0, wer_ref, cer_ref
+	else:
+		wer = decoder.wer(transcript, reference)
+		cer = decoder.cer(transcript, reference)
+	return wer, cer, wer_ref, cer_ref
 
 def unpack_targets(targets, target_sizes):
-    unpacked = []
-    offset = 0
-    for size in target_sizes:
-        unpacked.append(targets[offset:offset + size])
-        offset += size
-    return unpacked
+	unpacked = []
+	offset = 0
+	for size in target_sizes:
+		unpacked.append(targets[offset:offset + size])
+		offset += size
+	return unpacked
 
 def collate_fn(batch):
-    def func(p):
-        return p[0].size(1)
+	duration_in_frames = lambda example: example[0].shape[-1]
+	batch = sorted(batch, key=duration_in_frames, reverse=True)
+	longest_sample = max(batch, key=duration_in_frames)[0]
+	freq_size = longest_sample.size(0)
+	minibatch_size = len(batch)
+	max_seqlength = longest_sample.size(1)
+	inputs = torch.zeros(minibatch_size, 1, freq_size, max_seqlength)
+	input_percentages = torch.FloatTensor(minibatch_size)
+	target_sizes = torch.IntTensor(minibatch_size)
+	targets = []
+	filenames = []
+	for x in range(minibatch_size):
+		sample = batch[x]
+		tensor = sample[0]
+		target = sample[1]
+		filenames.append(sample[2])
+		seq_length = tensor.size(1)
+		inputs[x][0].narrow(1, 0, seq_length).copy_(tensor)
+		input_percentages[x] = seq_length / float(max_seqlength)
+		target_sizes[x] = len(target)
+		targets.extend(target)
+	targets = torch.IntTensor(targets)
+	return inputs, targets, filenames, input_percentages, target_sizes
 
-    batch = sorted(batch, key=lambda sample: sample[0].size(1), reverse=True)
-    longest_sample = max(batch, key=func)[0]
-    freq_size = longest_sample.size(0)
-    minibatch_size = len(batch)
-    max_seqlength = longest_sample.size(1)
-    inputs = torch.zeros(minibatch_size, 1, freq_size, max_seqlength)
-    input_percentages = torch.FloatTensor(minibatch_size)
-    target_sizes = torch.IntTensor(minibatch_size)
-    targets = []
-    filenames = []
-    for x in range(minibatch_size):
-        sample = batch[x]
-        tensor = sample[0]
-        target = sample[1]
-        filenames.append(sample[2])
-        seq_length = tensor.size(1)
-        inputs[x][0].narrow(1, 0, seq_length).copy_(tensor)
-        input_percentages[x] = seq_length / float(max_seqlength)
-        target_sizes[x] = len(target)
-        targets.extend(target)
-    targets = torch.IntTensor(targets)
-    return inputs, targets, filenames, input_percentages, target_sizes
+def load_example(audio_path, transcript, sample_rate, window_size, window_stride, window, parse_transcript = None):
+	signal, sample_rate_ = read_wav(audio_path)
+	if sample_rate_ != sample_rate:
+		signal = torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate))
+	# TODO: apply self.transforms 
+	spect = spectrogram(signal, sample_rate, window_size, window_stride, window)
+	transcript = parse_transcript(transcript)
+	return spect, transcript, audio_path
 
 def spectrogram(signal, sample_rate, window_size, window_stride, window):
 	n_fft = int(sample_rate * (window_size + 1e-8))

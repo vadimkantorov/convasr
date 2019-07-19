@@ -5,6 +5,7 @@ import argparse
 import torch
 import torch.utils.data
 import torch.utils.tensorboard
+import torch.nn as nn
 
 import data.dataset
 import model
@@ -34,16 +35,14 @@ parser.add_argument('--model', default = 'Wav2LetterRu')
 parser.add_argument('--log-dir')
 parser.add_argument('--max-norm', type = float, default = 100)
 parser.add_argument('--data-parallel', action = 'store_true')
-parser.add_argument('--seed', default = 1)
+parser.add_argument('--seed', default = 123456)
 parser.add_argument('--id', default = time.strftime('%Y-%m-%d_%H-%M-%S'))
 args = parser.parse_args()
 
 for set_seed in [torch.manual_seed] + ([torch.cuda.manual_seed_all] if args.device != 'cpu' else []):
     set_seed(args.seed)
-
 tb = torch.utils.tensorboard.SummaryWriter(args.log_dir)
 
-#torch.multiprocessing.set_start_method('spawn', force = True) # https://github.com/pytorch/pytorch/issues/22131
 labels = data.labels.RU_LABELS
 num_classes = len(labels)
 
@@ -61,22 +60,23 @@ if not args.skip_training:
 val_dataset = data.dataset.SpectrogramDataset(sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, data_path = args.val_data_path, labels = labels, base_dir = args.val_base_dir)
 val_loader = torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size)
 
-model = model.to(args.device)
-optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay)
-criterion = CTCLoss()
 decoder = decoder.GreedyDecoder(labels)
+criterion = CTCLoss()
+
+l = torch.nn.Sequential(torch.load('../model0.pt')['model'][0], model.model[-1])
+model.model[0] = l[0] #nn.Sequential(*modules)  #l[0]
+model = model.to(args.device)
+
+optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = True)
 
 for epoch in range(args.epochs if not args.skip_training else 1):
     if not args.skip_training:
         model.train()
         for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
-            input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
-            logits, probs, output_sizes = model(inputs.to(args.device), input_sizes.to(args.device))
+            input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
 
-            loss = criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes) # logits -> TxNxH
-            loss = loss / len(inputs) 
-            loss = loss.to(args.device)
-
+            logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
+            loss = (criterion(logits.transpose(0, 1), targets, output_sizes, target_sizes) / len(inputs))
             print('epoch', epoch, 'iteration', i, 'loss:', float(loss))
             if (torch.isinf(loss) | torch.isnan(loss)).any():
                 continue
@@ -92,8 +92,8 @@ for epoch in range(args.epochs if not args.skip_training else 1):
         num_words, num_chars, val_wer_sum, val_cer_sum = 0, 0, 0.0, 0.0
         cer_ = []
         for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(val_loader):
-            input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
-            logits, probs, output_sizes = model(inputs.to(args.device), input_sizes.to(args.device))
+            input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
+            logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
             decoded_output, _ = decoder.decode(probs, output_sizes)
             target_strings = decoder.convert_to_strings(data.dataset.unpack_targets(targets, target_sizes))
             for x in range(len(target_strings)):
