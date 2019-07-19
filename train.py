@@ -49,7 +49,6 @@ tb = torch.utils.tensorboard.SummaryWriter(args.log_dir)
 lang = importlib.import_module(args.lang)
 labels = dataset.Labels(lang.LABELS, preprocess_text = lang.preprocess_text, preprocess_word = lang.preprocess_word)
 
-
 if not args.skip_training:
     train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels)
     train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
@@ -61,9 +60,8 @@ val_loader = torch.utils.data.DataLoader(val_dataset, num_workers = args.num_wor
 model = model.Speech2TextModel(getattr(model, args.model)(num_classes = len(labels.char_labels)))
 if args.checkpoint:
     model.load_checkpoint(args.checkpoint)
-if args.data_parallel:
-    model = torch.nn.DataParallel(model)
-model = model.to(args.device)
+model = torch.nn.DataParallel(model).to(args.device)
+
 criterion = warpctc_pytorch.CTCLoss()
 decoder = decoder.GreedyDecoder(labels.char_labels)
 
@@ -74,9 +72,8 @@ for epoch in range(args.epochs if not args.skip_training else 1):
         model.train()
         for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
             input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
-
             logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
-            loss = (criterion(logits.transpose(0, 1), targets, output_sizes, target_sizes) / len(inputs))
+            loss = (criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs))
             print('epoch', epoch, 'iteration', i, 'loss:', float(loss))
             if (torch.isinf(loss) | torch.isnan(loss)).any():
                 continue
@@ -95,10 +92,10 @@ for epoch in range(args.epochs if not args.skip_training else 1):
             input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
             logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
             decoded_output, _ = decoder.decode(probs, output_sizes)
-            target_strings = decoder.convert_to_strings(data.dataset.unpack_targets(targets, target_sizes))
+            target_strings = decoder.convert_to_strings(dataset.unpack_targets(targets, target_sizes))
             for x in range(len(target_strings)):
                 transcript, reference = decoded_output[x][0], target_strings[x][0]
-                wer, cer, wer_ref, cer_ref = data.dataset.get_cer_wer(decoder, transcript, reference)
+                wer, cer, wer_ref, cer_ref = dataset.get_cer_wer(decoder, transcript, reference)
                 val_wer_sum += wer
                 val_cer_sum += cer
                 num_words += wer_ref
@@ -111,4 +108,4 @@ for epoch in range(args.epochs if not args.skip_training else 1):
 
         if args.checkpoint_dir:
             os.makedirs(args.checkpoint_dir, exist_ok = True)
-            model.save_checkpoint(args.checkpoint_dir)
+            model.module.save_checkpoint(args.checkpoint_dir)
