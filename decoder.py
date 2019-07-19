@@ -15,8 +15,8 @@
 # ----------------------------------------------------------------------------
 # Modified to support pytorch Tensors
 
-import torch
 import Levenshtein as Lev
+import torch
 
 def levenshtein(a, b):
   """Calculates the Levenshtein distance between a and b.
@@ -40,7 +40,8 @@ def levenshtein(a, b):
 
   return current[n]
 
-class GreedyDecoder:
+
+class Decoder(object):
     """
     Basic decoder class from which all other decoders inherit. Implements several
     helper functions. Subclasses should implement the decode() method.
@@ -60,6 +61,112 @@ class GreedyDecoder:
         if ' ' in labels:
             space_index = labels.index(' ')
         self.space_index = space_index
+
+    def wer(self, s1, s2):
+        """
+        Computes the Word Error Rate, defined as the edit distance between the
+        two provided sentences after tokenizing to words.
+        Arguments:
+            s1 (string): space-separated sentence
+            s2 (string): space-separated sentence
+        """
+        #return levenshtein(s1.split(), s2.split())
+        # build mapping of words to integers
+        b = set(s1.split() + s2.split())
+        word2char = dict(zip(b, range(len(b))))
+
+        # map the words to a char array (Levenshtein packages only accepts
+        # strings)
+        w1 = [chr(word2char[w]) for w in s1.split()]
+        w2 = [chr(word2char[w]) for w in s2.split()]
+
+        return Lev.distance(''.join(w1), ''.join(w2))
+
+    def cer(self, s1, s2):
+        """
+        Computes the Character Error Rate, defined as the edit distance.
+
+        Arguments:
+            s1 (string): space-separated sentence
+            s2 (string): space-separated sentence
+        """
+        s1, s2, = s1.replace(' ', ''), s2.replace(' ', '')
+        return Lev.distance(s1, s2)
+
+    def decode(self, probs, sizes=None):
+        """
+        Given a matrix of character probabilities, returns the decoder's
+        best guess of the transcription
+
+        Arguments:
+            probs: Tensor of character probabilities, where probs[c,t]
+                            is the probability of character c at time t
+            sizes(optional): Size of each sequence in the mini-batch
+        Returns:
+            string: sequence of the model's best guess for the transcription
+        """
+        raise NotImplementedError
+
+
+class BeamCTCDecoder(Decoder):
+    def __init__(self, labels, lm_path=None, alpha=0, beta=0, cutoff_top_n=40, cutoff_prob=1.0, beam_width=100,
+                 num_processes=4, blank_index=0):
+        super(BeamCTCDecoder, self).__init__(labels)
+        try:
+            from ctcdecode import CTCBeamDecoder
+        except ImportError:
+            raise ImportError("BeamCTCDecoder requires paddledecoder package.")
+        self._decoder = CTCBeamDecoder(labels.lower(), lm_path, alpha, beta, cutoff_top_n, cutoff_prob, beam_width,
+                                       num_processes, blank_index)
+
+    def convert_to_strings(self, out, seq_len):
+        results = []
+        for b, batch in enumerate(out):
+            utterances = []
+            for p, utt in enumerate(batch):
+                size = seq_len[b][p]
+                if size > 0:
+                    transcript = ''.join(map(lambda x: self.int_to_char[x.item()], utt[0:size])).upper()
+                else:
+                    transcript = ''
+                utterances.append(transcript)
+            results.append(utterances)
+        return results
+
+    def convert_tensor(self, offsets, sizes):
+        results = []
+        for b, batch in enumerate(offsets):
+            utterances = []
+            for p, utt in enumerate(batch):
+                size = sizes[b][p]
+                if sizes[b][p] > 0:
+                    utterances.append(utt[0:size])
+                else:
+                    utterances.append(torch.tensor([], dtype=torch.int))
+            results.append(utterances)
+        return results
+
+    def decode(self, probs, sizes=None):
+        """
+        Decodes probability output using ctcdecode package.
+        Arguments:
+            probs: Tensor of character probabilities, where probs[c,t]
+                            is the probability of character c at time t
+            sizes: Size of each sequence in the mini-batch
+        Returns:
+            string: sequences of the model's best guess for the transcription
+        """
+        probs = probs.cpu()
+        out, scores, offsets, seq_lens = self._decoder.decode(probs, sizes)
+
+        strings = self.convert_to_strings(out, seq_lens)
+        offsets = self.convert_tensor(offsets, seq_lens)
+        return strings, offsets
+
+
+class GreedyDecoder(Decoder):
+    def __init__(self, labels, blank_index=0):
+        super(GreedyDecoder, self).__init__(labels, blank_index)
 
     def convert_to_strings(self, sequences, sizes=None, remove_repetitions=False, return_offsets=False):
         """Given a list of numeric sequences, returns the corresponding strings"""
@@ -95,16 +202,6 @@ class GreedyDecoder:
 
     def decode(self, probs, sizes=None, remove_repetitions=True):
         """
-        Given a matrix of character probabilities, returns the decoder's
-        best guess of the transcription
-
-        Arguments:
-            probs: Tensor of character probabilities, where probs[c,t]
-                            is the probability of character c at time t
-            sizes(optional): Size of each sequence in the mini-batch
-        Returns:
-            string: sequence of the model's best guess for the transcription
-        --------
         Returns the argmax decoding given the probability matrix. Removes
         repeated elements in the sequence, as well as blanks.
 
@@ -119,34 +216,3 @@ class GreedyDecoder:
         strings, offsets = self.convert_to_strings(max_probs.view(max_probs.size(0), max_probs.size(1)), sizes,
                                                    remove_repetitions=remove_repetitions, return_offsets=True)
         return strings, offsets
-
-    def wer(self, s1, s2):
-        """
-        Computes the Word Error Rate, defined as the edit distance between the
-        two provided sentences after tokenizing to words.
-        Arguments:
-            s1 (string): space-separated sentence
-            s2 (string): space-separated sentence
-        """
-        #return levenshtein(s1.split(), s2.split())
-        # build mapping of words to integers
-        b = set(s1.split() + s2.split())
-        word2char = dict(zip(b, range(len(b))))
-
-        # map the words to a char array (Levenshtein packages only accepts
-        # strings)
-        w1 = [chr(word2char[w]) for w in s1.split()]
-        w2 = [chr(word2char[w]) for w in s2.split()]
-
-        return Lev.distance(''.join(w1), ''.join(w2))
-
-    def cer(self, s1, s2):
-        """
-        Computes the Character Error Rate, defined as the edit distance.
-
-        Arguments:
-            s1 (string): space-separated sentence
-            s2 (string): space-separated sentence
-        """
-        s1, s2, = s1.replace(' ', ''), s2.replace(' ', '')
-        return Lev.distance(s1, s2)

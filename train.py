@@ -1,30 +1,28 @@
 import os
 import gc
+import gzip
+import csv
 import time
 import argparse
+import importlib
 import torch
 import torch.utils.data
 import torch.utils.tensorboard
 import torch.nn as nn
-
-import data.dataset
+import dataset
 import model
 import decoder
-from warpctc_pytorch import CTCLoss
+import warpctc_pytorch
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--train-data-path', default = '../open_stt_splits/splits/clean_train.csv.gz')
-parser.add_argument('--val-data-path', default = '../sample_ok/sample_ok_.txt')
-parser.add_argument('--val-base-dir', default = '../sample_ok/sample_ok')
+parser.add_argument('--train-data-path', required = True)
+parser.add_argument('--val-data-path', required = True)
 parser.add_argument('--skip-training', action = 'store_true')
 parser.add_argument('--sample-rate', type = int, default = 16000)
 parser.add_argument('--window-size', type = float, default = 0.02)
 parser.add_argument('--window-stride', type = float, default = 0.01)
 parser.add_argument('--window', default = 'hann', choices = ['hann', 'hamming'])
 parser.add_argument('--num-workers', type = int, default = 1)
-parser.add_argument('--lr', type = float, default = 5e-3)
-parser.add_argument('--weight-decay', type = float, default = 1e-5)
-parser.add_argument('--momentum', type = float, default = 0.5)
 parser.add_argument('--train-batch-size', type = int, default = 40)
 parser.add_argument('--val-batch-size', type = int, default = 80)
 parser.add_argument('--epochs', type = int, default = 20)
@@ -33,41 +31,43 @@ parser.add_argument('--checkpoint')
 parser.add_argument('--checkpoint-dir', default = 'data/checkpoints')
 parser.add_argument('--model', default = 'Wav2LetterRu')
 parser.add_argument('--log-dir')
-parser.add_argument('--max-norm', type = float, default = 100)
 parser.add_argument('--data-parallel', action = 'store_true')
-parser.add_argument('--seed', default = 123456)
+parser.add_argument('--seed', default = 1)
 parser.add_argument('--id', default = time.strftime('%Y-%m-%d_%H-%M-%S'))
+parser.add_argument('--lang', default = 'ru')
+parser.add_argument('--max-norm', type = float, default = 100)
+parser.add_argument('--lr', type = float, default = 5e-3)
+parser.add_argument('--weight-decay', type = float, default = 1e-5)
+parser.add_argument('--momentum', type = float, default = 0.5)
+parser.add_argument('--nesterov', action = 'store_true')
 args = parser.parse_args()
 
 for set_seed in [torch.manual_seed] + ([torch.cuda.manual_seed_all] if args.device != 'cpu' else []):
     set_seed(args.seed)
 tb = torch.utils.tensorboard.SummaryWriter(args.log_dir)
 
-labels = data.labels.RU_LABELS
-num_classes = len(labels)
+lang = importlib.import_module(args.lang)
+labels = dataset.Labels(lang.LABELS, preprocess_text = lang.preprocess_text, preprocess_word = lang.preprocess_word)
 
-model = model.Speech2TextModel(getattr(model, args.model)(num_classes))
+
+if not args.skip_training:
+    train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels)
+    train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
+    train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
+
+val_dataset = dataset.SpectrogramDataset(args.val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels)
+val_loader = torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size)
+
+model = model.Speech2TextModel(getattr(model, args.model)(num_classes = len(labels.char_labels)))
 if args.checkpoint:
     model.load_checkpoint(args.checkpoint)
 if args.data_parallel:
     model = torch.nn.DataParallel(model)
-
-if not args.skip_training:
-    train_dataset = data.dataset.SpectrogramDataset(sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, data_path = args.train_data_path, labels = labels)
-    train_sampler = data.dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
-    train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
-
-val_dataset = data.dataset.SpectrogramDataset(sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, data_path = args.val_data_path, labels = labels, base_dir = args.val_base_dir)
-val_loader = torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = data.dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size)
-
-decoder = decoder.GreedyDecoder(labels)
-criterion = CTCLoss()
-
-l = torch.nn.Sequential(torch.load('../model0.pt')['model'][0], model.model[-1])
-model.model[0] = l[0] #nn.Sequential(*modules)  #l[0]
 model = model.to(args.device)
+criterion = warpctc_pytorch.CTCLoss()
+decoder = decoder.GreedyDecoder(labels.char_labels)
 
-optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = True)
+optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov)
 
 for epoch in range(args.epochs if not args.skip_training else 1):
     if not args.skip_training:

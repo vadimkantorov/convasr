@@ -1,4 +1,5 @@
 import os
+import re
 import csv
 import gzip
 import numpy as np
@@ -7,20 +8,36 @@ import scipy.io.wavfile
 import scipy.signal
 import librosa
 
-import data.labels
+class Labels(object):
+	def __init__(self, char_labels, preprocess_text = lambda text: text, preprocess_word = lambda word: word):
+		self.char_labels = char_labels
+		self.labels_map = {l: i for i, l in enumerate(char_labels)}
+		self.preprocess_text = preprocess_text
+		self.preprocess_word = preprocess_word
+
+	def find_words(self, text):
+		text = re.sub(r'([^\W\d]+)2', r'\1', text)
+		text = self.preprocess_text(text)
+		words = re.findall(r'-?\d+|-?\d+-\w+|\w+', text)
+		return list(filter(bool, (''.join([c for c in self.preprocess_word(w) if c.upper() in self.labels_map]).strip() for w in words)))
+
+	def parse(self, text):
+		if text.startswith('!clean:'):
+			return [self.labels_map[x] for x in text.replace('!clean:', '', 1).strip()]
+		chars = ' '.join(self.find_words(text)).upper().strip() or '*'
+		return [self.labels_map[c] if i == 0 or c != chars[i - 1] else self.labels_map['2'] for i, c in enumerate(chars)]
+
+	def render_transcript(self, codes):
+		return ''.join([self.char_labels[i] for i in codes])
 
 class SpectrogramDataset(torch.utils.data.Dataset):
-	def __init__(self, sample_rate, window_size, window_stride, window, data_path, labels, base_dir = '', max_duration = 20):
+	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, labels, max_duration = 20):
 		self.window_stride = window_stride
 		self.window_size = window_size
 		self.sample_rate = sample_rate
 		self.window = getattr(scipy.signal, window)
-		self.labels = data.labels.Labels(labels)
-		self.transforms = []
-		if data_path.endswith('.gz'):
-			self.ids = [(row[-1], row[-3].upper(), float(row[3])) for row in csv.reader(gzip.open(data_path, 'rt')) if float(row[3]) < max_duration]
-		else:
-			self.ids = [(os.path.join(base_dir, row[0]), row[-1].upper(), 5) for row in csv.reader(open(data_path)) if 'wav' in row[0]]
+		self.labels = labels
+		self.ids = [(row[0], row[1], float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or float(row[2]) < max_duration] if isinstance(data_or_path, str) else [d for d in data_or_path if d[-1] == -1 or d[-1] < max_duration]
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
