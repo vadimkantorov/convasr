@@ -31,7 +31,7 @@ parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 parser.add_argument('--checkpoint')
 parser.add_argument('--checkpoint-dir', default = 'data/checkpoints')
 parser.add_argument('--model', default = 'Wav2LetterRu')
-parser.add_argument('--log-dir')
+parser.add_argument('--tensorboard-log-dir', default = 'data/tensorboard')
 parser.add_argument('--seed', default = 1)
 parser.add_argument('--id', default = time.strftime('%Y-%m-%d_%H-%M-%S'))
 parser.add_argument('--lang', default = 'ru')
@@ -44,7 +44,7 @@ args = parser.parse_args()
 
 for set_seed in [torch.manual_seed] + ([torch.cuda.manual_seed_all] if args.device != 'cpu' else []):
     set_seed(args.seed)
-tensorboard = torch.utils.tensorboard.SummaryWriter(args.log_dir)
+tensorboard = torch.utils.tensorboard.SummaryWriter(args.tensorboard_log_dir)
 
 lang = importlib.import_module(args.lang)
 labels = dataset.Labels(lang.LABELS, preprocess_text = lang.preprocess_text, preprocess_word = lang.preprocess_word)
@@ -76,7 +76,7 @@ for epoch in range(args.epochs if args.train_data_path else 1):
             input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
             logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
             loss = (criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs))
-            print('epoch', epoch, 'iteration', i, 'loss:', float(loss))
+            print(f'epoch: {epoch:02d} iter: {iteration:09d} loss: {float(loss):.2f}')
             if (torch.isinf(loss) | torch.isnan(loss)).any():
                 continue
 

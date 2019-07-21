@@ -112,7 +112,7 @@ def collate_fn(batch):
 	targets = torch.IntTensor(targets)
 	return inputs, targets, filenames, input_percentages, target_sizes
 
-def load_example(audio_path, transcript, sample_rate, window_size, window_stride, window, parse_transcript = None):
+def load_example(audio_path, transcript, sample_rate, window_size, window_stride, window, parse_transcript = lambda transcript: transcript):
 	signal, sample_rate_ = read_wav(audio_path)
 	if sample_rate_ != sample_rate:
 		signal = torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate))

@@ -19,7 +19,7 @@ class ReLUDropoutInplace(torch.nn.Module):
             return input.clamp_(min = 0)
 
 class Wav2LetterRu(nn.Sequential):
-    def __init__(self, num_classes, dropout = 0.0, batch_norm_momentum = 0.1):
+    def __init__(self, num_classes, dropout = 0.2, batch_norm_momentum = 0.1):
         def conv_block(kernel_size, num_channels, stride = 1, padding = 0):
             return nn.Sequential(
                 nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, padding = padding, bias = False),
