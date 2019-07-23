@@ -86,11 +86,15 @@ for epoch in range(args.epochs if args.train_data_path else 1):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
             optimizer.step()
 
+            if iteration % 10000 == 0 and args.checkpoint_dir:
+                os.makedirs(args.checkpoint_dir, exist_ok = True)
+                save_checkpoint(model.module, args.checkpoint_dir, epoch, iteration)
+
     with torch.no_grad():
         model.eval()
         for val_dataset_name, val_loader in val_loaders.items():
             num_words, num_chars, val_wer_sum, val_cer_sum = 0, 0, 0.0, 0.0
-            cer_ = []
+            cer_, wer_ = [], []
             for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(val_loader):
                 input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
                 logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
@@ -107,11 +111,13 @@ for epoch in range(args.epochs if args.train_data_path else 1):
                     num_words += wer_ref
                     num_chars += cer_ref
                     cer_.append(cer / cer_ref)
-            cer_avg = torch.tensor(cer_).mean()
-            wer_avg = val_wer_sum / num_words
+                    wer_.append(wer / wer_ref)
+            cer_avg = float(torch.tensor(cer_).mean())
+            wer_avg = float(torch.tensor(wer_).mean())
+            wer_avg_total = val_wer_sum / num_words
             cer_avg_total = val_cer_sum / num_chars
-            print(f'{val_dataset_name} | WER: {wer_avg:.02%} CER: {cer_avg_total:.02%} | {cer_avg:.02%}')
-            tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg), epoch)
+            print(f'{val_dataset_name} | WER: {wer_avg_total:.02%} | {wer_avg:.02%} CER: {cer_avg_total:.02%} | {cer_avg:.02%}')
+            tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, wer_avg_total = wer_avg_total, cer_avg = cer_avg, cer_avg_total = cer_avg_total), epoch)
 
         if args.checkpoint_dir:
             os.makedirs(args.checkpoint_dir, exist_ok = True)

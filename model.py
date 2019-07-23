@@ -65,6 +65,59 @@ class Wav2LetterVanilla(nn.Sequential):
 
         super(Wav2LetterVanilla, self).__init__(*layers)
 
+class JasperNetDenseResidual(nn.Module):
+    class conv_block(nn.Module):
+        def __init__(kernel_size, num_channels, dropout = 0, stride = 1, dilation = 1, batch_norm_momentum = 0.1, repeat = 1, num_channels_residual = []):
+            self.relu_dropout = nn.ReLUDropoutInplace(p = dropout)
+            self.conv = nn.ModuleList([nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation) for i in range(repeat)])
+            self.bn = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat)])
+            self.conv_residual = nn.ModuleList([nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual])
+            self.bn_residual   = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual])
+
+        def forward(self, x, residuals):
+            for i in range(len(self.conv) - 1):
+                x = self.bn[i](self.conv[i](x))
+                x = self.relu_dropout(x)
+
+            x = self.conv[len(self.conv) - 1](x)
+            x = self.bn[len(self.conv) - 1](x)
+            for r, conv, bn in zip(residuals, self.conv_residual, self.bn_residual):
+                x = x + bn(conv(r))
+            x = self.relu_dropout(x)
+            return x
+
+    def __init__(self, num_classes):
+        self.blocks = nn.ModuleList([
+            conv_block(kernel_size = 11, num_channels = (161, 256), dropout = 0.2, stride = 2),
+
+            conv_block(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = 5, num_channels_residual = [256]),
+            conv_block(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = 5, num_channels_residual = [256, 256]),
+
+            conv_block(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, repeat = 5, num_channels_residual = [256, 256, 256]),
+            conv_block(kernel_size = 13, num_channels = (384, 384), dropout = 0.2, repeat = 5, num_channels_residual = [256, 256, 256, 384]),
+
+            conv_block(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384]),
+            conv_block(kernel_size = 17, num_channels = (512, 512), dropout = 0.2, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512]),
+
+            conv_block(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512]),
+            conv_block(kernel_size = 21, num_channels = (640, 640), dropout = 0.3, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640]),
+
+            conv_block(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640]),
+            conv_block(kernel_size = 25, num_channels = (768, 768), dropout = 0.3, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640, 768]),
+
+            conv_block(kernel_size = 29, num_channels = (768, 896), dropout = 0.4, dilation = 2),
+            conv_block(kernel_size = 1, num_channels = (896, 1024), dropout = 0.4),
+            nn.Conv1d(1024, num_classes, 1)
+        ])
+        super(JasperNet, self).__init__()
+
+    def forward(self, x):
+        residual = []
+        for i, block in enumerate(self.blocks):
+            x = block(x, residual = residual if i < len(self.blocks) - 3 else [])
+            residual.append(x)
+        return x
+
 class Speech2TextModel(nn.Module):
     def __init__(self, model):
         super(Speech2TextModel, self).__init__()
