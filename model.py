@@ -74,14 +74,14 @@ class JasperNetDenseResidual(nn.Module):
             self.conv_residual = nn.ModuleList([nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual])
             self.bn_residual   = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual])
 
-        def forward(self, x, residuals):
+        def forward(self, x, residual):
             for i in range(len(self.conv) - 1):
                 x = self.bn[i](self.conv[i](x))
                 x = self.relu_dropout(x)
 
             x = self.conv[len(self.conv) - 1](x)
             x = self.bn[len(self.conv) - 1](x)
-            for r, conv, bn in zip(residuals, self.conv_residual, self.bn_residual):
+            for r, conv, bn in zip(residual, self.conv_residual, self.bn_residual):
                 x = x + bn(conv(r))
             x = self.relu_dropout(x)
             return x
