@@ -69,7 +69,7 @@ class JasperNetDenseResidual(nn.Module):
     class conv_block(nn.Module):
         def __init__(kernel_size, num_channels, dropout = 0, stride = 1, dilation = 1, batch_norm_momentum = 0.1, repeat = 1, num_channels_residual = []):
             self.relu_dropout = nn.ReLUDropoutInplace(p = dropout)
-            self.conv = nn.ModuleList([nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation) for i in range(repeat)])
+            self.conv = nn.ModuleList([nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, bias = False) for i in range(repeat)])
             self.bn = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat)])
             self.conv_residual = nn.ModuleList([nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual])
             self.bn_residual   = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual])
