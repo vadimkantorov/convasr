@@ -12,6 +12,7 @@ import torch.nn as nn
 import warpctc_pytorch
 
 import dataset
+import transforms
 import decoder
 import model
 from model import load_checkpoint, save_checkpoint
@@ -42,6 +43,7 @@ parser.add_argument('--momentum', type = float, default = 0.5)
 parser.add_argument('--nesterov', action = 'store_true')
 parser.add_argument('--val-batch-period', type = int, default = None)
 parser.add_argument('--train-batch-period-logging', type = int, default = 100)
+parser.add_argument('--augment', action = 'store_true')
 args = parser.parse_args()
 
 for set_seed in [torch.manual_seed] + ([torch.cuda.manual_seed_all] if args.device != 'cpu' else []):
@@ -52,7 +54,7 @@ lang = importlib.import_module(args.lang)
 labels = dataset.Labels(lang.LABELS, preprocess_text = lang.preprocess_text, preprocess_word = lang.preprocess_word)
 
 if args.train_data_path:
-    train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels)
+    train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, transform = transforms.SpecAugment() if args.augment else (lambda x: x))
     train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
     train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
 
@@ -107,8 +109,6 @@ loss_avg, tictoc_avg = 0.0, 0.0
 for epoch in range(args.epochs if args.train_data_path else 0):
     model.train()
     for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
-        iteration += 1
-        
         input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
         logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
         loss = (criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs))
@@ -118,12 +118,13 @@ for epoch in range(args.epochs if args.train_data_path else 0):
             if args.max_norm > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
             optimizer.step()
+            loss_avg = moving_average(loss_avg, float(loss))
 
         tictoc = (time.time() - tic) * 1000
         tictoc_avg = moving_average(tictoc_avg, tictoc)
-        loss_avg = moving_average(loss_avg, float(loss))
-        print(f'epoch: {epoch:02d} iter: [{i: >6d} / {len(train_loader)} | {iteration: >9d}] loss: {float(loss):.2f} <{loss_avg:.2f}> time: {tictoc:.0f} <{tictoc_avg:.0f}> ms')
+        print(f'epoch: {epoch:02d} iter: [{i: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss):8.2f} <{loss_avg:4.2f}> time: {tictoc:8.0f} <{tictoc_avg:4.0f}> ms')
         tic = time.time()
+        iteration += 1
 
         if args.val_batch_period is not None and iteration > 0 and iteration % args.val_batch_period == 0:
             evaluate_model(epoch, iteration)

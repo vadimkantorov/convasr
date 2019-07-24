@@ -31,17 +31,20 @@ class Labels(object):
 		return ''.join([self.char_labels[i] for i in codes])
 
 class SpectrogramDataset(torch.utils.data.Dataset):
-	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, labels, max_duration = 20):
+	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, labels, transform = lambda x: x, max_duration = 20):
 		self.window_stride = window_stride
 		self.window_size = window_size
 		self.sample_rate = sample_rate
 		self.window = getattr(scipy.signal, window)
 		self.labels = labels
+		self.transform = transform
 		self.ids = [(row[0], row[1], float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or float(row[2]) < max_duration] if isinstance(data_or_path, str) else [d for d in data_or_path if d[-1] == -1 or d[-1] < max_duration]
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
-		return load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.labels.parse)
+		spect, transcript, audio_path = load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.labels.parse)
+		spect = self.transform(spect)
+		return spect, transcript, audio_path
 
 	def __len__(self):
 		return len(self.ids)
