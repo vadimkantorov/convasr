@@ -19,8 +19,8 @@ class ReLUDropoutInplace(torch.nn.Module):
             return input.clamp_(min = 0)
 
 class Wav2LetterRu(nn.Sequential):
-    def __init__(self, num_classes, dropout = 0.2, batch_norm_momentum = 0.1):
-        def conv_block(kernel_size, num_channels, stride = 1, padding = 0):
+    def __init__(self, num_classes):
+        def conv_block(kernel_size, num_channels, stride = 1, padding = 0, dropout = 0.2, batch_norm_momentum = 0.1):
             return nn.Sequential(
                 nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, padding = padding, bias = False),
                 nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum),
@@ -46,8 +46,7 @@ class Wav2LetterVanilla(nn.Sequential):
         def conv_block(kernel_size, num_channels, stride = 1, dilation = 1, repeat = 1, padding = 0):
             modules = []
             for i in range(repeat):
-                conv = Conv1dSamePadding(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation)#, padding = padding)
-                modules.append(conv)
+                modules.append(nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, padding = padding))
                 modules.append(nn.Hardtanh(0, 20, inplace = True))
             return nn.Sequential(*modules)
 
@@ -67,9 +66,10 @@ class Wav2LetterVanilla(nn.Sequential):
 
 class JasperNetDenseResidual(nn.Module):
     class conv_block(nn.Module):
-        def __init__(kernel_size, num_channels, dropout = 0, stride = 1, dilation = 1, batch_norm_momentum = 0.1, repeat = 1, num_channels_residual = []):
-            self.relu_dropout = nn.ReLUDropoutInplace(p = dropout)
-            self.conv = nn.ModuleList([nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, bias = False) for i in range(repeat)])
+        def __init__(self, kernel_size, num_channels, dropout = 0, stride = 1, dilation = 1, padding = 0, batch_norm_momentum = 0.1, repeat = 1, num_channels_residual = []):
+            super(JasperNetDenseResidual.conv_block, self).__init__()
+            self.relu_dropout = ReLUDropoutInplace(p = dropout)
+            self.conv = nn.ModuleList([nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, padding = padding, bias = False) for i in range(repeat)])
             self.bn = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat)])
             self.conv_residual = nn.ModuleList([nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual])
             self.bn_residual   = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual])
@@ -78,45 +78,49 @@ class JasperNetDenseResidual(nn.Module):
             for i in range(len(self.conv) - 1):
                 x = self.bn[i](self.conv[i](x))
                 x = self.relu_dropout(x)
-
-            x = self.conv[len(self.conv) - 1](x)
-            x = self.bn[len(self.conv) - 1](x)
+            x = self.bn[-1](self.conv[-1](x))
             for r, conv, bn in zip(residual, self.conv_residual, self.bn_residual):
                 x = x + bn(conv(r))
-            x = self.relu_dropout(x)
-            return x
+            return self.relu_dropout(x)
 
     def __init__(self, num_classes):
+        super(JasperNetDenseResidual, self).__init__()
         self.blocks = nn.ModuleList([
-            conv_block(kernel_size = 11, num_channels = (161, 256), dropout = 0.2, stride = 2),
+            JasperNetDenseResidual.conv_block(kernel_size = 11, num_channels = (161, 256), dropout = 0.2, padding = 5, stride = 2),
 
-            conv_block(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = 5, num_channels_residual = [256]),
-            conv_block(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = 5, num_channels_residual = [256, 256]),
+            #JasperNetDenseResidual.conv_block(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, padding = 5, repeat = 5, num_channels_residual = [256]),
+            #JasperNetDenseResidual.conv_block(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, padding = 5, repeat = 5, num_channels_residual = [256, 256]),
 
-            conv_block(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, repeat = 5, num_channels_residual = [256, 256, 256]),
-            conv_block(kernel_size = 13, num_channels = (384, 384), dropout = 0.2, repeat = 5, num_channels_residual = [256, 256, 256, 384]),
+            #JasperNetDenseResidual.conv_block(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, padding = 6, repeat = 5, num_channels_residual = [256, 256, 256]),
+            #JasperNetDenseResidual.conv_block(kernel_size = 13, num_channels = (384, 384), dropout = 0.2, padding = 6, repeat = 5, num_channels_residual = [256, 256, 256, 384]),
 
-            conv_block(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384]),
-            conv_block(kernel_size = 17, num_channels = (512, 512), dropout = 0.2, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512]),
+            #JasperNetDenseResidual.conv_block(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, padding = 8, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384]),
+            #JasperNetDenseResidual.conv_block(kernel_size = 17, num_channels = (512, 512), dropout = 0.2, padding = 8, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512]),
 
-            conv_block(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512]),
-            conv_block(kernel_size = 21, num_channels = (640, 640), dropout = 0.3, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640]),
+            #JasperNetDenseResidual.conv_block(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, padding = 10, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512]),
+            #JasperNetDenseResidual.conv_block(kernel_size = 21, num_channels = (640, 640), dropout = 0.3, padding = 10, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640]),
 
-            conv_block(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640]),
-            conv_block(kernel_size = 25, num_channels = (768, 768), dropout = 0.3, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640, 768]),
+            #JasperNetDenseResidual.conv_block(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, padding = 12, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640]),
+            #JasperNetDenseResidual.conv_block(kernel_size = 25, num_channels = (768, 768), dropout = 0.3, padding = 12, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640, 768]),
 
-            conv_block(kernel_size = 29, num_channels = (768, 896), dropout = 0.4, dilation = 2),
-            conv_block(kernel_size = 1, num_channels = (896, 1024), dropout = 0.4),
+            JasperNetDenseResidual.conv_block(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, padding = 5,  repeat = 3, num_channels_residual = [256]),
+            JasperNetDenseResidual.conv_block(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, padding = 6,  repeat = 3, num_channels_residual = [256, 256]),
+            JasperNetDenseResidual.conv_block(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, padding = 8,  repeat = 3, num_channels_residual = [256, 256, 384]),
+            JasperNetDenseResidual.conv_block(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, padding = 10, repeat = 3, num_channels_residual = [256, 256, 384, 512]),
+            JasperNetDenseResidual.conv_block(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, padding = 12, repeat = 3, num_channels_residual = [256, 256, 384, 512, 640]),
+
+            JasperNetDenseResidual.conv_block(kernel_size = 29, num_channels = (768, 896), dropout = 0.4, padding = 28, dilation = 2),
+            JasperNetDenseResidual.conv_block(kernel_size = 1, num_channels = (896, 1024), dropout = 0.4),
+
             nn.Conv1d(1024, num_classes, 1)
         ])
-        super(JasperNet, self).__init__()
 
     def forward(self, x):
         residual = []
-        for i, block in enumerate(self.blocks):
-            x = block(x, residual = residual if i < len(self.blocks) - 3 else [])
+        for i, block in enumerate(self.blocks[:-1]):
+            x = block(x, residual if i < len(self.blocks) - 3 else [])
             residual.append(x)
-        return x
+        return self.blocks[-1](x)
 
 class Speech2TextModel(nn.Module):
     def __init__(self, model):

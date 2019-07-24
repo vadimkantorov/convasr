@@ -48,9 +48,6 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 
 class BucketingSampler(torch.utils.data.Sampler):
 	def __init__(self, data_source, batch_size=1):
-		"""
-		Samples batches assuming they are in order of size to batch similarly sized samples together.
-		"""
 		super(BucketingSampler, self).__init__(data_source)
 		self.data_source = data_source
 		ids = list(range(0, len(data_source)))

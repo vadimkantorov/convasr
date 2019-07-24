@@ -24,8 +24,8 @@ parser.add_argument('--window-size', type = float, default = 0.02)
 parser.add_argument('--window-stride', type = float, default = 0.01)
 parser.add_argument('--window', default = 'hann', choices = ['hann', 'hamming'])
 parser.add_argument('--num-workers', type = int, default = 10)
-parser.add_argument('--train-batch-size', type = int, default = 40)
-parser.add_argument('--val-batch-size', type = int, default = 80)
+parser.add_argument('--train-batch-size', type = int, default = 64)
+parser.add_argument('--val-batch-size', type = int, default = 64)
 parser.add_argument('--epochs', type = int, default = 20)
 parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 parser.add_argument('--checkpoint')
@@ -40,6 +40,8 @@ parser.add_argument('--lr', type = float, default = 5e-3)
 parser.add_argument('--weight-decay', type = float, default = 1e-5)
 parser.add_argument('--momentum', type = float, default = 0.5)
 parser.add_argument('--nesterov', action = 'store_true')
+parser.add_argument('--val-batch-period', type = int, default = None)
+parser.add_argument('--train-batch-period-logging', type = int, default = 100)
 args = parser.parse_args()
 
 for set_seed in [torch.manual_seed] + ([torch.cuda.manual_seed_all] if args.device != 'cpu' else []):
@@ -66,34 +68,13 @@ decoder = decoder.GreedyDecoder(labels.char_labels)
 
 optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov)
 
-iteration = 0
-for epoch in range(args.epochs if args.train_data_path else 1):
-    if args.train_data_path:
-        model.train()
-        for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
-            iteration += 1
-
-            input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
-            logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
-            loss = (criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs))
-            print(f'epoch: {epoch:02d} iter: {iteration:09d} loss: {float(loss):.2f}')
-            if (torch.isinf(loss) | torch.isnan(loss)).any():
-                continue
-
-            optimizer.zero_grad()
-            loss.backward()
-            if args.max_norm > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
-            optimizer.step()
-
-            if iteration % 10000 == 0 and args.checkpoint_dir:
-                os.makedirs(args.checkpoint_dir, exist_ok = True)
-                save_checkpoint(model.module, args.checkpoint_dir, epoch, iteration)
-
+def moving_average(avg, x, K = 50):
+    return (1. / K) * x + (1 - 1./K) * avg
+ 
+def evaluate_model(epoch = None, iteration = None):
+    model.eval()
     with torch.no_grad():
-        model.eval()
         for val_dataset_name, val_loader in val_loaders.items():
-            num_words, num_chars, val_wer_sum, val_cer_sum = 0, 0, 0.0, 0.0
             cer_, wer_ = [], []
             for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(val_loader):
                 input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
@@ -106,19 +87,46 @@ for epoch in range(args.epochs if args.train_data_path else 1):
                     print(val_dataset_name, 'REF: ', reference)
                     print(val_dataset_name, 'HYP: ', transcript)
                     print()
-                    val_wer_sum += wer
-                    val_cer_sum += cer
-                    num_words += wer_ref
-                    num_chars += cer_ref
                     cer_.append(cer / cer_ref)
                     wer_.append(wer / wer_ref)
             cer_avg = float(torch.tensor(cer_).mean())
             wer_avg = float(torch.tensor(wer_).mean())
-            wer_avg_total = val_wer_sum / num_words
-            cer_avg_total = val_cer_sum / num_chars
-            print(f'{val_dataset_name} | WER: {wer_avg_total:.02%} | {wer_avg:.02%} CER: {cer_avg_total:.02%} | {cer_avg:.02%}')
-            tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, wer_avg_total = wer_avg_total, cer_avg = cer_avg, cer_avg_total = cer_avg_total), epoch)
+            print(f'{val_dataset_name} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
+    model.train()
+    if epoch is not None and iteration is not None:
+        tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg), epoch)
+        os.makedirs(args.checkpoint_dir, exist_ok = True)
+        save_checkpoint(model.module, args.checkpoint_dir, epoch, iteration)
 
-        if args.checkpoint_dir:
-            os.makedirs(args.checkpoint_dir, exist_ok = True)
-            save_checkpoint(model.module, args.checkpoint_dir, epoch, iteration)
+if not args.train_data_path:
+    evaluate_model()
+
+iteration = 0
+tic = time.time()
+loss_avg = 0.0
+for epoch in range(args.epochs if args.train_data_path else 0):
+    model.train()
+    for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
+        iteration += 1
+        
+        input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
+        logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
+        loss = (criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs))
+        if not (torch.isinf(loss) | torch.isnan(loss)).any():
+            optimizer.zero_grad()
+            loss.backward()
+            if args.max_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+            optimizer.step()
+
+        loss_avg = moving_average(loss_avg, float(loss))
+        print(f'epoch: {epoch:02d} iter: [{i} / {len(train_loader)} | {iteration:09d}] loss: {float(loss):.2f} time: {(time.time() - tic) * 1000:.0f} ms')
+        tic = time.time()
+
+        if args.val_batch_period is not None and iteration > 0 and iteration % args.val_batch_period == 0:
+            evaluate_model(epoch, iteration)
+
+        if iteration % args.train_batch_period_logging == 0:
+            tensorboard.add_scalars(args.id + '_' + os.path.basename(args.train_data_path), dict(loss_avg = loss_avg), iteration)
+
+    evaluate_model(epoch, iteration)
