@@ -101,9 +101,9 @@ def evaluate_model(epoch = None, iteration = None):
 if not args.train_data_path:
     evaluate_model()
 
-iteration = 0
 tic = time.time()
-loss_avg = 0.0
+iteration = 0
+loss_avg, tictoc_avg = 0.0, 0.0
 for epoch in range(args.epochs if args.train_data_path else 0):
     model.train()
     for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
@@ -119,8 +119,10 @@ for epoch in range(args.epochs if args.train_data_path else 0):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
             optimizer.step()
 
+        tictoc = (time.time() - tic) * 1000
+        tictoc_avg = moving_average(tictoc_avg, tictoc)
         loss_avg = moving_average(loss_avg, float(loss))
-        print(f'epoch: {epoch:02d} iter: [{i} / {len(train_loader)} | {iteration:09d}] loss: {float(loss):.2f} time: {(time.time() - tic) * 1000:.0f} ms')
+        print(f'epoch: {epoch:02d} iter: [{i: >6d} / {len(train_loader)} | {iteration: >9d}] loss: {float(loss):.2f} <{loss_avg:.2f}> time: {tictoc:.0f} <{tictoc_avg:.0f}> ms')
         tic = time.time()
 
         if args.val_batch_period is not None and iteration > 0 and iteration % args.val_batch_period == 0:
