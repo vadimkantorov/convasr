@@ -101,7 +101,7 @@ def evaluate_model(epoch = None, iteration = None):
             if training:
                 tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg), epoch)
             with open(os.path.join(args.checkpoint_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts, 'w') as f:
-                json.dump(ref_tra, f)
+                json.dump(ref_tra, f, ensure_ascii = False, indent = 2, sort_keys = True)
 
     model.train()
     if training:
