@@ -96,9 +96,9 @@ def collate_fn(batch):
 	input_percentages = torch.FloatTensor(len(batch))
 	target_sizes = torch.IntTensor(len(batch))
 	targets, filenames = [], []
-	for k, (tensor, target, filenam) in enumerate(batch):
+	for k, (tensor, target, filename) in enumerate(batch):
 		seq_len = tensor.shape[1]
-		inputs[k, :, :seq_length] = tensor
+		inputs[k, :, :seq_len] = tensor
 		input_percentages[k] = seq_len / float(max_seq_len)
 		target_sizes[k] = len(target)
 		targets.extend(target)

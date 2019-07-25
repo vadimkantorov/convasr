@@ -59,12 +59,12 @@ class Wav2LetterVanilla(nn.Sequential):
             conv_block(kernel_size = 25, num_channels = (640, 768), repeat = 3, padding = 12),
             conv_block(kernel_size = 29, num_channels = (768, 896), repeat = 1, padding = 28, dilation = 2),
             conv_block(kernel_size = 1, num_channels = (896, 1024), repeat = 1),
-            nn.Conv1d(1024, num_classes, 1)
+            nn.Conv1d(1024, num_classes, kernel_size = 1)
         ]
 
         super(Wav2LetterVanilla, self).__init__(*layers)
 
-class JasperNetDenseResidual(nn.ModuleList):
+class JasperNet(nn.ModuleList):
     def __init__(self, num_classes):
         class conv_block(nn.Module):
             def __init__(self, kernel_size, num_channels, dropout = 0, stride = 1, dilation = 1, padding = 0, batch_norm_momentum = 0.1, repeat = 1, num_channels_residual = []):
@@ -102,7 +102,7 @@ class JasperNetDenseResidual(nn.ModuleList):
             conv_block(kernel_size = 29, num_channels = (768, 896), dropout = 0.4, padding = 28, dilation = 2),
             conv_block(kernel_size = 1, num_channels = (896, 1024), dropout = 0.4),
 
-            nn.Conv1d(1024, num_classes, 1)
+            nn.Conv1d(1024, num_classes, kernel_size = 1)
         ]
         super(JasperNetDenseResidual, self).__init__(blocks)
 
