@@ -31,6 +31,7 @@ parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 parser.add_argument('--checkpoint')
 parser.add_argument('--checkpoint-dir', default = 'data/checkpoints')
 parser.add_argument('--transcripts', default = 'data/transcripts.json')
+parser.add_argument('--logits', default = 'data/logits.pt')
 parser.add_argument('--model', default = 'Wav2LetterRu')
 parser.add_argument('--tensorboard-log-dir', default = 'data/tensorboard')
 parser.add_argument('--seed', default = 1)
@@ -70,8 +71,8 @@ decoder = decoder.GreedyDecoder(labels.char_labels)
 
 optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov)
 
-def moving_average(avg, x, K = 50):
-    return (1. / K) * x + (1 - 1./K) * avg
+def moving_average(avg, x, max = 0, K = 50):
+    return (1. / K) * min(x, max) + (1 - 1./K) * avg
  
 def evaluate_model(epoch = None, iteration = None):
     training = epoch is not None and iteration is not None
@@ -79,7 +80,7 @@ def evaluate_model(epoch = None, iteration = None):
     model.eval()
     with torch.no_grad():
         for val_dataset_name, val_loader in val_loaders.items():
-            ref_tra, cer_, wer_ = [], [], []
+            logits_, ref_tra_, cer_, wer_ = [], [], [], []
             for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(val_loader):
                 input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
                 logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
@@ -94,14 +95,15 @@ def evaluate_model(epoch = None, iteration = None):
                     wer, cer = wer / wer_ref,  cer / cer_ref
                     cer_.append(cer)
                     wer_.append(wer)
-                    ref_tra.append(dict(reference = reference, transcript = transcript, filename = filenames[k], cer = cer, wer = wer))
+                    ref_tra_.append(dict(reference = reference, transcript = transcript, filename = filenames[k], cer = cer, wer = wer))
+                    logits_.extend(logits)
             cer_avg = float(torch.tensor(cer_).mean())
             wer_avg = float(torch.tensor(wer_).mean())
             print(f'{val_dataset_name} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
-            if training:
-                tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg), epoch)
             with open(os.path.join(args.checkpoint_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts, 'w') as f:
-                json.dump(ref_tra, f, ensure_ascii = False, indent = 2, sort_keys = True)
+                json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
+            torch.save(dict(logits = logits_, ref_tra = ref_tra_), f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt' if training else args.logits)
+            tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg), epoch) if training else None
 
     model.train()
     if training:
@@ -126,10 +128,10 @@ for epoch in range(args.epochs if args.train_data_path else 0):
             if args.max_norm > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
             optimizer.step()
-            loss_avg = moving_average(loss_avg, float(loss))
+            loss_avg = moving_average(loss_avg, float(loss), max = 1000)
 
         tictoc = (time.time() - tic) * 1000
-        tictoc_avg = moving_average(tictoc_avg, tictoc)
+        tictoc_avg = moving_average(tictoc_avg, tictoc, max = 10000)
         print(f'epoch: {epoch:02d} iter: [{i: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {tictoc:8.0f} <{tictoc_avg:4.0f}> ms')
         tic = time.time()
         iteration += 1
