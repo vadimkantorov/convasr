@@ -94,9 +94,10 @@ def evaluate_model(epoch = None, iteration = None):
             cer_avg = float(torch.tensor(cer_).mean())
             wer_avg = float(torch.tensor(wer_).mean())
             print(f'{val_dataset_name} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
+            if epoch is not None and iteration is not None:
+                tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg), epoch)
     model.train()
     if epoch is not None and iteration is not None:
-        tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg), epoch)
         os.makedirs(args.checkpoint_dir, exist_ok = True)
         save_checkpoint(model.module, args.checkpoint_dir, epoch, iteration)
 
@@ -122,7 +123,7 @@ for epoch in range(args.epochs if args.train_data_path else 0):
 
         tictoc = (time.time() - tic) * 1000
         tictoc_avg = moving_average(tictoc_avg, tictoc)
-        print(f'epoch: {epoch:02d} iter: [{i: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss):8.2f} <{loss_avg:4.2f}> time: {tictoc:8.0f} <{tictoc_avg:4.0f}> ms')
+        print(f'epoch: {epoch:02d} iter: [{i: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {tictoc:8.0f} <{tictoc_avg:4.0f}> ms')
         tic = time.time()
         iteration += 1
 

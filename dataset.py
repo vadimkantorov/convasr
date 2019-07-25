@@ -89,26 +89,20 @@ def unpack_targets(targets, target_sizes):
 
 def collate_fn(batch):
 	duration_in_frames = lambda example: example[0].shape[-1]
-	batch = sorted(batch, key=duration_in_frames, reverse=True)
-	longest_sample = max(batch, key=duration_in_frames)[0]
-	freq_size = longest_sample.size(0)
-	minibatch_size = len(batch)
-	max_seqlength = longest_sample.size(1)
-	inputs = torch.zeros(minibatch_size, 1, freq_size, max_seqlength)
-	input_percentages = torch.FloatTensor(minibatch_size)
-	target_sizes = torch.IntTensor(minibatch_size)
-	targets = []
-	filenames = []
-	for x in range(minibatch_size):
-		sample = batch[x]
-		tensor = sample[0]
-		target = sample[1]
-		filenames.append(sample[2])
-		seq_length = tensor.size(1)
-		inputs[x][0].narrow(1, 0, seq_length).copy_(tensor)
-		input_percentages[x] = seq_length / float(max_seqlength)
-		target_sizes[x] = len(target)
+	batch = sorted(batch, key = duration_in_frames, reverse=True)
+	longest_sample = max(batch, key = duration_in_frames)[0]
+	freq_size, max_seq_len = longest_sample.shape
+	inputs = torch.zeros(len(batch), freq_size, max_seq_len)
+	input_percentages = torch.FloatTensor(len(batch))
+	target_sizes = torch.IntTensor(len(batch))
+	targets, filenames = [], []
+	for k, (tensor, target, filenam) in enumerate(batch):
+		seq_len = tensor.shape[1]
+		inputs[k, :, :seq_length] = tensor
+		input_percentages[k] = seq_len / float(max_seq_len)
+		target_sizes[k] = len(target)
 		targets.extend(target)
+		filenames.append(filename)
 	targets = torch.IntTensor(targets)
 	return inputs, targets, filenames, input_percentages, target_sizes
 
@@ -116,7 +110,6 @@ def load_example(audio_path, transcript, sample_rate, window_size, window_stride
 	signal, sample_rate_ = read_wav(audio_path)
 	if sample_rate_ != sample_rate:
 		signal = torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate))
-	# TODO: apply self.transforms 
 	spect = spectrogram(signal, sample_rate, window_size, window_stride, window)
 	transcript = parse_transcript(transcript)
 	return spect, transcript, audio_path
