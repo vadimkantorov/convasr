@@ -151,6 +151,6 @@ def load_checkpoint(model, checkpoint_path):
     state_dict = torch.load(checkpoint_path)
     model.load_state_dict(state_dict)
 
-def save_checkpoint(model, checkpoint_dir, epoch, iteration):
+def save_checkpoint(model, checkpoint_path):
     state_dict = model.state_dict()
-    torch.save(state_dict, os.path.join(checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
+    torch.save(state_dict, checkpoint_path)

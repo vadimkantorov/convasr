@@ -1,7 +1,6 @@
 import os
 import gc
-import gzip
-import csv
+import json
 import time
 import argparse
 import importlib
@@ -31,6 +30,7 @@ parser.add_argument('--epochs', type = int, default = 20)
 parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 parser.add_argument('--checkpoint')
 parser.add_argument('--checkpoint-dir', default = 'data/checkpoints')
+parser.add_argument('--transcripts', default = 'data/transcripts.json')
 parser.add_argument('--model', default = 'Wav2LetterRu')
 parser.add_argument('--tensorboard-log-dir', default = 'data/tensorboard')
 parser.add_argument('--seed', default = 1)
@@ -74,32 +74,39 @@ def moving_average(avg, x, K = 50):
     return (1. / K) * x + (1 - 1./K) * avg
  
 def evaluate_model(epoch = None, iteration = None):
+    training = epoch is not None and iteration is not None
+
     model.eval()
     with torch.no_grad():
         for val_dataset_name, val_loader in val_loaders.items():
-            cer_, wer_ = [], []
+            ref_tra, cer_, wer_ = [], [], []
             for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(val_loader):
                 input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
                 logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
                 decoded_output, _ = decoder.decode(probs, output_sizes)
                 target_strings = decoder.convert_to_strings(dataset.unpack_targets(targets, target_sizes))
-                for x in range(len(target_strings)):
-                    transcript, reference = decoded_output[x][0], target_strings[x][0]
+                for k in range(len(target_strings)):
+                    transcript, reference = decoded_output[k][0], target_strings[k][0]
                     wer, cer, wer_ref, cer_ref = dataset.get_cer_wer(decoder, transcript, reference)
                     print(val_dataset_name, 'REF: ', reference)
                     print(val_dataset_name, 'HYP: ', transcript)
                     print()
-                    cer_.append(cer / cer_ref)
-                    wer_.append(wer / wer_ref)
+                    wer, cer = wer / wer_ref,  cer / cer_ref
+                    cer_.append(cer)
+                    wer_.append(wer)
+                    ref_tra.append(dict(reference = reference, transcript = transcript, filename = filenames[k], cer = cer, wer = wer))
             cer_avg = float(torch.tensor(cer_).mean())
             wer_avg = float(torch.tensor(wer_).mean())
             print(f'{val_dataset_name} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
-            if epoch is not None and iteration is not None:
+            if training:
                 tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg), epoch)
+            with open(os.path.join(args.checkpoint_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts, 'w') as f:
+                json.dump(ref_tra, f)
+
     model.train()
-    if epoch is not None and iteration is not None:
+    if training:
         os.makedirs(args.checkpoint_dir, exist_ok = True)
-        save_checkpoint(model.module, args.checkpoint_dir, epoch, iteration)
+        save_checkpoint(model.module, os.path.join(args.checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
 
 if not args.train_data_path:
     evaluate_model()
