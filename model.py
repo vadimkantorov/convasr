@@ -104,7 +104,7 @@ class JasperNet(nn.ModuleList):
 
             nn.Conv1d(1024, num_classes, kernel_size = 1)
         ]
-        super(JasperNetDenseResidual, self).__init__(blocks)
+        super(JasperNet, self).__init__(blocks)
 
     def forward(self, x):
         residual = []

@@ -76,14 +76,17 @@ def moving_average(avg, x, max = 0, K = 50):
  
 def evaluate_model(epoch = None, iteration = None):
     training = epoch is not None and iteration is not None
+    os.makedirs(args.checkpoint_dir, exist_ok = True)
 
     model.eval()
     with torch.no_grad():
         for val_dataset_name, val_loader in val_loaders.items():
-            logits_, ref_tra_, cer_, wer_ = [], [], [], []
+            logits_, ref_tra_, cer_, wer_, loss_ = [], [], [], [], []
             for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(val_loader):
                 input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
                 logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
+                loss = criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs)
+                loss_.append(float(loss))
                 decoded_output, _ = decoder.decode(probs, output_sizes)
                 target_strings = decoder.convert_to_strings(dataset.unpack_targets(targets, target_sizes))
                 for k in range(len(target_strings)):
@@ -99,16 +102,14 @@ def evaluate_model(epoch = None, iteration = None):
                     logits_.extend(logits)
             cer_avg = float(torch.tensor(cer_).mean())
             wer_avg = float(torch.tensor(wer_).mean())
+            loss_avg = float(torch.tensor(loss_).mean())
             print(f'{val_dataset_name} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
             with open(os.path.join(args.checkpoint_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts, 'w') as f:
                 json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
-            torch.save(dict(logits = logits_, ref_tra = ref_tra_), f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt' if training else args.logits)
-            tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg), epoch) if training else None
-
+            torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.checkpoint_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits)
+            tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg, loss_avg = loss_avg), iteration) if training else None
     model.train()
-    if training:
-        os.makedirs(args.checkpoint_dir, exist_ok = True)
-        save_checkpoint(model.module, os.path.join(args.checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
+    save_checkpoint(model.module, os.path.join(args.checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')) if training else None
 
 if not args.train_data_path:
     evaluate_model()
@@ -121,7 +122,7 @@ for epoch in range(args.epochs if args.train_data_path else 0):
     for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
         input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
         logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
-        loss = (criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs))
+        loss = criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs)
         if not (torch.isinf(loss) | torch.isnan(loss)).any():
             optimizer.zero_grad()
             loss.backward()
