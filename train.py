@@ -10,6 +10,11 @@ import torch.utils.tensorboard
 import torch.nn as nn
 import warpctc_pytorch
 
+try:
+    import apex
+except:
+    pass
+
 import dataset
 import transforms
 import decoder
@@ -45,6 +50,10 @@ parser.add_argument('--nesterov', action = 'store_true')
 parser.add_argument('--val-batch-period', type = int, default = None)
 parser.add_argument('--train-batch-period-logging', type = int, default = 100)
 parser.add_argument('--augment', action = 'store_true')
+parser.add_argument('--verbose', action = 'store_true')
+parser.add_argument('--fp16', action = 'store_true')
+parser.add_argument('--fp16-opt-level', type = str, choices = ['O0', 'O1', 'O2', 'O3'], default = 'O0')
+parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
 args = parser.parse_args()
 
 for set_seed in [torch.manual_seed] + ([torch.cuda.manual_seed_all] if args.device != 'cpu' else []):
@@ -71,6 +80,9 @@ decoder = decoder.GreedyDecoder(labels.char_labels)
 
 optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov)
 
+if args.fp16:
+    model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16_opt_level, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+
 def moving_average(avg, x, max = 0, K = 50):
     return (1. / K) * min(x, max) + (1 - 1./K) * avg
  
@@ -92,9 +104,10 @@ def evaluate_model(epoch = None, iteration = None):
                 for k in range(len(target_strings)):
                     transcript, reference = decoded_output[k][0], target_strings[k][0]
                     wer, cer, wer_ref, cer_ref = dataset.get_cer_wer(decoder, transcript, reference)
-                    print(val_dataset_name, 'REF: ', reference)
-                    print(val_dataset_name, 'HYP: ', transcript)
-                    print()
+                    if args.verbose:
+                        print(val_dataset_name, 'REF: ', reference)
+                        print(val_dataset_name, 'HYP: ', transcript)
+                        print()
                     wer, cer = wer / wer_ref,  cer / cer_ref
                     cer_.append(cer)
                     wer_.append(wer)
@@ -103,7 +116,7 @@ def evaluate_model(epoch = None, iteration = None):
             cer_avg = float(torch.tensor(cer_).mean())
             wer_avg = float(torch.tensor(wer_).mean())
             loss_avg = float(torch.tensor(loss_).mean())
-            print(f'{val_dataset_name} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
+            print(f'{val_dataset_name} | Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
             with open(os.path.join(args.checkpoint_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts, 'w') as f:
                 json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
             torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.checkpoint_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits)
@@ -125,9 +138,17 @@ for epoch in range(args.epochs if args.train_data_path else 0):
         loss = criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs)
         if not (torch.isinf(loss) | torch.isnan(loss)).any():
             optimizer.zero_grad()
-            loss.backward()
+            if args.fp16:
+                with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
+
             if args.max_norm > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+                if args.fp16:
+                    torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer), args.max_norm)
+                else:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
             optimizer.step()
             loss_avg = moving_average(loss_avg, float(loss), max = 1000)
 

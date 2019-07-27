@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=0,1 python3 train.py --lang ru \
+CUDA_VISIBLE_DEVICES=0,1 python3 train.py --verbose --lang ru \
   --model JasperNet \
   --train-batch-size 40 --val-batch-size 40 \
   --lr 5e-3 --momentum 0.5 --weight-decay 1e-5 --nesterov \
