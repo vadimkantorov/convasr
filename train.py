@@ -133,6 +133,8 @@ loss_avg, tictoc_avg = 0.0, 0.0
 for epoch in range(args.epochs if args.train_data_path else 0):
     model.train()
     for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
+        toc = time.time()
+        if iteration < 45001: print('Skipping', iteration); iteration += 1; continue
         input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
         logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
         loss = criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs)
@@ -154,7 +156,7 @@ for epoch in range(args.epochs if args.train_data_path else 0):
 
         tictoc = (time.time() - tic) * 1000
         tictoc_avg = moving_average(tictoc_avg, tictoc, max = 10000)
-        print(f'epoch: {epoch:02d} iter: [{i: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {tictoc:8.0f} <{tictoc_avg:4.0f}> ms')
+        print(f'epoch: {epoch:02d} iter: [{i: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {tictoc:8.0f} <{tictoc_avg:4.0f}> ms (data {(toc - tic)*1000} ms)')
         tic = time.time()
         iteration += 1
 

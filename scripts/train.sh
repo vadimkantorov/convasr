@@ -5,4 +5,5 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py --verbose --lang ru \
   --train-data-path ../open_stt_splits/splits/mixed_train.csv --augment \
   --val-batch-period 5000 \
   --val-data-path ../open_stt_splits/splits/clean_val.csv ../open_stt_splits/splits/mixed_val.csv ../sample_ok/sample_ok.convasr.csv \
-  --epochs 5
+  --epochs 5 \
+  --checkpoint data/checkpoints/checkpoint_epoch00_iter0045000.pt
