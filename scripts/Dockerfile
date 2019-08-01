@@ -8,8 +8,13 @@ RUN curl -so /miniconda.sh https://repo.continuum.io/miniconda/Miniconda3-latest
  && rm /miniconda.sh
 ENV PATH=/miniconda/bin:$PATH
 
-RUN /miniconda/bin/conda install -y ipython numpy pyyaml mkl mkl-include setuptools cffi typing mkl-dnn opencv ninja matplotlib scipy scikit-learn numba
+RUN /miniconda/bin/conda install -y ipython matplotlib scipy scikit-learn numba
 
-RUN conda install pytorch -y -c magma-cuda100 pytorch
+# Prerequisites for building PyTorch from source (just in case)
+RUN /miniconda/bin/conda install -y numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
+RUN conda install pytorch -y -c magma-cuda100 
 
-RUN pip install yacs cython librosa librosa python-levenshtein wget tqdm
+RUN conda install pytorch -y -c pytorch
+
+RUN pip install cython librosa librosa python-levenshtein tqdm
+RUN pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex
