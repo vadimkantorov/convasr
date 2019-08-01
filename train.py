@@ -18,7 +18,7 @@ except:
 import dataset
 import transforms
 import decoder
-import model
+import model as model_module
 from model import load_checkpoint, save_checkpoint
 
 
@@ -64,7 +64,7 @@ def main():
                                                    batch_size=args.val_batch_size) for val_data_path in
                    args.val_data_path}
 
-    model = model.Speech2TextModel(getattr(model, args.model)(num_classes = len(labels.char_labels)))
+    model = model_module.Speech2TextModel(getattr(model_module, args.model)(num_classes = len(labels.char_labels)))
     if args.checkpoint:
         load_checkpoint(model, args.checkpoint)
     # copy model for all gpu
