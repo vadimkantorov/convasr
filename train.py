@@ -64,7 +64,7 @@ lang = importlib.import_module(args.lang)
 labels = dataset.Labels(lang.LABELS, preprocess_text = lang.preprocess_text, preprocess_word = lang.preprocess_word)
 
 if args.train_data_path:
-    train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, transform = transforms.SpecAugment() if args.augment else (lambda x: x))
+    train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, transform = transforms.SpecAugment() if args.augment else None)
     train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
     train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
 
@@ -129,12 +129,12 @@ if not args.train_data_path:
 
 tic = time.time()
 iteration = 0
-loss_avg, tictoc_avg = 0.0, 0.0
+loss_avg, time_avg = 0.0, 0.0
 for epoch in range(args.epochs if args.train_data_path else 0):
     model.train()
     for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
         toc = time.time()
-        if iteration < 45001: print('Skipping', iteration); iteration += 1; continue
+        #if iteration < 45001: print('Skipping', iteration); iteration += 1; continue
         input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
         logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
         loss = criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs)
@@ -154,9 +154,9 @@ for epoch in range(args.epochs if args.train_data_path else 0):
             optimizer.step()
             loss_avg = moving_average(loss_avg, float(loss), max = 1000)
 
-        tictoc = (time.time() - tic) * 1000
-        tictoc_avg = moving_average(tictoc_avg, tictoc, max = 10000)
-        print(f'epoch: {epoch:02d} iter: [{i: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {tictoc:8.0f} <{tictoc_avg:4.0f}> ms (data {(toc - tic)*1000} ms)')
+        time_data, time_model = (toc - tic) * 1000, (time.time() - toc) * 1000
+        time_avg = moving_average(time_avg, time_model, max = 10000)
+        print(f'epoch: {epoch:02d} iter: [{i: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_model:8.0f} <{time_avg:4.0f}> ms (data {time_data:.2f} ms)')
         tic = time.time()
         iteration += 1
 

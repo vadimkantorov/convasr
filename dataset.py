@@ -43,7 +43,7 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
 		spect, transcript, audio_path = load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.labels.parse)
-		spect = self.transform(spect)
+		spect = self.transform(spect) if self.transform is not None else spect
 		return spect, transcript, audio_path
 
 	def __len__(self):
