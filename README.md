@@ -2,8 +2,9 @@
 Baseline convolutional ASR system in PyTorch
 
 # Dependencies
-PyTorch, NumPy, SciPy, NVidia Apex (for fp16 training)
+aria2 (for downloading ru_open_stt via torrent), PyTorch, NumPy, SciPy, NVidia Apex (for fp16 training)
 ```shell
+# installing apex
 pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex
 ```
 
