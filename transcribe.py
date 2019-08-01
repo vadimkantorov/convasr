@@ -1,6 +1,6 @@
 import argparse
 import importlib
-
+import torch
 import dataset
 import decoder
 import model
@@ -28,8 +28,8 @@ model.eval()
 
 torch.set_grad_enabled(False)
 
-spect, transcript_dummy, audio_path_dummy = dataset.load_example(args.audio_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window)
-inputs = spect[None, :, None, :]
+spect, transcript_dummy, audio_path_dummy = dataset.load_example(args.audio_path, transcript = '', sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window)
+inputs = spect.unsqueeze(0)
 input_sizes = torch.IntTensor([[spect.shape[-1]]])
 
 logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)

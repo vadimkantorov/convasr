@@ -148,7 +148,7 @@ class Conv1dSamePadding(nn.Conv1d):
         return F.conv1d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
 
 def load_checkpoint(model, checkpoint_path):
-    state_dict = torch.load(checkpoint_path)
+    state_dict = torch.load(checkpoint_path, map_location='cpu')
     model.load_state_dict(state_dict)
 
 def save_checkpoint(model, checkpoint_path):

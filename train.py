@@ -94,7 +94,7 @@ def main():
                 for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(val_loader):
                     input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
                     logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
-                    loss = criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs)
+                    loss = 0 #loss = criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs)
                     loss_.append(float(loss))
                     decoded_output, _ = decoder.decode(probs, output_sizes)
                     target_strings = decoder.convert_to_strings(dataset.unpack_targets(targets, target_sizes))
