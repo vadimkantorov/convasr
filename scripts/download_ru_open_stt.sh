@@ -15,3 +15,8 @@ for f in audiobooks_2.tar.gz_ public_youtube700.tar.gz_ asr_public_phone_calls_2
   tar -xf tmp.tar.gz
   rm tmp.tar.gz
 done
+
+mkdir -p $DATSET_OPEN_STT/splits
+for f in calls_val.csv clean_train.csv clean_val.csv mixed_small.csv mixed_train.csv mixed_val.csv; do
+  wget "https://github.com/vadimkantorov/open_stt_splits/releases/download/with_excluded_by_cer/$f" -P $DATASET_OPEN_STT/splits
+done
