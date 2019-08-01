@@ -17,7 +17,7 @@ except:
 
 import dataset
 import transforms
-import decoder
+import decoder as decoder_module
 import model as model_module
 from model import load_checkpoint, save_checkpoint
 
@@ -70,7 +70,7 @@ def main():
     # copy model for all gpu
     model = torch.nn.DataParallel(model).to(args.device)
     criterion = warpctc_pytorch.CTCLoss()
-    decoder = decoder.GreedyDecoder(labels.char_labels)
+    decoder = decoder_module.GreedyDecoder(labels.char_labels)
     optimizer = torch.optim.SGD(model.parameters(),
                                 lr=args.lr,
                                 momentum=args.momentum,
