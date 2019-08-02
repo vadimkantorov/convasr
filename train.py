@@ -8,8 +8,7 @@ import torch
 import torch.utils.data
 import torch.utils.tensorboard
 import torch.nn as nn
-import warpctc_pytorch
-
+import torch.nn.functional as F
 try:
     import apex
 except:
@@ -32,11 +31,12 @@ parser.add_argument('--num-workers', type = int, default = 10)
 parser.add_argument('--train-batch-size', type = int, default = 64)
 parser.add_argument('--val-batch-size', type = int, default = 64)
 parser.add_argument('--epochs', type = int, default = 20)
+parser.add_argument('--iterations')
 parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 parser.add_argument('--checkpoint')
 parser.add_argument('--checkpoint-dir', default = 'data/checkpoints')
-parser.add_argument('--transcripts', default = 'data/transcripts.json')
-parser.add_argument('--logits', default = 'data/logits.pt')
+parser.add_argument('--transcripts', default = 'data/transcripts_{val_dataset_name}.json')
+parser.add_argument('--logits', default = 'data/logits_{val_dataset_name}.pt')
 parser.add_argument('--model', default = 'Wav2LetterRu')
 parser.add_argument('--tensorboard-log-dir', default = 'data/tensorboard')
 parser.add_argument('--seed', default = 1)
@@ -45,7 +45,7 @@ parser.add_argument('--lang', default = 'ru')
 parser.add_argument('--max-norm', type = float, default = 100)
 parser.add_argument('--lr', type = float, default = 5e-3)
 parser.add_argument('--weight-decay', type = float, default = 1e-5)
-parser.add_argument('--momentum', type = float, default = 0.5)
+parser.add_argument('--momentum', type = float, default = 0.9)
 parser.add_argument('--nesterov', action = 'store_true')
 parser.add_argument('--val-batch-period', type = int, default = None)
 parser.add_argument('--train-batch-period-logging', type = int, default = 100)
@@ -75,7 +75,7 @@ if args.checkpoint:
     load_checkpoint(model, args.checkpoint)
 model = torch.nn.DataParallel(model).to(args.device)
 
-criterion = warpctc_pytorch.CTCLoss()
+criterion = nn.CTCLoss(blank = labels.chr2idx(dataset.Labels.epsilon), reduction = 'sum').to(args.device)
 decoder = decoder.GreedyDecoder(labels.char_labels)
 
 optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov)
@@ -95,11 +95,11 @@ def evaluate_model(epoch = None, iteration = None):
         for val_dataset_name, val_loader in val_loaders.items():
             logits_, ref_tra_, cer_, wer_, loss_ = [], [], [], [], []
             for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(val_loader):
-                input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
-                logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
-                loss = criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs)
+                input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
+                logits, output_lengths = model(inputs.to(args.device), input_lengths)
+                loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_sizes.to(args.device)) / len(inputs)
                 loss_.append(float(loss))
-                decoded_output, _ = decoder.decode(probs, output_sizes)
+                decoded_output, _ = decoder.decode(F.softmax(logits, dim = 1).permute(0, 2, 1), output_lengths)
                 target_strings = decoder.convert_to_strings(dataset.unpack_targets(targets, target_sizes))
                 for k in range(len(target_strings)):
                     transcript, reference = decoded_output[k][0], target_strings[k][0]
@@ -117,9 +117,9 @@ def evaluate_model(epoch = None, iteration = None):
             wer_avg = float(torch.tensor(wer_).mean())
             loss_avg = float(torch.tensor(loss_).mean())
             print(f'{val_dataset_name} | Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
-            with open(os.path.join(args.checkpoint_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts, 'w') as f:
+            with open(os.path.join(args.checkpoint_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
                 json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
-            torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.checkpoint_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits)
+            torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.checkpoint_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits.format(val_dataset_name = val_dataset_name))
             tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg, loss_avg = loss_avg), iteration) if training else None
     model.train()
     save_checkpoint(model.module, os.path.join(args.checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')) if training else None
@@ -134,11 +134,10 @@ for epoch in range(args.epochs if args.train_data_path else 0):
     model.train()
     for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
         toc = time.time()
-        #if iteration < 45001: print('Skipping', iteration); iteration += 1; continue
-        input_sizes = (input_percentages.cpu() * inputs.shape[-1]).int()
-        logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
-        loss = criterion(logits.transpose(0, 1), targets, output_sizes.cpu(), target_sizes.cpu()) / len(inputs)
-        if not (torch.isinf(loss) | torch.isnan(loss)).any():
+        input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
+        logits, output_lengths = model(inputs.to(args.device), input_lengths)
+        loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_sizes.to(args.device)) / len(inputs)
+        if not (torch.isinf(loss) or torch.isnan(loss)):
             optimizer.zero_grad()
             if args.fp16:
                 with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -147,10 +146,8 @@ for epoch in range(args.epochs if args.train_data_path else 0):
                 loss.backward()
 
             if args.max_norm > 0:
-                if args.fp16:
-                    torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer), args.max_norm)
-                else:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_norm)
+                torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
+
             optimizer.step()
             loss_avg = moving_average(loss_avg, float(loss), max = 1000)
 

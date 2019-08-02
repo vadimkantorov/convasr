@@ -9,6 +9,8 @@ import scipy.signal
 import librosa
 
 class Labels(object):
+	epsilon = '|'
+
 	def __init__(self, char_labels, preprocess_text = lambda text: text, preprocess_word = lambda word: word):
 		self.char_labels = char_labels
 		self.labels_map = {l: i for i, l in enumerate(char_labels)}
@@ -29,6 +31,12 @@ class Labels(object):
 
 	def render_transcript(self, codes):
 		return ''.join([self.char_labels[i] for i in codes])
+
+	def chr2idx(self, chr):
+		return self.char_labels.index(chr)
+
+	def idx2chr(self, idx):
+		return self.char_labels[idx]
 
 class SpectrogramDataset(torch.utils.data.Dataset):
 	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, labels, transform = lambda x: x, max_duration = 20):

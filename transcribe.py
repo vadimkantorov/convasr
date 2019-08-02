@@ -28,11 +28,11 @@ model.eval()
 
 torch.set_grad_enabled(False)
 
-spect, transcript_dummy, audio_path_dummy = dataset.load_example(args.audio_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window)
-inputs = spect[None, :, None, :]
+spect, transcript_dummy, audio_path_dummy = dataset.load_example(args.audio_path, transcript = '', sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window)
+inputs = spect.unsqueeze(0)
 input_sizes = torch.IntTensor([[spect.shape[-1]]])
 
-logits, probs, output_sizes = model(inputs.to(args.device), input_sizes)
-decoded_output, decoded_offsets = decoder.decode(probs, output_sizes)
+logits, output_sizes = model(inputs.to(args.device), input_sizes)
+decoded_output, decoded_offsets = decoder.decode(F.softmax(logits, dim = 1).permute(0, 2, 1), output_sizes)
 
 print('HYP:', decoded_output)

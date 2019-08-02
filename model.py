@@ -127,9 +127,7 @@ class Speech2TextModel(nn.Module):
     def forward(self, x, lengths):
         output_lengths = lengths.int() // 2
         logits = self.model(x)
-        logits = logits.permute(2, 0, 1).contiguous().transpose(0, 1)
-
-        return logits, F.softmax(logits, dim=-1), output_lengths
+        return logits, output_lengths
  
 class Conv1dSamePadding(nn.Conv1d):
     """ 2D Convolutions like TensorFlow """
@@ -148,7 +146,7 @@ class Conv1dSamePadding(nn.Conv1d):
         return F.conv1d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
 
 def load_checkpoint(model, checkpoint_path):
-    state_dict = torch.load(checkpoint_path)
+    state_dict = torch.load(checkpoint_path, map_location = 'cpu')
     model.load_state_dict(state_dict)
 
 def save_checkpoint(model, checkpoint_path):
