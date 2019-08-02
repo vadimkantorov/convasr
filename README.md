@@ -1,4 +1,4 @@
-# convasr
+# convasr - Work In Progress
 Baseline convolutional ASR system in PyTorch
 
 # Dependencies
