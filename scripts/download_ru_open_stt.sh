@@ -9,7 +9,7 @@ for f in asr_calls_2_val.tar.gz buriy_audiobooks_2_val.tar.gz public_youtube700_
   rm $f
 done
 
-for f in audiobooks_2.tar.gz_ public_youtube700.tar.gz_ asr_public_phone_calls_2.tar.gz_; do
+for f in audiobooks_2.tar.gz_ public_youtube700.tar.gz_ asr_public_phone_calls_2.tar.gz_ tts_russian_addresses_rhvoice_4voices.tar.gz_; do
   cat $f* > tmp.tar.gz
   rm $f*
   tar -xf tmp.tar.gz
