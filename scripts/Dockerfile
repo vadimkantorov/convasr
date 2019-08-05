@@ -23,7 +23,8 @@ RUN apt update -y && apt install -y --no-install-recommends \
   vim \
   sudo \
   wget \
-  gdb
+  gdb \
+  && apt clean && rm -rf /var/lib/apt/lists/*
 
 RUN curl -so /miniconda.sh https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh \
  && chmod +x /miniconda.sh \

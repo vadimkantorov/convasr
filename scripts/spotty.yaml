@@ -8,7 +8,7 @@ project:
 
 container:
   projectDir: /workspace/project
-  image: ubuntu:18.04
+  file: Dockerfile
   volumeMounts:
     - name: dataset_open_stt
       mountPath: /dataset_open_stt
@@ -26,7 +26,7 @@ instances:
       volumes:
         - name: docker
           parameters:
-            size: 10
+            size: 20
             mountDir: /docker
             deletionPolicy: retain
         - name: workspace
@@ -41,6 +41,7 @@ instances:
             deletionPolicy: retain
 scripts:
   train: |
+    rm -rf ~/convasr
     git clone https://github.com/vadimkantorov/convasr ~/convasr
     cd ~/convasr
     mkdir -p data
