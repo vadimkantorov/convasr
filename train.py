@@ -48,7 +48,6 @@ def traintest(args):
      
     def evaluate_model(epoch = None, iteration = None):
         training = epoch is not None and iteration is not None
-        os.makedirs(args.checkpoint_dir, exist_ok = True)
 
         model.eval()
         with torch.no_grad():
@@ -84,8 +83,12 @@ def traintest(args):
         model.train()
         models.save_checkpoint(model.module, os.path.join(args.checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')) if training else None
 
+    os.makedirs(args.checkpoint_dir, exist_ok = True)
     if not args.train_data_path:
         evaluate_model()
+
+    with open(os.path.join(args.checkpoint_dir, args.args), 'w') as f:
+        json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
 
     tic = time.time()
     iteration = 0
@@ -154,6 +157,7 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint-dir', default = 'data/checkpoints')
     parser.add_argument('--transcripts', default = 'data/transcripts_{val_dataset_name}.json')
     parser.add_argument('--logits', default = 'data/logits_{val_dataset_name}.pt')
+    parser.add_argument('--args', default = 'args.json')
     parser.add_argument('--model', default = 'Wav2LetterRu')
     parser.add_argument('--tensorboard-log-dir', default = 'data/tensorboard')
     parser.add_argument('--seed', default = 1)
