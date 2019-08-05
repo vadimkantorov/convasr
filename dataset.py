@@ -147,8 +147,8 @@ def read_wav(path, channel=-1):
 		if signal.shape[1] == 1:
 			signal = signal.squeeze()
 		elif channel == -1:
-			signal = signal.mean(1)  # multiple channels, average
+			signal = signal.mean(1)
 		else:
-			signal = signal[:, channel]  # multiple channels, average
+			signal = signal[:, channel] 
 		assert len(signal.shape) == 1
 	return signal, sample_rate

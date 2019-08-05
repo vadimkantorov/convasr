@@ -15,9 +15,8 @@ except:
     pass
 import dataset
 import transforms
-import decoder as decoder_module
-import model as model_module
-from model import load_checkpoint, save_checkpoint
+import decoders
+import models
 
 def traintest(args):
     for set_random_seed in [torch.manual_seed] + ([torch.cuda.manual_seed_all] if args.device == 'cuda' else []):
@@ -34,19 +33,18 @@ def traintest(args):
 
     val_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size) for val_data_path in args.val_data_path}
 
-    model = model.Speech2TextModel(getattr(model, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features))
+    model = models.Speech2TextModel(getattr(model, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features))
     if args.checkpoint:
-        load_checkpoint(model, args.checkpoint)
+        models.load_checkpoint(model, args.checkpoint)
     model = torch.nn.DataParallel(model).to(args.device)
 
     criterion = nn.CTCLoss(blank = labels.chr2idx(dataset.Labels.epsilon), reduction = 'sum').to(args.device)
-    decoder = decoder.GreedyDecoder(labels.char_labels)
+    decoder = decoders.GreedyDecoder(labels.char_labels)
 
     optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else None
 
     if args.fp16:
         model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16_opt_level, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-
      
     def evaluate_model(epoch = None, iteration = None):
         training = epoch is not None and iteration is not None
@@ -84,7 +82,7 @@ def traintest(args):
                 torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.checkpoint_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits.format(val_dataset_name = val_dataset_name))
                 tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg, loss_avg = loss_avg), iteration) if training else None
         model.train()
-        save_checkpoint(model.module, os.path.join(args.checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')) if training else None
+        models.save_checkpoint(model.module, os.path.join(args.checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')) if training else None
 
     if not args.train_data_path:
         evaluate_model()

@@ -1,10 +1,8 @@
 import argparse
 import importlib
-
 import dataset
-import decoder
-import model
-from model import load_checkpoint, save_checkpoint
+import decoders
+import models
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--num-input-features', type = int, default = 64)
@@ -21,10 +19,10 @@ args = parser.parse_args()
 
 lang = importlib.import_module(args.lang)
 labels = dataset.Labels(lang.LABELS, preprocess_text = lang.preprocess_text, preprocess_word = lang.preprocess_word)
-model = model.Speech2TextModel(getattr(model, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features))
+model = models.Speech2TextModel(getattr(model, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features))
 load_checkpoint(model, args.checkpoint)
 model = model.to(args.device)
-decoder = decoder.GreedyDecoder(labels.char_labels)
+decoder = decoders.GreedyDecoder(labels.char_labels)
 model.eval()
 
 torch.set_grad_enabled(False)
