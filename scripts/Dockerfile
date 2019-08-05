@@ -40,5 +40,5 @@ RUN conda install  -y -c pytorch magma-cuda100
 
 RUN conda install -y -c pytorch cudatoolkit=10.0 pytorch-nightly=1.2.0.dev20190805
 
-RUN pip install cython librosa python-levenshtein tqdm
+RUN pip install future cython librosa python-levenshtein tqdm tensorboard==1.14.0
 RUN pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex

@@ -9,6 +9,7 @@ project:
 container:
   projectDir: /workspace/project
   file: Dockerfile
+  runtimeParameters: ['--ipc=host']
   volumeMounts:
     - name: dataset_open_stt
       mountPath: /dataset_open_stt
@@ -20,7 +21,7 @@ instances:
     provider: aws
     parameters:
       region: us-east-1
-      instanceType: t2.large #p3.8xlarge
+      instanceType: g3s.xlarge #t2.large #p3.8xlarge
       maxPrice: 4.0
       dockerDataRoot: /docker
       volumes:
@@ -44,9 +45,10 @@ scripts:
     rm -rf ~/convasr
     git clone https://github.com/vadimkantorov/convasr ~/convasr
     cd ~/convasr
+    ln -s /dataset_open_stt/ru_open_stt_wav ru_open_stt
     mkdir -p data
-    for f in calls_val.csv clean_train.csv mixed_small.csv mixed_train.csv mixed_val.csv; do
-        wget https://github.com/vadimkantorov/open_stt_splits/releases/download/with_excluded_by_cer/$f -P data
+    for f in calls_val.csv clean_train.csv clean_val.csv mixed_small.csv mixed_train.csv mixed_val.csv; do
+        wget -q https://github.com/vadimkantorov/open_stt_splits/releases/download/with_excluded_by_cer/$f -P data
     done
     git checkout {{TAG}}
-    python train.py --checkpoint-dir /workspace {{ARGS}}
+    CUDA_VISIBLE_DEVICES={{CUDA_VISIBLE_DEVICES}} python train.py {{ARGS}}
