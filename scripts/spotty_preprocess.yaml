@@ -5,6 +5,7 @@ project:
       - .git/*
       - '*/__pycache__/*'
       - data/*
+      - ru_open_stt
 
 container:
   projectDir: /workspace/project
