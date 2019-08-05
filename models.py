@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class Wav2LetterRu(nn.Sequential):
-    def __init__(self, num_classes, num_input_features = 64):
+    def __init__(self, num_classes, num_input_features):
         def conv_bn_relu_dropout(kernel_size, num_channels, stride = 1, padding = 0, dropout = 0.2, batch_norm_momentum = 0.1):
             return nn.Sequential(
                 nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, padding = padding, bias = False),
@@ -28,7 +28,7 @@ class Wav2LetterRu(nn.Sequential):
         super(Wav2LetterRu, self).__init__(*layers)
 
 class Wav2LetterVanilla(nn.Sequential):
-    def __init__(self, num_classes, num_input_features = 161):
+    def __init__(self, num_classes, num_input_features):
         def conv_bn_clip(kernel_size, num_channels, stride = 1, dilation = 1, repeat = 1, padding = 0):
             modules = []
             for i in range(repeat):
@@ -51,7 +51,7 @@ class Wav2LetterVanilla(nn.Sequential):
         super(Wav2LetterVanilla, self).__init__(*layers)
 
 class JasperNet(nn.ModuleList):
-    def __init__(self, num_classes, num_input_features = 161):
+    def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1):
         def conv_bn_relu_dropout_residual(kernel_size, num_channels, dropout = 0, stride = 1, dilation = 1, padding = 0, batch_norm_momentum = 0.1, repeat = 1, num_channels_residual = []):
                 return nn.ModuleDict(dict(
                     relu_dropout = ReLUDropoutInplace(p = dropout),
@@ -62,24 +62,26 @@ class JasperNet(nn.ModuleList):
                 ))
 
         blocks = [
-            conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (num_input_features, 256), dropout = 0.2, padding = 5, stride = 2),
-
-            #conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, padding = 5, repeat = 5, num_channels_residual = [256]),
-            #conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, padding = 5, repeat = 5, num_channels_residual = [256, 256]),
-            #conv_bn_relu_dropout_residual(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, padding = 6, repeat = 5, num_channels_residual = [256, 256, 256]),
-            #conv_bn_relu_dropout_residual(kernel_size = 13, num_channels = (384, 384), dropout = 0.2, padding = 6, repeat = 5, num_channels_residual = [256, 256, 256, 384]),
-            #conv_bn_relu_dropout_residual(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, padding = 8, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384]),
-            #conv_bn_relu_dropout_residual(kernel_size = 17, num_channels = (512, 512), dropout = 0.2, padding = 8, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512]),
-            #conv_bn_relu_dropout_residual(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, padding = 10, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512]),
-            #conv_bn_relu_dropout_residual(kernel_size = 21, num_channels = (640, 640), dropout = 0.3, padding = 10, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640]),
-            #conv_bn_relu_dropout_residual(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, padding = 12, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640]),
-            #conv_bn_relu_dropout_residual(kernel_size = 25, num_channels = (768, 768), dropout = 0.3, padding = 12, repeat = 5, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640, 768]),
-
-            conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, padding = 5,  repeat = 3, num_channels_residual = [256]),
-            conv_bn_relu_dropout_residual(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, padding = 6,  repeat = 3, num_channels_residual = [256, 256]),
-            conv_bn_relu_dropout_residual(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, padding = 8,  repeat = 3, num_channels_residual = [256, 256, 384]),
-            conv_bn_relu_dropout_residual(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, padding = 10, repeat = 3, num_channels_residual = [256, 256, 384, 512]),
-            conv_bn_relu_dropout_residual(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, padding = 12, repeat = 3, num_channels_residual = [256, 256, 384, 512, 640]),
+            conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (num_input_features, 256), dropout = 0.2, padding = 5, stride = 2)] +
+            ([
+                conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, padding = 5, repeat = repeat, num_channels_residual = [256]),
+                conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, padding = 5, repeat = repeat, num_channels_residual = [256, 256]),
+                conv_bn_relu_dropout_residual(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, padding = 6, repeat = repeat, num_channels_residual = [256, 256, 256]),
+                conv_bn_relu_dropout_residual(kernel_size = 13, num_channels = (384, 384), dropout = 0.2, padding = 6, repeat = repeat, num_channels_residual = [256, 256, 256, 384]),
+                conv_bn_relu_dropout_residual(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, padding = 8, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384]),
+                conv_bn_relu_dropout_residual(kernel_size = 17, num_channels = (512, 512), dropout = 0.2, padding = 8, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512]),
+                conv_bn_relu_dropout_residual(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, padding = 10, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512]),
+                conv_bn_relu_dropout_residual(kernel_size = 21, num_channels = (640, 640), dropout = 0.3, padding = 10, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640]),
+                conv_bn_relu_dropout_residual(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, padding = 12, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640]),
+                conv_bn_relu_dropout_residual(kernel_size = 25, num_channels = (768, 768), dropout = 0.3, padding = 12, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640, 768]),
+            ] if num_subblocks == 2 else
+            [
+                conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, padding = 5,  repeat = repeat, num_channels_residual = [256]),
+                conv_bn_relu_dropout_residual(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, padding = 6,  repeat = repeat, num_channels_residual = [256, 256]),
+                conv_bn_relu_dropout_residual(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, padding = 8,  repeat = repeat, num_channels_residual = [256, 256, 384]),
+                conv_bn_relu_dropout_residual(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, padding = 10, repeat = repeat, num_channels_residual = [256, 256, 384, 512]),
+                conv_bn_relu_dropout_residual(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, padding = 12, repeat = repeat, num_channels_residual = [256, 256, 384, 512, 640]),
+            ]) + [
             conv_bn_relu_dropout_residual(kernel_size = 29, num_channels = (768, 896), dropout = 0.4, padding = 28, dilation = 2),
             conv_bn_relu_dropout_residual(kernel_size = 1, num_channels = (896, 1024), dropout = 0.4),
 
@@ -123,27 +125,13 @@ class ReLUDropoutInplace(torch.nn.Module):
             return input.masked_fill_(~mask, 0).mul_(1.0 / p1m)
         else:
             return input.clamp_(min = 0)
- 
-class Conv1dSamePadding(nn.Conv1d):
-    """ 2D Convolutions like TensorFlow """
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, dilation=1, groups=1, bias=True):
-        super().__init__(in_channels, out_channels, kernel_size, stride, 0, dilation, groups, bias)
-        self.stride = self.stride[0] # just a scalar
 
-    def forward(self, x):
-        iw = int(x.size()[-1])
-        kw = int(self.weight.size()[-1])
-        sw = self.stride
-        ow = math.ceil(iw / sw)
-        pad_w = max((ow - 1) * self.stride + (kw - 1) * self.dilation[0] + 1 - iw, 0)
-        if pad_w > 0:
-            x = F.pad(x, [pad_w//2, pad_w - pad_w//2])
-        return F.conv1d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+def load_checkpoint(model, optimizer, sampler, checkpoint_path):
+    checkpoint = torch.load(checkpoint_path, map_location = 'cpu')
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    sampler.load_state_dict(checkpoint['sampler_state_dict'])
 
-def load_checkpoint(model, checkpoint_path):
-    state_dict = torch.load(checkpoint_path, map_location = 'cpu')
-    model.load_state_dict(state_dict)
-
-def save_checkpoint(model, checkpoint_path):
-    state_dict = model.state_dict()
-    torch.save(state_dict, checkpoint_path)
+def save_checkpoint(model, optimizer, sampler, batch_idx, checkpoint_path):
+    checkpoint = dict(model_state_dict = model.state_dict(), optimizer_state_dict = optimizer.state_dict(), sampler_state_dict = sampler.state_dict(batch_idx))
+    torch.save(checkpoint, checkpoint_path)

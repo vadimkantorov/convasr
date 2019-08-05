@@ -35,7 +35,7 @@ def traintest(args):
 
     model = models.Speech2TextModel(getattr(models, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features))
     if args.checkpoint:
-        models.load_checkpoint(model, args.checkpoint)
+        models.load_checkpoint(model, optimizer, sampler, args.checkpoint)
     model = torch.nn.DataParallel(model).to(args.device)
 
     criterion = nn.CTCLoss(blank = labels.chr2idx(dataset.Labels.epsilon), reduction = 'sum').to(args.device)
@@ -46,8 +46,8 @@ def traintest(args):
     if args.fp16:
         model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16_opt_level, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
      
-    def evaluate_model(epoch = None, iteration = None):
-        training = epoch is not None and iteration is not None
+    def evaluate_model(epoch = None, batch_idx = None, iteration = None):
+        training = epoch is not None and batch_idx is not None iteration is not None
 
         model.eval()
         with torch.no_grad():
@@ -81,7 +81,7 @@ def traintest(args):
                 torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.checkpoint_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits.format(val_dataset_name = val_dataset_name))
                 tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg, loss_avg = loss_avg), iteration) if training else None
         model.train()
-        models.save_checkpoint(model.module, os.path.join(args.checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')) if training else None
+        models.save_checkpoint(model.module, optimizer, sampler, batch_idx, os.path.join(args.checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')) if training else None
 
     os.makedirs(args.checkpoint_dir, exist_ok = True)
     if not args.train_data_path:
@@ -96,7 +96,7 @@ def traintest(args):
     moving_average = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1./K) * avg
     for epoch in range(args.epochs if args.train_data_path else 0):
         model.train()
-        for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
+        for batch_idx, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
             toc = time.time()
             input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
             logits, output_lengths = model(inputs.to(args.device), input_lengths)
@@ -116,17 +116,17 @@ def traintest(args):
 
             time_data, time_model = (toc - tic) * 1000, (time.time() - toc) * 1000
             time_avg = moving_average(time_avg, time_model, max = 10000)
-            print(f'epoch: {epoch:02d} iter: [{i: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_model:8.0f} <{time_avg:4.0f}> ms (data {time_data:.2f} ms)')
+            print(f'epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_model:8.0f} <{time_avg:4.0f}> ms (data {time_data:.2f} ms)')
             tic = time.time()
             iteration += 1
 
             if args.val_batch_period is not None and iteration > 0 and iteration % args.val_batch_period == 0:
-                evaluate_model(epoch, iteration)
+                evaluate_model(epoch, batch_idx, iteration)
 
             if iteration % args.train_batch_period_logging == 0:
                 tensorboard.add_scalars(args.id + '_' + os.path.basename(args.train_data_path), dict(loss_avg = loss_avg), iteration)
 
-        evaluate_model(epoch, iteration)
+        evaluate_model(epoch, batch_idx, iteration)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
