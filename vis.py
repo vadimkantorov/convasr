@@ -20,20 +20,20 @@ def tra(transcripts):
 
 def meanstd(logits):
     cov = lambda m: m @ m.t()
-    l = torch.load(logits, map_location = 'cpu')
+    L = torch.load(logits, map_location = 'cpu')
 
-    batch_m = [b.mean(dim = -1) for b in l['features']]
+    batch_m = [b.mean(dim = -1) for b in L['features']]
     batch_mean = torch.stack(batch_m).mean(dim = 0)
-    batch_s = [b.std(dim = -1) for b in l['features']]
+    batch_s = [b.std(dim = -1) for b in L['features']]
     batch_std = torch.stack(batch_s).mean(dim = 0)
-    batch_c = [cov(b - m.unsqueeze(-1)) for b, m in zip(l['features'], batch_m)]
+    batch_c = [cov(b - m.unsqueeze(-1)) for b, m in zip(L['features'], batch_m)]
     batch_cov = torch.stack(batch_c).mean(dim = 0)
 
-    conv1_m = [b.mean(dim = -1) for b in l['conv1']]
+    conv1_m = [b.mean(dim = -1) for b in L['conv1']]
     conv1_mean = torch.stack(conv1_m).mean(dim = 0)
-    conv1_s = [b.std(dim = -1) for b in l['conv1']]
+    conv1_s = [b.std(dim = -1) for b in L['conv1']]
     conv1_std = torch.stack(conv1_s).mean(dim = 0)
-    conv1_c = [cov(b - m.unsqueeze(-1)) for b, m in zip(l['conv1'], conv1_m)]
+    conv1_c = [cov(b - m.unsqueeze(-1)) for b, m in zip(L['conv1'], conv1_m)]
     conv1_cov = torch.stack(conv1_c).mean(dim = 0)
     
     plt.subplot(231)
@@ -52,6 +52,12 @@ def meanstd(logits):
     plt.subplots_adjust(top = 0.99, bottom=0.01, hspace=0.8, wspace=0.4)
     plt.savefig(logits + '.jpg', dpi = 150)
 
+def entropy(logits):
+    L = torch.load(logits, map_location = 'cpu')
+    entropy = lambda x, dim = 0, eps = 1e-16: -(x * (x + eps).log()).sum(dim = dim)
+    e = [entropy(F.softmax(l, dim = 0), dim = 0).mean() for l in L['logits']]
+    print(os.path.basename(logits), 'Entropy:', float(torch.tensor(e).mean()))
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
@@ -63,6 +69,10 @@ if __name__ == '__main__':
     cmd = subparsers.add_parser('meanstd')
     cmd.add_argument('--logits', default = 'data/logits.pt')
     cmd.set_defaults(func = meanstd)
+
+    cmd = subparsers.add_parser('entropy')
+    cmd.add_argument('--logits', default = 'data/logits.pt')
+    cmd.set_defaults(func = entropy)
 
     args = vars(parser.parse_args())
     func = args.pop('func')
