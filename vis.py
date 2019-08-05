@@ -6,6 +6,7 @@ import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import torch
+import torch.nn.functional as F
 
 def tra(transcripts):
 	ref_tra = list(sorted(json.load(open(transcripts)), key = lambda j: j['cer']))
@@ -55,7 +56,7 @@ def meanstd(logits):
 def entropy(logits):
     L = torch.load(logits, map_location = 'cpu')
     entropy = lambda x, dim = 0, eps = 1e-16: -(x * (x + eps).log()).sum(dim = dim)
-    e = [entropy(F.softmax(l, dim = 0), dim = 0).mean() for l in L['logits']]
+    e = [entropy(F.softmax(l, dim = 1), dim = 1).mean() for l in L['logits']]
     print(os.path.basename(logits), 'Entropy:', float(torch.tensor(e).mean()))
 
 if __name__ == '__main__':
