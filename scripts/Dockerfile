@@ -35,9 +35,9 @@ RUN /miniconda/bin/conda install -y ipython matplotlib scipy scikit-learn numba
 
 # Prerequisites for building PyTorch from source (just in case)
 RUN /miniconda/bin/conda install -y numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
-RUN conda install pytorch -y -c magma-cuda100 
+RUN conda install  -y -c pytorch magma-cuda100 
 
-RUN conda install pytorch -y -c pytorch
+RUN conda install -y -c pytorch pytorch-nightly
 
 RUN pip install cython librosa librosa python-levenshtein tqdm
 RUN pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex

@@ -1,7 +1,7 @@
 import random
 
 class SpecAugment(object):
-    def __init__(self, n_freq_mask = 2, n_time_mask = 2, width_freq_mask = 5, width_time_mask = 20, replace_strategy = None):
+    def __init__(self, n_freq_mask = 2, n_time_mask = 2, width_freq_mask = 6, width_time_mask = 6, replace_strategy = None):
         # fb code: https://github.com/facebookresearch/wav2letter/commit/04c3d80bf66fe749466cd427afbcc936fbdec5cd
         # width_freq_mask = 27, width_time_mask = 100, and n_freq_mask/n_time_mask = 2
         # google code: https://github.com/tensorflow/lingvo/blob/master/lingvo/core/spectrum_augmenter.py#L37-L42

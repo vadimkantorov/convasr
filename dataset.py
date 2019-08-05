@@ -39,18 +39,19 @@ class Labels(object):
 		return self.char_labels[idx]
 
 class SpectrogramDataset(torch.utils.data.Dataset):
-	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, labels, transform = lambda x: x, max_duration = 20):
+	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, transform = lambda x: x, max_duration = 20):
 		self.window_stride = window_stride
 		self.window_size = window_size
 		self.sample_rate = sample_rate
 		self.window = getattr(scipy.signal, window)
+		self.num_input_features = num_input_features
 		self.labels = labels
 		self.transform = transform
 		self.ids = [(row[0], row[1], float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or float(row[2]) < max_duration] if isinstance(data_or_path, str) else [d for d in data_or_path if d[-1] == -1 or d[-1] < max_duration]
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
-		spect, transcript, audio_path = load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.labels.parse)
+		spect, transcript, audio_path = load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, self.labels.parse)
 		spect = self.transform(spect) if self.transform is not None else spect
 		return spect, transcript, audio_path
 
@@ -114,28 +115,33 @@ def collate_fn(batch):
 	targets = torch.IntTensor(targets)
 	return inputs, targets, filenames, input_percentages, target_sizes
 
-def load_example(audio_path, transcript, sample_rate, window_size, window_stride, window, parse_transcript = lambda transcript: transcript):
+def load_example(audio_path, transcript, sample_rate, window_size, window_stride, window, num_input_features, parse_transcript = lambda transcript: transcript):
 	signal, sample_rate_ = read_wav(audio_path)
 	if sample_rate_ != sample_rate:
 		signal = torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate))
-	spect = spectrogram(signal, sample_rate, window_size, window_stride, window)
+	spect = spectrogram(signal, sample_rate, window_size, window_stride, window, num_input_features)
 	transcript = parse_transcript(transcript)
 	return spect, transcript, audio_path
 
-def spectrogram(signal, sample_rate, window_size, window_stride, window):
+def spectrogram(signal, sample_rate, window_size, window_stride, window, num_input_features):
+	preemphasis = lambda signal, coeff: torch.cat([signal[:1], torch.sub(signal[1:], torch.mul(signal[:-1], coeff))])
 	n_fft = int(sample_rate * (window_size + 1e-8))
 	win_length = n_fft
 	hop_length = int(sample_rate * (window_stride + 1e-8))
-	D = librosa.stft(signal.numpy(), n_fft=n_fft, hop_length=hop_length, win_length=win_length, window=window)
-	spect = np.abs(D)
-	return torch.from_numpy(spect)
+	signal = preemphasis(signal, coeff = 0.97)
+	spect = librosa.stft(signal.numpy(), n_fft=n_fft, hop_length=hop_length, win_length=win_length, window=window, center=True)
+	spect = np.abs(spect) ** 2.0
+	features = librosa.filters.mel(sample_rate, n_fft, n_mels=num_input_features, fmin=0, fmax=int(sample_rate/2)) @ spect
+	features = np.log(features + 1e-20)
+	mean = np.mean(features, axis = 1, keepdims = True)
+	std_dev = np.std(features, axis = 1, keepdims = True)
+	features = (features - mean) / std_dev
+	return torch.from_numpy(features)
 
 def read_wav(path, channel=-1):
 	sample_rate, signal = scipy.io.wavfile.read(path)
 	signal = torch.from_numpy(signal).to(torch.float32)
-	abs_max = signal.abs().max()
-	if abs_max > 0:
-		signal *= 1. / abs_max
+	signal *= 1. / (signal.abs().max() + 1e-5)
 	
 	if len(signal.shape) > 1:
 		if signal.shape[1] == 1:

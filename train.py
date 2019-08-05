@@ -21,6 +21,21 @@ import model
 from model import load_checkpoint, save_checkpoint
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--optimizer', choices = ['SGD', 'AdamW'], default = 'SGD')
+parser.add_argument('--max-norm', type = float, default = 100)
+parser.add_argument('--lr', type = float, default = 5e-3)
+parser.add_argument('--weight-decay', type = float, default = 1e-5)
+parser.add_argument('--momentum', type = float, default = 0.9)
+parser.add_argument('--nesterov', action = 'store_true')
+parser.add_argument('--betas', nargs = '*', type = float, default = (0.9, 0.999)) 
+
+parser.add_argument('--fp16', action = 'store_true')
+parser.add_argument('--fp16-opt-level', type = str, choices = ['O0', 'O1', 'O2', 'O3'], default = 'O0')
+parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
+
+parser.add_argument('--iterations')
+parser.add_argument('--epochs', type = int, default = 20)
+parser.add_argument('--num-input-features', default = 64)
 parser.add_argument('--train-data-path')
 parser.add_argument('--val-data-path', nargs = '+')
 parser.add_argument('--sample-rate', type = int, default = 16000)
@@ -30,8 +45,6 @@ parser.add_argument('--window', default = 'hann', choices = ['hann', 'hamming'])
 parser.add_argument('--num-workers', type = int, default = 10)
 parser.add_argument('--train-batch-size', type = int, default = 64)
 parser.add_argument('--val-batch-size', type = int, default = 64)
-parser.add_argument('--epochs', type = int, default = 20)
-parser.add_argument('--iterations')
 parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 parser.add_argument('--checkpoint')
 parser.add_argument('--checkpoint-dir', default = 'data/checkpoints')
@@ -42,21 +55,13 @@ parser.add_argument('--tensorboard-log-dir', default = 'data/tensorboard')
 parser.add_argument('--seed', default = 1)
 parser.add_argument('--id', default = time.strftime('%Y-%m-%d_%H-%M-%S'))
 parser.add_argument('--lang', default = 'ru')
-parser.add_argument('--max-norm', type = float, default = 100)
-parser.add_argument('--lr', type = float, default = 5e-3)
-parser.add_argument('--weight-decay', type = float, default = 1e-5)
-parser.add_argument('--momentum', type = float, default = 0.9)
-parser.add_argument('--nesterov', action = 'store_true')
 parser.add_argument('--val-batch-period', type = int, default = None)
 parser.add_argument('--train-batch-period-logging', type = int, default = 100)
 parser.add_argument('--augment', action = 'store_true')
 parser.add_argument('--verbose', action = 'store_true')
-parser.add_argument('--fp16', action = 'store_true')
-parser.add_argument('--fp16-opt-level', type = str, choices = ['O0', 'O1', 'O2', 'O3'], default = 'O0')
-parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
 args = parser.parse_args()
 
-for set_seed in [torch.manual_seed] + ([torch.cuda.manual_seed_all] if args.device != 'cpu' else []):
+for set_seed in [torch.manual_seed] + ([torch.cuda.manual_seed_all] if args.device == 'cuda' else []):
     set_seed(args.seed)
 tensorboard = torch.utils.tensorboard.SummaryWriter(args.tensorboard_log_dir)
 
@@ -64,13 +69,13 @@ lang = importlib.import_module(args.lang)
 labels = dataset.Labels(lang.LABELS, preprocess_text = lang.preprocess_text, preprocess_word = lang.preprocess_word)
 
 if args.train_data_path:
-    train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, transform = transforms.SpecAugment() if args.augment else None)
+    train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, transform = transforms.SpecAugment() if args.augment else None)
     train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
     train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
 
-val_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size) for val_data_path in args.val_data_path}
+val_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size) for val_data_path in args.val_data_path}
 
-model = model.Speech2TextModel(getattr(model, args.model)(num_classes = len(labels.char_labels)))
+model = model.Speech2TextModel(getattr(model, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features))
 if args.checkpoint:
     load_checkpoint(model, args.checkpoint)
 model = torch.nn.DataParallel(model).to(args.device)
@@ -78,7 +83,7 @@ model = torch.nn.DataParallel(model).to(args.device)
 criterion = nn.CTCLoss(blank = labels.chr2idx(dataset.Labels.epsilon), reduction = 'sum').to(args.device)
 decoder = decoder.GreedyDecoder(labels.char_labels)
 
-optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov)
+optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else None
 
 if args.fp16:
     model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16_opt_level, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
@@ -145,8 +150,7 @@ for epoch in range(args.epochs if args.train_data_path else 0):
             else:
                 loss.backward()
 
-            if args.max_norm > 0:
-                torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
+            torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
 
             optimizer.step()
             loss_avg = moving_average(loss_avg, float(loss), max = 1000)
