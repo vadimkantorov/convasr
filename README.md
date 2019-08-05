@@ -2,14 +2,14 @@
 Baseline convolutional ASR system in PyTorch
 
 # Dependencies
-aria2 (for downloading ru_open_stt via torrent), PyTorch, NumPy, SciPy (for wav loading), librosa (for audio resampling), NVidia Apex (for fp16 training), tensorboard==1.14.0, future (PyTorch nightlies don't install future), spotty (for AWS Spot Instances training)
+aria2 (for downloading **ru_open_stt** via torrent), PyTorch, NumPy, SciPy (for wav loading), librosa (for audio resampling), NVidia Apex (for fp16 training), tensorboard==1.14.0, future (PyTorch nightlies don't install future), spotty (for AWS Spot Instances training)
 ```shell
 # installing apex
 pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex
 ```
-Dependencies are also listed in `scripts/Dockerfile`. The ru_open_stt dataset download script is also in `scripts/download_ru_open_stt.sh`.
+Dependencies are also listed in `scripts/Dockerfile`. The **ru_open_stt** dataset download script is also in `scripts/download_ru_open_stt.sh`.
 
-# data file format
+# Data file format
 CSV (comma-separated) with 3 columns without header:
 1. Full path to the audio wav file (mono, 16 Khz)
 2. Transcript
