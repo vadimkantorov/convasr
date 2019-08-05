@@ -33,9 +33,9 @@ def traintest(args):
 
     val_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size) for val_data_path in args.val_data_path}
 
-    model = models.Speech2TextModel(getattr(models, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features))
+    model = getattr(models, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features)
     if args.checkpoint:
-        models.load_checkpoint(model, optimizer, sampler, args.checkpoint)
+        models.load_checkpoint(args.checkpoint, model, optimizer, sampler)
     model = torch.nn.DataParallel(model).to(args.device)
 
     criterion = nn.CTCLoss(blank = labels.chr2idx(dataset.Labels.epsilon), reduction = 'sum').to(args.device)
@@ -55,7 +55,8 @@ def traintest(args):
                 logits_, ref_tra_, cer_, wer_, loss_ = [], [], [], [], []
                 for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(val_loader):
                     input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
-                    logits, output_lengths = model(inputs.to(args.device), input_lengths)
+                    logits = model(inputs.to(args.device), input_lengths)
+                    output_lengths = models.compute_output_lengths(model, input_lengths)
                     loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_sizes.to(args.device)) / len(inputs)
                     loss_.append(float(loss))
                     decoded_output, _ = decoder.decode(F.softmax(logits, dim = 1).permute(0, 2, 1), output_lengths)
@@ -81,7 +82,7 @@ def traintest(args):
                 torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.checkpoint_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits.format(val_dataset_name = val_dataset_name))
                 tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg, loss_avg = loss_avg), iteration) if training else None
         model.train()
-        models.save_checkpoint(model.module, optimizer, sampler, batch_idx, os.path.join(args.checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')) if training else None
+        models.save_checkpoint(os.path.join(args.checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, sampler, epoch, batch_idx) if training else None
 
     os.makedirs(args.checkpoint_dir, exist_ok = True)
     if not args.train_data_path:
@@ -99,7 +100,8 @@ def traintest(args):
         for batch_idx, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
             toc = time.time()
             input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
-            logits, output_lengths = model(inputs.to(args.device), input_lengths)
+            logits = model(inputs.to(args.device), input_lengths)
+            output_lengths = models.compute_output_lengths(model, input_lengths)
             loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_sizes.to(args.device)) / len(inputs)
             if not (torch.isinf(loss) or torch.isnan(loss)):
                 optimizer.zero_grad()
@@ -140,7 +142,7 @@ if __name__ == '__main__':
     parser.add_argument('--fp16', action = 'store_true')
     parser.add_argument('--fp16-opt-level', type = str, choices = ['O0', 'O1', 'O2', 'O3'], default = 'O0')
     parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
-    parser.add_argument('--iterations')
+    parser.add_argument('--epoch')        
     parser.add_argument('--epochs', type = int, default = 20)
     parser.add_argument('--num-input-features', default = 64)
     parser.add_argument('--train-data-path')

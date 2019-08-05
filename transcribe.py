@@ -19,19 +19,20 @@ args = parser.parse_args()
 
 lang = importlib.import_module(args.lang)
 labels = dataset.Labels(lang.LABELS, preprocess_text = lang.preprocess_text, preprocess_word = lang.preprocess_word)
-model = models.Speech2TextModel(getattr(model, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features))
-load_checkpoint(model, args.checkpoint)
+model = getattr(model, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features)
+models.load_checkpoint(args.checkpoint, model)
 model = model.to(args.device)
 decoder = decoders.GreedyDecoder(labels.char_labels)
 model.eval()
 
 torch.set_grad_enabled(False)
 
-spect, transcript_dummy, audio_path_dummy = dataset.load_example(args.audio_path, transcript = '', sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, num_input_features = args.num_input_features, window = args.window)
+spect, transcript_dummy, audio_path = dataset.load_example(args.audio_path, transcript = '', sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, num_input_features = args.num_input_features, window = args.window)
 inputs = spect.unsqueeze(0)
 input_sizes = torch.IntTensor([[spect.shape[-1]]])
 
-logits, output_sizes = model(inputs.to(args.device), input_sizes)
+logits = model(inputs.to(args.device), input_lengths)
+output_lengths = models.compute_output_lengths(model, input_lengths)
 decoded_output, decoded_offsets = decoder.decode(F.softmax(logits, dim = 1).permute(0, 2, 1), output_sizes)
 
-print('HYP:', decoded_output)
+print(decoded_output)

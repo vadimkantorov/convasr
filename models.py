@@ -102,15 +102,8 @@ class JasperNet(nn.ModuleList):
             residual.append(x)
         return self[-1](x)
 
-class Speech2TextModel(nn.Module):
-    def __init__(self, model):
-        super(Speech2TextModel, self).__init__()
-        self.model = model
-
-    def forward(self, x, lengths):
-        output_lengths = lengths.int() // 2
-        logits = self.model(x)
-        return logits, output_lengths
+def compute_output_lengths(model, input_lengths):
+    return input_lengths.int() // 2
 
 class ReLUDropoutInplace(torch.nn.Module):
     def __init__(self, p):
@@ -126,12 +119,14 @@ class ReLUDropoutInplace(torch.nn.Module):
         else:
             return input.clamp_(min = 0)
 
-def load_checkpoint(model, optimizer, sampler, checkpoint_path):
+def load_checkpoint(checkpoint_path, model, optimizer = None, sampler = None):
     checkpoint = torch.load(checkpoint_path, map_location = 'cpu')
     model.load_state_dict(checkpoint['model_state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    sampler.load_state_dict(checkpoint['sampler_state_dict'])
+    if optimizer is not None:
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    if sampler is not None:
+        sampler.load_state_dict(checkpoint['sampler_state_dict'])
 
-def save_checkpoint(model, optimizer, sampler, batch_idx, checkpoint_path):
-    checkpoint = dict(model_state_dict = model.state_dict(), optimizer_state_dict = optimizer.state_dict(), sampler_state_dict = sampler.state_dict(batch_idx))
+def save_checkpoint(checkpoint_path, model, optimizer, sampler, epoch, batch_idx):
+    checkpoint = dict(model_state_dict = model.state_dict(), optimizer_state_dict = optimizer.state_dict(), sampler_state_dict = sampler.state_dict(batch_idx), epoch = epoch)
     torch.save(checkpoint, checkpoint_path)
