@@ -1,0 +1,51 @@
+project:
+  name: convasr
+  syncFilters:
+    - exclude:
+      - .git/*
+      - '*/__pycache__/*'
+      - data/*
+
+container:
+  projectDir: /workspace/project
+  image: ubuntu:18.04
+  volumeMounts:
+    - name: dataset_open_stt
+      mountPath: /dataset_open_stt
+    - name: workspace
+      mountPath: /workspace
+
+instances:
+  - name: instance-train1
+    provider: aws
+    parameters:
+      region: us-east-1
+      instanceType: t2.large #p3.8xlarge
+      maxPrice: 4.0
+      dockerDataRoot: /docker
+      volumes:
+        - name: docker
+          parameters:
+            size: 10
+            mountDir: /docker
+            deletionPolicy: retain
+        - name: workspace
+          parameters:
+            size: 50
+            deletionPolicy: retain
+        - name: dataset_open_stt
+          parameters:
+            volumeName: dataset_open_stt
+            size: 1200
+            mountDir: /dataset_open_stt
+            deletionPolicy: retain
+scripts:
+  train: |
+    git clone https://github.com/vadimkantorov/convasr ~/convasr
+    cd ~/convasr
+    mkdir -p data
+    for f in calls_val.csv clean_train.csv mixed_small.csv mixed_train.csv mixed_val.csv; do
+        wget https://github.com/vadimkantorov/open_stt_splits/releases/download/with_excluded_by_cer/$f -P data
+    done
+    git checkout {{TAG}}
+    python train.py --checkpoint-dir /workspace {{ARGS}}

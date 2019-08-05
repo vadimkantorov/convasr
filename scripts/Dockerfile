@@ -37,7 +37,7 @@ RUN /miniconda/bin/conda install -y ipython matplotlib scipy scikit-learn numba
 RUN /miniconda/bin/conda install -y numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
 RUN conda install  -y -c pytorch magma-cuda100 
 
-RUN conda install -y -c pytorch pytorch-nightly
+RUN conda install -y -c pytorch cudatoolkit=10.0 pytorch-nightly=1.2.0.dev20190805
 
-RUN pip install cython librosa librosa python-levenshtein tqdm
+RUN pip install cython librosa python-levenshtein tqdm
 RUN pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex

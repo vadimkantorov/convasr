@@ -163,4 +163,7 @@ if __name__ == '__main__':
     parser.add_argument('--train-batch-period-logging', type = int, default = 100)
     parser.add_argument('--augment', action = 'store_true')
     parser.add_argument('--verbose', action = 'store_true')
-    traintest(parser.parse_args())
+    args = parser.parse_args()
+    if args.verbose:
+        print(args)
+    traintest(args)
