@@ -51,9 +51,9 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
-		spect, transcript, audio_path = load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, self.labels.parse)
-		spect = self.transform(spect) if self.transform is not None else spect
-		return spect, transcript, audio_path
+		features, transcript, audio_path = load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, self.labels.parse)
+		features = self.transform(features) if self.transform is not None else features
+		return features, transcript, audio_path
 
 	def __len__(self):
 		return len(self.ids)
@@ -128,11 +128,11 @@ def load_example(audio_path, transcript, sample_rate, window_size, window_stride
 	signal, sample_rate_ = read_wav(audio_path)
 	if sample_rate_ != sample_rate:
 		signal = torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate))
-	spect = spectrogram(signal, sample_rate, window_size, window_stride, window, num_input_features)
+	features = logfbanknorm(signal, sample_rate, window_size, window_stride, window, num_input_features)
 	transcript = parse_transcript(transcript)
-	return spect, transcript, audio_path
+	return features, transcript, audio_path
 
-def spectrogram(signal, sample_rate, window_size, window_stride, window, num_input_features):
+def logfbanknorm(signal, sample_rate, window_size, window_stride, window, num_input_features):
 	preemphasis = lambda signal, coeff: torch.cat([signal[:1], torch.sub(signal[1:], torch.mul(signal[:-1], coeff))])
 	n_fft = int(sample_rate * (window_size + 1e-8))
 	win_length = n_fft
