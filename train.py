@@ -33,7 +33,7 @@ def traintest(args):
 
     val_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size) for val_data_path in args.val_data_path}
 
-    model = models.Speech2TextModel(getattr(model, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features))
+    model = models.Speech2TextModel(getattr(models, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features))
     if args.checkpoint:
         models.load_checkpoint(model, args.checkpoint)
     model = torch.nn.DataParallel(model).to(args.device)
