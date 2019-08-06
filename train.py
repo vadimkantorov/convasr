@@ -47,7 +47,7 @@ def traintest(args):
         model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16_opt_level, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
      
     def evaluate_model(epoch = None, batch_idx = None, iteration = None):
-        training = epoch is not None and batch_idx is not None iteration is not None
+        training = epoch is not None and batch_idx is not None and iteration is not None
 
         model.eval()
         with torch.no_grad():

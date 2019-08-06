@@ -64,13 +64,13 @@ class BucketingSampler(torch.utils.data.Sampler):
 		self.data_source = data_source
 		ids = list(range(0, len(data_source)))
 		self.bins = [ids[i:i + batch_size] for i in range(0, len(ids), batch_size)]
-        self.batch_idx = 0
+		self.batch_idx = 0
 
 	def __iter__(self):
 		for ids in self.bins[self.batch_idx:]:
 			np.random.shuffle(ids)
 			yield ids
-        self.batch_idx = 0
+		self.batch_idx = 0
 
 	def __len__(self):
 		return len(self.bins)
@@ -78,12 +78,12 @@ class BucketingSampler(torch.utils.data.Sampler):
 	def shuffle(self, epoch):
 		np.random.shuffle(self.bins)
 
-    def state_dict(self, batch_idx):
-        return dict(bins = self.bins, batch_idx = batch_idx)
+	def state_dict(self, batch_idx):
+		return dict(bins = self.bins, batch_idx = batch_idx)
 
-    def load_state_dict(self, state_dict):
-        self.bins = state_dict['bins']
-        self.batch_idx = state_dict['batch_idx']
+	def load_state_dict(self, state_dict):
+		self.bins = state_dict['bins']
+		self.batch_idx = state_dict['batch_idx']
 
 def get_cer_wer(decoder, transcript, reference):
 	reference = reference.strip()
