@@ -6,6 +6,7 @@ project:
       - '*/__pycache__/*'
       - data/*
       - ru_open_stt
+      - '*.pt'
 
 container:
   projectDir: /workspace/project

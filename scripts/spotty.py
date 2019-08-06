@@ -4,11 +4,8 @@ import subprocess
 
 spotty_yaml = os.path.join(os.path.dirname(__file__), 'spotty.yaml')
 
-def start():
-    subprocess.call(['spotty', 'start', '-c', spotty_yaml])
-
-def stop():
-    subprocess.call(['spotty', 'stop', '-c', spotty_yaml])
+def spotty(arguments):
+    subprocess.call(['spotty', arguments[0], '-c', spotty_yaml] + arguments[1:])
 
 def train(script):
     lines = [l.strip() for l in open(script) if l.strip() and not l.startswith('#')]
@@ -18,7 +15,7 @@ def train(script):
     subprocess.call(['spotty', 'run', '-c', spotty_yaml, 'train', '-p', 'ARGS=' + ARGS])
 
 def download_checkpoint(id):
-    subprocess.call(['spotty', 'download', '-c', spotty_yaml, '-f', os.pathjoin('experiments', id)])
+    subprocess.call(['spotty', 'download', '-c', spotty_yaml, '-f', os.path.join('experiments', id)])
 
 def cer(id, val_dataset_name):
     subprocess.call(['spotty', 'run', '-c', spotty_yaml, 'cer', '-p', 'ID=' + id, 'VALDATASETNAME=' + val_dataset_name])
@@ -27,24 +24,20 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
 
-    cmd = subparsers.add_parser('start')
-    cmd.add_argument('start')
-    cmd.set_defaults(func = start)
-
-    cmd = subparsers.add_parser('stop')
-    cmd.add_argument('stop')
-    cmd.set_defaults(func = stop)
+    cmd = subparsers.add_parser('spotty')
+    cmd.add_argument('arguments', nargs = argparse.REMAINDER)
+    cmd.set_defaults(func = spotty)
 
     cmd = subparsers.add_parser('train')
     cmd.add_argument('script')
     cmd.set_defaults(func = train)
 
     cmd = subparsers.add_parser('download_checkpoint')
-    cmd.add_argument('--id', required = True)
+    cmd.add_argument('id')
     cmd.set_defaults(func = download_checkpoint)
     
     cmd = subparsers.add_parser('cer')
-    cmd.add_argument('--id', required = True)
+    cmd.add_argument('id')
     cmd.add_argument('--val-dataset-name', default = 'clean_val.csv')
     cmd.set_defaults(func = cer)
 

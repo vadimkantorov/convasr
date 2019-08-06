@@ -22,8 +22,14 @@ spotty start -c scripts/spotty_preprocess.yaml
 spotty run -c scripts/spotty_preprocess.yaml preprocess
 
 # start a GPU instance
-spotty start -c scripts/spotty.yaml
+python scripts/spotty.py spotty start
 
-# edit scripts/spotty_train.sh and launch training on a GPU instance
-bash scripts/spotty_train.sh
+# edit scripts/train.sh and launch training on a GPU instance
+python scripts/spotty.py train scripts/train.sh
+
+# check CER
+python scripts/spotty.py cer EXPERIMENT_ID --val-dataset-name clean_val.csv
+
+# download a checkpoint
+python scripts/spotty.py download_checkpoint CHECKPOINT_PATH
 ```
