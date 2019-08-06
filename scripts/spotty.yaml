@@ -24,7 +24,7 @@ instances:
     provider: aws
     parameters:
       region: us-east-1
-      instanceType: g3s.xlarge #t2.large #p3.8xlarge
+      instanceType: p3.8xlarge #g3s.xlarge #t2.large #p3.8xlarge
       maxPrice: 4.0
       dockerDataRoot: /docker
       volumes:
@@ -61,4 +61,4 @@ scripts:
 
   cer: |
     cd ~/convasr
-    python vis.py cer --experiments-dir /workspace/experiments --id {{ID}} --val-dataset-name {{VALDATASETNAME}}
+    python vis.py cer {{ID}} --experiments-dir /workspace/experiments --val-dataset-name {{VALDATASETNAME}}
