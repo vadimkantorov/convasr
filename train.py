@@ -35,7 +35,7 @@ def traintest(args):
 
     model = getattr(models, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features)
     if args.checkpoint:
-        models.load_checkpoint(args.checkpoint, model, optimizer, sampler)
+        models.load_checkpoint(args.checkpoint, model, optimizer, train_sampler)
     model = torch.nn.DataParallel(model).to(args.device)
 
     criterion = nn.CTCLoss(blank = labels.chr2idx(dataset.Labels.epsilon), reduction = 'sum').to(args.device)
@@ -82,7 +82,7 @@ def traintest(args):
                 torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.checkpoint_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits.format(val_dataset_name = val_dataset_name))
                 tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg, loss_avg = loss_avg), iteration) if training else None
         model.train()
-        models.save_checkpoint(os.path.join(args.checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, sampler, epoch, batch_idx) if training else None
+        models.save_checkpoint(os.path.join(args.checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, train_sampler, epoch, batch_idx) if training else None
 
     os.makedirs(args.checkpoint_dir, exist_ok = True)
     if not args.train_data_path:
