@@ -11,6 +11,7 @@ container:
   projectDir: /workspace/project
   file: Dockerfile
   runtimeParameters: ['--ipc=host']
+  ports: [6006, 8888]
   volumeMounts:
     - name: dataset_open_stt
       mountPath: /dataset_open_stt
@@ -52,4 +53,7 @@ scripts:
         wget -q https://github.com/vadimkantorov/open_stt_splits/releases/download/with_excluded_by_cer/$f -P data
     done
     git checkout {{TAG}}
-    CUDA_VISIBLE_DEVICES={{CUDA_VISIBLE_DEVICES}} python train.py {{ARGS}}
+    CUDA_VISIBLE_DEVICES={{CUDA_VISIBLE_DEVICES}} python train.py --experiments-dir /workspace/experiments {{ARGS}}
+
+  tensorboard: |
+    tensorboard --logdir /workspace/experiments/{{ID}}

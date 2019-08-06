@@ -19,9 +19,15 @@ import decoders
 import models
 
 def traintest(args):
+    if args.verbose:
+        print(args)
+    args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'))
+    args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, id = args.id)
+    os.makedirs(args.experiment_dir, exist_ok = True)
+
     for set_random_seed in [torch.manual_seed] + ([torch.cuda.manual_seed_all] if args.device == 'cuda' else []):
         set_random_seed(args.seed)
-    tensorboard = torch.utils.tensorboard.SummaryWriter(args.tensorboard_log_dir)
+    tensorboard = torch.utils.tensorboard.SummaryWriter(os.path.join(args.experiment_dir, 'tensorboard'))
 
     lang = importlib.import_module(args.lang)
     labels = dataset.Labels(lang.LABELS, preprocess_text = lang.preprocess_text, preprocess_word = lang.preprocess_word)
@@ -76,19 +82,19 @@ def traintest(args):
                 cer_avg = float(torch.tensor(cer_).mean())
                 wer_avg = float(torch.tensor(wer_).mean())
                 loss_avg = float(torch.tensor(loss_).mean())
-                print(f'{val_dataset_name} | Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
-                with open(os.path.join(args.checkpoint_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
+                print(f'{args.id} {val_dataset_name} | Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
+                with open(os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
                     json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
-                torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.checkpoint_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits.format(val_dataset_name = val_dataset_name))
+                torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.experiment_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits.format(val_dataset_name = val_dataset_name))
                 tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg, loss_avg = loss_avg), iteration) if training else None
         model.train()
         models.save_checkpoint(os.path.join(args.checkpoint_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, train_sampler, epoch, batch_idx) if training else None
 
-    os.makedirs(args.checkpoint_dir, exist_ok = True)
     if not args.train_data_path:
         evaluate_model()
+        return
 
-    with open(os.path.join(args.checkpoint_dir, args.args), 'w') as f:
+    with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
         json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
 
     tic = time.time()
@@ -112,20 +118,19 @@ def traintest(args):
                     loss.backward()
 
                 torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
-
                 optimizer.step()
                 loss_avg = moving_average(loss_avg, float(loss), max = 1000)
 
             time_data, time_model = (toc - tic) * 1000, (time.time() - toc) * 1000
             time_avg = moving_average(time_avg, time_model, max = 10000)
-            print(f'epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_model:8.0f} <{time_avg:4.0f}> ms (data {time_data:.2f} ms)')
+            print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_model:8.0f} <{time_avg:4.0f}> ms (data {time_data:.2f} ms)')
             tic = time.time()
             iteration += 1
 
-            if args.val_batch_period is not None and iteration > 0 and iteration % args.val_batch_period == 0:
+            if args.val_iteration_interval is not None and iteration > 0 and iteration % args.val_iteration_interval == 0:
                 evaluate_model(epoch, batch_idx, iteration)
 
-            if iteration % args.train_batch_period_logging == 0:
+            if iteration % args.log_iteration_interval == 0:
                 tensorboard.add_scalars(args.id + '_' + os.path.basename(args.train_data_path), dict(loss_avg = loss_avg), iteration)
 
         evaluate_model(epoch, batch_idx, iteration)
@@ -156,20 +161,18 @@ if __name__ == '__main__':
     parser.add_argument('--val-batch-size', type = int, default = 64)
     parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
     parser.add_argument('--checkpoint')
-    parser.add_argument('--checkpoint-dir', default = 'data/checkpoints')
+    parser.add_argument('--experiments-dir', default = 'data/experiments')
+    parser.add_argument('--experiment-dir', default = '{experiments_dir}/{id}')
     parser.add_argument('--transcripts', default = 'data/transcripts_{val_dataset_name}.json')
     parser.add_argument('--logits', default = 'data/logits_{val_dataset_name}.pt')
     parser.add_argument('--args', default = 'args.json')
     parser.add_argument('--model', default = 'Wav2LetterRu')
-    parser.add_argument('--tensorboard-log-dir', default = 'data/tensorboard')
     parser.add_argument('--seed', default = 1)
-    parser.add_argument('--id', default = time.strftime('%Y-%m-%d_%H-%M-%S'))
+    parser.add_argument('--id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}')
     parser.add_argument('--lang', default = 'ru')
-    parser.add_argument('--val-batch-period', type = int, default = None)
-    parser.add_argument('--train-batch-period-logging', type = int, default = 100)
+    parser.add_argument('--val-iteration-interval', type = int, default = None)
+    parser.add_argument('--log-iteration-interval', type = int, default = 100)
     parser.add_argument('--augment', action = 'store_true')
     parser.add_argument('--verbose', action = 'store_true')
     args = parser.parse_args()
-    if args.verbose:
-        print(args)
     traintest(args)
