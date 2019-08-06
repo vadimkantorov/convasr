@@ -82,7 +82,7 @@ def traintest(args):
                 cer_avg = float(torch.tensor(cer_).mean())
                 wer_avg = float(torch.tensor(wer_).mean())
                 loss_avg = float(torch.tensor(loss_).mean())
-                print(f'{val_dataset_name} | Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
+                print(f'{args.id} {val_dataset_name} | Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
                 with open(os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
                     json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
                 torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.experiment_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits.format(val_dataset_name = val_dataset_name))
@@ -123,7 +123,7 @@ def traintest(args):
 
             time_data, time_model = (toc - tic) * 1000, (time.time() - toc) * 1000
             time_avg = moving_average(time_avg, time_model, max = 10000)
-            print(f'epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_model:8.0f} <{time_avg:4.0f}> ms (data {time_data:.2f} ms)')
+            print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_model:8.0f} <{time_avg:4.0f}> ms (data {time_data:.2f} ms)')
             tic = time.time()
             iteration += 1
 
