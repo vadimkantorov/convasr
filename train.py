@@ -21,7 +21,7 @@ import models
 def traintest(args):
     if args.verbose:
         print(args)
-    args.id = args.id.format(model = args.model, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'))
+    args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'))
     args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, id = args.id)
     os.makedirs(args.experiment_dir, exist_ok = True)
 
