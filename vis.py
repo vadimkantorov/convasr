@@ -60,10 +60,13 @@ def entropy(logits):
     e = [entropy(F.softmax(l, dim = 1), dim = 1).mean() for l in L['logits']]
     print(os.path.basename(logits), 'Entropy:', float(torch.tensor(e).mean()))
 
-def cer(experiment_dir, val_dataset_name):
-    for f in glob.glob(os.path.join(experiment_dir, 'transcripts_*.json')):
+def cer(experiments_dir, id, val_dataset_name):
+    experiment_dir = os.path.join(experiments_dir, id)
+    for f in glob.glob(os.path.join(experiment_dir, f'transcripts_{val_dataset_name}*.json')):
         iteration = f[f.find('iter'):]
-        print(p, float(torch.tensor([j['cer'] for j in json.load(open(f))]).mean()))
+        checkpoint = os.path.abspath(os.path.join(experiment_dir, 'checkpoint_' + f[f.find('epoch'):].replace('.json', '.pt')))
+        cer = float(torch.tensor([j['cer'] for j in json.load(open(f))]).mean())
+        print(f'{iteration}    {cer:.02f}     {checkpoint}')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -82,7 +85,8 @@ if __name__ == '__main__':
     cmd.set_defaults(func = entropy)
 
     cmd = subparsers.add_parser('cer')
-    cmd.add_argument('--experiment-dir')
+    cmd.add_argument('--experiments-dir')
+    cmd.add_argument('--id')
     cmd.add_argument('--val-dataset-name')
     cmd.set_defaults(func = cer)
 
