@@ -8,7 +8,7 @@ project:
       - ru_open_stt
 
 container:
-  projectDir: /workspace/project
+  projectDir: /workspace
   file: Dockerfile
   runtimeParameters: ['--ipc=host']
   ports: [6006, 8888]
@@ -34,7 +34,7 @@ instances:
             deletionPolicy: retain
         - name: workspace
           parameters:
-            size: 50
+            size: 200
             deletionPolicy: retain
         - name: dataset_open_stt
           parameters:
@@ -57,3 +57,7 @@ scripts:
 
   tensorboard: |
     tensorboard --logdir /workspace/experiments/{{ID}}
+
+  cer: |
+    cd ~/convasr
+    python vis.py cer --experiments-dir /workspace/experiments --id {{ID}} --val-dataset-name {{VALDATASETNAME}}

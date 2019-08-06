@@ -1,4 +1,5 @@
-CUDA_VISIBLE_DEVICES=0,1 python3 train.py --verbose --lang ru \
+CUDA_VISIBLE_DEVICES=0,1 python3 train.py \
+  --verbose --lang ru \
   --model Wav2LetterRu \
   --train-batch-size 80 --val-batch-size 80 \
   --lr 1e-2 --optimizer SGD \
