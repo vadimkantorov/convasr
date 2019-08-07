@@ -137,7 +137,7 @@ def traintest(args):
 
             time_ms_data, time_ms_model = (toc - tic) * 1000, (time.time() - toc) * 1000
             time_ms_avg = moving_avg(time_ms_avg, time_ms_model, max = 10000)
-            print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:8.0f} <{time_ms_avg:4.0f}> ms (data {time_ms_data:.2f} ms)')
+            print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:8.0f} <{time_ms_avg:4.0f}> ms (data {time_ms_data:.2f} ms)  | lr: {scheduler.get_lr()[0]:.0e}')
             tic = time.time()
             scheduler.step()
             iteration += 1
