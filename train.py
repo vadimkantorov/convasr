@@ -109,7 +109,7 @@ def traintest(args):
     optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else None
     if args.fp16:
         model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16_opt_level, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.gamma, milestones = args.milestones) if args.scheduler == 'MultiStepLR' else PolynomialDecayLR(optimizer, power = args.power, decay_steps = len(train_loader) * args.epochs, end_learning_rate = args.lr_end) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.gamma, milestones = args.milestones) if args.scheduler == 'MultiStepLR' else PolynomialDecayLR(optimizer, power = args.power, decay_steps = len(train_loader) * args.decay_epochs, end_learning_rate = args.lr_end) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr)
 
     tic = time.time()
     iteration = 0
@@ -135,11 +135,11 @@ def traintest(args):
                 optimizer.step()
                 loss_avg = moving_avg(loss_avg, float(loss), max = 1000)
 
-            scheduler.step()
             time_ms_data, time_ms_model = (toc - tic) * 1000, (time.time() - toc) * 1000
             time_ms_avg = moving_avg(time_ms_avg, time_ms_model, max = 10000)
             print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:8.0f} <{time_ms_avg:4.0f}> ms (data {time_ms_data:.2f} ms)')
             tic = time.time()
+            scheduler.step()
             iteration += 1
 
             if args.val_iteration_interval is not None and iteration > 0 and iteration % args.val_iteration_interval == 0:
@@ -161,13 +161,13 @@ if __name__ == '__main__':
     parser.add_argument('--betas', nargs = '*', type = float, default = (0.9, 0.999))
     parser.add_argument('--scheduler', choices = ['MultiStepLR', 'PolynomialDecayLR'], default = None)
     parser.add_argument('--gamma', type = float, default = 0.1)
-    parser.add_argument('--milestones', nargs = '*', default = [25000])
+    parser.add_argument('--milestones', nargs = '*', type = int, default = [25000])
     parser.add_argument('--power', type = float, default = 2.0)
-    parser.add_argument('--lr-end', default = 1e-5)
+    parser.add_argument('--lr-end', type = float, default = 1e-5)
+    parser.add_argument('--decay-epochs', type = int, default = 5)
     parser.add_argument('--fp16', action = 'store_true')
     parser.add_argument('--fp16-opt-level', type = str, choices = ['O0', 'O1', 'O2', 'O3'], default = 'O0')
     parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
-    parser.add_argument('--epoch')        
     parser.add_argument('--epochs', type = int, default = 20)
     parser.add_argument('--num-input-features', default = 64)
     parser.add_argument('--train-data-path')
