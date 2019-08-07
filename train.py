@@ -165,7 +165,7 @@ if __name__ == '__main__':
     parser.add_argument('--decay-power', type = float, default = 2.0)
     parser.add_argument('--decay-lr-end', type = float, default = 1e-5)
     parser.add_argument('--decay-epochs', type = int, default = 5)
-	parser.add_argument('--decay-step-size', type = int, default = 10000)
+    parser.add_argument('--decay-step-size', type = int, default = 10000)
     parser.add_argument('--fp16', action = 'store_true')
     parser.add_argument('--fp16-opt-level', type = str, choices = ['O0', 'O1', 'O2', 'O3'], default = 'O0')
     parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
