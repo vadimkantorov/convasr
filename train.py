@@ -102,7 +102,7 @@ def traintest(args):
     with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
         json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
 
-    train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, transform = transforms.SpecAugment() if args.augment else None)
+    train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, transform = transforms.SpecAugment() if args.augment else None, noise_data_path = args.noise_data_path)
     train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
     train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
     criterion = nn.CTCLoss(blank = labels.chr2idx(dataset.Labels.epsilon), reduction = 'sum').to(args.device)
@@ -173,6 +173,7 @@ if __name__ == '__main__':
     parser.add_argument('--num-input-features', default = 64)
     parser.add_argument('--train-data-path')
     parser.add_argument('--val-data-path', nargs = '+')
+    parser.add_argument('--noise-data-path')
     parser.add_argument('--sample-rate', type = int, default = 16000)
     parser.add_argument('--window-size', type = float, default = 0.02)
     parser.add_argument('--window-stride', type = float, default = 0.01)
