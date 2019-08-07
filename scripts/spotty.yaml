@@ -25,7 +25,7 @@ instances:
     parameters:
       region: us-east-1
       availabilityZone: us-east-1a
-      instanceType: g3.16xlarge #p3.8xlarge #g3s.xlarge #t2.large #p3.8xlarge
+      instanceType: p3.8xlarge #g3s.xlarge #t2.large #p3.8xlarge
       maxPrice: 1.4
       dockerDataRoot: /docker
       volumes:

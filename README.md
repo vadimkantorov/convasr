@@ -32,4 +32,7 @@ python scripts/spotty.py cer EXPERIMENT_ID --val-dataset-name clean_val.csv
 
 # download a checkpoint
 python scripts/spotty.py download_checkpoint CHECKPOINT_PATH
+
+# check spot instance prices
+spotty aws spot-prices -i p3.8xlarge -r us-east-1
 ```
