@@ -109,7 +109,7 @@ def traintest(args):
     optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else None
     if args.fp16:
         model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16_opt_level, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.gamma, milestones = args.milestones) if args.scheduler == 'MultiStepLR' else PolynomialDecayLR(optimizer, power = args.power, decay_steps = len(train_loader) * args.decay_epochs, end_learning_rate = args.lr_end) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_loader) * args.decay_epochs, end_learning_rate = args.decay_lr_end) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr)
 
     tic = time.time()
     iteration = 0
@@ -159,12 +159,13 @@ if __name__ == '__main__':
     parser.add_argument('--momentum', type = float, default = 0.9)
     parser.add_argument('--nesterov', action = 'store_true')
     parser.add_argument('--betas', nargs = '*', type = float, default = (0.9, 0.999))
-    parser.add_argument('--scheduler', choices = ['MultiStepLR', 'PolynomialDecayLR'], default = None)
-    parser.add_argument('--gamma', type = float, default = 0.1)
-    parser.add_argument('--milestones', nargs = '*', type = int, default = [25000])
-    parser.add_argument('--power', type = float, default = 2.0)
-    parser.add_argument('--lr-end', type = float, default = 1e-5)
+    parser.add_argument('--scheduler', choices = ['MultiStepLR', 'PolynomialDecayLR', 'StepLR'], default = None)
+    parser.add_argument('--decay-gamma', type = float, default = 0.1)
+    parser.add_argument('--decay-milestones', nargs = '*', type = int, default = [25000])
+    parser.add_argument('--decay-power', type = float, default = 2.0)
+    parser.add_argument('--decay-lr-end', type = float, default = 1e-5)
     parser.add_argument('--decay-epochs', type = int, default = 5)
+	parser.add_argument('--decay-step-size', type = int, default = 10000)
     parser.add_argument('--fp16', action = 'store_true')
     parser.add_argument('--fp16-opt-level', type = str, choices = ['O0', 'O1', 'O2', 'O3'], default = 'O0')
     parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')

@@ -9,7 +9,7 @@ project:
       - '*.pt'
 
 container:
-  projectDir: /workspace/project
+  projectDir: /workspace
   image: ubuntu:18.04
   volumeMounts:
     - name: dataset_open_stt
