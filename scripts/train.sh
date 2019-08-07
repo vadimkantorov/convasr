@@ -3,7 +3,7 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py \
   --model Wav2LetterRu \
   --train-batch-size 80 --val-batch-size 80 \
   --lr 1e-2 --optimizer SGD \
-  --train-data-path ../open_stt_splits/splits/mixed_small.csv \
+  --train-data-path ../open_stt_splits/splits/mixed_train.csv \
   --noise-data-path data/ru_open_stt_noise_small.csv \
   --val-data-path ../open_stt_splits/splits/mixed_val.csv \
   --val-iteration-interval 2500 \
