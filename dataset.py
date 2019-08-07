@@ -147,10 +147,11 @@ def logfbanknorm(signal, sample_rate, window_size, window_stride, window, num_in
 	features = (features - mean) / std_dev
 	return torch.from_numpy(features)
 
-def read_wav(path, channel=-1):
+def read_wav(path, channel=-1, normalize = True):
 	sample_rate, signal = scipy.io.wavfile.read(path)
 	signal = torch.from_numpy(signal).to(torch.float32)
-	signal *= 1. / (signal.abs().max() + 1e-5)
+	if normalize:
+		signal *= 1. / (signal.abs().max() + 1e-5)
 	
 	if len(signal.shape) > 1:
 		if signal.shape[1] == 1:
