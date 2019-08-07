@@ -109,7 +109,7 @@ def traintest(args):
     optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else None
     if args.fp16:
         model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16_opt_level, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.gamma, milestones = args.milestones) if args.scheduler == 'MultiStepLR' else PolynomialDecayLR(optimizer, power = args.power, decay_steps = len(train_loader) * args.epochs, end_learning_rate = args.lr_end) else torch.optim.lr_scheduler.LambdaLR(lambda epoch: args.lr)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.gamma, milestones = args.milestones) if args.scheduler == 'MultiStepLR' else PolynomialDecayLR(optimizer, power = args.power, decay_steps = len(train_loader) * args.epochs, end_learning_rate = args.lr_end) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr)
 
     tic = time.time()
     iteration = 0
