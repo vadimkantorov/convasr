@@ -83,6 +83,7 @@ def traintest(args):
                 wer_avg = float(torch.tensor(wer_).mean())
                 loss_avg = float(torch.tensor(loss_).mean())
                 print(f'{args.id} {val_dataset_name} | epoch {epoch} iter {iteration} | Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
+                print()
                 with open(os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
                     json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
                 torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.experiment_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits.format(val_dataset_name = val_dataset_name))

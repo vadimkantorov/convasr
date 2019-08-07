@@ -66,7 +66,7 @@ def cer(experiments_dir, id, val_dataset_name):
         iteration = f[f.find('iter'):]
         checkpoint = os.path.join(id, 'checkpoint_' + f[f.find('epoch'):].replace('.json', '.pt'))
         cer = float(torch.tensor([j['cer'] for j in json.load(open(f))]).mean())
-        print(f'{iteration}    {cer:.02f}     {checkpoint}')
+        print(f'{iteration}    {cer:.04f}     {checkpoint}')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -87,7 +87,7 @@ if __name__ == '__main__':
     cmd = subparsers.add_parser('cer')
     cmd.add_argument('id')
     cmd.add_argument('--experiments-dir', default = 'data/experiments')
-    cmd.add_argument('--val-dataset-name', default = 'sample_ok.convasr.csv')
+    cmd.add_argument('-d', '--val-dataset-name', default = 'sample_ok.convasr.csv')
     cmd.set_defaults(func = cer)
 
     args = vars(parser.parse_args())
