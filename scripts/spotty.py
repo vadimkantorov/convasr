@@ -40,7 +40,7 @@ if __name__ == '__main__':
     
     cmd = subparsers.add_parser('cer')
     cmd.add_argument('id')
-    cmd.add_argument('--val-dataset-name', default = 'clean_val.csv')
+    cmd.add_argument('-d', '--val-dataset-name', default = 'clean_val.csv')
     cmd.set_defaults(func = cer)
 
     args = vars(parser.parse_args())
