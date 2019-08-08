@@ -21,9 +21,11 @@ except:
 
 def traintest(args):
 	print(args)
-	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), noise_level = 0 if not args.noise_data_path else args.noise_level if isinstance(args.noise_level, float) else '-'.join(map(str, args.noise_level)), id_ = args.id_).replace('e-0', 'e-')
+	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), noise_level = 0 if not args.noise_data_path else args.noise_level if isinstance(args.noise_level, float) else '-'.join(map(str, args.noise_level)), name = args.name).replace('e-0', 'e-').rstrip('_')
 	if args.dry:
+		print()
 		print('Experiment id:', args.id)
+		print()
 		return
 	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, id = args.id)
 	os.makedirs(args.experiment_dir, exist_ok = True)
@@ -175,8 +177,8 @@ if __name__ == '__main__':
 	parser.add_argument('--args', default = 'args.json')
 	parser.add_argument('--model', default = 'Wav2LetterRu')
 	parser.add_argument('--seed', default = 1)
-	parser.add_argument('--id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_noise{noise_level}_{id_}')
-	parser.add_argument('--id_', default = '')
+	parser.add_argument('--id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_noise{noise_level}_{name}')
+	parser.add_argument('--name', default = '')
 	parser.add_argument('--dry', action = 'store_true')
 	parser.add_argument('--lang', default = 'ru')
 	parser.add_argument('--val-iteration-interval', type = int, default = None)
