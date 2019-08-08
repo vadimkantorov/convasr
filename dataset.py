@@ -2,44 +2,15 @@ import os
 import re
 import csv
 import gzip
+import random
 import numpy as np
 import torch.utils.data
 import scipy.io.wavfile
 import scipy.signal
 import librosa
 
-class Labels(object):
-	epsilon = '|'
-
-	def __init__(self, char_labels, preprocess_text = lambda text: text, preprocess_word = lambda word: word):
-		self.char_labels = char_labels
-		self.labels_map = {l: i for i, l in enumerate(char_labels)}
-		self.preprocess_text = preprocess_text
-		self.preprocess_word = preprocess_word
-
-	def find_words(self, text):
-		text = re.sub(r'([^\W\d]+)2', r'\1', text)
-		text = self.preprocess_text(text)
-		words = re.findall(r'-?\d+|-?\d+-\w+|\w+', text)
-		return list(filter(bool, (''.join([c for c in self.preprocess_word(w) if c.upper() in self.labels_map]).strip() for w in words)))
-
-	def parse(self, text):
-		if text.startswith('!clean:'):
-			return [self.labels_map[x] for x in text.replace('!clean:', '', 1).strip()]
-		chars = ' '.join(self.find_words(text)).upper().strip() or '*'
-		return [self.labels_map[c] if i == 0 or c != chars[i - 1] else self.labels_map['2'] for i, c in enumerate(chars)]
-
-	def render_transcript(self, codes):
-		return ''.join([self.char_labels[i] for i in codes])
-
-	def chr2idx(self, chr):
-		return self.char_labels.index(chr)
-
-	def idx2chr(self, idx):
-		return self.char_labels[idx]
-
 class SpectrogramDataset(torch.utils.data.Dataset):
-	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, transform = lambda x: x, max_duration = 20):
+	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, transform = lambda x: x, max_duration = 20, noise_levels = (0.2, 0.6), noise_data_path = None):
 		self.window_stride = window_stride
 		self.window_size = window_size
 		self.sample_rate = sample_rate
@@ -48,10 +19,16 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 		self.labels = labels
 		self.transform = transform
 		self.ids = [(row[0], row[1], float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or float(row[2]) < max_duration] if isinstance(data_or_path, str) else [d for d in data_or_path if d[-1] == -1 or d[-1] < max_duration]
+		self.noise_levels = noise_levels
+		self.noise_paths = list(map(str.strip, open(noise_data_path))) if noise_data_path is not None else []
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
-		features, transcript, audio_path = load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, self.labels.parse)
+		noise_path, noise_level = None, None
+		if self.noise_paths:
+			noise_path = self.noise_paths[hash(audio_path) % len(self.noise_paths)]
+			noise_level = random.uniform(*self.noise_levels)
+		features, transcript, audio_path = load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, self.labels.parse, noise_path = noise_path, noise_level = noise_level)
 		features = self.transform(features) if self.transform is not None else features
 		return features, transcript, audio_path
 
@@ -84,6 +61,36 @@ class BucketingSampler(torch.utils.data.Sampler):
 	def load_state_dict(self, state_dict):
 		self.bins = state_dict['bins']
 		self.batch_idx = state_dict['batch_idx']
+
+class Labels(object):
+	epsilon = '|'
+
+	def __init__(self, char_labels, preprocess_text = lambda text: text, preprocess_word = lambda word: word):
+		self.char_labels = char_labels
+		self.labels_map = {l: i for i, l in enumerate(char_labels)}
+		self.preprocess_text = preprocess_text
+		self.preprocess_word = preprocess_word
+
+	def find_words(self, text):
+		text = re.sub(r'([^\W\d]+)2', r'\1', text)
+		text = self.preprocess_text(text)
+		words = re.findall(r'-?\d+|-?\d+-\w+|\w+', text)
+		return list(filter(bool, (''.join([c for c in self.preprocess_word(w) if c.upper() in self.labels_map]).strip() for w in words)))
+
+	def parse(self, text):
+		if text.startswith('!clean:'):
+			return [self.labels_map[x] for x in text.replace('!clean:', '', 1).strip()]
+		chars = ' '.join(self.find_words(text)).upper().strip() or '*'
+		return [self.labels_map[c] if i == 0 or c != chars[i - 1] else self.labels_map['2'] for i, c in enumerate(chars)]
+
+	def render_transcript(self, codes):
+		return ''.join([self.char_labels[i] for i in codes])
+
+	def chr2idx(self, chr):
+		return self.char_labels.index(chr)
+
+	def idx2chr(self, idx):
+		return self.char_labels[idx]
 
 def get_cer_wer(decoder, transcript, reference):
 	reference = reference.strip()
@@ -124,10 +131,16 @@ def collate_fn(batch):
 	targets = torch.IntTensor(targets)
 	return inputs, targets, filenames, input_percentages, target_sizes
 
-def load_example(audio_path, transcript, sample_rate, window_size, window_stride, window, num_input_features, parse_transcript = lambda transcript: transcript):
-	signal, sample_rate_ = read_wav(audio_path)
-	if sample_rate_ != sample_rate:
-		signal = torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate))
+def mix_noise(signal, noise, noise_level):
+	noise = torch.cat([noise] * (1 + len(signal) // len(noise)))[:len(signal)]
+	return signal + noise * noise_level
+
+def load_example(audio_path, transcript, sample_rate, window_size, window_stride, window, num_input_features, parse_transcript = lambda transcript: transcript, noise_path = None, noise_level = None):
+	signal, sample_rate_ = read_wav(audio_path, sample_rate = sample_rate)
+	if noise_path is not None and noise_level is not None:
+		noise, sample_rate_ = read_wav(noise_path, sample_rate = sample_rate)
+		signal = mix_noise(signal, noise, noise_level)
+		
 	features = logfbanknorm(signal, sample_rate, window_size, window_stride, window, num_input_features)
 	transcript = parse_transcript(transcript)
 	return features, transcript, audio_path
@@ -147,11 +160,15 @@ def logfbanknorm(signal, sample_rate, window_size, window_stride, window, num_in
 	features = (features - mean) / std_dev
 	return torch.from_numpy(features)
 
-def read_wav(path, channel=-1):
-	sample_rate, signal = scipy.io.wavfile.read(path)
+def read_wav(path, channel=-1, normalize = True, sample_rate = None):
+	sample_rate_, signal = scipy.io.wavfile.read(path)
 	signal = torch.from_numpy(signal).to(torch.float32)
-	signal *= 1. / (signal.abs().max() + 1e-5)
-	
+	if normalize:
+		signal *= 1. / (signal.abs().max() + 1e-5)
+
+	if sample_rate is not None and sample_rate_ != sample_rate:
+		sample_rate_, signal = sample_rate, torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate))
+
 	if len(signal.shape) > 1:
 		if signal.shape[1] == 1:
 			signal = signal.squeeze()
@@ -160,4 +177,4 @@ def read_wav(path, channel=-1):
 		else:
 			signal = signal[:, channel] 
 		assert len(signal.shape) == 1
-	return signal, sample_rate
+	return signal, sample_rate_
