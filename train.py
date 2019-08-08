@@ -36,17 +36,17 @@ def traintest(args):
 
 	lang = importlib.import_module(args.lang)
 	labels = dataset.Labels(lang.LABELS, preprocess_text = lang.preprocess_text, preprocess_word = lang.preprocess_word)
-	val_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, noise_data_path = args.noise_data_path if not args.train_data_path else None, noise_level = args.noise_level) for val_data_path in args.val_data_path}
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, noise_data_path = args.noise_data_path if not args.train_data_path else None, noise_level = args.noise_level), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size) for val_data_path in args.val_data_path}
 	model = getattr(models, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features)
 	criterion = nn.CTCLoss(blank = labels.chr2idx(dataset.Labels.epsilon), reduction = 'sum').to(args.device)
 	if args.train_data_path:
 		train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, transform = transforms.SpecAugment() if args.augment else None, noise_data_path = args.noise_data_path, noise_level = args.noise_level)
 		train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
-		train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
+		train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
 		optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else None
 		if args.fp16:
 			model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-		scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_loader) * args.decay_epochs, end_learning_rate = args.decay_lr_end) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr)
+		scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_learning_rate = args.decay_lr_end) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr)
 	else:
 		optimizer, train_sampler = None, None
 	if args.checkpoint:
@@ -58,9 +58,9 @@ def traintest(args):
 		training = epoch is not None and batch_idx is not None and iteration is not None
 		model.eval()
 		with torch.no_grad():
-			for val_dataset_name, val_loader in val_loaders.items():
+			for val_dataset_name, val_data_loader in val_data_loaders.items():
 				logits_, ref_tra_, cer_, wer_, loss_ = [], [], [], [], []
-				for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(val_loader):
+				for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(val_data_loader):
 					input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
 					logits = model(inputs.to(args.device), input_lengths)
 					output_lengths = models.compute_output_lengths(model, input_lengths)
@@ -104,7 +104,7 @@ def traintest(args):
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1./K) * avg
 	for epoch in range(args.epochs if args.train_data_path else 0):
 		model.train()
-		for batch_idx, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_loader):
+		for batch_idx, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_data_loader):
 			toc = time.time()
 			input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
 			logits = model(inputs.to(args.device), input_lengths)
@@ -124,7 +124,7 @@ def traintest(args):
 
 			time_ms_data, time_ms_model = (toc - tic) * 1000, (time.time() - toc) * 1000
 			time_ms_avg = moving_avg(time_ms_avg, time_ms_model, max = 10000)
-			print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:8.0f} <{time_ms_avg:4.0f}> ms (data {time_ms_data:.2f} ms)  | lr: {scheduler.get_lr()[0]:.0e}')
+			print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:8.0f} <{time_ms_avg:4.0f}> ms (data {time_ms_data:.2f} ms)  | lr: {scheduler.get_lr()[0]:.0e}')
 			tic = time.time()
 			scheduler.step()
 			iteration += 1

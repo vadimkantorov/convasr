@@ -33,6 +33,6 @@ input_sizes = torch.IntTensor([[spect.shape[-1]]])
 
 logits = model(inputs.to(args.device), input_lengths)
 output_lengths = models.compute_output_lengths(model, input_lengths)
-decoded_output, decoded_offsets = decoder.decode(F.softmax(logits, dim = 1).permute(0, 2, 1), output_sizes)
+decoded_output, decoded_offsets = decoder.decode(F.softmax(logits, dim = 1).permute(0, 2, 1), output_lengths)
 
 print(decoded_output)
