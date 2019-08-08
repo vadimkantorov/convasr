@@ -10,7 +10,7 @@ import scipy.signal
 import librosa
 
 class SpectrogramDataset(torch.utils.data.Dataset):
-	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, transform = lambda x: x, max_duration = 20, noise_levels = (0.2, 0.6), noise_data_path = None):
+	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, transform = lambda x: x, max_duration = 20, noise_level = None, noise_data_path = None):
 		self.window_stride = window_stride
 		self.window_size = window_size
 		self.sample_rate = sample_rate
@@ -19,7 +19,7 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 		self.labels = labels
 		self.transform = transform
 		self.ids = [(row[0], row[1], float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or float(row[2]) < max_duration] if isinstance(data_or_path, str) else [d for d in data_or_path if d[-1] == -1 or d[-1] < max_duration]
-		self.noise_levels = noise_levels
+		self.noise_level = [noise_level] if isinstance(noise_level, float) else noise_level
 		self.noise_paths = list(map(str.strip, open(noise_data_path))) if noise_data_path is not None else []
 
 	def __getitem__(self, index):
@@ -27,7 +27,7 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 		noise_path, noise_level = None, None
 		if self.noise_paths:
 			noise_path = self.noise_paths[hash(audio_path) % len(self.noise_paths)]
-			noise_level = random.uniform(*self.noise_levels)
+			noise_level = self.noise_level[0] if len(self.noise_level) == 1 else random.uniform(*self.noise_level)
 		features, transcript, audio_path = load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, self.labels.parse, noise_path = noise_path, noise_level = noise_level)
 		features = self.transform(features) if self.transform is not None else features
 		return features, transcript, audio_path

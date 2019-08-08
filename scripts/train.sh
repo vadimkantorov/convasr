@@ -4,8 +4,8 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py \
   --train-batch-size 80 --val-batch-size 80 \
   --lr 1e-2 --optimizer SGD \
   --train-data-path ../open_stt_splits/splits/mixed_train.csv \
-  --noise-data-path data/ru_open_stt_noise_small.csv \
-  --val-data-path ../open_stt_splits/splits/mixed_val.csv \
+  --noise-data-path data/ru_open_stt_noise_small.csv --noise-level 0.6 \
+  --val-data-path ../open_stt_splits/splits/mixed_val.csv ../sample_ok/sample_ok.convasr.csv \
   --val-iteration-interval 2500 \
   --scheduler MultiStepLR --decay-milestones 10000 30000 --decay-gamma 0.5 \
   --epochs 1 
