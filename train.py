@@ -20,9 +20,11 @@ except:
 	pass
 
 def traintest(args):
-	if args.verbose:
-		print(args)
-	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'))
+	print(args)
+	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), noise_level = 0 if not args.noise_data_path else args.noise_level if isinstance(args.noise_level, float) else '-'.join(map(str, args.noise_level)), id_ = args.id_).replace('e-0', 'e-')
+	if args.dry:
+		print('Experiment id:', args.id)
+		return
 	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, id = args.id)
 	os.makedirs(args.experiment_dir, exist_ok = True)
 
@@ -32,7 +34,7 @@ def traintest(args):
 
 	lang = importlib.import_module(args.lang)
 	labels = dataset.Labels(lang.LABELS, preprocess_text = lang.preprocess_text, preprocess_word = lang.preprocess_word)
-	val_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size) for val_data_path in args.val_data_path}
+	val_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, noise_data_path = args.noise_data_path if not args.train_data_path else None, noise_level = args.noise_level) for val_data_path in args.val_data_path}
 	model = getattr(models, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features)
 	criterion = nn.CTCLoss(blank = labels.chr2idx(dataset.Labels.epsilon), reduction = 'sum').to(args.device)
 	if args.train_data_path:
@@ -173,7 +175,9 @@ if __name__ == '__main__':
 	parser.add_argument('--args', default = 'args.json')
 	parser.add_argument('--model', default = 'Wav2LetterRu')
 	parser.add_argument('--seed', default = 1)
-	parser.add_argument('--id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}')
+	parser.add_argument('--id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_noise{noise_level}_{id_}')
+	parser.add_argument('--id_', default = '')
+	parser.add_argument('--dry', action = 'store_true')
 	parser.add_argument('--lang', default = 'ru')
 	parser.add_argument('--val-iteration-interval', type = int, default = None)
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
