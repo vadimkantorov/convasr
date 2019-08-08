@@ -13,30 +13,11 @@ import dataset
 import transforms
 import decoders
 import models
+import optimizers
 try:
     import apex
 except:
     pass
-
-class PolynomialDecayLR(torch.optim.lr_scheduler._LRScheduler):
-    def __init__(self, optimizer, decay_steps, power = 1.0, begin_decay_at = 0, end_learning_rate = 0.0, warmup_steps = 0, last_epoch = -1):
-        self.decay_steps = decay_steps
-        self.power = power
-        self.begin_decay_at = begin_decay_at
-        self.end_learning_rate = end_learning_rate
-        self.warmup_steps = warmup_steps
-        super(PolynomialDecayLR, self).__init__(optimizer, last_epoch)
-
-    def get_lr(self):
-        global_step = self.last_epoch
-
-        lr = [group['lr'] for group in self.optimizer.param_groups]
-        if self.warmup_steps > 0:
-            lr = list(map(lambda learning_rate: (learning_rate * global_step / self.warmup_steps) if global_step < self.warmup_steps else learning_rate, lr))
-        if global_step >= self.begin_decay_at:
-            global_step = min(global_step - self.begin_decay_at, self.decay_steps)
-            lr = list(map(lambda learning_rate: (learning_rate - self.end_learning_rate) * (1 - global_step / self.decay_steps) ** self.power + self.end_learning_rate, lr))
-        return lr
 
 def traintest(args):
     if args.verbose:
@@ -106,10 +87,10 @@ def traintest(args):
     train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
     train_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
     criterion = nn.CTCLoss(blank = labels.chr2idx(dataset.Labels.epsilon), reduction = 'sum').to(args.device)
-    optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else None
+    optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else None
     if args.fp16:
         model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16_opt_level, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_loader) * args.decay_epochs, end_learning_rate = args.decay_lr_end) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_loader) * args.decay_epochs, end_learning_rate = args.decay_lr_end) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr)
 
     tic = time.time()
     iteration = 0
@@ -152,7 +133,7 @@ def traintest(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--optimizer', choices = ['SGD', 'AdamW'], default = 'SGD')
+    parser.add_argument('--optimizer', choices = ['SGD', 'AdamW', 'NovoGrad'], default = 'SGD')
     parser.add_argument('--max-norm', type = float, default = 100)
     parser.add_argument('--lr', type = float, default = 5e-3)
     parser.add_argument('--weight-decay', type = float, default = 1e-5)
