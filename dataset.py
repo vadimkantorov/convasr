@@ -139,7 +139,7 @@ def load_example(audio_path, transcript, sample_rate, window_size, window_stride
 	signal, sample_rate_ = read_wav(audio_path, sample_rate = sample_rate)
 	if noise_path is not None and noise_level is not None:
 		noise, sample_rate_ = read_wav(noise_path, sample_rate = sample_rate)
-		signal = mix_noise(signal, noise, noise_level)
+		signal = mix_noise(signal, noise, noise_level)#; librosa.output.write_wav(f'data/noise_test/{hash(audio_path)}.wav', signal.numpy() / float(signal.abs().max()), sample_rate)
 		
 	features = logfbanknorm(signal, sample_rate, window_size, window_stride, window, num_input_features)
 	transcript = parse_transcript(transcript)

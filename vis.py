@@ -63,7 +63,7 @@ def entropy(logits):
 def cer(experiments_dir, id, val_dataset_name):
     experiment_dir = os.path.join(experiments_dir, id)
     for f in sorted(glob.glob(os.path.join(experiment_dir, f'transcripts_{val_dataset_name}*.json'))):
-        iteration = f[f.find('iter'):]
+        iteration = f[f.find('epoch'):].replace('.json', '')
         checkpoint = os.path.join(id, 'checkpoint_' + f[f.find('epoch'):].replace('.json', '.pt'))
         cer = float(torch.tensor([j['cer'] for j in json.load(open(f))]).mean())
         print(f'{iteration}    {cer:.04f}     {checkpoint}')

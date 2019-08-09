@@ -20,12 +20,10 @@ except:
 	pass
 
 def traintest(args):
-	print(args)
+	print('\n', 'Arguments:', args)
 	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), noise_level = 0 if not args.noise_data_path else args.noise_level if isinstance(args.noise_level, float) else '-'.join(map(str, args.noise_level)), name = args.name).replace('e-0', 'e-').rstrip('_')
+	print('\n', 'Experiment id:', args.id, '\n')
 	if args.dry:
-		print()
-		print('Experiment id:', args.id)
-		print()
 		return
 	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, id = args.id)
 	os.makedirs(args.experiment_dir, exist_ok = True)
@@ -41,6 +39,7 @@ def traintest(args):
 	criterion = nn.CTCLoss(blank = labels.chr2idx(dataset.Labels.epsilon), reduction = 'sum').to(args.device)
 	if args.train_data_path:
 		train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, transform = transforms.SpecAugment() if args.augment else None, noise_data_path = args.noise_data_path, noise_level = args.noise_level)
+		train_dataset_name = os.path.basename(args.train_data_path)
 		train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
 		train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
 		optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else None
@@ -88,7 +87,7 @@ def traintest(args):
 				with open(os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
 					json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
 				torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.experiment_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits.format(val_dataset_name = val_dataset_name))
-				tensorboard.add_scalars(args.id + '_' + val_dataset_name, dict(wer_avg = wer_avg, cer_avg = cer_avg, loss_avg = loss_avg), iteration) if training else None
+				tensorboard.add_scalars(args.id, {val_dataset_name + '_wer_avg' : wer_avg * 100.0, val_dataset_name + '_cer_avg' : cer_avg * 100.0, val_dataset_name + '_loss_avg' : loss_avg), iteration) if training else None
 		model.train()
 		models.save_checkpoint(os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, train_sampler, epoch, batch_idx) if training else None
 
@@ -124,7 +123,7 @@ def traintest(args):
 
 			time_ms_data, time_ms_model = (toc - tic) * 1000, (time.time() - toc) * 1000
 			time_ms_avg = moving_avg(time_ms_avg, time_ms_model, max = 10000)
-			print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:8.0f} <{time_ms_avg:4.0f}> ms (data {time_ms_data:.2f} ms)  | lr: {scheduler.get_lr()[0]:.0e}')
+			print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:6.0f} <{time_ms_avg:4.0f}> +{time_ms_data:.2f} ms  | lr: {scheduler.get_lr()[0]:.0e}')
 			tic = time.time()
 			scheduler.step()
 			iteration += 1
@@ -133,7 +132,7 @@ def traintest(args):
 				evaluate_model(epoch, batch_idx, iteration)
 
 			if iteration % args.log_iteration_interval == 0:
-				tensorboard.add_scalars(args.id + '_' + os.path.basename(args.train_data_path), dict(loss_avg = loss_avg), iteration)
+				tensorboard.add_scalars(args.id, {train_dataset_name + '_loss_avg' : loss_avg}, iteration)
 
 		evaluate_model(epoch, batch_idx, iteration)
 
