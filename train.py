@@ -42,10 +42,10 @@ def traintest(args):
 		train_dataset_name = os.path.basename(args.train_data_path)
 		train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
 		train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
-		optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else None
+		optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else None
 		if args.fp16:
 			model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-		scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_learning_rate = args.decay_lr_end) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr)
+		scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr)
 	else:
 		optimizer, train_sampler = None, None
 	if args.checkpoint:
@@ -87,7 +87,7 @@ def traintest(args):
 				with open(os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
 					json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
 				torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.experiment_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits.format(val_dataset_name = val_dataset_name))
-				tensorboard.add_scalars(args.id, {val_dataset_name + '_wer_avg' : wer_avg * 100.0, val_dataset_name + '_cer_avg' : cer_avg * 100.0, val_dataset_name + '_loss_avg' : loss_avg), iteration) if training else None
+				tensorboard.add_scalars(args.id, {val_dataset_name + '_wer_avg' : wer_avg * 100.0, val_dataset_name + '_cer_avg' : cer_avg * 100.0, val_dataset_name + '_loss_avg' : loss_avg}, iteration) if training else None
 		model.train()
 		models.save_checkpoint(os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, train_sampler, epoch, batch_idx) if training else None
 
@@ -99,7 +99,7 @@ def traintest(args):
 
 	tic = time.time()
 	iteration = 0
-	loss_avg, time_ms_avg = 0.0, 0.0
+	loss_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1./K) * avg
 	for epoch in range(args.epochs if args.train_data_path else 0):
 		model.train()
@@ -123,7 +123,8 @@ def traintest(args):
 
 			time_ms_data, time_ms_model = (toc - tic) * 1000, (time.time() - toc) * 1000
 			time_ms_avg = moving_avg(time_ms_avg, time_ms_model, max = 10000)
-			print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:6.0f} <{time_ms_avg:4.0f}> +{time_ms_data:.2f} ms  | lr: {scheduler.get_lr()[0]:.0e}')
+			lr_avg = moving_avg(lr_avg, scheduler.get_lr()[0], max = 1)
+			print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:6.0f} <{time_ms_avg:4.0f}> +{time_ms_data:.2f} ms  | lr: <{lr_avg:.0e}>')
 			tic = time.time()
 			scheduler.step()
 			iteration += 1
@@ -132,13 +133,13 @@ def traintest(args):
 				evaluate_model(epoch, batch_idx, iteration)
 
 			if iteration % args.log_iteration_interval == 0:
-				tensorboard.add_scalars(args.id, {train_dataset_name + '_loss_avg' : loss_avg}, iteration)
+				tensorboard.add_scalars(args.id, {train_dataset_name + '_loss_avg' : loss_avg, train_dataset_name + '_lr_avg_x10K' : lr_avg * 1e4}, iteration)
 
 		evaluate_model(epoch, batch_idx, iteration)
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--optimizer', choices = ['SGD', 'AdamW'], default = 'SGD')
+	parser.add_argument('--optimizer', choices = ['SGD', 'AdamW', 'NovoGrad'], default = 'SGD')
 	parser.add_argument('--max-norm', type = float, default = 100)
 	parser.add_argument('--lr', type = float, default = 5e-3)
 	parser.add_argument('--weight-decay', type = float, default = 1e-5)
@@ -149,7 +150,7 @@ if __name__ == '__main__':
 	parser.add_argument('--decay-gamma', type = float, default = 0.1)
 	parser.add_argument('--decay-milestones', nargs = '*', type = int, default = [25000])
 	parser.add_argument('--decay-power', type = float, default = 2.0)
-	parser.add_argument('--decay-lr-end', type = float, default = 1e-5)
+	parser.add_argument('--decay-lr', type = float, default = 1e-5)
 	parser.add_argument('--decay-epochs', type = int, default = 5)
 	parser.add_argument('--decay-step-size', type = int, default = 10000)
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
@@ -159,7 +160,7 @@ if __name__ == '__main__':
 	parser.add_argument('--train-data-path')
 	parser.add_argument('--val-data-path', nargs = '+')
 	parser.add_argument('--noise-data-path')
-	parser.add_argument('--noise-level', type = float, nargs = '*', default = [0.2, 0.6])
+	parser.add_argument('--noise-level', type = float, nargs = '+', default = [0.2, 0.6])
 	parser.add_argument('--sample-rate', type = int, default = 16000)
 	parser.add_argument('--window-size', type = float, default = 0.02)
 	parser.add_argument('--window-stride', type = float, default = 0.01)

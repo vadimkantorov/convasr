@@ -19,7 +19,7 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 		self.labels = labels
 		self.transform = transform
 		self.ids = [(row[0], row[1], float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or float(row[2]) < max_duration] if isinstance(data_or_path, str) else [d for d in data_or_path if d[-1] == -1 or d[-1] < max_duration]
-		self.noise_level = [noise_level] if isinstance(noise_level, float) else noise_level
+		self.noise_level = noise_level
 		self.noise_paths = list(map(str.strip, open(noise_data_path))) if noise_data_path is not None else []
 
 	def __getitem__(self, index):
