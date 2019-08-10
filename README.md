@@ -36,3 +36,8 @@ python scripts/spotty.py download_checkpoint CHECKPOINT_PATH
 # check spot instance prices
 spotty aws spot-prices -i p3.8xlarge -r us-east-1
 ```
+
+# Augment a dataset
+```shell
+bash scripts/augment.sh data/clean_val.csv data/clean_val_aug ffmpeg -i input.wav output.wav
+```
