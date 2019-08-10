@@ -4,33 +4,27 @@ import dataset
 import librosa
 import pyrubberband
 
-def fixed_or_uniform(r):
-	return random.uniform(*r) if isinstance(r, list) else r
-
 class SpeedPerturbation(object):
-	def __init__(self, noise_level):
-		self.noise_level = noise_level
+	def __init__(self, rate):
+		self.rate = rate
 
 	def __call__(self, signal, sample_rate):
-		noise_level = self.noise_level[0] if len(self.noise_level) == 1 else random.uniform(*self.noise_level)
-		return torch.from_numpy(librosa.effects.time_stretch(signal.numpy(), noise_level)), sample_rate
+		return torch.from_numpy(librosa.effects.time_stretch(signal.numpy(), fixed_or_uniform(self.rate))), sample_rate
 
 class PitchShift(object):
-	def __init__(self, noise_level):
-		self.noise_level = noise_level
+	def __init__(self, n_steps):
+		self.n_steps = n_steps
 
 	def __call__(self, signal, sample_rate):
-		noise_level = self.noise_level[0] if len(self.noise_level) == 1 else random.uniform(*self.noise_level)
-		return torch.from_numpy(pyrubberband.pyrb.pitch_shift(signal.numpy(), sample_rate, n_steps = noise_level)), sample_rate
+		return torch.from_numpy(pyrubberband.pyrb.pitch_shift(signal.numpy(), sample_rate, fixed_or_uniform(self.rate))), sample_rate
 		#return torch.from_numpy(librosa.effects.pitch_shift(signal.numpy(), sample_rate, n_steps = noise_level)), sample_rate
 
 class GainPerturbation(object):
-	def __init__(self, noise_level):
-		self.noise_level = noise_level
+	def __init__(self, gain_power):
+		self.gain_power = gain_power
 
 	def __call__(self, signal, sample_rate):
-		noise_level = self.noise_level[0] if len(self.noise_level) == 1 else random.uniform(*self.noise_level)
-		return signal * (10. ** (noise_level / 20.)), sample_rate
+		return signal * (10. ** (fixed_or_uniform(self.gain_power) / 20.)), sample_rate
 
 class AddWhiteNoise(object):
 	def __init__(self, noise_level):
@@ -38,7 +32,7 @@ class AddWhiteNoise(object):
 
 	def __call__(self, signal, sample_rate):
 		noise = torch.randn_like(signal).clamp(-1, 1)
-		noise_level = self.noise_level[0] if len(self.noise_level) == 1 else random.uniform(*self.noise_level)
+		noise_level = fixed_or_uniform(self.noise_level)
 		return signal + noise * noise_level, sample_rate
 
 class MixExternalNoise(object):
@@ -80,3 +74,6 @@ class SpecAugment(object):
 			spect[:, t0:t0 + t] = replace_val
 
 		return spect
+
+def fixed_or_uniform(r):
+	return random.uniform(*r) if isinstance(r, list) else r
