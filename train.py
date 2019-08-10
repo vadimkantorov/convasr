@@ -2,6 +2,7 @@ import os
 import gc
 import json
 import time
+import random
 import argparse
 import importlib
 import torch
@@ -19,26 +20,28 @@ try:
 except:
 	pass
 
+def set_random_seed(seed):
+	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
+		set_random_seed(seed)
+
 def traintest(args):
 	print('\n', 'Arguments:', args)
-	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), noise_level = 0 if not args.noise_data_path else args.noise_level if isinstance(args.noise_level, float) else '-'.join(map(str, args.noise_level)), name = args.name).replace('e-0', 'e-').rstrip('_')
+	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), name = args.name).replace('e-0', 'e-').rstrip('_')
 	print('\n', 'Experiment id:', args.id, '\n')
 	if args.dry:
 		return
 	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, id = args.id)
-	os.makedirs(args.experiment_dir, exist_ok = True)
-
-	for set_random_seed in [torch.manual_seed] + ([torch.cuda.manual_seed_all] if args.device == 'cuda' else []):
-		set_random_seed(args.seed)
-	tensorboard = torch.utils.tensorboard.SummaryWriter(os.path.join(args.experiment_dir, 'tensorboard'))
+	set_random_seed(args.seed)
 
 	lang = importlib.import_module(args.lang)
 	labels = dataset.Labels(lang.LABELS, preprocess_text = lang.preprocess_text, preprocess_word = lang.preprocess_word)
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, noise_data_path = args.noise_data_path if not args.train_data_path else None, noise_level = args.noise_level), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size) for val_data_path in args.val_data_path}
+	val_waveform_transforms = eval(f'[{args.val_waveform_transforms}]', vars(transforms))
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transforms = val_waveform_transforms), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed) for val_data_path in args.val_data_path}
 	model = getattr(models, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features)
 	criterion = nn.CTCLoss(blank = labels.chr2idx(dataset.Labels.epsilon), reduction = 'sum').to(args.device)
 	if args.train_data_path:
-		train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, transform = transforms.SpecAugment() if args.augment else None, noise_data_path = args.noise_data_path, noise_level = args.noise_level)
+		train_waveform_transforms = eval(f'[{args.train_waveform_transforms}]', vars(transforms))
+		train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transforms = train_waveform_transforms)
 		train_dataset_name = os.path.basename(args.train_data_path)
 		train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
 		train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
@@ -87,13 +90,16 @@ def traintest(args):
 				with open(os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
 					json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
 				torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.experiment_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits.format(val_dataset_name = val_dataset_name))
-				tensorboard.add_scalars(args.id, {val_dataset_name + '_wer_avg' : wer_avg * 100.0, val_dataset_name + '_cer_avg' : cer_avg * 100.0, val_dataset_name + '_loss_avg' : loss_avg}, iteration) if training else None
 		model.train()
-		models.save_checkpoint(os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, train_sampler, epoch, batch_idx) if training else None
+		if training:
+			tensorboard.add_scalars(args.id, {val_dataset_name + '_wer_avg' : wer_avg * 100.0, val_dataset_name + '_cer_avg' : cer_avg * 100.0, val_dataset_name + '_loss_avg' : loss_avg}, iteration) 
+			models.save_checkpoint(os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, train_sampler, epoch, batch_idx)
 
 	if not args.train_data_path:
 		return evaluate_model()
 
+	os.makedirs(args.experiment_dir, exist_ok = True)
+	tensorboard = torch.utils.tensorboard.SummaryWriter(os.path.join(args.experiment_dir, 'tensorboard'))
 	with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
 		json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
 
@@ -159,8 +165,6 @@ if __name__ == '__main__':
 	parser.add_argument('--num-input-features', default = 64)
 	parser.add_argument('--train-data-path')
 	parser.add_argument('--val-data-path', nargs = '+')
-	parser.add_argument('--noise-data-path')
-	parser.add_argument('--noise-level', type = float, nargs = '+', default = [0.2, 0.6])
 	parser.add_argument('--sample-rate', type = int, default = 16000)
 	parser.add_argument('--window-size', type = float, default = 0.02)
 	parser.add_argument('--window-stride', type = float, default = 0.01)
@@ -176,11 +180,13 @@ if __name__ == '__main__':
 	parser.add_argument('--logits', default = 'data/logits_{val_dataset_name}.pt')
 	parser.add_argument('--args', default = 'args.json')
 	parser.add_argument('--model', default = 'Wav2LetterRu')
-	parser.add_argument('--seed', default = 1)
-	parser.add_argument('--id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_noise{noise_level}_{name}')
+	parser.add_argument('--seed', type = int, default = 1)
+	parser.add_argument('--id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{name}')
 	parser.add_argument('--name', default = '')
 	parser.add_argument('--dry', action = 'store_true')
 	parser.add_argument('--lang', default = 'ru')
+	parser.add_argument('--val-waveform-transforms', default = '')
+	parser.add_argument('--train-waveform-transforms', default = '')
 	parser.add_argument('--val-iteration-interval', type = int, default = None)
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
 	parser.add_argument('--augment', action = 'store_true')
