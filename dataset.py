@@ -123,7 +123,7 @@ def collate_fn(batch):
 def load_example(audio_path, transcript, sample_rate, window_size, window_stride, window, num_input_features, parse_transcript = lambda transcript: transcript, waveform_transforms = [], feature_transforms = []):
 	signal, sample_rate = read_wav(audio_path, sample_rate = sample_rate)
 	for transform in waveform_transforms:
-		signal, sample_rate = transform(signal, sample_rate); scipy.io.wavfile.write(f'data/noise_wav/{os.path.basename(audio_path)}', sample_rate, signal.numpy())
+		signal, sample_rate = transform(signal, sample_rate)#; scipy.io.wavfile.write(f'data/noise_wav/{os.path.basename(audio_path)}', sample_rate, signal.numpy())
 		
 	features = logfbanknorm(signal, sample_rate, window_size, window_stride, window, num_input_features)
 	for transform in feature_transforms:

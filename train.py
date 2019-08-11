@@ -26,7 +26,10 @@ def set_random_seed(seed):
 
 def traintest(args):
 	print('\n', 'Arguments:', args)
-	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), name = args.name).replace('e-0', 'e-').rstrip('_')
+	train_waveform_transforms = eval(f'[{args.train_waveform_transforms}]', vars(transforms))
+	val_waveform_transforms = eval(f'[{args.val_waveform_transforms}]', vars(transforms))
+	fmt_transforms = lambda ts: ','.join(f'{t.__class__.__name__}({",".join(f"{n}={v}" for n, v in t.__dict__.items())})' for t in ts)
+	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), train_waveform_transforms = fmt_transforms(train_waveform_transforms), val_waveform_transforms = fmt_transforms(val_waveform_transforms), name = args.name).replace('e-0', 'e-').rstrip('_')
 	print('\n', 'Experiment id:', args.id, '\n')
 	if args.dry:
 		return
@@ -34,7 +37,6 @@ def traintest(args):
 	set_random_seed(args.seed)
 
 	labels = dataset.Labels(importlib.import_module(args.lang))
-	val_waveform_transforms = eval(f'[{args.val_waveform_transforms}]', vars(transforms))
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transforms = val_waveform_transforms), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed) for val_data_path in args.val_data_path}
 	model = getattr(models, args.model)(num_classes = len(labels), num_input_features = args.num_input_features)
 	criterion = nn.CTCLoss(blank = labels.blank_idx, reduction = 'sum').to(args.device)
@@ -47,7 +49,7 @@ def traintest(args):
 		with torch.no_grad():
 			for val_dataset_name, val_data_loader in val_data_loaders.items():
 				logits_, ref_tra_, loss_ = [], [], []
-				for i, (inputs, targets, filenames, input_percentages, target_lengths) in enumerate(val_data_loader):
+				for batch_idx, (inputs, targets, filenames, input_percentages, target_lengths) in enumerate(val_data_loader):
 					input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
 					logits = model(inputs.to(args.device), input_lengths)
 					output_lengths = models.compute_output_lengths(model, input_lengths)
@@ -57,6 +59,7 @@ def traintest(args):
 					target_strings = labels.idx2str(dataset.unpack_targets(targets.tolist(), target_lengths.tolist()))
 					for k, (transcript, reference) in enumerate(zip(decoded_strings, target_strings)):
 						if args.verbose:
+							print(batch_idx * len(inputs) + k, '/', len(val_data_loader) * len(inputs))
 							print(val_dataset_name, 'REF: ', reference)
 							print(val_dataset_name, 'HYP: ', transcript)
 							print()
@@ -82,7 +85,6 @@ def traintest(args):
 		models.load_checkpoint(args.checkpoint, model)
 		return evaluate_model()
 
-	train_waveform_transforms = eval(f'[{args.train_waveform_transforms}]', vars(transforms))
 	train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transforms = train_waveform_transforms)
 	train_dataset_name = os.path.basename(args.train_data_path)
 	train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
@@ -90,7 +92,7 @@ def traintest(args):
 	optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else None
 	if args.fp16:
 		model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr)
+	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: 1)
 	if args.checkpoint:
 		models.load_checkpoint(args.checkpoint, model, optimizer, train_sampler)
 	os.makedirs(args.experiment_dir, exist_ok = True)
@@ -99,10 +101,9 @@ def traintest(args):
 		json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
 
 	tic = time.time()
-	iteration = 0
-	loss_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0
+	iteration, loss_avg, time_ms_avg, lr_avg = 0, 0.0, 0.0, 0.0
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1./K) * avg
-	for epoch in range(args.epochs if args.train_data_path else 0):
+	for epoch in range(args.epochs):
 		model.train()
 		for batch_idx, (inputs, targets, filenames, input_percentages, target_lengths) in enumerate(train_data_loader):
 			toc = time.time()
@@ -117,7 +118,6 @@ def traintest(args):
 						scaled_loss.backward()
 				else:
 					loss.backward()
-
 				torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
 				optimizer.step()
 				loss_avg = moving_avg(loss_avg, float(loss), max = 1000)
@@ -127,7 +127,7 @@ def traintest(args):
 			lr = scheduler.get_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
 			print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:6.0f} <{time_ms_avg:4.0f}> +{time_ms_data:.2f} ms  | lr: {lr}')#<{lr:.0e}>')
 			tic = time.time()
-			scheduler.step()
+			#scheduler.step()
 			iteration += 1
 
 			if args.val_iteration_interval is not None and iteration > 0 and iteration % args.val_iteration_interval == 0:
@@ -156,7 +156,7 @@ if __name__ == '__main__':
 	parser.add_argument('--decay-step-size', type = int, default = 10000)
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
 	parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
-	parser.add_argument('--epochs', type = int, default = 20)
+	parser.add_argument('--epochs', type = int, default = 10)
 	parser.add_argument('--num-input-features', default = 64)
 	parser.add_argument('--train-data-path')
 	parser.add_argument('--val-data-path', nargs = '+')
@@ -164,7 +164,7 @@ if __name__ == '__main__':
 	parser.add_argument('--window-size', type = float, default = 0.02)
 	parser.add_argument('--window-stride', type = float, default = 0.01)
 	parser.add_argument('--window', default = 'hann', choices = ['hann', 'hamming'])
-	parser.add_argument('--num-workers', type = int, default = 10)
+	parser.add_argument('--num-workers', type = int, default = 20)
 	parser.add_argument('--train-batch-size', type = int, default = 64)
 	parser.add_argument('--val-batch-size', type = int, default = 64)
 	parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
@@ -176,7 +176,7 @@ if __name__ == '__main__':
 	parser.add_argument('--args', default = 'args.json')
 	parser.add_argument('--model', default = 'Wav2LetterRu')
 	parser.add_argument('--seed', type = int, default = 1)
-	parser.add_argument('--id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{name}')
+	parser.add_argument('--id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_trainWT_{train_waveform_transforms}_valWT_{val_waveform_transforms}_{name}')
 	parser.add_argument('--name', default = '')
 	parser.add_argument('--dry', action = 'store_true')
 	parser.add_argument('--lang', default = 'ru')
