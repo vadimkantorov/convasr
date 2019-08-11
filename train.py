@@ -56,15 +56,13 @@ def traintest(args):
 					decoded_strings = labels.idx2str(decoder.decode(F.softmax(logits, dim = 1), output_lengths.tolist()))
 					target_strings = labels.idx2str(dataset.unpack_targets(targets.tolist(), target_lengths.tolist()))
 					for k, (transcript, reference) in enumerate(zip(decoded_strings, target_strings)):
-						transcript, reference = transcript.strip(), reference.strip()
-						wer_ref = len(reference.split()) or 1
-						cer_ref = len(reference.replace(' ','')) or 1
-						wer, cer = (decoders.compute_wer(transcript, reference), decoders.compute_cer(transcript, reference)) if reference != transcript else (0, 0)
 						if args.verbose:
 							print(val_dataset_name, 'REF: ', reference)
 							print(val_dataset_name, 'HYP: ', transcript)
 							print()
-						wer, cer = wer / wer_ref,  cer / cer_ref
+						transcript, reference = transcript.strip(), reference.strip()
+						wer_ref_len, cer_ref_len = len(reference.split()) or 1, len(reference.replace(' ','')) or 1
+						wer, cer = (decoders.compute_wer(transcript, reference) / wer_ref_len, decoders.compute_cer(transcript, reference) / cer_ref_len) if reference != transcript else (0, 0)
 						ref_tra_.append(dict(reference = reference, transcript = transcript, filename = filenames[k], cer = cer, wer = wer))
 						logits_.extend(logits)
 				cer_avg = float(torch.tensor([x['cer'] for x in ref_tra_]).mean())

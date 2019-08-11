@@ -5,7 +5,7 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --lr 1e-2 --weight-decay 1e-3 --optimizer SGD \
   --train-data-path data/mixed_train.csv \
   --val-data-path data/mixed_val.csv ../sample_ok/sample_ok.convasr.csv \
-  --val-iteration-interval 10 \
+  --val-iteration-interval 2500 \
   --scheduler PolynomialDecayLR --decay-epochs 5 --decay-lr 1e-5 \
   --epochs 1 
 

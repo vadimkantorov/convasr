@@ -23,7 +23,8 @@ def compute_cer(s1, s2):
 
 def compute_wer(s1, s2):
 	# build mapping of words to integers, Levenshtein package only accepts strings
-	word2char = dict(zip(set(s1.split() + s2.split()), range(len(b))))
+	b = set(s1.split() + s2.split())
+	word2char = dict(zip(b, range(len(b))))
 	return Levenshtein.distance(''.join([chr(word2char[w]) for w in s1.split()]), ''.join([chr(word2char[w]) for w in s2.split()]))
 
 class GreedyDecoder(object):

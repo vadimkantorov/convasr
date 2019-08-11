@@ -80,9 +80,9 @@ class Labels(object):
 		chars = ' '.join(self.find_words(text)).upper().strip() or '*'
 		return [self.chr2idx(c) if i == 0 or c != chars[i - 1] else self.chr2idx('2') for i, c in enumerate(chars)]
 
-	def idx2str(self, idx, size = None):
+	def idx2str(self, idx):
 		i2s = lambda i: ''.join(map(self.idx2chr, i))
-		return [i2s(i[slice(s)]) for i, s in zip(idx, size if size is not None else [None] * len(idx))] if isinstance(idx[0], list) else i2s(idx[:int(size)])
+		return list(map(i2s, idx)) if isinstance(idx[0], list) else i2s(idx)
 
 	def chr2idx(self, chr):
 		return self.chr2idx_[chr]
