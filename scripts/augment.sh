@@ -1,14 +1,15 @@
 INPUTFILE=$1
 OUTPUTDIR=$2
 shift 2
+CMD=$@
 
 mkdir -p "$OUTPUTDIR"
 while read line; do
-    WAVPATH=$(echo $line | cut -d ',' -f1)
+    INPUTWAV=$(echo $line | cut -d ',' -f1)
     REST=$(echo $line | cut -d ',' -f2-3)
-    NEWPATH=$OUTPUTDIR/$(basename "$WAVPATH")
-    cp "$WAVPATH" input.wav
-    $@
-    mv output.wav "$OUTPUTDIR" && rm input.wav
-    echo "$NEWPATH,$REST"
+    OUTPUTWAV=$OUTPUTDIR/$(basename "$INPUTWAV")
+    CMDFIXED=${CMD/input.wav/\"$INPUTWAV\"}
+    CMDFIXED=${CMDFIXED/output.wav/\"$OUTPUTWAV\"}
+    $CMDFIXED 1>&2
+    echo "$OUTPUTWAV,$REST"
 done < "$INPUTFILE" > "$OUTPUTDIR.csv"
