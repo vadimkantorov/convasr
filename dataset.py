@@ -57,46 +57,41 @@ class BucketingSampler(torch.utils.data.Sampler):
 		self.batch_idx = state_dict['batch_idx']
 
 class Labels(object):
-	epsilon = '|'
+	blank = '|'
+	space = ' '
 
-	def __init__(self, char_labels, preprocess_text = lambda text: text, preprocess_word = lambda word: word):
-		self.char_labels = char_labels
-		self.labels_map = {l: i for i, l in enumerate(char_labels)}
-		self.preprocess_text = preprocess_text
-		self.preprocess_word = preprocess_word
+	def __init__(self, lang):
+		self.idx2chr_ = lang.LABELS
+		self.preprocess_text = lang.preprocess_text
+		self.preprocess_word = lang.preprocess_word
+		self.chr2idx_ = {l: i for i, l in enumerate(self.idx2chr_)}
+		self.blank_idx = self.idx2chr_.find(self.blank)
+		self.space_idx = self.idx2chr_.find(self.space)
 
 	def find_words(self, text):
 		text = re.sub(r'([^\W\d]+)2', r'\1', text)
 		text = self.preprocess_text(text)
 		words = re.findall(r'-?\d+|-?\d+-\w+|\w+', text)
-		return list(filter(bool, (''.join([c for c in self.preprocess_word(w) if c.upper() in self.labels_map]).strip() for w in words)))
+		return list(filter(bool, (''.join([c for c in self.preprocess_word(w) if c.upper() in self.chr2idx_]).strip() for w in words)))
 
 	def parse(self, text):
 		if text.startswith('!clean:'):
-			return [self.labels_map[x] for x in text.replace('!clean:', '', 1).strip()]
+			return ''.join(map(self.chr2idx, text.replace('!clean:', '', 1).strip()))
 		chars = ' '.join(self.find_words(text)).upper().strip() or '*'
-		return [self.labels_map[c] if i == 0 or c != chars[i - 1] else self.labels_map['2'] for i, c in enumerate(chars)]
+		return [self.chr2idx(c) if i == 0 or c != chars[i - 1] else self.chr2idx('2') for i, c in enumerate(chars)]
 
-	def render_transcript(self, codes):
-		return ''.join([self.char_labels[i] for i in codes])
+	def idx2str(self, idx, size = None):
+		i2s = lambda i: ''.join(map(self.idx2chr, i))
+		return [i2s(i[slice(s)]) for i, s in zip(idx, size if size is not None else [None] * len(idx))] if isinstance(idx[0], list) else i2s(idx[:int(size)])
 
 	def chr2idx(self, chr):
-		return self.char_labels.index(chr)
+		return self.chr2idx_[chr]
 
 	def idx2chr(self, idx):
-		return self.char_labels[idx]
+		return self.idx2chr_[idx]
 
-def get_cer_wer(decoder, transcript, reference):
-	reference = reference.strip()
-	transcript = transcript.strip()
-	wer_ref = float(len(reference.split()) or 1)
-	cer_ref = float(len(reference.replace(' ','')) or 1)
-	if reference == transcript:
-		return 0, 0, wer_ref, cer_ref
-	else:
-		wer = decoder.wer(transcript, reference)
-		cer = decoder.cer(transcript, reference)
-	return wer, cer, wer_ref, cer_ref
+	def __len__(self):
+		return len(self.idx2chr_)
 
 def unpack_targets(targets, target_sizes):
 	unpacked = []

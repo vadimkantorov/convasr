@@ -10,14 +10,14 @@ class PolynomialDecayLR(torch.optim.lr_scheduler._LRScheduler):
         super(PolynomialDecayLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
-        global_step = self.last_epoch
+        global_step = self.last_epoch; print(global_step, 'out of', self.decay_steps)
 
         lr = [group['lr'] for group in self.optimizer.param_groups]
         if self.warmup_steps > 0:
             lr = list(map(lambda lr: (lr * global_step / self.warmup_steps) if global_step < self.warmup_steps else lr, lr))
         if global_step >= self.begin_decay_at:
             global_step = min(global_step - self.begin_decay_at, self.decay_steps)
-            lr = list(map(lambda lr: (lr - self.end_lr) * (1 - global_step / self.decay_steps) ** self.power + self.end_lr, lr))
+            lr = list(map(lambda lr: self.end_lr + (lr - self.end_lr) * (1 - global_step / self.decay_steps) ** self.power, lr))
         return lr
 
 class NovoGrad(torch.optim.Optimizer):

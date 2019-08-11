@@ -5,9 +5,12 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --lr 1e-2 --weight-decay 1e-3 --optimizer SGD \
   --train-data-path data/mixed_train.csv \
   --val-data-path data/mixed_val.csv ../sample_ok/sample_ok.convasr.csv \
-  --val-iteration-interval 2500 \
-  --scheduler PolynomialDecayLR --decay-epochs 40 --decay-lr 1e-5 \
+  --val-iteration-interval 10 \
+  --scheduler PolynomialDecayLR --decay-epochs 5 --decay-lr 1e-5 \
   --epochs 1 
+
+#  --train-waveform-transforms 'MixExternalNoise("data/sample_ok.noise.csv", 1.0)' \
+#  --val-waveform-transforms 'MixExternalNoise("data/sample_ok.noise.csv", 1.0)' \
 
 #  --noise-data-path data/ru_open_stt_noise_small.csv --noise-level 0.7 \
 #  --scheduler MultiStepLR --decay-milestones 10000 30000 40000 80000 --decay-gamma 0.1 \

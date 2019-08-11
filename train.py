@@ -33,57 +33,42 @@ def traintest(args):
 	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, id = args.id)
 	set_random_seed(args.seed)
 
-	lang = importlib.import_module(args.lang)
-	labels = dataset.Labels(lang.LABELS, preprocess_text = lang.preprocess_text, preprocess_word = lang.preprocess_word)
+	labels = dataset.Labels(importlib.import_module(args.lang))
 	val_waveform_transforms = eval(f'[{args.val_waveform_transforms}]', vars(transforms))
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transforms = val_waveform_transforms), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed) for val_data_path in args.val_data_path}
-	model = getattr(models, args.model)(num_classes = len(labels.char_labels), num_input_features = args.num_input_features)
-	criterion = nn.CTCLoss(blank = labels.chr2idx(dataset.Labels.epsilon), reduction = 'sum').to(args.device)
-	if args.train_data_path:
-		train_waveform_transforms = eval(f'[{args.train_waveform_transforms}]', vars(transforms))
-		train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transforms = train_waveform_transforms)
-		train_dataset_name = os.path.basename(args.train_data_path)
-		train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
-		train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
-		optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else None
-		if args.fp16:
-			model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-		scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr)
-	else:
-		optimizer, train_sampler = None, None
-	if args.checkpoint:
-		models.load_checkpoint(args.checkpoint, model, optimizer, train_sampler)
+	model = getattr(models, args.model)(num_classes = len(labels), num_input_features = args.num_input_features)
+	criterion = nn.CTCLoss(blank = labels.blank_idx, reduction = 'sum').to(args.device)
 	model = torch.nn.DataParallel(model).to(args.device)
-	decoder = decoders.GreedyDecoder(labels.char_labels)
+	decoder = decoders.GreedyDecoder(labels)
 
 	def evaluate_model(epoch = None, batch_idx = None, iteration = None):
 		training = epoch is not None and batch_idx is not None and iteration is not None
 		model.eval()
 		with torch.no_grad():
 			for val_dataset_name, val_data_loader in val_data_loaders.items():
-				logits_, ref_tra_, cer_, wer_, loss_ = [], [], [], [], []
-				for i, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(val_data_loader):
+				logits_, ref_tra_, loss_ = [], [], []
+				for i, (inputs, targets, filenames, input_percentages, target_lengths) in enumerate(val_data_loader):
 					input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
 					logits = model(inputs.to(args.device), input_lengths)
 					output_lengths = models.compute_output_lengths(model, input_lengths)
-					loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_sizes.to(args.device)) / len(inputs)
+					loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_lengths.to(args.device)) / len(inputs)
 					loss_.append(float(loss))
-					decoded_output, _ = decoder.decode(F.softmax(logits, dim = 1).permute(0, 2, 1), output_lengths)
-					target_strings = decoder.convert_to_strings(dataset.unpack_targets(targets, target_sizes))
-					for k in range(len(target_strings)):
-						transcript, reference = decoded_output[k][0], target_strings[k][0]
-						wer, cer, wer_ref, cer_ref = dataset.get_cer_wer(decoder, transcript, reference)
+					decoded_strings = labels.idx2str(decoder.decode(F.softmax(logits, dim = 1), output_lengths.tolist()))
+					target_strings = labels.idx2str(dataset.unpack_targets(targets.tolist(), target_lengths.tolist()))
+					for k, (transcript, reference) in enumerate(zip(decoded_strings, target_strings)):
+						transcript, reference = transcript.strip(), reference.strip()
+						wer_ref = len(reference.split()) or 1
+						cer_ref = len(reference.replace(' ','')) or 1
+						wer, cer = (decoders.compute_wer(transcript, reference), decoders.compute_cer(transcript, reference)) if reference != transcript else (0, 0)
 						if args.verbose:
 							print(val_dataset_name, 'REF: ', reference)
 							print(val_dataset_name, 'HYP: ', transcript)
 							print()
 						wer, cer = wer / wer_ref,  cer / cer_ref
-						cer_.append(cer)
-						wer_.append(wer)
 						ref_tra_.append(dict(reference = reference, transcript = transcript, filename = filenames[k], cer = cer, wer = wer))
 						logits_.extend(logits)
-				cer_avg = float(torch.tensor(cer_).mean())
-				wer_avg = float(torch.tensor(wer_).mean())
+				cer_avg = float(torch.tensor([x['cer'] for x in ref_tra_]).mean())
+				wer_avg = float(torch.tensor([x['wer'] for x in ref_tra_]).mean())
 				loss_avg = float(torch.tensor(loss_).mean())
 				print(f'{args.id} {val_dataset_name} | epoch {epoch} iter {iteration} | Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
 				print()
@@ -96,8 +81,20 @@ def traintest(args):
 			models.save_checkpoint(os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, train_sampler, epoch, batch_idx)
 
 	if not args.train_data_path:
+		models.load_checkpoint(args.checkpoint, model)
 		return evaluate_model()
 
+	train_waveform_transforms = eval(f'[{args.train_waveform_transforms}]', vars(transforms))
+	train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transforms = train_waveform_transforms)
+	train_dataset_name = os.path.basename(args.train_data_path)
+	train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
+	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
+	optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else None
+	if args.fp16:
+		model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: args.lr)
+	if args.checkpoint:
+		models.load_checkpoint(args.checkpoint, model, optimizer, train_sampler)
 	os.makedirs(args.experiment_dir, exist_ok = True)
 	tensorboard = torch.utils.tensorboard.SummaryWriter(os.path.join(args.experiment_dir, 'tensorboard'))
 	with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
@@ -109,12 +106,12 @@ def traintest(args):
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1./K) * avg
 	for epoch in range(args.epochs if args.train_data_path else 0):
 		model.train()
-		for batch_idx, (inputs, targets, filenames, input_percentages, target_sizes) in enumerate(train_data_loader):
+		for batch_idx, (inputs, targets, filenames, input_percentages, target_lengths) in enumerate(train_data_loader):
 			toc = time.time()
 			input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
 			logits = model(inputs.to(args.device), input_lengths)
 			output_lengths = models.compute_output_lengths(model, input_lengths)
-			loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_sizes.to(args.device)) / len(inputs)
+			loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_lengths.to(args.device)) / len(inputs)
 			if not (torch.isinf(loss) or torch.isnan(loss)):
 				optimizer.zero_grad()
 				if args.fp16:
@@ -129,8 +126,8 @@ def traintest(args):
 
 			time_ms_data, time_ms_model = (toc - tic) * 1000, (time.time() - toc) * 1000
 			time_ms_avg = moving_avg(time_ms_avg, time_ms_model, max = 10000)
-			lr_avg = moving_avg(lr_avg, scheduler.get_lr()[0], max = 1)
-			print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:6.0f} <{time_ms_avg:4.0f}> +{time_ms_data:.2f} ms  | lr: <{lr_avg:.0e}>')
+			lr = scheduler.get_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
+			print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:6.0f} <{time_ms_avg:4.0f}> +{time_ms_data:.2f} ms  | lr: {lr}')#<{lr:.0e}>')
 			tic = time.time()
 			scheduler.step()
 			iteration += 1
