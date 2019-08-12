@@ -123,7 +123,8 @@ def collate_fn(batch):
 def load_example(audio_path, transcript, sample_rate, window_size, window_stride, window, num_input_features, parse_transcript = lambda transcript: transcript, waveform_transform = None, feature_transform = None):
 	signal, sample_rate = read_wav(audio_path, sample_rate = sample_rate)
 	if waveform_transform is not None:
-		signal, sample_rate = waveform_transform(signal, sample_rate)#; scipy.io.wavfile.write(f'data/noise_wav/{os.path.basename(audio_path)}', sample_rate, signal.numpy())
+		signal, sample_rate = waveform_transform(signal, sample_rate); 
+		#dirname = os.path.join('data', waveform_transform.__class__.__name__); os.makedirs(dirname, exist_ok = True); scipy.io.wavfile.write(os.path.join(dirname, f'{random.randint(0, int(1e9))}.wav'), sample_rate, signal.numpy())
 		
 	features = logfbanknorm(signal, sample_rate, window_size, window_stride, window, num_input_features)
 	if feature_transform is not None:
@@ -166,5 +167,6 @@ def read_wav(path, channel=-1, normalize = True, sample_rate = None, max_duratio
 
 	if sample_rate is not None and sample_rate_ != sample_rate:
 		sample_rate_, signal = sample_rate, torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate))
+		#dirname = os.path.join('data', 'sample_ok_converted'); os.makedirs(dirname, exist_ok = True); scipy.io.wavfile.write(os.path.join(dirname, f'{random.randint(0, int(1e9))}.wav'), sample_rate, signal.numpy())
 
 	return signal, sample_rate_

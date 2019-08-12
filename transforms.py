@@ -5,25 +5,26 @@ import librosa
 import pyrubberband
 
 class RandomCompose(object):
-	def __init__(self, transforms, probs):
+	def __init__(self, transforms, prob):
 		self.transforms = transforms
-		self.probs = probs
+		self.prob = prob
 
 	def __call__(self, *x):
-		for transform, prob in zip(self.transforms, self.probs if isinstance(self.probs, list) else [self.probs] * len(self.transforms)):
-			if random.random() < prob:
-				x = transform(*x)
+		if random.random() < self.prob:
+			transform = random.choice(self.transforms)
+			x = transform(*x)
 		return x
 
 class SpeedPerturbation(object):
-	def __init__(self, rate = [0.8, 1.2]):
+	def __init__(self, rate = [0.9, 1.1]):
 		self.rate = rate
 
 	def __call__(self, signal, sample_rate):
+		#return torch.from_numpy(pyrubberband.pyrb.time_stretch(signal.numpy(), sample_rate, fixed_or_uniform(self.rate))), sample_rate
 		return torch.from_numpy(librosa.effects.time_stretch(signal.numpy(), fixed_or_uniform(self.rate))), sample_rate
 
 class PitchShift(object):
-	def __init__(self, n_steps = [-3, 3]):
+	def __init__(self, n_steps = [-2, 2]):
 		self.n_steps = n_steps
 
 	def __call__(self, signal, sample_rate):

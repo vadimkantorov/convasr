@@ -26,7 +26,7 @@ def set_random_seed(seed):
 
 def traintest(args):
 	print('\n', 'Arguments:', args)
-	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), name = args.name, train_waveform_transform = f'aug{args.train_waveform_transform}{args.train_waveform_transform_prob}' if args.train_waveform_transform_prob > 0 else '').replace('e-0', 'e-').rstrip('_')
+	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), name = args.name, train_waveform_transform = f'aug{args.train_waveform_transform}{args.train_waveform_transform_prob}' if args.train_waveform_transform_prob > 0 or args.train_waveform_transform_prob != args.train_waveform_transform_prob else '').replace('e-0', 'e-').rstrip('_')
 	print('\n', 'Experiment id:', args.id, '\n')
 	if args.dry:
 		return
@@ -34,7 +34,8 @@ def traintest(args):
 	set_random_seed(args.seed)
 
 	labels = dataset.Labels(importlib.import_module(args.lang))
-	val_waveform_transform = getattr(transforms, args.val_waveform_transform)(args.val_waveform_transform_prob) if args.val_waveform_transform_prob > 0 else None 
+	transform = lambda name, prob: getattr(transforms, name)() if prob != prob else getattr(transforms, name)(prob) if prob > 0 else None
+	val_waveform_transform = transform(args.val_waveform_transform, args.val_waveform_transform_prob)
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed) for val_data_path in args.val_data_path}
 	model = getattr(models, args.model)(num_classes = len(labels), num_input_features = args.num_input_features)
 	criterion = nn.CTCLoss(blank = labels.blank_idx, reduction = 'none').to(args.device)
@@ -64,7 +65,7 @@ def traintest(args):
 						wer_ref_len, cer_ref_len = len(reference.split()) or 1, len(reference.replace(' ','')) or 1
 						wer, cer = (decoders.compute_wer(transcript, reference) / wer_ref_len, decoders.compute_cer(transcript, reference) / cer_ref_len) if reference != transcript else (0, 0)
 						ref_tra_.append(dict(reference = reference, transcript = transcript, filename = filenames[k], cer = cer, wer = wer))
-						logits_.extend(logits)
+						logits_.extend(logits.cpu())
 				cer_avg = float(torch.tensor([x['cer'] for x in ref_tra_]).mean())
 				wer_avg = float(torch.tensor([x['wer'] for x in ref_tra_]).mean())
 				loss_avg = float(torch.tensor(loss_).mean())
@@ -83,7 +84,7 @@ def traintest(args):
 		model = torch.nn.DataParallel(model).to(args.device)
 		return evaluate_model()
 
-	train_waveform_transform = getattr(transforms, args.train_waveform_transform)(args.train_waveform_transform_prob) if args.train_waveform_transform_prob > 0 else None 
+	train_waveform_transform = transform(args.train_waveform_transform, args.train_waveform_transform_prob)
 	train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = train_waveform_transform)
 	train_dataset_name = os.path.basename(args.train_data_path)
 	train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
@@ -181,8 +182,10 @@ if __name__ == '__main__':
 	parser.add_argument('--dry', action = 'store_true')
 	parser.add_argument('--lang', default = 'ru')
 	parser.add_argument('--val-waveform-transform', default = 'AWNSPGPPS')
+	parser.add_argument('--val-feature-transform')
 	parser.add_argument('--val-waveform-transform-prob', type = float, default = 0)
 	parser.add_argument('--train-waveform-transform', default = 'AWNSPGPPS')
+	parser.add_argument('--train-feature-transform')
 	parser.add_argument('--train-waveform-transform-prob', type = float, default = 0)
 	parser.add_argument('--val-iteration-interval', type = int, default = None)
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
