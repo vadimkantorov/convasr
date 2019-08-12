@@ -16,29 +16,29 @@ class RandomCompose(object):
 		return x
 
 class SpeedPerturbation(object):
-	def __init__(self, rate):
+	def __init__(self, rate = [0.8, 1.2]):
 		self.rate = rate
 
 	def __call__(self, signal, sample_rate):
 		return torch.from_numpy(librosa.effects.time_stretch(signal.numpy(), fixed_or_uniform(self.rate))), sample_rate
 
 class PitchShift(object):
-	def __init__(self, n_steps):
+	def __init__(self, n_steps = [-3, 3]):
 		self.n_steps = n_steps
 
 	def __call__(self, signal, sample_rate):
-		return torch.from_numpy(pyrubberband.pyrb.pitch_shift(signal.numpy(), sample_rate, fixed_or_uniform(self.n_steps))), sample_rate
-		#return torch.from_numpy(librosa.effects.pitch_shift(signal.numpy(), sample_rate, fixed_or_uniform(self.n_steps)), sample_rate
+		#return torch.from_numpy(pyrubberband.pyrb.pitch_shift(signal.numpy(), sample_rate, fixed_or_uniform(self.n_steps))), sample_rate
+		return torch.from_numpy(librosa.effects.pitch_shift(signal.numpy(), sample_rate, fixed_or_uniform(self.n_steps))), sample_rate
 
 class GainPerturbation(object):
-	def __init__(self, gain_power):
-		self.gain_power = gain_power
+	def __init__(self, gain_db = [-10, 10]):
+		self.gain_db = gain_db
 
 	def __call__(self, signal, sample_rate):
-		return signal * (10. ** (fixed_or_uniform(self.gain_power) / 20.)), sample_rate
+		return signal * (10. ** (fixed_or_uniform(self.gain_db) / 20.)), sample_rate
 
 class AddWhiteNoise(object):
-	def __init__(self, noise_level):
+	def __init__(self, noise_level = 0.025):
 		self.noise_level = noise_level
 
 	def __call__(self, signal, sample_rate):
@@ -89,3 +89,5 @@ class SpecAugment(object):
 
 def fixed_or_uniform(r):
 	return random.uniform(*r) if isinstance(r, list) else r
+
+AWNSPGPPS = lambda prob: RandomCompose([AddWhiteNoise(), SpeedPerturbation(), GainPerturbation(), PitchShift()], prob)

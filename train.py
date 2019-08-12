@@ -26,10 +26,7 @@ def set_random_seed(seed):
 
 def traintest(args):
 	print('\n', 'Arguments:', args)
-	train_waveform_transforms = eval(f'[{args.train_waveform_transforms}]', vars(transforms))
-	val_waveform_transforms = eval(f'[{args.val_waveform_transforms}]', vars(transforms))
-	fmt_transforms = lambda ts: ','.join(f'{t.__class__.__name__}({",".join(f"{n}={repr(v)}" for n, v in t.__dict__.items() if "paths" not in n) if len(t.__dict__) > 1 else next(iter(t.__dict__.values()))})'.replace('/', '_') for t in ts)
-	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), train_waveform_transforms = fmt_transforms(train_waveform_transforms), val_waveform_transforms = fmt_transforms(val_waveform_transforms), name = args.name).replace('e-0', 'e-').rstrip('_')
+	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), name = args.name, train_waveform_transform = f'aug{args.train_waveform_transform}{args.train_waveform_transform_prob}' if args.train_waveform_transform_prob > 0 else '').replace('e-0', 'e-').rstrip('_')
 	print('\n', 'Experiment id:', args.id, '\n')
 	if args.dry:
 		return
@@ -37,7 +34,8 @@ def traintest(args):
 	set_random_seed(args.seed)
 
 	labels = dataset.Labels(importlib.import_module(args.lang))
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed) for val_data_path in args.val_data_path}
+	val_waveform_transform = getattr(transforms, args.val_waveform_transform)(args.val_waveform_transform_prob) if args.val_waveform_transform_prob > 0 else None 
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed) for val_data_path in args.val_data_path}
 	model = getattr(models, args.model)(num_classes = len(labels), num_input_features = args.num_input_features)
 	criterion = nn.CTCLoss(blank = labels.blank_idx, reduction = 'none').to(args.device)
 	decoder = decoders.GreedyDecoder(labels)
@@ -85,8 +83,8 @@ def traintest(args):
 		model = torch.nn.DataParallel(model).to(args.device)
 		return evaluate_model()
 
-    
-	train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transforms = train_waveform_transforms)
+	train_waveform_transform = getattr(transforms, args.train_waveform_transform)(args.train_waveform_transform_prob) if args.train_waveform_transform_prob > 0 else None 
+	train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = train_waveform_transform)
 	train_dataset_name = os.path.basename(args.train_data_path)
 	train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
 	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler)
@@ -129,7 +127,7 @@ def traintest(args):
 			lr = scheduler.get_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
 			print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:6.0f} <{time_ms_avg:4.0f}> +{time_ms_data:.2f} ms  | lr: {lr}')#<{lr:.0e}>')
 			tic = time.time()
-			#scheduler.step()
+			scheduler.step()
 			iteration += 1
 
 			if args.val_iteration_interval is not None and iteration > 0 and iteration % args.val_iteration_interval == 0:
@@ -178,12 +176,14 @@ if __name__ == '__main__':
 	parser.add_argument('--args', default = 'args.json')
 	parser.add_argument('--model', default = 'Wav2LetterRu')
 	parser.add_argument('--seed', type = int, default = 1)
-	parser.add_argument('--id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_trainWT_{train_waveform_transforms}_valWT_{val_waveform_transforms}_{name}')
+	parser.add_argument('--id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{train_waveform_transform}_{name}')
 	parser.add_argument('--name', default = '')
 	parser.add_argument('--dry', action = 'store_true')
 	parser.add_argument('--lang', default = 'ru')
-	parser.add_argument('--val-waveform-transforms', default = '')
-	parser.add_argument('--train-waveform-transforms', default = '')
+	parser.add_argument('--val-waveform-transform', default = 'AWNSPGPPS')
+	parser.add_argument('--val-waveform-transform-prob', type = float, default = 0)
+	parser.add_argument('--train-waveform-transform', default = 'AWNSPGPPS')
+	parser.add_argument('--train-waveform-transform-prob', type = float, default = 0)
 	parser.add_argument('--val-iteration-interval', type = int, default = None)
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
 	parser.add_argument('--augment', action = 'store_true')

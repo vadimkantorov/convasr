@@ -5,9 +5,8 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --lr 1e-2 --weight-decay 1e-3 --optimizer SGD \
   --train-data-path data/mixed_train.csv \
   --val-data-path data/mixed_val.csv data/clean_val.csv ../sample_ok/sample_ok.convasr.csv \
+  --train-waveform-transform-prob 0.3 \
   --val-iteration-interval 2500 \
-  --train-waveform-transforms 'MixExternalNoise("data/sample_ok.noise.csv", 1.0)' \
-  --val-waveform-transforms 'MixExternalNoise("data/sample_ok.noise.csv", 1.0)' \
   --epochs 2 
 
 #  --train-waveform-transforms 'AddWhiteNoise(0.025)' \
