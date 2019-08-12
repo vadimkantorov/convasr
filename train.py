@@ -28,7 +28,7 @@ def traintest(args):
 	print('\n', 'Arguments:', args)
 	train_waveform_transforms = eval(f'[{args.train_waveform_transforms}]', vars(transforms))
 	val_waveform_transforms = eval(f'[{args.val_waveform_transforms}]', vars(transforms))
-	fmt_transforms = lambda ts: ','.join(f'{t.__class__.__name__}({",".join(f"{n}={v}" for n, v in t.__dict__.items())})' for t in ts)
+	fmt_transforms = lambda ts: ','.join(f'{t.__class__.__name__}({",".join(f"{n}={repr(v)}" for n, v in t.__dict__.items() if "paths" not in n) if len(t.__dict__) > 1 else next(iter(t.__dict__.values()))})'.replace('/', '_') for t in ts)
 	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), train_waveform_transforms = fmt_transforms(train_waveform_transforms), val_waveform_transforms = fmt_transforms(val_waveform_transforms), name = args.name).replace('e-0', 'e-').rstrip('_')
 	print('\n', 'Experiment id:', args.id, '\n')
 	if args.dry:
@@ -37,10 +37,9 @@ def traintest(args):
 	set_random_seed(args.seed)
 
 	labels = dataset.Labels(importlib.import_module(args.lang))
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transforms = val_waveform_transforms), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed) for val_data_path in args.val_data_path}
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed) for val_data_path in args.val_data_path}
 	model = getattr(models, args.model)(num_classes = len(labels), num_input_features = args.num_input_features)
-	criterion = nn.CTCLoss(blank = labels.blank_idx, reduction = 'sum').to(args.device)
-	model = torch.nn.DataParallel(model).to(args.device)
+	criterion = nn.CTCLoss(blank = labels.blank_idx, reduction = 'none').to(args.device)
 	decoder = decoders.GreedyDecoder(labels)
 
 	def evaluate_model(epoch = None, batch_idx = None, iteration = None):
@@ -53,7 +52,7 @@ def traintest(args):
 					input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
 					logits = model(inputs.to(args.device), input_lengths)
 					output_lengths = models.compute_output_lengths(model, input_lengths)
-					loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_lengths.to(args.device)) / len(inputs)
+					loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_lengths.to(args.device)).mean()
 					loss_.append(float(loss))
 					decoded_strings = labels.idx2str(decoder.decode(F.softmax(logits, dim = 1), output_lengths.tolist()))
 					target_strings = labels.idx2str(dataset.unpack_targets(targets.tolist(), target_lengths.tolist()))
@@ -83,8 +82,10 @@ def traintest(args):
 
 	if not args.train_data_path:
 		models.load_checkpoint(args.checkpoint, model)
+		model = torch.nn.DataParallel(model).to(args.device)
 		return evaluate_model()
 
+    
 	train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transforms = train_waveform_transforms)
 	train_dataset_name = os.path.basename(args.train_data_path)
 	train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
@@ -95,6 +96,7 @@ def traintest(args):
 	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: 1)
 	if args.checkpoint:
 		models.load_checkpoint(args.checkpoint, model, optimizer, train_sampler)
+	model = torch.nn.DataParallel(model).to(args.device)
 	os.makedirs(args.experiment_dir, exist_ok = True)
 	tensorboard = torch.utils.tensorboard.SummaryWriter(os.path.join(args.experiment_dir, 'tensorboard'))
 	with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
@@ -110,7 +112,7 @@ def traintest(args):
 			input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
 			logits = model(inputs.to(args.device), input_lengths)
 			output_lengths = models.compute_output_lengths(model, input_lengths)
-			loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_lengths.to(args.device)) / len(inputs)
+			loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_lengths.to(args.device)).mean()
 			if not (torch.isinf(loss) or torch.isnan(loss)):
 				optimizer.zero_grad()
 				if args.fp16:

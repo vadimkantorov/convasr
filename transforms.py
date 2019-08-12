@@ -4,6 +4,17 @@ import dataset
 import librosa
 import pyrubberband
 
+class RandomCompose(object):
+	def __init__(self, transforms, probs):
+		self.transforms = transforms
+		self.probs = probs
+
+	def __call__(self, *x):
+		for transform, prob in zip(self.transforms, self.probs if isinstance(self.probs, list) else [self.probs] * len(self.transforms)):
+			if random.random() < prob:
+				x = transform(*x)
+		return x
+
 class SpeedPerturbation(object):
 	def __init__(self, rate):
 		self.rate = rate
@@ -16,8 +27,8 @@ class PitchShift(object):
 		self.n_steps = n_steps
 
 	def __call__(self, signal, sample_rate):
-		return torch.from_numpy(pyrubberband.pyrb.pitch_shift(signal.numpy(), sample_rate, fixed_or_uniform(self.rate))), sample_rate
-		#return torch.from_numpy(librosa.effects.pitch_shift(signal.numpy(), sample_rate, n_steps = noise_level)), sample_rate
+		return torch.from_numpy(pyrubberband.pyrb.pitch_shift(signal.numpy(), sample_rate, fixed_or_uniform(self.n_steps))), sample_rate
+		#return torch.from_numpy(librosa.effects.pitch_shift(signal.numpy(), sample_rate, fixed_or_uniform(self.n_steps)), sample_rate
 
 class GainPerturbation(object):
 	def __init__(self, gain_power):
@@ -38,6 +49,7 @@ class AddWhiteNoise(object):
 class MixExternalNoise(object):
 	def __init__(self, noise_data_path, noise_level):
 		self.noise_level = noise_level
+		self.noise_data_path = noise_data_path
 		self.noise_paths = list(map(str.strip, open(noise_data_path))) if noise_data_path is not None else []
 
 	def __call__(self, signal, sample_rate):

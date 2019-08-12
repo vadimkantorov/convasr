@@ -10,20 +10,20 @@ import scipy.signal
 import librosa
 
 class SpectrogramDataset(torch.utils.data.Dataset):
-	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, waveform_transforms = [], feature_transforms = [], max_duration = 20, noise_level = None, noise_data_path = None):
+	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, waveform_transform = None, feature_transform = None, max_duration = 20):
 		self.window_stride = window_stride
 		self.window_size = window_size
 		self.sample_rate = sample_rate
 		self.window = getattr(scipy.signal, window)
 		self.num_input_features = num_input_features
 		self.labels = labels
-		self.waveform_transforms = waveform_transforms
-		self.feature_transforms = feature_transforms
+		self.waveform_transform = waveform_transform
+		self.feature_transform = feature_transform
 		self.ids = [(row[0], row[1], float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or float(row[2]) < max_duration] if isinstance(data_or_path, str) else [d for d in data_or_path if d[-1] == -1 or d[-1] < max_duration]
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
-		features, transcript, audio_path = load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, self.labels.parse, waveform_transforms = self.waveform_transforms, feature_transforms = self.feature_transforms)
+		features, transcript, audio_path = load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, self.labels.parse, waveform_transform = self.waveform_transform, feature_transform = self.feature_transform)
 		return features, transcript, audio_path
 
 	def __len__(self):
@@ -120,14 +120,14 @@ def collate_fn(batch):
 	targets = torch.IntTensor(targets)
 	return inputs, targets, filenames, input_percentages, target_sizes
 
-def load_example(audio_path, transcript, sample_rate, window_size, window_stride, window, num_input_features, parse_transcript = lambda transcript: transcript, waveform_transforms = [], feature_transforms = []):
+def load_example(audio_path, transcript, sample_rate, window_size, window_stride, window, num_input_features, parse_transcript = lambda transcript: transcript, waveform_transform = None, feature_transform = None):
 	signal, sample_rate = read_wav(audio_path, sample_rate = sample_rate)
-	for transform in waveform_transforms:
-		signal, sample_rate = transform(signal, sample_rate)#; scipy.io.wavfile.write(f'data/noise_wav/{os.path.basename(audio_path)}', sample_rate, signal.numpy())
+	if waveform_transform is not None:
+		signal, sample_rate = waveform_transform(signal, sample_rate)#; scipy.io.wavfile.write(f'data/noise_wav/{os.path.basename(audio_path)}', sample_rate, signal.numpy())
 		
 	features = logfbanknorm(signal, sample_rate, window_size, window_stride, window, num_input_features)
-	for transform in feature_transforms:
-		features = transform(features)
+	if feature_transform is not None:
+		features = feature_transform(features)
 
 	transcript = parse_transcript(transcript)
 	return features, transcript, audio_path
