@@ -39,5 +39,9 @@ spotty aws spot-prices -i p3.8xlarge -r us-east-1
 
 # Augment a dataset
 ```shell
-bash scripts/augment.sh data/clean_val.csv data/clean_val_aug ffmpeg -i input.wav output.wav
+# encode to GSM and back
+bash scripts/augment.sh data/clean_val.csv data/clean_val_gsm "sox input.wav -r 8000 -c 1 -t gsm - | ffmpeg -nostdin -hide_banner -loglevel fatal -y -f gsm -i - output.wav"
+
+# encode to AMR(NB) and back
+bash scripts/augment.sh data/clean_val.csv data/clean_val_amr "sox input.wav -r 8000 -c 1 -t amr-nb - | ffmpeg -nostdin -hide_banner -loglevel fatal -y -f amr -i - output.wav"
 ```
