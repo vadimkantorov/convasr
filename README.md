@@ -48,3 +48,13 @@ bash scripts/augment.sh data/clean_val.csv data/clean_val_amrnb "sox input.wav -
 # encode to AMR (WB) and back
 bash scripts/augment.sh data/clean_val.csv data/clean_val_amrwb "sox input.wav -r 8000 -c 1 -t amr-wb - | ffmpeg -nostdin -hide_banner -loglevel fatal -y -f amr -i - output.wav"
 ```
+
+# Docker commands
+```
+# build scripts/Dockerfile
+sudo nvidia-docker build -t convasr scripts
+
+# run docker
+sudo nvidia-docker run -v $PWD/deepspeech.pytorch:/deepspeech.pytorch -it --ipc=host convasr 
+
+```
