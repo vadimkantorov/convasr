@@ -140,12 +140,13 @@ def traintest(args):
 			if iteration % args.log_iteration_interval == 0:
 				tensorboard.add_scalars(args.experiment_id, {train_dataset_name + '_loss_avg' : loss_avg, train_dataset_name + '_lr_avg_x10K' : lr_avg * 1e4}, iteration)
 				for param_name, param in model.module.named_parameters():
+										tag = args.experiment_id + '_params/' + param_name.replace('.', '/')
 					norm, grad_norm = param.norm(), param.grad.norm()
 					ratio = grad_norm / (1e-9 + norm)
-					tensorboard.add_scalars(args.experiment_id + '_params/' + param_name.replace('.', '/'), dict(norm = norm, grad_norm = grad_norm, ratio = ratio), iteration)
-					#tensorboard.add_scalar(args.experiment_id + '_params/' + param_name.replace('.', '/') + '/grad/norm', grad_norm, iteration)
-					#tensorboard.add_histogram(args.experiment_id + '_params/' + param_name.replace('.', '/'), param, iteration)
-					#tensorboard.add_histogram(args.experiment_id + '_params/' + param_name.replace('.', '/') + '/grad', param.grad, iteration)
+					tensorboard.add_scalars(tag, dict(norm = float(norm), grad_norm = float(grad_norm), ratio = float(ratio)), iteration)
+										if args.log_weight_distribution:
+						tensorboard.add_histogram(tag, param, iteration)
+						tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
 
 		evaluate_model(epoch, batch_idx, iteration)
 
@@ -199,6 +200,7 @@ if __name__ == '__main__':
 	parser.add_argument('--train-waveform-transform-prob', type = float, default = 0)
 	parser.add_argument('--val-iteration-interval', type = int, default = None)
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
+	parser.add_argument('--log-weight-distribution', action = 'store_true')
 	parser.add_argument('--augment', action = 'store_true')
 	parser.add_argument('--verbose', action = 'store_true')
 	traintest(parser.parse_args())
