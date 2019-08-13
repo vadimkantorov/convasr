@@ -38,15 +38,17 @@ spotty aws spot-prices -i p3.8xlarge -r us-east-1
 ```
 
 # Augment a dataset with SOX (offline)
+The passed command must read from stdin and write to stdout.
+
 ```shell
 # encode to GSM and back
-bash scripts/augment.sh data/clean_val.csv data/clean_val_gsm "sox input.wav -r 8000 -c 1 -t gsm - | ffmpeg -nostdin -hide_banner -loglevel fatal -y -f gsm -i - output.wav"
+bash scripts/augment.sh data/clean_val.csv data/clean_val_gsm "sox -V0 -t wav - -r 8k -c 1 -t gsm - | sox -V0 -t gsm - -t wav -b 16 -e signed -r 1k -c 1 -"
 
-# encode to AMR (NB) and back
-bash scripts/augment.sh data/clean_val.csv data/clean_val_amrnb "sox input.wav -r 8000 -c 1 -t amr-nb - | ffmpeg -nostdin -hide_banner -loglevel fatal -y -f amr -i - output.wav"
+# encode to AMR (NB: narrow-band, 8kHz) and back
+bash scripts/augment.sh data/clean_val.csv data/clean_val_amrnb "sox -V0 -t wav - -r 8k -c 1 -t amr-nb - | sox -V0 -t amr-nb - -t wav -b 16 -e signed -r 16k -c 1 -"
 
-# encode to AMR (WB) and back
-bash scripts/augment.sh data/clean_val.csv data/clean_val_amrwb "sox input.wav -r 8000 -c 1 -t amr-wb - | ffmpeg -nostdin -hide_banner -loglevel fatal -y -f amr -i - output.wav"
+# encode to AMR (WB: wide-band, 16kHz) and back
+bash scripts/augment.sh data/clean_val.csv data/clean_val_amrwb "sox -V0 -t wav - -r 16k -c 1 -t amr-wb - | sox -V0 -t amr-nb - -t wav -b 16 -e signed -r 16k -c 1 -"
 ```
 
 # Docker commands

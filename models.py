@@ -123,14 +123,16 @@ class ReLUDropoutInplace(torch.nn.Module):
 		else:
 			return input.clamp_(min = 0)
 
-def load_checkpoint(checkpoint_path, model, optimizer = None, sampler = None):
+def load_checkpoint(checkpoint_path, model, optimizer = None, sampler = None, scheduler = None):
 	checkpoint = torch.load(checkpoint_path, map_location = 'cpu')
 	model.load_state_dict(checkpoint['model_state_dict'])
 	if optimizer is not None:
 		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 	if sampler is not None:
 		sampler.load_state_dict(checkpoint['sampler_state_dict'])
+	if scheduler is not None:
+		scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
-def save_checkpoint(checkpoint_path, model, optimizer, sampler, epoch, batch_idx):
-	checkpoint = dict(model_state_dict = model.state_dict(), optimizer_state_dict = optimizer.state_dict(), sampler_state_dict = sampler.state_dict(batch_idx), epoch = epoch)
+def save_checkpoint(checkpoint_path, model, optimizer, sampler, scheduler, epoch, batch_idx):
+	checkpoint = dict(model_state_dict = model.state_dict(), optimizer_state_dict = optimizer.state_dict(), scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(batch_idx), epoch = epoch)
 	torch.save(checkpoint, checkpoint_path)

@@ -79,7 +79,7 @@ def traintest(args):
 				elif args.logits:
 					torch.save(dict(logits = logits_, ref_tra = ref_tra_), args.logits.format(val_dataset_name = val_dataset_name))
 		if training:
-			models.save_checkpoint(os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, train_sampler, epoch, batch_idx)
+			models.save_checkpoint(os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, train_sampler, scheduler, epoch, batch_idx)
 			model.train()
 
 	if not args.train_data_path:
@@ -97,7 +97,7 @@ def traintest(args):
 		model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: 1)
 	if args.checkpoint:
-		models.load_checkpoint(args.checkpoint, model, optimizer, train_sampler)
+		models.load_checkpoint(args.checkpoint, model, optimizer, train_sampler, scheduler)
 	model = torch.nn.DataParallel(model).to(args.device)
 	os.makedirs(args.experiment_dir, exist_ok = True)
 	tensorboard = torch.utils.tensorboard.SummaryWriter(os.path.join(args.experiment_dir, 'tensorboard'))
@@ -140,11 +140,11 @@ def traintest(args):
 			if iteration % args.log_iteration_interval == 0:
 				tensorboard.add_scalars(args.experiment_id, {train_dataset_name + '_loss_avg' : loss_avg, train_dataset_name + '_lr_avg_x10K' : lr_avg * 1e4}, iteration)
 				for param_name, param in model.module.named_parameters():
-										tag = args.experiment_id + '_params/' + param_name.replace('.', '/')
+					tag = args.experiment_id + '_params/' + param_name.replace('.', '/')
 					norm, grad_norm = param.norm(), param.grad.norm()
 					ratio = grad_norm / (1e-9 + norm)
 					tensorboard.add_scalars(tag, dict(norm = float(norm), grad_norm = float(grad_norm), ratio = float(ratio)), iteration)
-										if args.log_weight_distribution:
+					if args.log_weight_distribution:
 						tensorboard.add_histogram(tag, param, iteration)
 						tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
 
