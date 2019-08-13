@@ -26,11 +26,11 @@ def set_random_seed(seed):
 
 def traintest(args):
 	print('\n', 'Arguments:', args)
-	args.id = args.id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), name = args.name, train_waveform_transform = f'aug{args.train_waveform_transform}{args.train_waveform_transform_prob}' if args.train_waveform_transform_prob > 0 or args.train_waveform_transform_prob != args.train_waveform_transform_prob else '').replace('e-0', 'e-').rstrip('_')
-	print('\n', 'Experiment id:', args.id, '\n')
+	args.experiment_id = args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, train_waveform_transform = f'aug{args.train_waveform_transform}{args.train_waveform_transform_prob}' if args.train_waveform_transform_prob > 0 or args.train_waveform_transform_prob != args.train_waveform_transform_prob else '').replace('e-0', 'e-').rstrip('_')
+	print('\n', 'Experiment id:', args.experiment_id, '\n')
 	if args.dry:
 		return
-	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, id = args.id)
+	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, id = args.experiment_id)
 	set_random_seed(args.seed)
 
 	labels = dataset.Labels(importlib.import_module(args.lang))
@@ -65,19 +65,22 @@ def traintest(args):
 						wer_ref_len, cer_ref_len = len(reference.split()) or 1, len(reference.replace(' ','')) or 1
 						wer, cer = (decoders.compute_wer(transcript, reference) / wer_ref_len, decoders.compute_cer(transcript, reference) / cer_ref_len) if reference != transcript else (0, 0)
 						ref_tra_.append(dict(reference = reference, transcript = transcript, filename = filenames[k], cer = cer, wer = wer))
-						logits_.extend(logits.cpu())
+						if not training and args.logits:
+							logits_.extend(logits.cpu())
 				cer_avg = float(torch.tensor([x['cer'] for x in ref_tra_]).mean())
 				wer_avg = float(torch.tensor([x['wer'] for x in ref_tra_]).mean())
 				loss_avg = float(torch.tensor(loss_).mean())
-				print(f'{args.id} {val_dataset_name} | epoch {epoch} iter {iteration} | Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
+				print(f'{args.experiment_id} {val_dataset_name} | epoch {epoch} iter {iteration} | Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
 				print()
 				with open(os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
 					json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
-				torch.save(dict(logits = logits_, ref_tra = ref_tra_), os.path.join(args.experiment_dir, f'logits_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.pt') if training else args.logits.format(val_dataset_name = val_dataset_name))
-		model.train()
+				if training:
+					tensorboard.add_scalars(args.experiment_id, {val_dataset_name + '_wer_avg' : wer_avg * 100.0, val_dataset_name + '_cer_avg' : cer_avg * 100.0, val_dataset_name + '_loss_avg' : loss_avg}, iteration) 
+				elif args.logits:
+					torch.save(dict(logits = logits_, ref_tra = ref_tra_), args.logits.format(val_dataset_name = val_dataset_name))
 		if training:
-			tensorboard.add_scalars(args.id, {val_dataset_name + '_wer_avg' : wer_avg * 100.0, val_dataset_name + '_cer_avg' : cer_avg * 100.0, val_dataset_name + '_loss_avg' : loss_avg}, iteration) 
 			models.save_checkpoint(os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, train_sampler, epoch, batch_idx)
+			model.train()
 
 	if not args.train_data_path:
 		models.load_checkpoint(args.checkpoint, model)
@@ -126,7 +129,7 @@ def traintest(args):
 			time_ms_data, time_ms_model = (toc - tic) * 1000, (time.time() - toc) * 1000
 			time_ms_avg = moving_avg(time_ms_avg, time_ms_model, max = 10000)
 			lr = scheduler.get_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
-			print(f'{args.id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:6.0f} <{time_ms_avg:4.0f}> +{time_ms_data:.2f} ms  | lr: {lr}')#<{lr:.0e}>')
+			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:6.0f} <{time_ms_avg:4.0f}> +{time_ms_data:.2f} ms  | lr: {lr}')#<{lr:.0e}>')
 			tic = time.time()
 			scheduler.step()
 			iteration += 1
@@ -135,7 +138,14 @@ def traintest(args):
 				evaluate_model(epoch, batch_idx, iteration)
 
 			if iteration % args.log_iteration_interval == 0:
-				tensorboard.add_scalars(args.id, {train_dataset_name + '_loss_avg' : loss_avg, train_dataset_name + '_lr_avg_x10K' : lr_avg * 1e4}, iteration)
+				tensorboard.add_scalars(args.experiment_id, {train_dataset_name + '_loss_avg' : loss_avg, train_dataset_name + '_lr_avg_x10K' : lr_avg * 1e4}, iteration)
+				for param_name, param in model.module.named_parameters():
+					norm, grad_norm = param.norm(), param.grad.norm()
+					ratio = grad_norm / (1e-9 + norm)
+					tensorboard.add_scalars(args.experiment_id + '_params/' + param_name.replace('.', '/'), dict(norm = norm, grad_norm = grad_norm, ratio = ratio), iteration)
+					#tensorboard.add_scalar(args.experiment_id + '_params/' + param_name.replace('.', '/') + '/grad/norm', grad_norm, iteration)
+					#tensorboard.add_histogram(args.experiment_id + '_params/' + param_name.replace('.', '/'), param, iteration)
+					#tensorboard.add_histogram(args.experiment_id + '_params/' + param_name.replace('.', '/') + '/grad', param.grad, iteration)
 
 		evaluate_model(epoch, batch_idx, iteration)
 
@@ -177,8 +187,8 @@ if __name__ == '__main__':
 	parser.add_argument('--args', default = 'args.json')
 	parser.add_argument('--model', default = 'Wav2LetterRu')
 	parser.add_argument('--seed', type = int, default = 1)
-	parser.add_argument('--id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{train_waveform_transform}_{name}')
-	parser.add_argument('--name', default = '')
+	parser.add_argument('--experiment-id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{train_waveform_transform}_{experiment_name}')
+	parser.add_argument('--experiment-name', '--name', default = '')
 	parser.add_argument('--dry', action = 'store_true')
 	parser.add_argument('--lang', default = 'ru')
 	parser.add_argument('--val-waveform-transform', default = 'AWNSPGPPS')

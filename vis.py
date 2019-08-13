@@ -16,7 +16,7 @@ def tra(transcripts):
 
 	for i, (reference, transcript, filename, cer) in enumerate(list(map(j.get, ['reference', 'transcript', 'filename', 'cer'])) for j in ref_tra):
 		encoded = base64.b64encode(open(filename, 'rb').read()).decode('utf-8').replace('\n', '')
-		vis.write(f'<tr><td style="border-right: 2px black solid">{cer:.02%}</td> <td style="font-size:xx-small">{os.path.basename(filename)}</td> <td><audio controls src="data:audio/wav;base64,{encoded}"/></td><td><div><b>{reference}</b></div><div>{transcript}</div></td></tr>\n')
+		vis.write(f'<tr><td style="border-right: 2px black solexperiment_id">{cer:.02%}</td> <td style="font-size:xx-small">{os.path.basename(filename)}</td> <td><audio controls src="data:audio/wav;base64,{encoded}"/></td><td><div><b>{reference}</b></div><div>{transcript}</div></td></tr>\n')
 
 	vis.write('</tbody></table></body></html>')
 
@@ -60,11 +60,11 @@ def entropy(logits):
     e = [entropy(F.softmax(l, dim = 1), dim = 1).mean() for l in L['logits']]
     print(os.path.basename(logits), 'Entropy:', float(torch.tensor(e).mean()))
 
-def cer(experiments_dir, id, val_dataset_name):
-    experiment_dir = os.path.join(experiments_dir, id)
+def cer(experiments_dir, experiment_id, val_dataset_name):
+    experiment_dir = os.path.join(experiments_dir, experiment_id)
     for f in sorted(glob.glob(os.path.join(experiment_dir, f'transcripts_{val_dataset_name}*.json'))):
         iteration = f[f.find('epoch'):].replace('.json', '')
-        checkpoint = os.path.join(id, 'checkpoint_' + f[f.find('epoch'):].replace('.json', '.pt'))
+        checkpoint = os.path.join(experiment_id, 'checkpoint_' + f[f.find('epoch'):].replace('.json', '.pt'))
         cer = float(torch.tensor([j['cer'] for j in json.load(open(f))]).mean())
         print(f'{iteration}    {cer:.04f}     {checkpoint}')
 
@@ -85,7 +85,7 @@ if __name__ == '__main__':
     cmd.set_defaults(func = entropy)
 
     cmd = subparsers.add_parser('cer')
-    cmd.add_argument('id')
+    cmd.add_argument('experiment-id')
     cmd.add_argument('--experiments-dir', default = 'data/experiments')
     cmd.add_argument('-d', '--val-dataset-name', default = 'sample_ok.convasr.csv')
     cmd.set_defaults(func = cer)

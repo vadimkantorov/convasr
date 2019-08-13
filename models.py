@@ -1,4 +1,5 @@
 import os
+import collections
 import math
 import torch
 import torch.nn as nn
@@ -7,10 +8,11 @@ import torch.nn.functional as F
 class Wav2LetterRu(nn.Sequential):
 	def __init__(self, num_classes, num_input_features):
 		def conv_bn_relu_dropout(kernel_size, num_channels, stride = 1, padding = None, dropout = 0.2, batch_norm_momentum = 0.1):
-			return nn.Sequential(
+			return nn.Sequential(collections.OrderedDict(zip(['conv', 'bn', 'relu_dropout'], [
 				nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, padding = padding if padding is not None else max(1, kernel_size // 2), bias = False),
 				nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum),
 				ReLUDropoutInplace(p = dropout)
+                ]))
 			)
 
 		layers = [
