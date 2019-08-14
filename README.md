@@ -56,3 +56,26 @@ sudo nvidia-docker build -t convasr scripts
 # run docker
 sudo nvidia-docker run -v $PWD/deepspeech.pytorch:/deepspeech.pytorch -it --ipc=host convasr 
 ```
+
+# KenLM
+Dependencies: `sudo apt-get install build-essential cmake libboost-all-dev zlib1g-dev libbz2-dev liblzma-dev`
+```shell
+# build kenlm
+wget https://github.com/kpu/kenlm/archive/master.tar.gz -O kenlm.tar.gz
+tar -xf kenlm.tar.gz
+cd master
+mkdir build
+cd build
+cmake ..
+make -j 4
+
+# estimate model in the text ARPA format
+bin/lmplz -o 2 <text.csv >lm.arpa
+bin/build_binary /dev/stdin lm.bin <lm.arpa
+```
+
+# Beam search decoder
+Dependencies: same as KenLM, `pip install wget`
+```shell
+pip install git+https://github.com/parlance/ctcdecode
+```
