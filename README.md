@@ -76,7 +76,7 @@ bin/build_binary /dev/stdin lm.bin <lm.arpa
 ```
 
 # Beam search decoder
-Dependencies: same as KenLM
+Dependencies: same as KenLM, `pip install wget`
 ```shell
-pip install wget git+https://github.com/parlance/ctcdecode
+pip install git+https://github.com/parlance/ctcdecode
 ```
