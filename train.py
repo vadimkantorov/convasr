@@ -30,7 +30,7 @@ def traintest(args):
 	print('\n', 'Experiment id:', args.experiment_id, '\n')
 	if args.dry:
 		return
-	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, id = args.experiment_id)
+	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, experiment_id = args.experiment_id)
 	set_random_seed(args.seed)
 
 	labels = dataset.Labels(importlib.import_module(args.lang))
@@ -39,7 +39,7 @@ def traintest(args):
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed) for val_data_path in args.val_data_path}
 	model = getattr(models, args.model)(num_classes = len(labels), num_input_features = args.num_input_features)
 	criterion = nn.CTCLoss(blank = labels.blank_idx, reduction = 'none').to(args.device)
-	decoder = decoders.GreedyDecoder(labels)
+	decoder = decoders.GreedyDecoder(labels) if args.decoder == 'greedy' else decoders.BeamSearchDecoder(labels, lm_path = args.lm_path, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers)
 
 	def evaluate_model(epoch = None, batch_idx = None, iteration = None):
 		training = epoch is not None and batch_idx is not None and iteration is not None
@@ -53,7 +53,7 @@ def traintest(args):
 					output_lengths = models.compute_output_lengths(model, input_lengths)
 					loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_lengths.to(args.device)).mean()
 					loss_.append(float(loss))
-					decoded_strings = labels.idx2str(decoder.decode(F.softmax(logits, dim = 1), output_lengths.tolist()))
+					decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
 					target_strings = labels.idx2str(dataset.unpack_targets(targets.tolist(), target_lengths.tolist()))
 					for k, (transcript, reference) in enumerate(zip(decoded_strings, target_strings)):
 						if args.verbose:
@@ -175,14 +175,14 @@ if __name__ == '__main__':
 	parser.add_argument('--sample-rate', type = int, default = 16000)
 	parser.add_argument('--window-size', type = float, default = 0.02)
 	parser.add_argument('--window-stride', type = float, default = 0.01)
-	parser.add_argument('--window', default = 'hann', choices = ['hann', 'hamming'])
+	parser.add_argument('--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'])
 	parser.add_argument('--num-workers', type = int, default = 20)
 	parser.add_argument('--train-batch-size', type = int, default = 64)
 	parser.add_argument('--val-batch-size', type = int, default = 64)
 	parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 	parser.add_argument('--checkpoint')
 	parser.add_argument('--experiments-dir', default = 'data/experiments')
-	parser.add_argument('--experiment-dir', default = '{experiments_dir}/{id}')
+	parser.add_argument('--experiment-dir', default = '{experiments_dir}/{experiment_id}')
 	parser.add_argument('--transcripts', default = 'data/transcripts_{val_dataset_name}.json')
 	parser.add_argument('--logits', default = 'data/logits_{val_dataset_name}.pt')
 	parser.add_argument('--args', default = 'args.json')
@@ -203,4 +203,10 @@ if __name__ == '__main__':
 	parser.add_argument('--log-weight-distribution', action = 'store_true')
 	parser.add_argument('--augment', action = 'store_true')
 	parser.add_argument('--verbose', action = 'store_true')
+	parser.add_argument('--decoder', default = 'greedy', choices = ['greedy', 'beam'])
+	parser.add_argument('--beam-width', type = int, default = 5000)
+	parser.add_argument('--beam-alpha', type = float, default = 0.3)
+	parser.add_argument('--beam-beta', type = float, default = 1.0)
+	parser.add_argument('--lm-path')
+	
 	traintest(parser.parse_args())

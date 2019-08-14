@@ -85,7 +85,7 @@ if __name__ == '__main__':
     cmd.set_defaults(func = entropy)
 
     cmd = subparsers.add_parser('cer')
-    cmd.add_argument('experiment-id')
+    cmd.add_argument('experiment_id')
     cmd.add_argument('--experiments-dir', default = 'data/experiments')
     cmd.add_argument('-d', '--val-dataset-name', default = 'sample_ok.convasr.csv')
     cmd.set_defaults(func = cer)

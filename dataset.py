@@ -2,6 +2,7 @@ import os
 import re
 import csv
 import gzip
+import math
 import random
 import numpy as np
 import torch.utils.data
@@ -10,20 +11,21 @@ import scipy.signal
 import librosa
 
 class SpectrogramDataset(torch.utils.data.Dataset):
-	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, waveform_transform = None, feature_transform = None, max_duration = 20):
+	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, waveform_transform = None, feature_transform = None, max_duration = 20, normalize_features = True):
 		self.window_stride = window_stride
 		self.window_size = window_size
 		self.sample_rate = sample_rate
-		self.window = getattr(scipy.signal, window)
+		self.window = window
 		self.num_input_features = num_input_features
 		self.labels = labels
 		self.waveform_transform = waveform_transform
 		self.feature_transform = feature_transform
+		self.normalize_features = normalize_features
 		self.ids = [(row[0], row[1], float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or float(row[2]) < max_duration] if isinstance(data_or_path, str) else [d for d in data_or_path if d[-1] == -1 or d[-1] < max_duration]
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
-		features, transcript, audio_path = load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, self.labels.parse, waveform_transform = self.waveform_transform, feature_transform = self.feature_transform)
+		features, transcript, audio_path = load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, self.labels.parse, waveform_transform = self.waveform_transform, feature_transform = self.feature_transform, normalize_features = self.normalize_features)
 		return features, transcript, audio_path
 
 	def __len__(self):
@@ -93,6 +95,9 @@ class Labels(object):
 	def __len__(self):
 		return len(self.idx2chr_)
 
+	def __str__(self):
+		return self.idx2chr_
+
 def unpack_targets(targets, target_sizes):
 	unpacked = []
 	offset = 0
@@ -106,7 +111,7 @@ def collate_fn(batch):
 	batch = sorted(batch, key = duration_in_frames, reverse=True)
 	longest_sample = max(batch, key = duration_in_frames)[0]
 	freq_size, max_seq_len = longest_sample.shape
-	inputs = torch.zeros(len(batch), freq_size, max_seq_len)
+	inputs = torch.zeros(len(batch), freq_size, max_seq_len, device = batch[0][0].device, dtype = batch[0][0].dtype)
 	input_percentages = torch.FloatTensor(len(batch))
 	target_sizes = torch.IntTensor(len(batch))
 	targets, filenames = [], []
@@ -120,20 +125,21 @@ def collate_fn(batch):
 	targets = torch.IntTensor(targets)
 	return inputs, targets, filenames, input_percentages, target_sizes
 
-def load_example(audio_path, transcript, sample_rate, window_size, window_stride, window, num_input_features, parse_transcript = lambda transcript: transcript, waveform_transform = None, feature_transform = None):
+def load_example(audio_path, transcript, sample_rate, window_size, window_stride, window, num_input_features, parse_transcript = lambda transcript: transcript, waveform_transform = None, feature_transform = None, normalize_features = True):
 	signal, sample_rate = read_wav(audio_path, sample_rate = sample_rate)
 	if waveform_transform is not None:
 		signal, sample_rate = waveform_transform(signal, sample_rate); 
 		#dirname = os.path.join('data', waveform_transform.__class__.__name__); os.makedirs(dirname, exist_ok = True); scipy.io.wavfile.write(os.path.join(dirname, f'{random.randint(0, int(1e9))}.wav'), sample_rate, signal.numpy())
 		
-	features = logfbanknorm(signal, sample_rate, window_size, window_stride, window, num_input_features)
+	features = logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, normalize = normalize_features)
 	if feature_transform is not None:
 		features = feature_transform(features)
 
 	transcript = parse_transcript(transcript)
 	return features, transcript, audio_path
 
-def logfbanknorm(signal, sample_rate, window_size, window_stride, window, num_input_features):
+def logfbank_(signal, sample_rate, window_size, window_stride, window, num_input_features):
+	window = getattr(scipy.signal, window)
 	preemphasis = lambda signal, coeff: torch.cat([signal[:1], torch.sub(signal[1:], torch.mul(signal[:-1], coeff))])
 	n_fft = int(sample_rate * (window_size + 1e-8))
 	win_length = n_fft
@@ -142,11 +148,25 @@ def logfbanknorm(signal, sample_rate, window_size, window_stride, window, num_in
 	spect = librosa.stft(signal.numpy(), n_fft=n_fft, hop_length=hop_length, win_length=win_length, window=window, center=True)
 	spect = np.abs(spect) ** 2.0
 	features = librosa.filters.mel(sample_rate, n_fft, n_mels=num_input_features, fmin=0, fmax=int(sample_rate/2)) @ spect
-	features = np.log(features + 1e-20)
-	mean = np.mean(features, axis = 1, keepdims = True)
-	std_dev = np.std(features, axis = 1, keepdims = True)
-	features = (features - mean) / std_dev
-	return torch.from_numpy(features)
+	features = torch.from_numpy(np.log(features + 1e-20))
+	mean = features.mean(dim = 1, keepdim = True)
+	std = features.std(dim = 1, keepdim = True)
+	return (features - mean) / std
+
+def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, dither = 1e-5, eps = 1e-20, preemph = 0.97, normalize = True):
+	preemphasis = lambda signal, coeff: torch.cat([signal[:1], signal[1:] - coeff * signal[:-1]])
+	signal = signal / (signal.abs().max() + eps)
+	signal = preemphasis(signal, coeff = preemph)
+	win_length, hop_length = int(window_size * sample_rate), int(window_stride * sample_rate)
+	n_fft = 2 ** math.ceil(math.log2(win_length))
+	signal += dither * torch.randn_like(signal)
+	window = getattr(torch, window)(win_length, periodic = False).type_as(signal)
+	mel_basis = torch.from_numpy(librosa.filters.mel(sample_rate, n_fft, n_mels=num_input_features, fmin=0, fmax=int(sample_rate/2))).type_as(signal)
+	power_spectrum = torch.stft(signal, n_fft, hop_length = hop_length, win_length = win_length, window = window, pad_mode = 'reflect', center = True).pow(2).sum(dim = -1)
+	features = torch.log(torch.matmul(mel_basis, power_spectrum) + eps)
+	if normalize:
+		features = (features - features.mean(dim = 1, keepdim = True)) / (eps + features.std(dim = 1, keepdim = True))
+	return features 
 
 def read_wav(path, channel=-1, normalize = True, sample_rate = None, max_duration = None):
 	sample_rate_, signal = scipy.io.wavfile.read(path)

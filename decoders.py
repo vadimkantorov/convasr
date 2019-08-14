@@ -1,20 +1,3 @@
-#!/usr/bin/env python
-# ----------------------------------------------------------------------------
-# Copyright 2015-2016 Nervana Systems Inc.
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#	  http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ----------------------------------------------------------------------------
-# Modified to support pytorch Tensors
-
 import Levenshtein 
 import torch
 
@@ -31,47 +14,23 @@ class GreedyDecoder(object):
 	def __init__(self, labels):
 	   self.labels = labels 
 
-	def decode(self, probs, sizes):
-		decoded = probs.argmax(dim = 1).tolist()
-		return [[i for k, i in enumerate(d) if (k == 0 or i != d[k - 1]) and i != self.labels.blank_idx] for d in decoded]
+	def decode(self, probs, output_lengths):
+		decoded_idx = probs.argmax(dim = 1).tolist()
+		return [[i for k, i in enumerate(d) if (k == 0 or i != d[k - 1]) and i != self.labels.blank_idx] for d in decoded_idx]
 
-class BeamCTCDecoder(object):
-	def __init__(self, labels, lm_path=None, alpha=0, beta=0, cutoff_top_n=40, cutoff_prob=1.0, beam_width=100,
-				 num_processes=4, blank_index=0):
-		super(BeamCTCDecoder, self).__init__(labels)
-		try:
-			from ctcdecode import CTCBeamDecoder
-		except ImportError:
-			raise ImportError("BeamCTCDecoder requires paddledecoder package.")
-		self._decoder = CTCBeamDecoder(labels.lower(), lm_path, alpha, beta, cutoff_top_n, cutoff_prob, beam_width,
-									   num_processes, blank_index)
+class BeamSearchDecoder(object):
+	def __init__(self, labels, lm_path, beam_width, beam_alpha = 0, beam_beta = 0, cutoff_top_n = 40, cutoff_prob = 1.0, num_workers = 1):
+		import ctcdecode
+		self.labels = labels
+		self.beam_search_decoder = ctcdecode.CTCBeamDecoder(str(labels).lower(), lm_path, beam_alpha, beam_beta, cutoff_top_n, cutoff_prob, beam_width, num_workers, labels.blank_idx, log_probs_input = True)
 
-	def convert_to_strings(self, out, seq_len):
-		results = []
-		for b, batch in enumerate(out):
-			utterances = []
-			for p, utt in enumerate(batch):
-				size = seq_len[b][p]
-				transcript = ''.join(map(self.labels.idx2chr, utt[0:size])).upper() if size > 0 else ''
-				utterances.append(transcript)
-			results.append(utterances)
-		return results
+	def decode(self, probs, output_lengths):
+		decoded_chr, decoded_scores, decoded_offsets, decoded_lengths = self.beam_search_decoder.decode(probs.permute(0, 2, 1).cpu(), torch.IntTensor(output_lengths))
+		decoded_top = decoded_scores.argmax(dim = 1)
+		arange = torch.arange(len(decoded_top))
+		return [d[t][:l[t]].tolist() for d, l, t in zip(decoded_chr, decoded_lengths, decoded_top)]
 
-	def convert_tensor(self, offsets, sizes):
-		results = []
-		for b, batch in enumerate(offsets):
-			utterances = []
-			for p, utt in enumerate(batch):
-				size = sizes[b][p]
-				utterances.append(utt[0:size] if size > 0 else torch.tensor([], dtype=torch.int))
-			results.append(utterances)
-		return results
-
-	def decode(self, probs, sizes=None):
-		out, scores, offsets, seq_lens = self._decoder.decode(probs.permute(2, 0, 1).cpu(), sizes)
-		return self.convert_to_strings(out, seq_lens), self.convert_tensor(offsets, seq_lens)
-
-def levenshtein(a, b):
+def unused_levenshtein(a, b):
 	"""Calculates the Levenshtein distance between a and b.
 	The code was copied from: http://hetland.org/coding/python/levenshtein.py
 	"""

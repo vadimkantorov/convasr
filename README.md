@@ -55,5 +55,4 @@ sudo nvidia-docker build -t convasr scripts
 
 # run docker
 sudo nvidia-docker run -v $PWD/deepspeech.pytorch:/deepspeech.pytorch -it --ipc=host convasr 
-
 ```

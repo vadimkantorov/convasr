@@ -8,11 +8,11 @@ import torch.nn.functional as F
 class Wav2LetterRu(nn.Sequential):
 	def __init__(self, num_classes, num_input_features):
 		def conv_bn_relu_dropout(kernel_size, num_channels, stride = 1, padding = None, dropout = 0.2, batch_norm_momentum = 0.1):
-			return nn.Sequential(collections.OrderedDict(zip(['conv', 'bn', 'relu_dropout'], [
+			return nn.Sequential(collections.OrderedDict(zip(['0', '1', '2'], [ #['conv', 'bn', 'relu_dropout'], [
 				nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, padding = padding if padding is not None else max(1, kernel_size // 2), bias = False),
 				nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum),
 				ReLUDropoutInplace(p = dropout)
-                ]))
+				]))
 			)
 
 		layers = [
@@ -122,6 +122,25 @@ class ReLUDropoutInplace(torch.nn.Module):
 			return input.masked_fill_(~mask, 0).mul_(1.0 / p1m)
 		else:
 			return input.clamp_(min = 0)
+
+class MaskedConv1d(nn.Conv1d):
+	def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=False, use_mask=True):
+		super(MaskedConv1d, self).__init__(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+		self.use_mask = use_mask
+
+		def get_seq_len(self, lens):
+			return ((lens + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1) / self.stride[0] + 1)
+
+		def forward(self, inp):
+			x, lens = inp
+			if self.use_mask:
+				max_len = x.size(2)
+				mask = torch.arange(max_len, dtype = lens.dtype, device = lens.device).expand(len(lens), max_len) >= lens.unsqueeze(1)
+				x = x.masked_fill(mask.unsqueeze(1).to(device=x.device), 0)
+				del mask
+				lens = self.get_seq_len(lens)
+			out = super(MaskedConv1d, self).forward(x)
+			return out, lens
 
 def load_checkpoint(checkpoint_path, model, optimizer = None, sampler = None, scheduler = None):
 	checkpoint = torch.load(checkpoint_path, map_location = 'cpu')
