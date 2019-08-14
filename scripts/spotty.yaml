@@ -36,6 +36,7 @@ instances:
             deletionPolicy: retain
         - name: workspace
           parameters:
+            volumeName: convasr-instance-train1-workspace
             size: 200
             deletionPolicy: retain
         - name: dataset_open_stt

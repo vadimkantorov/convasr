@@ -14,6 +14,8 @@ container:
   volumeMounts:
     - name: dataset_open_stt
       mountPath: /dataset_open_stt
+    - name: workspace
+      mountPath: /workspace
 
 instances:
   - name: instance-preprocess
@@ -30,6 +32,12 @@ instances:
             size: 1200
             mountDir: /dataset_open_stt
             deletionPolicy: retain
+        - name: workspace
+          parameters:
+            volumeName: convasr-instance-train1-workspace
+            size: 200
+            deletionPolicy: retain
+            
             
 scripts:
   preprocess: |

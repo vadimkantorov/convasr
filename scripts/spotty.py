@@ -16,8 +16,8 @@ def train(script):
     ARGS = ''.join(l.rstrip('\\') for l in lines[first + 1:last + 1]); print(ARGS)
     subprocess.call(['spotty', 'run', '-c', spotty_yaml, 'train', '-p', 'ARGS=' + ARGS])
 
-def download_checkpoint(experiment_id):
-    subprocess.call(['spotty', 'download', '-c', spotty_yaml, '-f', os.path.join('experiments', experiment_id)])
+def download_checkpoint(checkpoint_path):
+    subprocess.call(['spotty', 'download', '-c', spotty_yaml, '-f', os.path.join('experiments', checkpoint_path)])
 
 def cer(experiment_id, val_dataset_name):
     subprocess.call(['spotty', 'run', '-c', spotty_yaml, 'cer', '-p', 'ID=' + experiment_id, 'VALDATASETNAME=' + val_dataset_name])
@@ -38,7 +38,7 @@ if __name__ == '__main__':
     cmd.set_defaults(func = train)
 
     cmd = subparsers.add_parser('download_checkpoint')
-    cmd.add_argument('experiment-id')
+    cmd.add_argument('checkpoint_path')
     cmd.set_defaults(func = download_checkpoint)
     
     cmd = subparsers.add_parser('cer')
