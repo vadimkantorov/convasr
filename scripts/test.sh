@@ -1,10 +1,12 @@
 CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --lang ru \
   --model Wav2LetterRu \
-  --checkpoint "data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80_augAWNSPGPPS0.3/checkpoint_epoch00_iter0002500.pt" \
-  --val-batch-size 64 --val-data-path data/clean_val.csv  ../sample_ok/sample_ok.convasr.csv \
-  --decoder beam --beam-width 2048 --lm-path chats.binary #data/ru_wiyalen_no_punkt.arpa.binary
+  --checkpoint data/checkpoint_epoch04_iter0124135.pt \
+  --val-batch-size 64 --val-data-path ../sample_ok/sample_ok.convasr.csv \
+  --decoder beam --beam-width 5000 --lm-path chats.binary #data/ru_wiyalen_no_punkt.arpa.binary
 
+
+#  --checkpoint "data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80_augAWNSPGPPS0.3/checkpoint_epoch00_iter0002500.pt" \
 #  --checkpoint data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80_augAWNSPGPPS0.3_weightnorm/checkpoint_epoch00_iter0002500.pt \
 #  data/adapted.csv 
 #  --val-waveform-transforms 'MixExternalNoise("data/sample_ok.noise.csv", 1.0)' \
