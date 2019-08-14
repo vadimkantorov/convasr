@@ -16,11 +16,11 @@ def train(script):
     ARGS = ''.join(l.rstrip('\\') for l in lines[first + 1:last + 1]); print(ARGS)
     subprocess.call(['spotty', 'run', '-c', spotty_yaml, 'train', '-p', 'ARGS=' + ARGS])
 
-def download_checkpoint(id):
-    subprocess.call(['spotty', 'download', '-c', spotty_yaml, '-f', os.path.join('experiments', id)])
+def download_checkpoint(experiment_id):
+    subprocess.call(['spotty', 'download', '-c', spotty_yaml, '-f', os.path.join('experiments', experiment_id)])
 
-def cer(id, val_dataset_name):
-    subprocess.call(['spotty', 'run', '-c', spotty_yaml, 'cer', '-p', 'ID=' + id, 'VALDATASETNAME=' + val_dataset_name])
+def cer(experiment_id, val_dataset_name):
+    subprocess.call(['spotty', 'run', '-c', spotty_yaml, 'cer', '-p', 'ID=' + experiment_id, 'VALDATASETNAME=' + val_dataset_name])
 
 def tensorboard(id):
     subprocess.call(['spotty', 'run', '-c', spotty_yaml, 'tensorboard', '-p', 'ID=' + id])
@@ -38,11 +38,11 @@ if __name__ == '__main__':
     cmd.set_defaults(func = train)
 
     cmd = subparsers.add_parser('download_checkpoint')
-    cmd.add_argument('id')
+    cmd.add_argument('experiment-id')
     cmd.set_defaults(func = download_checkpoint)
     
     cmd = subparsers.add_parser('cer')
-    cmd.add_argument('id')
+    cmd.add_argument('experiment-id')
     cmd.add_argument('-d', '--val-dataset-name', default = 'clean_val.csv')
     cmd.set_defaults(func = cer)
 

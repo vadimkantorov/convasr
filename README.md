@@ -36,3 +36,46 @@ python scripts/spotty.py download_checkpoint CHECKPOINT_PATH
 # check spot instance prices
 spotty aws spot-prices -i p3.8xlarge -r us-east-1
 ```
+
+# Augment a dataset with SOX (offline)
+The passed command must read from stdin and write to stdout.
+
+```shell
+# encode to GSM and back
+bash scripts/augment.sh data/clean_val.csv data/clean_val_gsm "sox -V0 -t wav - -r 8k -c 1 -t gsm - | sox -V0 -t gsm - -t wav -b 16 -e signed -r 16k -c 1 -"
+
+# encode to AMR (NB: narrow-band, 8kHz) and back
+bash scripts/augment.sh data/clean_val.csv data/clean_val_amrnb "sox -V0 -t wav - -r 8k -c 1 -t amr-nb - | sox -V0 -t amr-nb - -t wav -b 16 -e signed -r 16k -c 1 -"
+```
+
+# Docker commands
+```
+# build scripts/Dockerfile
+sudo nvidia-docker build -t convasr scripts
+
+# run docker
+sudo nvidia-docker run -v $PWD/deepspeech.pytorch:/deepspeech.pytorch -it --ipc=host convasr 
+```
+
+# KenLM
+Dependencies: `sudo apt-get install build-essential cmake libboost-all-dev zlib1g-dev libbz2-dev liblzma-dev`
+```shell
+# build kenlm
+wget https://github.com/kpu/kenlm/archive/master.tar.gz -O kenlm.tar.gz
+tar -xf kenlm.tar.gz
+cd master
+mkdir build
+cd build
+cmake ..
+make -j 4
+
+# estimate model in the text ARPA format
+bin/lmplz -o 2 <text.csv >lm.arpa
+bin/build_binary /dev/stdin lm.bin <lm.arpa
+```
+
+# Beam search decoder
+Dependencies: same as KenLM, `pip install wget`
+```shell
+pip install git+https://github.com/parlance/ctcdecode
+```
