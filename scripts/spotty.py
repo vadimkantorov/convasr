@@ -27,32 +27,28 @@ def tensorboard(spotty_yaml, experiment_id):
 if __name__ == '__main__':
     spotty_yaml = os.path.join(os.path.dirname(__file__), 'spotty.yaml')
     parser = argparse.ArgumentParser()
+    parser.add_argument('-c','--spotty_yaml', default = spotty_yaml)
     subparsers = parser.add_subparsers()
 
     cmd = subparsers.add_parser('spotty')
-    cmd.add_argument('-c','--spotty_yaml', default = spotty_yaml)
     cmd.add_argument('arguments', nargs = argparse.REMAINDER)
     cmd.set_defaults(func = spotty)
 
     cmd = subparsers.add_parser('train')
     cmd.add_argument('script')
-    cmd.add_argument('-c','--spotty_yaml', default = spotty_yaml)
     cmd.set_defaults(func = train)
 
     cmd = subparsers.add_parser('download_checkpoint')
     cmd.add_argument('checkpoint_path')
-    cmd.add_argument('-c','--spotty_yaml', default = spotty_yaml)
     cmd.set_defaults(func = download_checkpoint)
     
     cmd = subparsers.add_parser('cer')
     cmd.add_argument('experiment_id')
-    cmd.add_argument('-c','--spotty_yaml', default = spotty_yaml)
     cmd.add_argument('-d', '--val-dataset-name', default = 'clean_val.csv')
     cmd.set_defaults(func = cer)
 
     cmd = subparsers.add_parser('tensorboard')
     cmd.add_argument('experiment_id')
-    cmd.add_argument('-c','--spotty_yaml', default = spotty_yaml)
     cmd.set_defaults(func = tensorboard)
 
     args = vars(parser.parse_args())
