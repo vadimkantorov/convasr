@@ -14,8 +14,8 @@ class GreedyDecoder(object):
 	def __init__(self, labels):
 	   self.labels = labels 
 
-	def decode(self, probs, output_lengths):
-		decoded_idx = probs.argmax(dim = 1).tolist()
+	def decode(self, log_probs, output_lengths):
+		decoded_idx = log_probs.argmax(dim = 1).tolist()
 		return [[i for k, i in enumerate(d) if (k == 0 or i != d[k - 1]) and i != self.labels.blank_idx] for d in decoded_idx]
 
 class BeamSearchDecoder(object):
@@ -24,8 +24,8 @@ class BeamSearchDecoder(object):
 		self.labels = labels
 		self.beam_search_decoder = ctcdecode.CTCBeamDecoder(str(labels).lower(), lm_path, beam_alpha, beam_beta, cutoff_top_n, cutoff_prob, beam_width, num_workers, labels.blank_idx, log_probs_input = True)
 
-	def decode(self, probs, output_lengths):
-		decoded_chr, decoded_scores, decoded_offsets, decoded_lengths = self.beam_search_decoder.decode(probs.permute(0, 2, 1).cpu(), torch.IntTensor(output_lengths))
+	def decode(self, log_probs, output_lengths):
+		decoded_chr, decoded_scores, decoded_offsets, decoded_lengths = self.beam_search_decoder.decode(log_probs.permute(0, 2, 1).cpu(), torch.IntTensor(output_lengths))
 		decoded_top = decoded_scores.argmax(dim = 1)
 		arange = torch.arange(len(decoded_top))
 		return [d[t][:l[t]].tolist() for d, l, t in zip(decoded_chr, decoded_lengths, decoded_top)]

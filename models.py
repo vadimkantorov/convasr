@@ -4,6 +4,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import librosa
 
 class Wav2LetterRu(nn.Sequential):
 	def __init__(self, num_classes, num_input_features):
@@ -155,3 +156,18 @@ def load_checkpoint(checkpoint_path, model, optimizer = None, sampler = None, sc
 def save_checkpoint(checkpoint_path, model, optimizer, sampler, scheduler, epoch, batch_idx):
 	checkpoint = dict(model_state_dict = model.state_dict(), optimizer_state_dict = optimizer.state_dict(), scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(batch_idx), epoch = epoch)
 	torch.save(checkpoint, checkpoint_path)
+
+def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, dither = 1e-5, eps = 1e-20, preemph = 0.97, normalize = True):
+	preemphasis = lambda signal, coeff: torch.cat([signal[:1], signal[1:] - coeff * signal[:-1]])
+	signal = signal / (signal.abs().max() + eps)
+	signal = preemphasis(signal, coeff = preemph)
+	win_length, hop_length = int(window_size * sample_rate), int(window_stride * sample_rate)
+	n_fft = 2 ** math.ceil(math.log2(win_length))
+	signal += dither * torch.randn_like(signal)
+	window = getattr(torch, window)(win_length, periodic = False).type_as(signal)
+	mel_basis = torch.from_numpy(librosa.filters.mel(sample_rate, n_fft, n_mels=num_input_features, fmin=0, fmax=int(sample_rate/2))).type_as(signal)
+	power_spectrum = torch.stft(signal, n_fft, hop_length = hop_length, win_length = win_length, window = window, pad_mode = 'reflect', center = True).pow(2).sum(dim = -1)
+	features = torch.log(torch.matmul(mel_basis, power_spectrum) + eps)
+	if normalize:
+		features = (features - features.mean(dim = 1, keepdim = True)) / (eps + features.std(dim = 1, keepdim = True))
+	return features 

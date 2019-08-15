@@ -34,12 +34,12 @@ def traintest(args):
 	set_random_seed(args.seed)
 
 	labels = dataset.Labels(importlib.import_module(args.lang))
-	transform = lambda name, prob: getattr(transforms, name)() if prob != prob else getattr(transforms, name)(prob) if prob > 0 else None
-	val_waveform_transform = transform(args.val_waveform_transform, args.val_waveform_transform_prob)
+	transform = lambda name, prob, args: getattr(transforms, name)() if prob != prob else getattr(transforms, name)(prob, *args) if prob > 0 else None
+	val_waveform_transform = transform(args.val_waveform_transform, args.val_waveform_transform_prob, args.val_waveform_transform_args)
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed) for val_data_path in args.val_data_path}
 	model = getattr(models, args.model)(num_classes = len(labels), num_input_features = args.num_input_features)
 	criterion = nn.CTCLoss(blank = labels.blank_idx, reduction = 'none').to(args.device)
-	decoder = decoders.GreedyDecoder(labels) if args.decoder == 'greedy' else decoders.BeamSearchDecoder(labels, lm_path = args.lm_path, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers)
+	decoder = decoders.GreedyDecoder(labels) if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm_path, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers)
 
 	def evaluate_model(epoch = None, batch_idx = None, iteration = None):
 		training = epoch is not None and batch_idx is not None and iteration is not None
@@ -87,7 +87,7 @@ def traintest(args):
 		model = torch.nn.DataParallel(model).to(args.device)
 		return evaluate_model()
 
-	train_waveform_transform = transform(args.train_waveform_transform, args.train_waveform_transform_prob)
+	train_waveform_transform = transform(args.train_waveform_transform, args.train_waveform_transform_prob, args.train_waveform_transform_args)
 	train_dataset = dataset.SpectrogramDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = train_waveform_transform)
 	train_dataset_name = os.path.basename(args.train_data_path)
 	train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
@@ -184,7 +184,7 @@ if __name__ == '__main__':
 	parser.add_argument('--experiments-dir', default = 'data/experiments')
 	parser.add_argument('--experiment-dir', default = '{experiments_dir}/{experiment_id}')
 	parser.add_argument('--transcripts', default = 'data/transcripts_{val_dataset_name}.json')
-	parser.add_argument('--logits', default = 'data/logits_{val_dataset_name}.pt')
+	parser.add_argument('--logits', nargs = '?', const = 'data/logits_{val_dataset_name}.pt')
 	parser.add_argument('--args', default = 'args.json')
 	parser.add_argument('--model', default = 'Wav2LetterRu')
 	parser.add_argument('--seed', type = int, default = 1)
@@ -195,15 +195,17 @@ if __name__ == '__main__':
 	parser.add_argument('--val-waveform-transform', default = 'AWNSPGPPS')
 	parser.add_argument('--val-feature-transform')
 	parser.add_argument('--val-waveform-transform-prob', type = float, default = 0)
+	parser.add_argument('--val-waveform-transform-args', nargs = '*', default = [])
 	parser.add_argument('--train-waveform-transform', default = 'AWNSPGPPS')
 	parser.add_argument('--train-feature-transform')
 	parser.add_argument('--train-waveform-transform-prob', type = float, default = 0)
+	parser.add_argument('--train-waveform-transform-args', nargs = '*', default = [])
 	parser.add_argument('--val-iteration-interval', type = int, default = None)
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
 	parser.add_argument('--log-weight-distribution', action = 'store_true')
 	parser.add_argument('--augment', action = 'store_true')
 	parser.add_argument('--verbose', action = 'store_true')
-	parser.add_argument('--decoder', default = 'greedy', choices = ['greedy', 'beam'])
+	parser.add_argument('--decoder', default = 'GreedyDecoder', choices = ['GreedyDecoder', 'BeamSearchDecoder'])
 	parser.add_argument('--beam-width', type = int, default = 5000)
 	parser.add_argument('--beam-alpha', type = float, default = 0.3)
 	parser.add_argument('--beam-beta', type = float, default = 1.0)

@@ -9,6 +9,8 @@ import torch.utils.data
 import scipy.io.wavfile
 import scipy.signal
 import librosa
+import models
+import transforms
 
 class SpectrogramDataset(torch.utils.data.Dataset):
 	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, waveform_transform = None, feature_transform = None, max_duration = 20, normalize_features = True):
@@ -25,7 +27,19 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
-		features, transcript, audio_path = load_example(audio_path, transcript, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, self.labels.parse, waveform_transform = self.waveform_transform, feature_transform = self.feature_transform, normalize_features = self.normalize_features)
+
+		if isinstance(self.waveform_transform, transforms.RandomComposeSox):
+			signal, sample_rate = self.waveform_transform(audio_path, sample_rate = args.sample_rate)
+		else:
+			signal, sample_rate = read_wav(audio_path, sample_rate = self.sample_rate)
+			if self.waveform_transform is not None:
+				signal, sample_rate = self.waveform_transform(signal, self.sample_rate); 
+			#dirname = os.path.join('data', waveform_transform.__class__.__name__); os.makedirs(dirname, exist_ok = True); scipy.io.wavfile.write(os.path.join(dirname, f'{random.randint(0, int(1e9))}.wav'), sample_rate, signal.numpy())
+		features = models.logfbank(signal, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, normalize = self.normalize_features)
+		if self.feature_transform is not None:
+			features = self.feature_transform(features)
+
+		transcript = self.labels.parse(transcript)
 		return features, transcript, audio_path
 
 	def __len__(self):
@@ -79,11 +93,14 @@ class Labels(object):
 	def parse(self, text):
 		if text.startswith('!clean:'):
 			return ''.join(map(self.chr2idx, text.replace('!clean:', '', 1).strip()))
-		chars = ' '.join(self.find_words(text)).upper().strip() or '*'
-		return [self.chr2idx(c) if i == 0 or c != chars[i - 1] else self.chr2idx('2') for i, c in enumerate(chars)]
+		else:
+			chars = ' '.join(self.find_words(text)).upper().strip() or '*'
+			return [self.chr2idx(c) if i == 0 or c != chars[i - 1] else self.chr2idx('2') for i, c in enumerate(chars)]
 
 	def idx2str(self, idx):
-		i2s = lambda i: ''.join(map(self.idx2chr, i))
+		replace2 = lambda s: ''.join(c if i == 0 or c != '2' else s[i - 1] for i, c in enumerate(s))
+		replace22 =lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
+		i2s = lambda i: replace22(replace2(''.join(map(self.idx2chr, i))))
 		return list(map(i2s, idx)) if isinstance(idx[0], list) else i2s(idx)
 
 	def chr2idx(self, chr):
@@ -124,49 +141,6 @@ def collate_fn(batch):
 		filenames.append(filename)
 	targets = torch.IntTensor(targets)
 	return inputs, targets, filenames, input_percentages, target_sizes
-
-def load_example(audio_path, transcript, sample_rate, window_size, window_stride, window, num_input_features, parse_transcript = lambda transcript: transcript, waveform_transform = None, feature_transform = None, normalize_features = True):
-	signal, sample_rate = read_wav(audio_path, sample_rate = sample_rate)
-	if waveform_transform is not None:
-		signal, sample_rate = waveform_transform(signal, sample_rate); 
-		#dirname = os.path.join('data', waveform_transform.__class__.__name__); os.makedirs(dirname, exist_ok = True); scipy.io.wavfile.write(os.path.join(dirname, f'{random.randint(0, int(1e9))}.wav'), sample_rate, signal.numpy())
-		
-	features = logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, normalize = normalize_features)
-	if feature_transform is not None:
-		features = feature_transform(features)
-
-	transcript = parse_transcript(transcript)
-	return features, transcript, audio_path
-
-def logfbank_(signal, sample_rate, window_size, window_stride, window, num_input_features):
-	window = getattr(scipy.signal, window)
-	preemphasis = lambda signal, coeff: torch.cat([signal[:1], torch.sub(signal[1:], torch.mul(signal[:-1], coeff))])
-	n_fft = int(sample_rate * (window_size + 1e-8))
-	win_length = n_fft
-	hop_length = int(sample_rate * (window_stride + 1e-8))
-	signal = preemphasis(signal, coeff = 0.97)
-	spect = librosa.stft(signal.numpy(), n_fft=n_fft, hop_length=hop_length, win_length=win_length, window=window, center=True)
-	spect = np.abs(spect) ** 2.0
-	features = librosa.filters.mel(sample_rate, n_fft, n_mels=num_input_features, fmin=0, fmax=int(sample_rate/2)) @ spect
-	features = torch.from_numpy(np.log(features + 1e-20))
-	mean = features.mean(dim = 1, keepdim = True)
-	std = features.std(dim = 1, keepdim = True)
-	return (features - mean) / std
-
-def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, dither = 1e-5, eps = 1e-20, preemph = 0.97, normalize = True):
-	preemphasis = lambda signal, coeff: torch.cat([signal[:1], signal[1:] - coeff * signal[:-1]])
-	signal = signal / (signal.abs().max() + eps)
-	signal = preemphasis(signal, coeff = preemph)
-	win_length, hop_length = int(window_size * sample_rate), int(window_stride * sample_rate)
-	n_fft = 2 ** math.ceil(math.log2(win_length))
-	signal += dither * torch.randn_like(signal)
-	window = getattr(torch, window)(win_length, periodic = False).type_as(signal)
-	mel_basis = torch.from_numpy(librosa.filters.mel(sample_rate, n_fft, n_mels=num_input_features, fmin=0, fmax=int(sample_rate/2))).type_as(signal)
-	power_spectrum = torch.stft(signal, n_fft, hop_length = hop_length, win_length = win_length, window = window, pad_mode = 'reflect', center = True).pow(2).sum(dim = -1)
-	features = torch.log(torch.matmul(mel_basis, power_spectrum) + eps)
-	if normalize:
-		features = (features - features.mean(dim = 1, keepdim = True)) / (eps + features.std(dim = 1, keepdim = True))
-	return features 
 
 def read_wav(path, channel=-1, normalize = True, sample_rate = None, max_duration = None):
 	sample_rate_, signal = scipy.io.wavfile.read(path)

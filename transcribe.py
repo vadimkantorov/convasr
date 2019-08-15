@@ -25,8 +25,8 @@ decoder = decoders.GreedyDecoder(labels.char_labels)
 model.eval()
 torch.set_grad_enabled(False)
 
-signal, sample_rate = read_wav(args.audio_path, sample_rate = args.sample_rate)
-features = logfbank(signal, args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features)
+signal, sample_rate = dataset.read_wav(args.audio_path, sample_rate = args.sample_rate)
+features = models.logfbank(signal, args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features)
 
 inputs = features.unsqueeze(0)
 input_lengths = torch.IntTensor([[spect.shape[-1]]])
