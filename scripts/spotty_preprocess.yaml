@@ -18,8 +18,8 @@ container:
     - name: workspace
       mountPath: /workspace
   commands: |
-    apt-get update && apt-get install python3-pip
-	pip3 install tensorboard==1.14.0
+    apt-get update && apt-get install -y python3-pip
+    pip3 install tensorboard==1.14.0
 
 instances:
   - name: instance-preprocess
@@ -63,3 +63,10 @@ scripts:
       tar -xf tmp.tar.gz
       rm tmp.tar.gz
     done
+
+  tensorboard: |
+    tensorboard --logdir /workspace/experiments/{{ID}}
+
+  cer: |
+    cd ~/convasr
+    python vis.py cer {{ID}} --experiments-dir /workspace/experiments --val-dataset-name {{VALDATASETNAME}}
