@@ -11,11 +11,15 @@ project:
 container:
   projectDir: /workspace
   image: ubuntu:18.04
+  ports: [6006]
   volumeMounts:
     - name: dataset_open_stt
       mountPath: /dataset_open_stt
     - name: workspace
       mountPath: /workspace
+  commands: |
+    apt-get update && apt-get install python3-pip
+	pip3 install tensorboard==1.14.0
 
 instances:
   - name: instance-preprocess
