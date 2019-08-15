@@ -40,6 +40,9 @@ instances:
             
             
 scripts:
+  tensorboard: |
+    tensorboard --logdir /workspace/experiments/{{ID}}
+
   preprocess: |
     apt update && apt install -y aria2
     aria2c http://academictorrents.com/download/a12a08b39cf3626407e10e01126cf27c198446c2.torrent  -d /dataset_open_stt --seed-time=0
