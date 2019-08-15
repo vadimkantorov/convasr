@@ -6,6 +6,7 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --train-data-path data/mixed_train.csv \
   --val-data-path data/mixed_val.csv data/clean_val.csv ../sample_ok/sample_ok.convasr.csv \
   --train-waveform-transform-prob 0.3 \
+  --train-waveform-transform SOXAWNSPGPPS \
   --val-iteration-interval 2500 \
   --epochs 2 
 

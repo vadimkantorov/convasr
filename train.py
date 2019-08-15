@@ -15,31 +15,50 @@ import transforms
 import decoders
 import models
 import optimizers
+import torchaudio
 try:
 	import apex
 except:
 	pass
 
+def load_checkpoint(checkpoint_path, model, optimizer = None, sampler = None, scheduler = None):
+	checkpoint = torch.load(checkpoint_path, map_location = 'cpu')
+	model.load_state_dict(checkpoint['model_state_dict'])
+	if optimizer is not None:
+		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+	if sampler is not None:
+		sampler.load_state_dict(checkpoint['sampler_state_dict'])
+	if scheduler is not None:
+		scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+
+def save_checkpoint(checkpoint_path, model, optimizer, sampler, scheduler, epoch, batch_idx):
+	checkpoint = dict(model = model.__class__.__name__, model_state_dict = model.state_dict(), optimizer_state_dict = optimizer.state_dict(), scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(batch_idx), epoch = epoch)
+	torch.save(checkpoint, checkpoint_path)
+
 def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
 		set_random_seed(seed)
 
-def traintest(args):
+def traineval(args):
 	print('\n', 'Arguments:', args)
-	args.experiment_id = args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, train_waveform_transform = f'aug{args.train_waveform_transform}{args.train_waveform_transform_prob}' if args.train_waveform_transform_prob > 0 or args.train_waveform_transform_prob != args.train_waveform_transform_prob else '').replace('e-0', 'e-').rstrip('_')
-	print('\n', 'Experiment id:', args.experiment_id, '\n')
+	args.experiment_id = args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, train_waveform_transform = f'aug{args.train_waveform_transform}{args.train_waveform_transform_prob or ""}' if args.train_waveform_transform_prob is None or args.train_waveform_transform_prob > 0 else '').replace('e-0', 'e-').rstrip('_')
+	if args.train_data_path:
+		print('\n', 'Experiment id:', args.experiment_id, '\n')
 	if args.dry:
 		return
 	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, experiment_id = args.experiment_id)
 	set_random_seed(args.seed)
 
 	labels = dataset.Labels(importlib.import_module(args.lang))
-	transform = lambda name, prob, args: getattr(transforms, name)() if prob != prob else getattr(transforms, name)(prob, *args) if prob > 0 else None
+	transform = lambda name, prob, args: getattr(transforms, name)(*args) if prob is None else getattr(transforms, name)(prob, *args) if prob > 0 else None
 	val_waveform_transform = transform(args.val_waveform_transform, args.val_waveform_transform_prob, args.val_waveform_transform_args)
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed) for val_data_path in args.val_data_path}
+	if args.val_waveform_transform_debug_dir:
+		args.val_waveform_transform_debug_dir = os.path.join(args.val_waveform_transform_debug_dir, str(val_waveform_transform) if isinstance(val_waveform_transform, transforms.RandomCompose) else val_waveform_transform.__class__.__name__)
+		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed) for val_data_path in args.val_data_path}
 	model = getattr(models, args.model)(num_classes = len(labels), num_input_features = args.num_input_features)
 	criterion = nn.CTCLoss(blank = labels.blank_idx, reduction = 'none').to(args.device)
-	decoder = decoders.GreedyDecoder(labels) if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm_path, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers)
+	decoder = decoders.GreedyDecoder(labels) if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers)
 
 	def evaluate_model(epoch = None, batch_idx = None, iteration = None):
 		training = epoch is not None and batch_idx is not None and iteration is not None
@@ -79,11 +98,11 @@ def traintest(args):
 				elif args.logits:
 					torch.save(dict(logits = logits_, ref_tra = ref_tra_), args.logits.format(val_dataset_name = val_dataset_name))
 		if training:
-			models.save_checkpoint(os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, train_sampler, scheduler, epoch, batch_idx)
+			save_checkpoint(os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, train_sampler, scheduler, epoch, batch_idx)
 			model.train()
 
 	if not args.train_data_path:
-		models.load_checkpoint(args.checkpoint, model)
+		load_checkpoint(args.checkpoint, model)
 		model = torch.nn.DataParallel(model).to(args.device)
 		return evaluate_model()
 
@@ -193,12 +212,13 @@ if __name__ == '__main__':
 	parser.add_argument('--dry', action = 'store_true')
 	parser.add_argument('--lang', default = 'ru')
 	parser.add_argument('--val-waveform-transform', default = 'AWNSPGPPS')
+	parser.add_argument('--val-waveform-transform-debug-dir')
 	parser.add_argument('--val-feature-transform')
-	parser.add_argument('--val-waveform-transform-prob', type = float, default = 0)
+	parser.add_argument('--val-waveform-transform-prob', type = float, default = None)
 	parser.add_argument('--val-waveform-transform-args', nargs = '*', default = [])
 	parser.add_argument('--train-waveform-transform', default = 'AWNSPGPPS')
 	parser.add_argument('--train-feature-transform')
-	parser.add_argument('--train-waveform-transform-prob', type = float, default = 0)
+	parser.add_argument('--train-waveform-transform-prob', type = float, default = None)
 	parser.add_argument('--train-waveform-transform-args', nargs = '*', default = [])
 	parser.add_argument('--val-iteration-interval', type = int, default = None)
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
@@ -209,6 +229,6 @@ if __name__ == '__main__':
 	parser.add_argument('--beam-width', type = int, default = 5000)
 	parser.add_argument('--beam-alpha', type = float, default = 0.3)
 	parser.add_argument('--beam-beta', type = float, default = 1.0)
-	parser.add_argument('--lm-path')
+	parser.add_argument('--lm')
 	
-	traintest(parser.parse_args())
+	traineval(parser.parse_args())

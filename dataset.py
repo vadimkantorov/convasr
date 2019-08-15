@@ -13,7 +13,7 @@ import models
 import transforms
 
 class SpectrogramDataset(torch.utils.data.Dataset):
-	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, waveform_transform = None, feature_transform = None, max_duration = 20, normalize_features = True):
+	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, waveform_transform = None, feature_transform = None, max_duration = 20, normalize_features = True, waveform_transform_debug_dir = None):
 		self.window_stride = window_stride
 		self.window_size = window_size
 		self.sample_rate = sample_rate
@@ -23,18 +23,19 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 		self.waveform_transform = waveform_transform
 		self.feature_transform = feature_transform
 		self.normalize_features = normalize_features
+		self.waveform_transform_debug_dir = waveform_transform_debug_dir
 		self.ids = [(row[0], row[1], float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or float(row[2]) < max_duration] if isinstance(data_or_path, str) else [d for d in data_or_path if d[-1] == -1 or d[-1] < max_duration]
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
 
-		if isinstance(self.waveform_transform, transforms.RandomComposeSox):
-			signal, sample_rate = self.waveform_transform(audio_path, sample_rate = args.sample_rate)
-		else:
-			signal, sample_rate = read_wav(audio_path, sample_rate = self.sample_rate)
-			if self.waveform_transform is not None:
-				signal, sample_rate = self.waveform_transform(signal, self.sample_rate); 
-			#dirname = os.path.join('data', waveform_transform.__class__.__name__); os.makedirs(dirname, exist_ok = True); scipy.io.wavfile.write(os.path.join(dirname, f'{random.randint(0, int(1e9))}.wav'), sample_rate, signal.numpy())
+		signal, sample_rate = (audio_path, self.sample_rate) if isinstance(self.waveform_transform, transforms.RandomComposeSox) else read_wav(audio_path, sample_rate = self.sample_rate)
+		if self.waveform_transform is not None:
+			signal, sample_rate = self.waveform_transform(signal, self.sample_rate)
+		
+		if self.waveform_transform_debug_dir:
+			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, f'{hash(audio_path)}.wav'), sample_rate, signal.numpy())
+
 		features = models.logfbank(signal, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, normalize = self.normalize_features)
 		if self.feature_transform is not None:
 			features = self.feature_transform(features)
@@ -142,7 +143,7 @@ def collate_fn(batch):
 	targets = torch.IntTensor(targets)
 	return inputs, targets, filenames, input_percentages, target_sizes
 
-def read_wav(path, channel=-1, normalize = True, sample_rate = None, max_duration = None):
+def read_wav(path, channel = -1, normalize = True, sample_rate = None, max_duration = None):
 	sample_rate_, signal = scipy.io.wavfile.read(path)
 	if len(signal.shape) > 1:
 		if signal.shape[1] == 1:
@@ -157,10 +158,9 @@ def read_wav(path, channel=-1, normalize = True, sample_rate = None, max_duratio
 		signal = signal[:int(max_duration * sample_rate_), ...]
 	signal = torch.from_numpy(signal).to(torch.float32)
 	if normalize:
-		signal *= 1. / (signal.abs().max() + 1e-5)
+		signal = models.normalize_signal(signal)
 
 	if sample_rate is not None and sample_rate_ != sample_rate:
 		sample_rate_, signal = sample_rate, torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate))
-		#dirname = os.path.join('data', 'sample_ok_converted'); os.makedirs(dirname, exist_ok = True); scipy.io.wavfile.write(os.path.join(dirname, f'{random.randint(0, int(1e9))}.wav'), sample_rate, signal.numpy())
 
 	return signal, sample_rate_

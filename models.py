@@ -28,7 +28,7 @@ class Wav2LetterRu(nn.Sequential):
 			conv_bn_relu_dropout(kernel_size = 1,  num_channels = (2048, 2048), stride = 1),
 			nn.Conv1d(2048, num_classes, kernel_size = 1, stride = 1)
 		]
-		super(Wav2LetterRu, self).__init__(*layers)
+		super().__init__(*layers)
 
 	def forward(self, x, input_lengths):
 		return super().forward(x)
@@ -54,7 +54,7 @@ class Wav2LetterVanilla(nn.Sequential):
 			nn.Conv1d(1024, num_classes, kernel_size = 1)
 		]
 
-		super(Wav2LetterVanilla, self).__init__(*layers)
+		super().__init__(*layers)
 
 class JasperNet(nn.ModuleList):
 	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1):
@@ -92,7 +92,7 @@ class JasperNet(nn.ModuleList):
 
 			nn.Conv1d(1024, num_classes, kernel_size = 1)
 		]
-		super(JasperNet, self).__init__(prologue + backbone + epilogue)
+		super().__init__(prologue + backbone + epilogue)
 
 	def forward(self, x):
 		residual = []
@@ -112,7 +112,7 @@ def compute_output_lengths(model, input_lengths):
 
 class ReLUDropoutInplace(torch.nn.Module):
 	def __init__(self, p):
-		super(ReLUDropoutInplace, self).__init__()
+		super().__init__()
 		self.p = p
 
 	def forward(self, input):
@@ -126,7 +126,7 @@ class ReLUDropoutInplace(torch.nn.Module):
 
 class MaskedConv1d(nn.Conv1d):
 	def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=False, use_mask=True):
-		super(MaskedConv1d, self).__init__(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
+		super().__init__(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
 		self.use_mask = use_mask
 
 		def get_seq_len(self, lens):
@@ -140,22 +140,8 @@ class MaskedConv1d(nn.Conv1d):
 				x = x.masked_fill(mask.unsqueeze(1).to(device=x.device), 0)
 				del mask
 				lens = self.get_seq_len(lens)
-			out = super(MaskedConv1d, self).forward(x)
+			out = super().forward(x)
 			return out, lens
-
-def load_checkpoint(checkpoint_path, model, optimizer = None, sampler = None, scheduler = None):
-	checkpoint = torch.load(checkpoint_path, map_location = 'cpu')
-	model.load_state_dict(checkpoint['model_state_dict'])
-	if optimizer is not None:
-		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-	if sampler is not None:
-		sampler.load_state_dict(checkpoint['sampler_state_dict'])
-	if scheduler is not None:
-		scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-
-def save_checkpoint(checkpoint_path, model, optimizer, sampler, scheduler, epoch, batch_idx):
-	checkpoint = dict(model_state_dict = model.state_dict(), optimizer_state_dict = optimizer.state_dict(), scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(batch_idx), epoch = epoch)
-	torch.save(checkpoint, checkpoint_path)
 
 def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, dither = 1e-5, eps = 1e-20, preemph = 0.97, normalize = True):
 	preemphasis = lambda signal, coeff: torch.cat([signal[:1], signal[1:] - coeff * signal[:-1]])
@@ -171,3 +157,6 @@ def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_
 	if normalize:
 		features = (features - features.mean(dim = 1, keepdim = True)) / (eps + features.std(dim = 1, keepdim = True))
 	return features 
+
+def normalize_signal(signal, eps = 1e-5):
+	return signal / (signal.abs().max() + eps)

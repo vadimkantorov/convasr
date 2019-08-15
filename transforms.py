@@ -2,29 +2,8 @@ import random
 import torch
 import dataset
 import librosa
-import pyrubberband
 import torchaudio
-
-torchaudio.initialize_sox()
-class RandomComposeSox(object):
-	def __init__(self, transforms, prob):
-		self.transforms = transforms
-		self.prob = prob
-
-	def __call__(self, audio_path, sample_rate):
-		sox = torchaudio.sox_effects.SoxEffectsChain()
-		sox.set_input_file(audio_path)
-		effect = None
-		if random.random() < self.prob:
-			transform = random.choice(self.transforms)
-			effect = ['pitch', fixed_or_uniform(transform.n_steps) * 100] if isinstance(transform, PitchShift) else ['tempo', fixed_or_uniform(transform.rate)] if isinstance(transform, SpeedPerturbation) else ['gain', fixed_or_uniform(transform.gain)] if isinstance(transform, GainPerturbation) else []
-			if effect:
-				sox.append_effect_to_chain(effect)	
-		sox.append_effect_to_chain('rate', sample_rate)
-		signal, sample_rate = sox.sox_build_flow_effects()
-		if effect == []:
-			signal, sample_rate = transform(signal, sample_rate) 
-		return signal, sample_rate
+import models
 
 class RandomCompose(object):
 	def __init__(self, transforms, prob):
@@ -37,20 +16,50 @@ class RandomCompose(object):
 			x = transform(*x)
 		return x
 
+	def __str__(self):
+		return '_'.join(t.__class__.__name__ + ('__'.join(str(y) for x in t.__dict__.values() for y in (x if isinstance(x, list) else [x]))) for t in self.transforms)
+
+class RandomComposeSox(RandomCompose):
+	def __init__(self, transforms, prob):
+		super().__init__(transforms, prob)
+		self.initialize_sox = True
+
+	def __call__(self, audio_path, sample_rate, normalize = True):
+		if self.initialize_sox:
+			torchaudio.initialize_sox()
+			self.initialize_sox = False
+		sox = torchaudio.sox_effects.SoxEffectsChain()
+		sox.set_input_file(audio_path)
+		effect = None
+		if random.random() < self.prob:
+			transform = random.choice(self.transforms)
+			effect = ['pitch', fixed_or_uniform(transform.n_steps) * 100] if isinstance(transform, PitchShift) else ['tempo', fixed_or_uniform(transform.rate)] if isinstance(transform, SpeedPerturbation) else ['gain', fixed_or_uniform(transform.gain_db)] if isinstance(transform, GainPerturbation) else []
+			if effect:
+				sox.append_effect_to_chain(*effect)
+		sox.append_effect_to_chain('rate', sample_rate)
+		sox.append_effect_to_chain('channels', 1)
+		signal = sox.sox_build_flow_effects()[0][0]
+		if normalize:
+			signal = models.normalize_signal(signal)
+		if effect == []:
+			signal, sample_rate = transform(signal, sample_rate) 
+		return signal, sample_rate
+
+	def __str__(self):
+		return 'SOXx' + RandomCompose.__str__(self)
+
 class PitchShift(object):
-	def __init__(self, n_steps = [-2, 2]):
+	def __init__(self, n_steps = [-4, 4]):
 		self.n_steps = n_steps
 
 	def __call__(self, signal, sample_rate):
-		#return torch.from_numpy(pyrubberband.pyrb.pitch_shift(signal.numpy(), sample_rate, fixed_or_uniform(self.n_steps))), sample_rate
 		return torch.from_numpy(librosa.effects.pitch_shift(signal.numpy(), sample_rate, fixed_or_uniform(self.n_steps))), sample_rate
 
 class SpeedPerturbation(object):
-	def __init__(self, rate = [0.9, 1.1]):
+	def __init__(self, rate = [0.7, 1.3]):
 		self.rate = rate
 
 	def __call__(self, signal, sample_rate):
-		#return torch.from_numpy(pyrubberband.pyrb.time_stretch(signal.numpy(), sample_rate, fixed_or_uniform(self.rate))), sample_rate
 		return torch.from_numpy(librosa.effects.time_stretch(signal.numpy(), fixed_or_uniform(self.rate))), sample_rate
 
 class GainPerturbation(object):
@@ -113,8 +122,14 @@ class SpecAugment(object):
 def fixed_or_uniform(r):
 	return random.uniform(*r) if isinstance(r, list) else r
 
-AWNSPGPPS = lambda prob: RandomCompose([AddWhiteNoise(), SpeedPerturbation(), GainPerturbation(), PitchShift()], prob)
+AWNSPGPPS = lambda prob = 0.3: RandomCompose([AddWhiteNoise(), SpeedPerturbation(), GainPerturbation(), PitchShift()], prob)
 
-SOXAWN = lambda prob: RandomComposeSox([AddWhiteNoise()], prob)
+SOXAWNSPGPPS = lambda prob = 0.3: RandomComposeSox([AddWhiteNoise(), SpeedPerturbation(), GainPerturbation(), PitchShift()], prob)
 
-SOXPS = lambda prob: RandomComposeSox([PitchShift()], prob)
+SOXAWN = lambda prob = 1.0: RandomComposeSox([AddWhiteNoise()], prob)
+
+SOXPS = lambda prob = 1.0: RandomComposeSox([PitchShift()], prob)
+
+SOXSP = lambda prob = 1.0: RandomComposeSox([SpeedPerturbation()], prob)
+
+SOXGP = lambda prob = 1.0: RandomComposeSox([GainPerturbation()], prob)

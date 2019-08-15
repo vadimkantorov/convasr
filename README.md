@@ -49,7 +49,7 @@ bash scripts/augment.sh data/clean_val.csv data/clean_val_amrnb "sox -V0 -t wav 
 ```
 
 # Docker commands
-```
+```shell
 # build scripts/Dockerfile
 sudo nvidia-docker build -t convasr scripts
 
@@ -70,7 +70,9 @@ cmake ..
 make -j 4
 
 # estimate model in the text ARPA format
-bin/lmplz -o 2 <text.csv >lm.arpa
+bin/lmplz -o 4 <text.csv >lm.arpa
+
+# binarize the estimated ARPA model
 bin/build_binary /dev/stdin lm.bin <lm.arpa
 ```
 
