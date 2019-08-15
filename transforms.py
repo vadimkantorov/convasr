@@ -3,6 +3,28 @@ import torch
 import dataset
 import librosa
 import pyrubberband
+import torchaudio
+
+torchaudio.initialize_sox()
+class RandomComposeSox(object):
+	def __init__(self, transforms, prob):
+		self.transforms = transforms
+		self.prob = prob
+
+	def __call__(self, audio_path, sample_rate):
+		sox = torchaudio.sox_effects.SoxEffectsChain()
+		sox.set_input_file(audio_path)
+		effect = None
+		if random.random() < self.prob:
+			transform = random.choice(self.transforms)
+			effect = ['pitch', fixed_or_uniform(transform.n_steps) * 100] if isinstance(transform, PitchShift) else ['tempo', fixed_or_uniform(transform.rate)] if isinstance(transform, SpeedPerturbation) else ['gain', fixed_or_uniform(transform.gain)] if isinstance(transform, GainPerturbation) else []
+			if effect:
+				sox.append_effect_to_chain(effect)	
+		sox.append_effect_to_chain('rate', sample_rate)
+		signal, sample_rate = sox.sox_build_flow_effects()
+		if effect == []:
+			signal, sample_rate = transform(signal, sample_rate) 
+		return signal, sample_rate
 
 class RandomCompose(object):
 	def __init__(self, transforms, prob):
@@ -15,14 +37,6 @@ class RandomCompose(object):
 			x = transform(*x)
 		return x
 
-class SpeedPerturbation(object):
-	def __init__(self, rate = [0.9, 1.1]):
-		self.rate = rate
-
-	def __call__(self, signal, sample_rate):
-		#return torch.from_numpy(pyrubberband.pyrb.time_stretch(signal.numpy(), sample_rate, fixed_or_uniform(self.rate))), sample_rate
-		return torch.from_numpy(librosa.effects.time_stretch(signal.numpy(), fixed_or_uniform(self.rate))), sample_rate
-
 class PitchShift(object):
 	def __init__(self, n_steps = [-2, 2]):
 		self.n_steps = n_steps
@@ -30,6 +44,14 @@ class PitchShift(object):
 	def __call__(self, signal, sample_rate):
 		#return torch.from_numpy(pyrubberband.pyrb.pitch_shift(signal.numpy(), sample_rate, fixed_or_uniform(self.n_steps))), sample_rate
 		return torch.from_numpy(librosa.effects.pitch_shift(signal.numpy(), sample_rate, fixed_or_uniform(self.n_steps))), sample_rate
+
+class SpeedPerturbation(object):
+	def __init__(self, rate = [0.9, 1.1]):
+		self.rate = rate
+
+	def __call__(self, signal, sample_rate):
+		#return torch.from_numpy(pyrubberband.pyrb.time_stretch(signal.numpy(), sample_rate, fixed_or_uniform(self.rate))), sample_rate
+		return torch.from_numpy(librosa.effects.time_stretch(signal.numpy(), fixed_or_uniform(self.rate))), sample_rate
 
 class GainPerturbation(object):
 	def __init__(self, gain_db = [-10, 10]):
@@ -48,7 +70,7 @@ class AddWhiteNoise(object):
 		return signal + noise * noise_level, sample_rate
 
 class MixExternalNoise(object):
-	def __init__(self, noise_data_path, noise_level):
+	def __init__(self, noise_level, noise_data_path):
 		self.noise_level = noise_level
 		self.noise_data_path = noise_data_path
 		self.noise_paths = list(map(str.strip, open(noise_data_path))) if noise_data_path is not None else []
@@ -92,3 +114,7 @@ def fixed_or_uniform(r):
 	return random.uniform(*r) if isinstance(r, list) else r
 
 AWNSPGPPS = lambda prob: RandomCompose([AddWhiteNoise(), SpeedPerturbation(), GainPerturbation(), PitchShift()], prob)
+
+SOXAWN = lambda prob: RandomComposeSox([AddWhiteNoise()], prob)
+
+SOXPS = lambda prob: RandomComposeSox([PitchShift()], prob)
