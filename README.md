@@ -42,10 +42,10 @@ The passed command must read from stdin and write to stdout.
 
 ```shell
 # encode to GSM and back
-bash scripts/augment.sh data/clean_val.csv data/clean_val_gsm "sox -V0 -t wav - -r 8k -c 1 -t gsm - | sox -V0 -t gsm - -t wav -b 16 -e signed -r 16k -c 1 -"
+bash scripts/augment.sh data/clean_val.csv data/clean_val_gsm "sox -V0 -t wav - -r 8k -c 1 -t gsm - | sox -V0 -r 8k -t gsm - -t wav -b 16 -e signed -r 16k -c 1 -"
 
 # encode to AMR (NB: narrow-band, 8kHz) and back
-bash scripts/augment.sh data/clean_val.csv data/clean_val_amrnb "sox -V0 -t wav - -r 8k -c 1 -t amr-nb - | sox -V0 -t amr-nb - -t wav -b 16 -e signed -r 16k -c 1 -"
+bash scripts/augment.sh data/clean_val.csv data/clean_val_amrnb "sox -V0 -t wav - -r 8k -c 1 -t amr-nb - | sox -V0 -r 8k -t amr-nb - -t wav -b 16 -e signed -r 16k -c 1 -"
 ```
 
 # Docker commands

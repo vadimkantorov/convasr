@@ -50,7 +50,7 @@ def traineval(args):
 	set_random_seed(args.seed)
 
 	labels = dataset.Labels(importlib.import_module(args.lang))
-	transform = lambda name, prob, args: getattr(transforms, name)(*args) if prob is None else getattr(transforms, name)(prob, *args) if prob > 0 else None
+	transform = lambda name, prob, args: None if not name else getattr(transforms, name)(*args) if prob is None else getattr(transforms, name)(prob, *args) if prob > 0 else None
 	val_waveform_transform = transform(args.val_waveform_transform, args.val_waveform_transform_prob, args.val_waveform_transform_args)
 	if args.val_waveform_transform_debug_dir:
 		args.val_waveform_transform_debug_dir = os.path.join(args.val_waveform_transform_debug_dir, str(val_waveform_transform) if isinstance(val_waveform_transform, transforms.RandomCompose) else val_waveform_transform.__class__.__name__)
@@ -211,7 +211,7 @@ if __name__ == '__main__':
 	parser.add_argument('--experiment-name', '--name', default = '')
 	parser.add_argument('--dry', action = 'store_true')
 	parser.add_argument('--lang', default = 'ru')
-	parser.add_argument('--val-waveform-transform', default = 'AWNSPGPPS')
+	parser.add_argument('--val-waveform-transform')
 	parser.add_argument('--val-waveform-transform-debug-dir')
 	parser.add_argument('--val-feature-transform')
 	parser.add_argument('--val-waveform-transform-prob', type = float, default = None)

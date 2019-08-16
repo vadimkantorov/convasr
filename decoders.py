@@ -27,7 +27,6 @@ class BeamSearchDecoder(object):
 	def decode(self, log_probs, output_lengths):
 		decoded_chr, decoded_scores, decoded_offsets, decoded_lengths = self.beam_search_decoder.decode(log_probs.permute(0, 2, 1).cpu(), torch.IntTensor(output_lengths))
 		decoded_top = decoded_scores.argmax(dim = 1)
-		arange = torch.arange(len(decoded_top))
 		return [d[t][:l[t]].tolist() for d, l, t in zip(decoded_chr, decoded_lengths, decoded_top)]
 
 def unused_levenshtein(a, b):

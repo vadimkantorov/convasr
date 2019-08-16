@@ -49,14 +49,14 @@ class RandomComposeSox(RandomCompose):
 		return 'SOXx' + RandomCompose.__str__(self)
 
 class PitchShift(object):
-	def __init__(self, n_steps = [-4, 4]):
+	def __init__(self, n_steps = [-3, 4]):
 		self.n_steps = n_steps
 
 	def __call__(self, signal, sample_rate):
 		return torch.from_numpy(librosa.effects.pitch_shift(signal.numpy(), sample_rate, fixed_or_uniform(self.n_steps))), sample_rate
 
 class SpeedPerturbation(object):
-	def __init__(self, rate = [0.7, 1.3]):
+	def __init__(self, rate = [0.8, 1.2]):
 		self.rate = rate
 
 	def __call__(self, signal, sample_rate):
@@ -91,6 +91,16 @@ class MixExternalNoise(object):
 		noise = torch.cat([noise] * (1 + len(signal) // len(noise)))[:len(signal)]
 		return signal + noise * noise_level, sample_rate
 
+class SpecLowPass(object):
+	def __init__(self, freq, sample_rate):
+		self.freq = freq
+		self.sample_rate = sample_rate
+
+	def __call__(self, spect):
+		n_low_freq = int(len(spect) * freq / (sample_rate / 2))
+		spect[n_low_freq:] = 0
+		return spect
+
 class SpecAugment(object):
 	def __init__(self, n_freq_mask = 2, n_time_mask = 2, width_freq_mask = 6, width_time_mask = 6, replace_strategy = None):
 		# fb code: https://github.com/facebookresearch/wav2letter/commit/04c3d80bf66fe749466cd427afbcc936fbdec5cd
@@ -119,6 +129,19 @@ class SpecAugment(object):
 
 		return spect
 
+class SpecCutOut(object):
+	def __init__(self, cutout_rect_freq = 25, cutout_rect_time = 60, cutout_rect_regions = 0):
+		self.cutout_rect_regions = cutout_rect_regions
+		self.cutout_rect_time = cutout_rect_time
+		self.cutout_rect_freq = cutout_rect_freq
+
+	def __call__(self, spect):
+		for i in range(self.cutout_rect_regions):
+			cutout_rect_x = random.randint(0, spect.shape[-2] - self.cutout_rect_freq)
+			cutout_rect_y = random.randint(0, spect.shape[-1] - self.cutout_rect_time)
+			spect[cutout_rect_x:cutout_rect_x + self.cutout_rect_freq, cutout_rect_y:cutout_rect_y + self.cutout_rect_time] = 0
+		return spect
+
 def fixed_or_uniform(r):
 	return random.uniform(*r) if isinstance(r, list) else r
 
@@ -127,9 +150,6 @@ AWNSPGPPS = lambda prob = 0.3: RandomCompose([AddWhiteNoise(), SpeedPerturbation
 SOXAWNSPGPPS = lambda prob = 0.3: RandomComposeSox([AddWhiteNoise(), SpeedPerturbation(), GainPerturbation(), PitchShift()], prob)
 
 SOXAWN = lambda prob = 1.0: RandomComposeSox([AddWhiteNoise()], prob)
-
-SOXPS = lambda prob = 1.0: RandomComposeSox([PitchShift()], prob)
-
-SOXSP = lambda prob = 1.0: RandomComposeSox([SpeedPerturbation()], prob)
-
-SOXGP = lambda prob = 1.0: RandomComposeSox([GainPerturbation()], prob)
+#SOXPS = lambda prob = 1.0: RandomComposeSox([PitchShift(-3)], prob)
+#SOXSP = lambda prob = 1.0: RandomComposeSox([SpeedPerturbation(0.8)], prob)
+#SOXGP = lambda prob = 1.0: RandomComposeSox([GainPerturbation(-50)], prob)

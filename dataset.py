@@ -25,6 +25,7 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 		self.normalize_features = normalize_features
 		self.waveform_transform_debug_dir = waveform_transform_debug_dir
 		self.ids = [(row[0], row[1], float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or float(row[2]) < max_duration] if isinstance(data_or_path, str) else [d for d in data_or_path if d[-1] == -1 or d[-1] < max_duration]
+		self.mean, self.std = list(map(torch.load('data/meanstd.pt').get, ['mean', 'std']))
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
@@ -34,9 +35,11 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 			signal, sample_rate = self.waveform_transform(signal, self.sample_rate)
 		
 		if self.waveform_transform_debug_dir:
-			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, f'{hash(audio_path)}.wav'), sample_rate, signal.numpy())
+			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, f'{os.path.basename(audio_path)}'), sample_rate, signal.numpy())
 
 		features = models.logfbank(signal, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, normalize = self.normalize_features)
+		#features = (features - self.mean.type_as(features).unsqueeze(1)) / self.std.type_as(features).unsqueeze(1)
+		#features = models.normalize_features(features)
 		if self.feature_transform is not None:
 			features = self.feature_transform(features)
 
@@ -124,6 +127,7 @@ def unpack_targets(targets, target_sizes):
 		offset += size
 	return unpacked
 
+# TODO: pad mini-batches
 def collate_fn(batch):
 	duration_in_frames = lambda example: example[0].shape[-1]
 	batch = sorted(batch, key = duration_in_frames, reverse=True)

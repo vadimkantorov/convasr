@@ -6,6 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import librosa
 
+#TODO: apply conv masking
+
 class Wav2LetterRu(nn.Sequential):
 	def __init__(self, num_classes, num_input_features):
 		def conv_bn_relu_dropout(kernel_size, num_channels, stride = 1, padding = None, dropout = 0.2, batch_norm_momentum = 0.1):
@@ -143,10 +145,9 @@ class MaskedConv1d(nn.Conv1d):
 			out = super().forward(x)
 			return out, lens
 
-def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, dither = 1e-5, eps = 1e-20, preemph = 0.97, normalize = True):
-	preemphasis = lambda signal, coeff: torch.cat([signal[:1], signal[1:] - coeff * signal[:-1]])
-	signal = signal / (signal.abs().max() + eps)
-	signal = preemphasis(signal, coeff = preemph)
+def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, dither = 1e-5, preemph = 0.97, normalize = True, eps = 1e-20):
+	signal = normalize_signal(signal)
+	signal = torch.cat([signal[:1], signal[1:] - preemph * signal[:-1]])
 	win_length, hop_length = int(window_size * sample_rate), int(window_stride * sample_rate)
 	n_fft = 2 ** math.ceil(math.log2(win_length))
 	signal += dither * torch.randn_like(signal)
@@ -154,9 +155,10 @@ def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_
 	mel_basis = torch.from_numpy(librosa.filters.mel(sample_rate, n_fft, n_mels=num_input_features, fmin=0, fmax=int(sample_rate/2))).type_as(signal)
 	power_spectrum = torch.stft(signal, n_fft, hop_length = hop_length, win_length = win_length, window = window, pad_mode = 'reflect', center = True).pow(2).sum(dim = -1)
 	features = torch.log(torch.matmul(mel_basis, power_spectrum) + eps)
-	if normalize:
-		features = (features - features.mean(dim = 1, keepdim = True)) / (eps + features.std(dim = 1, keepdim = True))
-	return features 
+	return normalize_features(features) if normalize else features 
 
 def normalize_signal(signal, eps = 1e-5):
 	return signal / (signal.abs().max() + eps)
+
+def normalize_features(features, eps = 1e-20):
+	return (features - features.mean(dim = -1, keepdim = True)) / (features.std(dim = -1, keepdim = True) + eps)
