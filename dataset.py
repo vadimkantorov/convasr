@@ -104,8 +104,8 @@ class Labels(object):
 	def idx2str(self, idx):
 		replace2 = lambda s: ''.join(c if i == 0 or c != '2' else s[i - 1] for i, c in enumerate(s))
 		replace22 =lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
-		i2s = lambda i: replace22(replace2(''.join(map(self.idx2chr, i)))).strip()
-		return list(map(i2s, idx)) if isinstance(idx[0], list) else i2s(idx)
+		i2s = lambda i: '' if len(i) == 0 else replace22(replace2(''.join(map(self.idx2chr, i)))).strip() if not isinstance(i[0], list) else list(map(i2s, i))
+		return i2s(idx)
 
 	def chr2idx(self, chr):
 		return self.chr2idx_[chr]

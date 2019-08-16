@@ -1,8 +1,12 @@
 CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --lang ru --model Wav2LetterRu \
   --checkpoint data/checkpoint_epoch04_iter0124135.pt \
-  --val-batch-size 64 --val-data-path ../sample_ok/sample_ok.convasr.csv \
-  --decoder BeamSearchDecoder --beam-width 20000 --lm chats_03_prune.binary #chats.binary #data/ru_wiyalen_no_punkt.arpa.binary
+  --val-batch-size 64 --val-data-path data/clean_val.csv \
+  --val-feature-transform SpecLowPass 4000 16000
+
+#--val-batch-size 64 --val-data-path ../sample_ok/sample_ok.convasr.csv \
+
+# --decoder BeamSearchDecoder --beam-width 20000 --lm chats_03_prune.binary #chats.binary #data/ru_wiyalen_no_punkt.arpa.binary
 
 #  --val-waveform-transform MixExternalNoise --val-waveform-transform-prob 1 --val-waveform-transform-args data/ru_open_stt_noise_small.csv --val-waveform-transform-debug-dir data/debug_aug \
 

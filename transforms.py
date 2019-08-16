@@ -93,12 +93,24 @@ class MixExternalNoise(object):
 
 class SpecLowPass(object):
 	def __init__(self, freq, sample_rate):
-		self.freq = freq
-		self.sample_rate = sample_rate
+		self.freq = int(freq)
+		self.sample_rate = int(sample_rate)
 
 	def __call__(self, spect):
-		n_low_freq = int(len(spect) * freq / (sample_rate / 2))
-		spect[n_low_freq:] = 0
+		mel_cut, mel_max = librosa.hz_to_mel(self.freq), librosa.hz_to_mel(self.sample_rate / 2)
+		n_freq = int(len(spect) * mel_cut / mel_max)
+		spect[n_freq:] = 0
+		return spect
+
+class SpecHighPass(object):
+	def __init__(self, freq, sample_rate):
+		self.freq = int(freq)
+		self.sample_rate = int(sample_rate)
+
+	def __call__(self, spect):
+		mel_cut, mel_max = librosa.hz_to_mel(self.freq), librosa.hz_to_mel(self.sample_rate / 2),  
+		n_freq = int(len(spect) * mel_cut / mel_max)
+		spect[:n_freq] = 0
 		return spect
 
 class SpecAugment(object):
