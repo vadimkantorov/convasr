@@ -1,20 +1,22 @@
 import Levenshtein 
 import torch
 
-def compute_cer(s1, s2):
-	return Levenshtein.distance(s1.replace(' ', ''), s2.replace(' ', ''))
+def compute_cer(transcript, reference):
+	cer_ref_len = len(reference.replace(' ', '')) or 1
+	return Levenshtein.distance(transcript.replace(' ', ''), reference.replace(' ', '')) / cer_ref_len
 
-def compute_wer(s1, s2):
+def compute_wer(transcript, reference):
 	# build mapping of words to integers, Levenshtein package only accepts strings
-	b = set(s1.split() + s2.split())
+	b = set(transcript.split() + reference.split())
 	word2char = dict(zip(b, range(len(b))))
-	return Levenshtein.distance(''.join([chr(word2char[w]) for w in s1.split()]), ''.join([chr(word2char[w]) for w in s2.split()]))
+	wer_ref_len = len(reference.split()) or 1
+	return Levenshtein.distance(''.join([chr(word2char[w]) for w in transcript.split()]), ''.join([chr(word2char[w]) for w in reference.split()])) / wer_ref_len
 
 class GreedyDecoder(object):
 	def __init__(self, labels):
 	   self.labels = labels 
 
-	def decode(self, log_probs, output_lengths):
+	def decode(self, log_probs, output_lengths, K = 1):
 		decoded_idx = log_probs.argmax(dim = 1).tolist()
 		return [[i for k, i in enumerate(d) if (k == 0 or i != d[k - 1]) and i != self.labels.blank_idx] for d in decoded_idx]
 
@@ -24,10 +26,11 @@ class BeamSearchDecoder(object):
 		self.labels = labels
 		self.beam_search_decoder = ctcdecode.CTCBeamDecoder(str(labels).lower(), lm_path, beam_alpha, beam_beta, cutoff_top_n, cutoff_prob, beam_width, num_workers, labels.blank_idx, log_probs_input = True)
 
-	def decode(self, log_probs, output_lengths):
+	def decode(self, log_probs, output_lengths, K = 1):
+		list_or_one = lambda xs: xs if len(xs) > 1 else xs[0]
 		decoded_chr, decoded_scores, decoded_offsets, decoded_lengths = self.beam_search_decoder.decode(log_probs.permute(0, 2, 1).cpu(), torch.IntTensor(output_lengths))
-		decoded_top = decoded_scores.argmax(dim = 1)
-		return [d[t][:l[t]].tolist() for d, l, t in zip(decoded_chr, decoded_lengths, decoded_top)]
+		decoded_top = decoded_scores.topk(K, dim = 1).indices
+		return [list_or_one([d[int(t_)][:l[int(t_)]].tolist() for t_ in t.tolist()]) for d, l, t in zip(decoded_chr, decoded_lengths, decoded_top)]
 
 def unused_levenshtein(a, b):
 	"""Calculates the Levenshtein distance between a and b.

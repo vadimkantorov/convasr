@@ -68,21 +68,21 @@ def traineval(args):
 				logits_, ref_tra_, loss_ = [], [], []
 				for batch_idx, (inputs, targets, filenames, input_percentages, target_lengths) in enumerate(val_data_loader):
 					input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
-					logits = model(inputs.to(args.device), input_lengths)
 					output_lengths = models.compute_output_lengths(model, input_lengths)
-					loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_lengths.to(args.device)).mean()
+					logits = model(inputs.to(args.device), input_lengths)
+					log_probs = F.log_softmax(logits, dim = 1)
+					loss = criterion(log_probs.permute(2, 0, 1), targets.to(args.device), output_lengths.to(args.device), target_lengths.to(args.device)).mean()
 					loss_.append(float(loss))
 					decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
 					target_strings = labels.idx2str(dataset.unpack_targets(targets.tolist(), target_lengths.tolist()))
 					for k, (transcript, reference) in enumerate(zip(decoded_strings, target_strings)):
+						wer, cer = (decoders.compute_wer(transcript, reference), decoders.compute_cer(transcript, reference)) if reference != transcript else (0, 0)
 						if args.verbose:
 							print(batch_idx * len(inputs) + k, '/', len(val_data_loader) * len(inputs))
-							print(val_dataset_name, 'REF: ', reference)
-							print(val_dataset_name, 'HYP: ', transcript)
+							print(f'{val_dataset_name} REF: {reference}')
+							print(f'{val_dataset_name} HYP: {transcript}')
+							print(f'{val_dataset_name} CER: {cer:.02%}')
 							print()
-						transcript, reference = transcript.strip(), reference.strip()
-						wer_ref_len, cer_ref_len = len(reference.split()) or 1, len(reference.replace(' ','')) or 1
-						wer, cer = (decoders.compute_wer(transcript, reference) / wer_ref_len, decoders.compute_cer(transcript, reference) / cer_ref_len) if reference != transcript else (0, 0)
 						ref_tra_.append(dict(reference = reference, transcript = transcript, filename = filenames[k], cer = cer, wer = wer))
 						if not training and args.logits:
 							logits_.extend(logits.cpu())
@@ -131,9 +131,10 @@ def traineval(args):
 		for batch_idx, (inputs, targets, filenames, input_percentages, target_lengths) in enumerate(train_data_loader):
 			toc = time.time()
 			input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
-			logits = model(inputs.to(args.device), input_lengths)
 			output_lengths = models.compute_output_lengths(model, input_lengths)
-			loss = criterion(F.log_softmax(logits.permute(2, 0, 1), dim = -1), targets.to(args.device), output_lengths.to(args.device), target_lengths.to(args.device)).mean()
+			logits = model(inputs.to(args.device), input_lengths)
+			log_probs = F.log_softmax(logits, dim = 1)
+			loss = criterion(log_probs.permute(2, 0, 1), targets.to(args.device), output_lengths.to(args.device), target_lengths.to(args.device)).mean()
 			if not (torch.isinf(loss) or torch.isnan(loss)):
 				optimizer.zero_grad()
 				if args.fp16:
