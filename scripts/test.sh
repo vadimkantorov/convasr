@@ -1,8 +1,8 @@
 CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --lang ru --model Wav2LetterRu \
   --checkpoint data/checkpoint_epoch04_iter0124135.pt \
-  --val-batch-size 64 --val-data-path data/clean_val.csv \
-  --val-feature-transform SpecLowPass 4000 16000
+  --val-batch-size 64 --val-data-path data/clean_val.csv #\
+#  --val-feature-transform SpecAugment
 
 #--val-batch-size 64 --val-data-path ../sample_ok/sample_ok.convasr.csv \
 
