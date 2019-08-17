@@ -141,19 +141,6 @@ class SpecAugment(object):
 
 		return spect
 
-class SpecCutOut(object):
-	def __init__(self, cutout_rect_freq = 25, cutout_rect_time = 60, cutout_rect_regions = 0):
-		self.cutout_rect_regions = cutout_rect_regions
-		self.cutout_rect_time = cutout_rect_time
-		self.cutout_rect_freq = cutout_rect_freq
-
-	def __call__(self, spect):
-		for i in range(self.cutout_rect_regions):
-			cutout_rect_x = random.randint(0, spect.shape[-2] - self.cutout_rect_freq)
-			cutout_rect_y = random.randint(0, spect.shape[-1] - self.cutout_rect_time)
-			spect[cutout_rect_x:cutout_rect_x + self.cutout_rect_freq, cutout_rect_y:cutout_rect_y + self.cutout_rect_time] = 0
-		return spect
-
 def fixed_or_uniform(r):
 	return random.uniform(*r) if isinstance(r, list) else r
 

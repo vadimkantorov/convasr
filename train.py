@@ -41,7 +41,7 @@ def set_random_seed(seed):
 
 def traineval(args):
 	print('\n', 'Arguments:', args)
-	args.experiment_id = args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, train_waveform_transform = f'aug{args.train_waveform_transform}{args.train_waveform_transform_prob or ""}' if args.train_waveform_transform_prob is None or args.train_waveform_transform_prob > 0 else '').replace('e-0', 'e-').rstrip('_')
+	args.experiment_id = args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, train_waveform_transform = f'aug{args.train_waveform_transform}{args.train_waveform_transform_prob or ""}' if args.train_waveform_transform_prob else '').replace('e-0', 'e-').rstrip('_')
 	if args.train_data_path:
 		print('\n', 'Experiment id:', args.experiment_id, '\n')
 	if args.dry:
@@ -220,9 +220,10 @@ if __name__ == '__main__':
 	parser.add_argument('--val-waveform-transform-prob', type = float, default = None)
 	parser.add_argument('--val-feature-transform', nargs = '*', default = [])
 	parser.add_argument('--val-feature-transform-prob', type = float, default = None)
-	parser.add_argument('--train-waveform-transform')
+	parser.add_argument('--train-waveform-transform', nargs = '*', default = [])
 	parser.add_argument('--train-waveform-transform-prob', type = float, default = None)
-	parser.add_argument('--train-feature-transform')
+	parser.add_argument('--train-feature-transform', nargs = '*', default = [])
+	parser.add_argument('--train-feature-transform-prob', type = float, default = None)
 	parser.add_argument('--val-iteration-interval', type = int, default = None)
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
 	parser.add_argument('--log-weight-distribution', action = 'store_true')
