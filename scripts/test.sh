@@ -1,12 +1,12 @@
 CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
-  --checkpoint data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80_augSOXPS0.3_SOXPS/checkpoint_epoch00_iter0015000.pt \
+  --checkpoint data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80_augSOXPS0.3_SOXPS/checkpoint_epoch01_iter0025000.pt \
   --val-batch-size 64 --val-data-path data/clean_val.csv data/mixed_val.csv ../sample_ok/sample_ok.convasr.csv \
   --val-waveform-transform SOXPS
 
 #  --decoder BeamSearchDecoder --beam-width 2000 --lm chats_03_prune.binary 
-
-
 #  --checkpoint data/checkpoint_epoch04_iter0124135.pt \
+
+
 
 #--val-batch-size 64 --val-data-path ../sample_ok/sample_ok.convasr.csv \
 

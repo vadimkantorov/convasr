@@ -51,7 +51,7 @@ def traineval(args):
 
 	def evaluate_model(epoch = None, batch_idx = None, iteration = None):
 		training = epoch is not None and batch_idx is not None and iteration is not None
-		model.eval()
+		model.eval()#; adapter = torch.load('adapter.pt').to(args.device)
 		with torch.no_grad():
 			for val_dataset_name, val_data_loader in val_data_loaders.items():
 				logits_, ref_tra_ = [], []

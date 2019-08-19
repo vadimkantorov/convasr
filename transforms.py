@@ -152,6 +152,6 @@ AWNSPGPPS = lambda prob = 0.3: RandomCompose([AddWhiteNoise(), SpeedPerturbation
 SOXAWNSPGPPS = lambda prob = 0.3: RandomComposeSox([AddWhiteNoise(), SpeedPerturbation(), GainPerturbation(), PitchShift()], prob)
 
 SOXAWN = lambda prob = 1.0: RandomComposeSox([AddWhiteNoise()], prob)
-SOXPS = lambda prob = 1.0: RandomComposeSox([PitchShift(3)], prob)
-#SOXSP = lambda prob = 1.0: RandomComposeSox([SpeedPerturbation(0.8)], prob)
+SOXPS = lambda prob = 1.0: RandomComposeSox([PitchShift()], prob)
+#SOXSP = lambda prob = 1.0: RandomComposeSox([SpeedPerturbation()], prob)
 #SOXGP = lambda prob = 1.0: RandomComposeSox([GainPerturbation(-50)], prob)
