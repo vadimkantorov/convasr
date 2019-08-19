@@ -333,7 +333,6 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 		alignment = dict(ref = r, hyp = h),
 		input = dict(ref = ref0, hyp = hyp0),
 		cer = Levenshtein.distance(ref0.replace(' ', ''), hyp0.replace(' ', '')) / len(ref0.replace(' ', ''))
-
 	)
 	return a
 
