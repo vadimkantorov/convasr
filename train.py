@@ -1,6 +1,7 @@
 import os
 import gc
 import json
+import math
 import time
 import random
 import argparse
@@ -21,32 +22,19 @@ try:
 except:
 	pass
 
-def load_checkpoint(checkpoint_path, model, optimizer = None, sampler = None, scheduler = None):
-	checkpoint = torch.load(checkpoint_path, map_location = 'cpu')
-	model.load_state_dict(checkpoint['model_state_dict'])
-	if optimizer is not None:
-		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-	if sampler is not None:
-		sampler.load_state_dict(checkpoint['sampler_state_dict'])
-	if scheduler is not None:
-		scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-
-def save_checkpoint(checkpoint_path, model, optimizer, sampler, scheduler, epoch, batch_idx):
-	checkpoint = dict(model = model.__class__.__name__, model_state_dict = model.state_dict(), optimizer_state_dict = optimizer.state_dict(), scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(batch_idx), epoch = epoch)
-	torch.save(checkpoint, checkpoint_path)
-
 def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
 		set_random_seed(seed)
 
 def traineval(args):
 	print('\n', 'Arguments:', args)
-	args.experiment_id = args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, train_waveform_transform = f'aug{args.train_waveform_transform}{args.train_waveform_transform_prob or ""}' if args.train_waveform_transform_prob else '').replace('e-0', 'e-').rstrip('_')
-	if args.train_data_path:
-		print('\n', 'Experiment id:', args.experiment_id, '\n')
+        checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoint else {}
+        args.experiment_id = checkpoint.get('experiment_id', args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, train_waveform_transform = f'aug{args.train_waveform_transform[0]}{args.train_waveform_transform_prob or ""}' if args.train_waveform_transform else '').replace('e-0', 'e-').rstrip('_'))
+	print('\n', 'Experiment id:', args.experiment_id, '\n')
+        args.lang, args.model, args.num_input_features = checkpoint.get('lang', args.lang), checkpoint.get('model', args.model), checkpoint.get('num_input_features', args.num_input_features)
+	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, experiment_id = args.experiment_id)
 	if args.dry:
 		return
-	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, experiment_id = args.experiment_id)
 	set_random_seed(args.seed)
 
 	labels = dataset.Labels(importlib.import_module(args.lang))
@@ -66,14 +54,13 @@ def traineval(args):
 		model.eval()
 		with torch.no_grad():
 			for val_dataset_name, val_data_loader in val_data_loaders.items():
-				logits_, ref_tra_, loss_ = [], [], []
+				logits_, ref_tra_ = [], []
 				for batch_idx, (inputs, targets, filenames, input_percentages, target_lengths) in enumerate(val_data_loader):
 					input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
 					output_lengths = models.compute_output_lengths(model, input_lengths)
 					logits = model(inputs.to(args.device), input_lengths)
 					log_probs = F.log_softmax(logits, dim = 1)
 					loss = criterion(log_probs.permute(2, 0, 1), targets.to(args.device), output_lengths.to(args.device), target_lengths.to(args.device)).mean()
-					loss_.append(float(loss))
 					decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
 					target_strings = labels.idx2str(dataset.unpack_targets(targets.tolist(), target_lengths.tolist()))
 					for k, (transcript, reference) in enumerate(zip(decoded_strings, target_strings)):
@@ -86,25 +73,25 @@ def traineval(args):
 							print(f'{val_dataset_name} HYP: {transcript}')
 							print(f'{val_dataset_name} CER: {cer:.02%}  |  WER: {wer:.02%}')
 							print()
-						ref_tra_.append(dict(reference = reference, transcript = transcript, filename = filenames[k], cer = cer, wer = wer))
+						ref_tra_.append(dict(reference = reference, transcript = transcript, filename = filenames[k], cer = cer, wer = wer, loss = float(loss)))
 						if not training and args.logits:
 							logits_.extend(logits.cpu())
-				cer_avg, wer_avg = [float(torch.tensor([x[k] for x in ref_tra_]).mean()) for k in ['cer', 'wer']]
-				loss_avg = float(torch.tensor(loss_).mean())
-				print(f'{args.experiment_id} {val_dataset_name} | epoch {epoch} iter {iteration} | Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
+				cer_avg, wer_avg, loss_avg = [float(torch.tensor([x[k] for x in ref_tra_ if not math.isinf(x[k]) and not math.isnan(x[k])]).mean()) for k in ['cer', 'wer', 'loss']]
+				print(f'{args.experiment_id} {val_dataset_name}', '| epoch {epoch} iter {iteration}' if training else '', f'| Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
 				print()
 				with open(os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
 					json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
 				if training:
-					tensorboard.add_scalars(args.experiment_id, {val_dataset_name + '_wer_avg' : wer_avg * 100.0, val_dataset_name + '_cer_avg' : cer_avg * 100.0, val_dataset_name + '_loss_avg' : loss_avg}, iteration) 
+					tensorboard.add_scalars(f'{args.experiment_id}/{val_dataset_name}', dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
+					tensorboard.flush()
 				elif args.logits:
 					torch.save(dict(logits = logits_, ref_tra = ref_tra_), args.logits.format(val_dataset_name = val_dataset_name))
 		if training:
-			save_checkpoint(os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'), model.module, optimizer, train_sampler, scheduler, epoch, batch_idx)
+                        torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer.state_dict(), scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = train_sampler.state_dict(batch_idx), epoch = epoch, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features), os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
 			model.train()
 
 	if not args.train_data_path:
-		load_checkpoint(args.checkpoint, model)
+        	model.load_state_dict(checkpoint['model_state_dict'])
 		model = torch.nn.DataParallel(model).to(args.device)
 		return evaluate_model()
 
@@ -118,8 +105,11 @@ def traineval(args):
 	if args.fp16:
 		model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: 1)
-	if args.checkpoint:
-		models.load_checkpoint(args.checkpoint, model, optimizer, train_sampler, scheduler)
+	if checkpoint:
+        	model.load_state_dict(checkpoint['model_state_dict'])
+		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+		sampler.load_state_dict(checkpoint['sampler_state_dict'])
+		scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 	model = torch.nn.DataParallel(model).to(args.device)
 	os.makedirs(args.experiment_dir, exist_ok = True)
 	tensorboard = torch.utils.tensorboard.SummaryWriter(os.path.join(args.experiment_dir, 'tensorboard'))
@@ -161,7 +151,7 @@ def traineval(args):
 				evaluate_model(epoch, batch_idx, iteration)
 
 			if iteration % args.log_iteration_interval == 0:
-				tensorboard.add_scalars(args.experiment_id, {train_dataset_name + '_loss_avg' : loss_avg, train_dataset_name + '_lr_avg_x10K' : lr_avg * 1e4}, iteration)
+				tensorboard.add_scalars(f'{args.experiment_id}/{train_dataset_name}', dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
 				for param_name, param in model.module.named_parameters():
 					tag = args.experiment_id + '_params/' + param_name.replace('.', '/')
 					norm, grad_norm = param.norm(), param.grad.norm()

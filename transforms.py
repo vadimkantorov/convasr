@@ -49,7 +49,7 @@ class RandomComposeSox(RandomCompose):
 		return 'SOXx' + RandomCompose.__str__(self)
 
 class PitchShift(object):
-	def __init__(self, n_steps = [-3, 4]):
+	def __init__(self, n_steps = [-3, 3]):
 		self.n_steps = n_steps
 
 	def __call__(self, signal, sample_rate):
@@ -79,15 +79,18 @@ class AddWhiteNoise(object):
 		return signal + noise * noise_level, sample_rate
 
 class MixExternalNoise(object):
-	def __init__(self, noise_level, noise_data_path):
+	def __init__(self, noise_level, noise_data_path, cache = False):
 		self.noise_level = noise_level
 		self.noise_data_path = noise_data_path
 		self.noise_paths = list(map(str.strip, open(noise_data_path))) if noise_data_path is not None else []
+		self.cache = {noise_path : dataset.read_wav(noise_path) for noise_path in self.noise_paths} if cache else {}
 
 	def __call__(self, signal, sample_rate):
 		noise_path = random.choice(self.noise_paths)
 		noise_level = fixed_or_uniform(self.noise_level)
-		noise, sample_rate = dataset.read_wav(noise_path, sample_rate = sample_rate, max_duration = 1.0 + len(signal) / sample_rate)
+		noise, sample_rate_ = self.cache.get(noise_path) or dataset.read_wav(noise_path, sample_rate = sample_rate, max_duration = 1.0 + len(signal) / sample_rate)
+		if sample_rate_ != sample_rate:
+			noise, sample_rate_ = dataset.resample(noise, sample_rate_, sample_rate)
 		noise = torch.cat([noise] * (1 + len(signal) // len(noise)))[:len(signal)]
 		return signal + noise * noise_level, sample_rate
 
@@ -149,6 +152,6 @@ AWNSPGPPS = lambda prob = 0.3: RandomCompose([AddWhiteNoise(), SpeedPerturbation
 SOXAWNSPGPPS = lambda prob = 0.3: RandomComposeSox([AddWhiteNoise(), SpeedPerturbation(), GainPerturbation(), PitchShift()], prob)
 
 SOXAWN = lambda prob = 1.0: RandomComposeSox([AddWhiteNoise()], prob)
-#SOXPS = lambda prob = 1.0: RandomComposeSox([PitchShift(-3)], prob)
+SOXPS = lambda prob = 1.0: RandomComposeSox([PitchShift(3)], prob)
 #SOXSP = lambda prob = 1.0: RandomComposeSox([SpeedPerturbation(0.8)], prob)
 #SOXGP = lambda prob = 1.0: RandomComposeSox([GainPerturbation(-50)], prob)

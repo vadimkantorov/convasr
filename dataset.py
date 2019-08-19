@@ -165,6 +165,9 @@ def read_wav(path, channel = -1, normalize = True, sample_rate = None, max_durat
 		signal = models.normalize_signal(signal)
 
 	if sample_rate is not None and sample_rate_ != sample_rate:
-		sample_rate_, signal = sample_rate, torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate))
+		sample_rate_, signal = resample(signal, sample_rate_, sample_rate)
 
 	return signal, sample_rate_
+
+def resample(signal, sample_rate_, sample_rate):
+	return sample_rate, torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate))
