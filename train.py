@@ -28,10 +28,10 @@ def set_random_seed(seed):
 
 def traineval(args):
 	print('\n', 'Arguments:', args)
-        checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoint else {}
-        args.experiment_id = checkpoint.get('experiment_id', args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, train_waveform_transform = f'aug{args.train_waveform_transform[0]}{args.train_waveform_transform_prob or ""}' if args.train_waveform_transform else '').replace('e-0', 'e-').rstrip('_'))
+	checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoint else {}
+	args.experiment_id = checkpoint.get('experiment_id', args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, train_waveform_transform = f'aug{args.train_waveform_transform[0]}{args.train_waveform_transform_prob or ""}' if args.train_waveform_transform else '').replace('e-0', 'e-').rstrip('_'))
 	print('\n', 'Experiment id:', args.experiment_id, '\n')
-        args.lang, args.model, args.num_input_features = checkpoint.get('lang', args.lang), checkpoint.get('model', args.model), checkpoint.get('num_input_features', args.num_input_features)
+	args.lang, args.model, args.num_input_features = checkpoint.get('lang', args.lang), checkpoint.get('model', args.model), checkpoint.get('num_input_features', args.num_input_features)
 	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, experiment_id = args.experiment_id)
 	if args.dry:
 		return
@@ -87,11 +87,11 @@ def traineval(args):
 				elif args.logits:
 					torch.save(dict(logits = logits_, ref_tra = ref_tra_), args.logits.format(val_dataset_name = val_dataset_name))
 		if training:
-                        torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer.state_dict(), scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = train_sampler.state_dict(batch_idx), epoch = epoch, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features), os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
+			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer.state_dict(), scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = train_sampler.state_dict(batch_idx), epoch = epoch, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features), os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
 			model.train()
 
 	if not args.train_data_path:
-        	model.load_state_dict(checkpoint['model_state_dict'])
+		model.load_state_dict(checkpoint['model_state_dict'])
 		model = torch.nn.DataParallel(model).to(args.device)
 		return evaluate_model()
 
@@ -106,7 +106,7 @@ def traineval(args):
 		model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: 1)
 	if checkpoint:
-        	model.load_state_dict(checkpoint['model_state_dict'])
+		model.load_state_dict(checkpoint['model_state_dict'])
 		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 		sampler.load_state_dict(checkpoint['sampler_state_dict'])
 		scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
