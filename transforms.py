@@ -95,26 +95,24 @@ class MixExternalNoise(object):
 		return signal + noise * noise_level, sample_rate
 
 class SpecLowPass(object):
-	def __init__(self, freq, sample_rate):
+	def __init__(self, freq):
 		self.freq = int(freq)
-		self.sample_rate = int(sample_rate)
 
-	def __call__(self, spect):
-		mel_cut, mel_max = librosa.hz_to_mel(self.freq), librosa.hz_to_mel(self.sample_rate / 2)
+	def __call__(self, spect, sample_rate):
+		mel_cut, mel_max = librosa.hz_to_mel(self.freq), librosa.hz_to_mel(sample_rate / 2)
 		n_freq = int(len(spect) * mel_cut / mel_max)
 		spect[n_freq:] = 0
-		return spect
+		return spect, sample_rate
 
 class SpecHighPass(object):
-	def __init__(self, freq, sample_rate):
+	def __init__(self, freq):
 		self.freq = int(freq)
-		self.sample_rate = int(sample_rate)
 
-	def __call__(self, spect):
-		mel_cut, mel_max = librosa.hz_to_mel(self.freq), librosa.hz_to_mel(self.sample_rate / 2),  
+	def __call__(self, spect, sample_rate):
+		mel_cut, mel_max = librosa.hz_to_mel(self.freq), librosa.hz_to_mel(sample_rate / 2),  
 		n_freq = int(len(spect) * mel_cut / mel_max)
 		spect[:n_freq] = 0
-		return spect
+		return spect, sample_rate
 
 class SpecAugment(object):
 	def __init__(self, n_freq_mask = 2, n_time_mask = 2, width_freq_mask = 6, width_time_mask = 6, replace_strategy = None):
@@ -153,5 +151,5 @@ SOXAWNSPGPPS = lambda prob = 0.3: RandomComposeSox([AddWhiteNoise(), SpeedPertur
 
 SOXAWN = lambda prob = 1.0: RandomComposeSox([AddWhiteNoise()], prob)
 SOXPS = lambda prob = 1.0: RandomComposeSox([PitchShift()], prob)
-#SOXSP = lambda prob = 1.0: RandomComposeSox([SpeedPerturbation()], prob)
+SOXSP = lambda prob = 1.0: RandomComposeSox([SpeedPerturbation()], prob)
 #SOXGP = lambda prob = 1.0: RandomComposeSox([GainPerturbation(-50)], prob)

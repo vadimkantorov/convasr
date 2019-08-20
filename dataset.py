@@ -35,13 +35,11 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 			signal, sample_rate = self.waveform_transform(signal, self.sample_rate)
 		
 		if self.waveform_transform_debug_dir:
-			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, f'{os.path.basename(audio_path)}'), sample_rate, signal.numpy())
+			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, f'{os.path.basename(audio_path)}'), self.sample_rate, signal.numpy())
 
 		features = models.logfbank(signal, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, normalize = self.normalize_features)
-		#features = (features - self.mean.type_as(features).unsqueeze(1)) / self.std.type_as(features).unsqueeze(1)
-		#features = models.normalize_features(features)
 		if self.feature_transform is not None:
-			features = self.feature_transform(features)
+			features, sample_rate = self.feature_transform(features, self.sample_rate)
 
 		transcript = self.labels.parse(transcript)
 		return features, transcript, audio_path

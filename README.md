@@ -49,6 +49,10 @@ bash scripts/augment.sh data/clean_val.csv data/clean_val_amrnb "sox -V0 -t wav 
 
 # denoise with RNNnoise
 LD_LIBRARY_PATH=rnnoise/.libs bash scripts/augment.sh ../sample_ok/sample_ok.convasr.csv data/sample_ok.convasr.rnnoise "sox -t wav - -r 48k --bits 16 --encoding signed-integer --endian little -t raw - | ./rnnoise/examples/rnnoise_demo /dev/stdin /dev/stdout | sox -t raw -r 48k --encoding signed-integer --endian little --bits 16 - -t wav -b 16 -e signed -r 16k -c 1 -"
+
+# denoise with SOX
+sox data/noise/1560751355.653399.wav_1.wav -n noiseprof data/noise.prof
+bash scripts/augment.sh ../sample_ok/sample_ok.convasr.csv data/sample_ok.convasr.noisered "sox -V0 -t wav - -t wav - noisered data/noise.prof 0.5"
 ```
 
 # Docker commands
