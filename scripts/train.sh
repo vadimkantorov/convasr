@@ -8,7 +8,8 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --val-iteration-interval 2500 \
   --sample-rate 8000 \
   --checkpoint data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80__8khz/checkpoint_epoch01_iter0025000.pt \
-  --epochs 2 
+  --epochs 2 \
+  --train-waveform-transform SOXAMRNB --train-waveform-transform-prob 1.0
 
 #  --train-waveform-transforms 'AddWhiteNoise(0.025)' \
 #  --val-waveform-transforms 'AddWhiteNoise(0.025)' \

@@ -1,4 +1,7 @@
+import os
+import tempfile
 import random
+import subprocess
 import torch
 import dataset
 import librosa
@@ -17,7 +20,7 @@ class RandomCompose(object):
 		return x
 
 	def __str__(self):
-		return '_'.join(t.__class__.__name__ + ('__'.join(str(y) for x in t.__dict__.values() for y in (x if isinstance(x, list) else [x]))) for t in self.transforms)
+		return self.__class__.__name__.replace('RandomCompose', '') + '_'.join(t.__class__.__name__ + ('__'.join(str(y) for x in t.__dict__.values() for y in (x if isinstance(x, list) else [x]))) for t in self.transforms)
 
 class RandomComposeSox(RandomCompose):
 	def __init__(self, transforms, prob):
@@ -28,25 +31,33 @@ class RandomComposeSox(RandomCompose):
 		if self.initialize_sox:
 			torchaudio.initialize_sox()
 			self.initialize_sox = False
-		sox = torchaudio.sox_effects.SoxEffectsChain()
-		sox.set_input_file(audio_path)
+
 		effect = None
 		if random.random() < self.prob:
 			transform = random.choice(self.transforms)
-			effect = ['pitch', fixed_or_uniform(transform.n_steps) * 100] if isinstance(transform, PitchShift) else ['tempo', fixed_or_uniform(transform.rate)] if isinstance(transform, SpeedPerturbation) else ['gain', fixed_or_uniform(transform.gain_db)] if isinstance(transform, GainPerturbation) else []
-			if effect:
-				sox.append_effect_to_chain(*effect)
+			effect = ['pitch', fixed_or_uniform(transform.n_steps) * 100] if isinstance(transform, PitchShift) else ['tempo', fixed_or_uniform(transform.rate)] if isinstance(transform, SpeedPerturbation) else ['gain', fixed_or_uniform(transform.gain_db)] if isinstance(transform, GainPerturbation) else 'transcode' if isinstance(transform, Transcode) else []
+
+		tmp_audio_path = []
+		if effect == 'transcode':
+			tmp_audio_path = [tempfile.mkstemp(suffix = '.' + transform.codec, dir = transform.tmpdir)[1], tempfile.mkstemp(suffix = '.wav', dir = transform.tmpdir)[1]]
+			subprocess.check_call(['sox', '-V0', audio_path, '-t', transform.codec, '-r', str(transform.sample_rate), tmp_audio_path[0]])
+			subprocess.check_call(['sox', '-V0', tmp_audio_path[0], '-t', 'wav', tmp_audio_path[1]])
+			audio_path, effect = tmp_audio_path[1], None
+
+		sox = torchaudio.sox_effects.SoxEffectsChain()
+		sox.set_input_file(audio_path)
+		if effect:
+			sox.append_effect_to_chain(*effect)
 		sox.append_effect_to_chain('rate', sample_rate)
 		sox.append_effect_to_chain('channels', 1)
 		signal = sox.sox_build_flow_effects()[0][0]
+		for audio_path in tmp_audio_path:
+			os.remove(audio_path)
 		if normalize:
 			signal = models.normalize_signal(signal)
 		if effect == []:
 			signal, sample_rate = transform(signal, sample_rate) 
 		return signal, sample_rate
-
-	def __str__(self):
-		return 'SOXx' + RandomCompose.__str__(self)
 
 class PitchShift(object):
 	def __init__(self, n_steps = [-3, 3]):
@@ -93,6 +104,26 @@ class MixExternalNoise(object):
 			noise, sample_rate_ = dataset.resample(noise, sample_rate_, sample_rate)
 		noise = torch.cat([noise] * (1 + len(signal) // len(noise)))[:len(signal)]
 		return signal + noise * noise_level, sample_rate
+
+class Transcode(object):
+	def __init__(self, codec = 'amr-nb', sample_rate = 8000, tmpdir = '/dev/shm'):
+		self.sample_rate = int(sample_rate)
+		self.codec = codec
+		self.tmpdir = tmpdir
+	
+	def __call__(self, audio_path, sample_rate, normalize = True):
+		tmp_audio_path = [tempfile.mkstemp(suffix = '.' + self.codec, dir = self.tmpdir)[1], tempfile.mkstemp(suffix = '.wav', dir = self.tmpdir)[1]]
+		subprocess.check_call(['sox', '-V0', audio_path, '-t', self.codec, '-r', str(self.sample_rate), tmp_audio_path[0]])
+		subprocess.check_call(['sox', '-V0', tmp_audio_path[0], '-t', 'wav', tmp_audio_path[1]])
+		signal, sample_rate_ = torchaudio.load(tmp_audio_path)
+
+		for audio_path in tmp_audio_path:
+			os.remove(audio_path)
+		if normalize:
+			signal = models.normalize_signal(signal)
+		if sample_rate_ != sample_rate:
+			sample_rate_, signal = dataset.resample(signal, sample_rate_, sample_rate)
+		return signal, sample_rate
 
 class SpecLowPass(object):
 	def __init__(self, freq):
@@ -146,10 +177,9 @@ def fixed_or_uniform(r):
 	return random.uniform(*r) if isinstance(r, list) else r
 
 AWNSPGPPS = lambda prob = 0.3: RandomCompose([AddWhiteNoise(), SpeedPerturbation(), GainPerturbation(), PitchShift()], prob)
-
 SOXAWNSPGPPS = lambda prob = 0.3: RandomComposeSox([AddWhiteNoise(), SpeedPerturbation(), GainPerturbation(), PitchShift()], prob)
-
 SOXAWN = lambda prob = 1.0: RandomComposeSox([AddWhiteNoise()], prob)
 SOXPS = lambda prob = 1.0: RandomComposeSox([PitchShift()], prob)
 SOXSP = lambda prob = 1.0: RandomComposeSox([SpeedPerturbation()], prob)
-#SOXGP = lambda prob = 1.0: RandomComposeSox([GainPerturbation(-50)], prob)
+SOXGSM = lambda prob = 1.0: RandomComposeSox([Transcode('gsm')], prob)
+SOXAMRNB = lambda prob = 1.0: RandomComposeSox([Transcode('amr-nb')], prob)
