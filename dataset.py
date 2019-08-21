@@ -25,7 +25,6 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 		self.normalize_features = normalize_features
 		self.waveform_transform_debug_dir = waveform_transform_debug_dir
 		self.ids = [(row[0], row[1], float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or float(row[2]) < max_duration] if isinstance(data_or_path, str) else [d for d in data_or_path if d[-1] == -1 or d[-1] < max_duration]
-		self.mean, self.std = list(map(torch.load('data/meanstd.pt').get, ['mean', 'std']))
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
@@ -54,6 +53,7 @@ class BucketingSampler(torch.utils.data.Sampler):
 		ids = list(range(0, len(data_source)))
 		self.bins = [ids[i:i + batch_size] for i in range(0, len(ids), batch_size)]
 		self.batch_idx = 0
+		self.shuffled = False
 
 	def __iter__(self):
 		for ids in self.bins[self.batch_idx:]:
@@ -65,7 +65,10 @@ class BucketingSampler(torch.utils.data.Sampler):
 		return len(self.bins)
 
 	def shuffle(self, epoch):
-		np.random.shuffle(self.bins)
+		if not self.shuffled:
+			np.random.shuffle(self.bins)
+			self.batch_idx = 0
+		self.shuffled = False
 
 	def state_dict(self, batch_idx):
 		return dict(bins = self.bins, batch_idx = batch_idx)
@@ -73,6 +76,7 @@ class BucketingSampler(torch.utils.data.Sampler):
 	def load_state_dict(self, state_dict):
 		self.bins = state_dict['bins']
 		self.batch_idx = state_dict['batch_idx']
+		self.shuffled = True
 
 class Labels(object):
 	blank = '|'

@@ -84,6 +84,15 @@ def cer(experiments_dir, experiment_id):
 		cers = {val_dataset_name : f'{cer:.04f}' for val_dataset_name, cer, checkpoint in r}
 		print(f'{iteration}\t' + '\t'.join(cers.get(val_dataset_name, '') for val_dataset_name in val_dataset_names) + f'\t{r[-1][-1]}')
 
+def words(train_data_path, val_data_path):
+	train_cnt = collections.Counter(w for l in open(train_data_path) for w in l.split(',')[1].split())
+	val_cnt = collections.Counter(w for l in open(val_data_path) for w in l.split(',')[1].split())
+
+	for w, c1 in val_cnt.most_common():
+		c2 = train_cnt[w]
+		if c1 > 1 and c2 < 1000:
+			print(w, c1, c2)
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -108,6 +117,11 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('errors')
 	cmd.add_argument('transcripts', default = 'data/transcripts.json')
 	cmd.set_defaults(func = errors)
+
+	cmd = subparsers.add_parser('words')
+	cmd.add_argument('train_data_path')
+	cmd.add_argument('val_data_path')
+	cmd.set_defaults(func = words)
 	
 	args = vars(parser.parse_args())
 	func = args.pop('func')

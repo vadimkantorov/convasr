@@ -328,7 +328,8 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 			ok_prefix_suffix = sum(1 if h_[0] not in ' |' and h_[-1] not in ' |' else 0 for r_, h_ in words()),
 			delete = sum(1 if h_.count('|') > len(r_) // 2 else 0 for r_, h_ in words()),
 			replace = sum(1 if sum(1 if h_[i] not in ' |' and h_[i] != r_[i] else 0 for i in range(len(r_))) > len(r_) // 2 else 0 for r_, h_ in words()),
-			total = sum(1 if c == ' ' else 0 for c in ref) + 1
+			total = sum(1 if c == ' ' else 0 for c in ref) + 1,
+			errors = list(sorted(set(r_.replace('|', '') for r_, h_ in words() if h_.count('|') > len(h_) // 4)))
 		),
 		alignment = dict(ref = r, hyp = h),
 		input = dict(ref = ref0, hyp = hyp0),
@@ -336,7 +337,7 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 	)
 	return a
 
-RU_PHONETIC_REPLACE_GROUPS = ['АО', 'БП', 'ЗСЦ', 'ВФ', 'ГК', 'ДТ', 'ЧЖШЩ', 'ЭЕИ', 'РЛ', 'ЮУ']
+RU_PHONETIC_REPLACE_GROUPS = ['АОЯ', 'БП', 'ЗСЦ', 'ВФ', 'ГК', 'ДТ', 'ЧЖШЩ', 'ЫЭЕИЙ', 'РЛ', 'ЮУ', 'ЪЬ']
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()

@@ -42,10 +42,10 @@ The passed command must read from stdin and write to stdout.
 
 ```shell
 # encode to GSM and back
-bash scripts/augment.sh data/clean_val.csv data/clean_val_gsm "sox -V0 -t wav - -r 8k -c 1 -t gsm - | sox -V0 -r 8k -t gsm - -t wav -b 16 -e signed -r 16k -c 1 -"
+bash scripts/augment.sh data/clean_val.csv data/clean_val_gsm "sox -V0 -t wav - -r 8k -c 1 -t gsm - | sox -V0 -r 8k -t gsm - -t wav -b 16 -e signed -r 8k -c 1 -"
 
 # encode to AMR (NB: narrow-band, 8kHz) and back
-bash scripts/augment.sh data/clean_val.csv data/clean_val_amrnb "sox -V0 -t wav - -r 8k -c 1 -t amr-nb - | sox -V0 -r 8k -t amr-nb - -t wav -b 16 -e signed -r 16k -c 1 -"
+bash scripts/augment.sh data/clean_val.csv data/clean_val_amrnb "sox -V0 -t wav - -r 8k -c 1 -t amr-nb - | sox -V0 -r 8k -t amr-nb - -t wav -b 16 -e signed -r 8k -c 1 -"
 
 # denoise with RNNnoise
 LD_LIBRARY_PATH=rnnoise/.libs bash scripts/augment.sh ../sample_ok/sample_ok.convasr.csv data/sample_ok.convasr.rnnoise "sox -t wav - -r 48k --bits 16 --encoding signed-integer --endian little -t raw - | ./rnnoise/examples/rnnoise_demo /dev/stdin /dev/stdout | sox -t raw -r 48k --encoding signed-integer --endian little --bits 16 - -t wav -b 16 -e signed -r 16k -c 1 -"

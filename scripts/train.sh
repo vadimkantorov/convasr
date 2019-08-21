@@ -7,7 +7,7 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --val-data-path data/mixed_val.csv data/clean_val.csv ../sample_ok/sample_ok.convasr.csv \
   --val-iteration-interval 2500 \
   --sample-rate 8000 \
-#  --train-waveform-transform SOXSP --train-waveform-transform-prob 1.0 \
+  --checkpoint data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80__8khz/checkpoint_epoch01_iter0025000.pt \
   --epochs 2 
 
 #  --train-waveform-transforms 'AddWhiteNoise(0.025)' \
