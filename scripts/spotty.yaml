@@ -7,10 +7,10 @@ project:
       - data/*
       - ru_open_stt
       - '*.pt'
-	  - scripts/experiments/*
+      - scripts/experiments/*
 
 container:
-  projectDir: /workspace
+  projectDir: /project
   file: Dockerfile
   runtimeParameters: ['--ipc=host']
   ports: [6006, 8888]

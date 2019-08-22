@@ -1,9 +1,10 @@
-CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
-  --checkpoint data/checkpoint_epoch04_iter0124135.pt \
-  --val-batch-size 32 --val-data-path  ../sample_ok/sample_ok.convasr.csv \
-  --decoder BeamSearchDecoder --beam-width 2000 --lm charlm/chats_06_noprune_char.binary #chats_03_prune.binary #
+python3 train.py $@ \
+  --checkpoint data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80__8khz/checkpoint_epoch01_iter0025000.pt \
+  --val-batch-size 32 --val-data-path  ../sample_ok/sample_ok.convasr.csv data/clean_val.csv data/calls_val.csv
 
-#  --checkpoint data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80__8khz/checkpoint_epoch01_iter0025000.pt \
+#  --decoder BeamSearchDecoder --beam-width 2000 --lm charlm/chats_06_noprune_char.binary #chats_03_prune.binary #
+
+#  --checkpoint data/checkpoint_epoch04_iter0124135.pt \
 
 #  --val-feature-transform SpecLowPass 4000 16000
 
