@@ -7,18 +7,21 @@ import subprocess
 def spotty(spotty_yaml, arguments):
     subprocess.call(['spotty', arguments[0], '-c', spotty_yaml] + arguments[1:])
 
-def train(spotty_yaml, script):
+def train(spotty_yaml, script, dry):
 	ARGS = []
 	lines = [l.strip() for l in open(script) if l.strip() and not l.startswith('#')]
 	first = None
-	for i, l in enumerate(l):
+	for i, l in enumerate(lines):
 		if 'train.py' in l:
 			first = i
-		else if l[i][-1] != '\\' and first is not None:
+		elif l[-1] != '\\' and first is not None:
 			ARGS.append(''.join(l.rstrip('\\') for l in lines[first + 1:i + 1]))
 			first = None
-
-    subprocess.call(['spotty', 'run', '-c', spotty_yaml, 'train', '-p'] + [f'ARGS{k}={a}' for k, a in enumerate(ARGS)])
+	cmd = ['spotty', 'run', '-c', spotty_yaml, 'train', '-p'] + [f'ARGS{k}={a}' for k, a in enumerate(ARGS)]
+	if dry:
+		print('\n'.join(cmd))
+	else:
+	    subprocess.call(cmd)
 
 def download_checkpoint(spotty_yaml, checkpoint_path):
     subprocess.call(['spotty', 'download', '-c', spotty_yaml, '-f', os.path.join('experiments', checkpoint_path)])
@@ -41,6 +44,7 @@ if __name__ == '__main__':
 
     cmd = subparsers.add_parser('train')
     cmd.add_argument('script')
+    cmd.add_argument('--dry', action = 'store_true')
     cmd.set_defaults(func = train)
 
     cmd = subparsers.add_parser('download_checkpoint')
