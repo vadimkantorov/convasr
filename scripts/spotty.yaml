@@ -56,11 +56,20 @@ scripts:
         wget -q https://github.com/vadimkantorov/open_stt_splits/releases/download/with_excluded_by_cer/$f -P data
     done
     git checkout {{TAG}}
-    python train.py --experiments-dir /workspace/experiments {{ARGS}}
+    [ ! -z "{{ARGS0}}" ] && python train.py --experiments-dir /workspace/experiments {{ARGS0}}
+    [ ! -z "{{ARGS1}}" ] && python train.py --experiments-dir /workspace/experiments {{ARGS1}}
+    [ ! -z "{{ARGS2}}" ] && python train.py --experiments-dir /workspace/experiments {{ARGS2}}
+    [ ! -z "{{ARGS3}}" ] && python train.py --experiments-dir /workspace/experiments {{ARGS3}}
+    [ ! -z "{{ARGS4}}" ] && python train.py --experiments-dir /workspace/experiments {{ARGS4}}
+    [ ! -z "{{ARGS5}}" ] && python train.py --experiments-dir /workspace/experiments {{ARGS5}}
+    [ ! -z "{{ARGS6}}" ] && python train.py --experiments-dir /workspace/experiments {{ARGS6}}
+    [ ! -z "{{ARGS7}}" ] && python train.py --experiments-dir /workspace/experiments {{ARGS7}}
+    [ ! -z "{{ARGS8}}" ] && python train.py --experiments-dir /workspace/experiments {{ARGS8}}
+    [ ! -z "{{ARGS9}}" ] && python train.py --experiments-dir /workspace/experiments {{ARGS9}}
 
   tensorboard: |
     tensorboard --logdir /workspace/experiments/{{ID}}
 
   cer: |
     cd ~/convasr
-    python vis.py cer {{ID}} --experiments-dir /workspace/experiments --val-dataset-name {{VALDATASETNAME}}
+    python vis.py cer {{ID}} --experiments-dir /workspace/experiments

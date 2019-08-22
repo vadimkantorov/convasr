@@ -4,16 +4,21 @@ import os
 import argparse
 import subprocess
 
-
 def spotty(spotty_yaml, arguments):
     subprocess.call(['spotty', arguments[0], '-c', spotty_yaml] + arguments[1:])
 
 def train(spotty_yaml, script):
-    lines = [l.strip() for l in open(script) if l.strip() and not l.startswith('#')]
-    first = [i for i, l in enumerate(lines) if 'train.py' in l][0]
-    last = [i for i in range(first + 1, len(lines)) if lines[i][-1] == '\\' or lines[i - 1][-1] == '\\'][-1]
-    ARGS = ''.join(l.rstrip('\\') for l in lines[first + 1:last + 1]); print(ARGS)
-    subprocess.call(['spotty', 'run', '-c', spotty_yaml, 'train', '-p', 'ARGS=' + ARGS])
+	ARGS = []
+	lines = [l.strip() for l in open(script) if l.strip() and not l.startswith('#')]
+	first = None
+	for i, l in enumerate(l):
+		if 'train.py' in l:
+			first = i
+		else if l[i][-1] != '\\' and first is not None:
+			ARGS.append(''.join(l.rstrip('\\') for l in lines[first + 1:i + 1]))
+			first = None
+
+    subprocess.call(['spotty', 'run', '-c', spotty_yaml, 'train', '-p'] + [f'ARGS{k}={a}' for k, a in enumerate(ARGS)])
 
 def download_checkpoint(spotty_yaml, checkpoint_path):
     subprocess.call(['spotty', 'download', '-c', spotty_yaml, '-f', os.path.join('experiments', checkpoint_path)])

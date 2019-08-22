@@ -79,7 +79,7 @@ def traineval(args):
 						if not training and args.logits:
 							logits_.extend(logits.cpu())
 				cer_avg, wer_avg, loss_avg = [float(torch.tensor([x[k] for x in ref_tra_ if not math.isinf(x[k]) and not math.isnan(x[k])]).mean()) for k in ['cer', 'wer', 'loss']]
-				print(f'{args.experiment_id} {val_dataset_name}', '| epoch {epoch} iter {iteration}' if training else '', f'| Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
+				print(f'{args.experiment_id} {val_dataset_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
 				print()
 				with open(os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
 					json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
