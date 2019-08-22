@@ -8,6 +8,8 @@ import librosa
 import torchaudio
 import models
 
+fixed_or_uniform = lambda r: random.uniform(*r) if isinstance(r, list) else r
+
 class RandomCompose(object):
 	def __init__(self, transforms, prob):
 		self.transforms = transforms
@@ -173,13 +175,9 @@ class SpecAugment(object):
 
 		return spect
 
-def fixed_or_uniform(r):
-	return random.uniform(*r) if isinstance(r, list) else r
-
-AWNSPGPPS = lambda prob = 0.3: RandomCompose([AddWhiteNoise(), SpeedPerturbation(), GainPerturbation(), PitchShift()], prob)
-SOXAWNSPGPPS = lambda prob = 0.3: RandomComposeSox([AddWhiteNoise(), SpeedPerturbation(), GainPerturbation(), PitchShift()], prob)
-SOXAWN = lambda prob = 1.0: RandomComposeSox([AddWhiteNoise()], prob)
-SOXPS = lambda prob = 1.0: RandomComposeSox([PitchShift()], prob)
-SOXSP = lambda prob = 1.0: RandomComposeSox([SpeedPerturbation()], prob)
-SOXGSM = lambda prob = 1.0: RandomComposeSox([Transcode('gsm')], prob)
-SOXAMRNB = lambda prob = 1.0: RandomComposeSox([Transcode('amr-nb')], prob)
+AWN = lambda prob = 1.0: RandomComposeSox([AddWhiteNoise()], prob)
+PS = lambda prob = 1.0: RandomComposeSox([PitchShift()], prob)
+SP = lambda prob = 1.0: RandomComposeSox([SpeedPerturbation()], prob)
+AMRNB = lambda prob = 1.0: RandomComposeSox([Transcode('amr-nb')], prob)
+GSM = lambda prob = 1.0: RandomComposeSox([Transcode('gsm')], prob)
+PSSPAMRNB = lambda prob = 1.0: RandomComposeSox([PitchShift(), SpeedPerturbation(), Transcode('amr-nb')], prob)

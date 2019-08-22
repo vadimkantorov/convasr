@@ -226,7 +226,7 @@ if __name__ == '__main__':
 	parser.add_argument('--train-waveform-transform-prob', type = float, default = None)
 	parser.add_argument('--train-feature-transform', nargs = '*', default = [])
 	parser.add_argument('--train-feature-transform-prob', type = float, default = None)
-	parser.add_argument('--val-iteration-interval', type = int, default = None)
+	parser.add_argument('--val-iteration-interval', type = int, default = 2500)
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
 	parser.add_argument('--log-weight-distribution', action = 'store_true')
 	parser.add_argument('--verbose', action = 'store_true')
