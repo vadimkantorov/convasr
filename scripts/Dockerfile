@@ -24,7 +24,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   sudo \
   wget \
   gdb \
-  libboost-all-dev zlib1g-dev libbz2-dev liblzma-dev ssh \
+  libboost-all-dev zlib1g-dev libbz2-dev liblzma-dev \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN curl -so /miniconda.sh https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh \
