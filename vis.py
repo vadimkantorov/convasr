@@ -10,11 +10,11 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 
-import diag
+import metrics
 
 def errors(transcripts):
 	ref_tra = list(sorted(json.load(open(transcripts)), key = lambda j: j['cer']))
-	res = list(map(lambda j: diag.analyze(j['reference'], j['transcript'], phonetic_replace_groups = diag.RU_PHONETIC_REPLACE_GROUPS), ref_tra))
+	res = list(map(lambda j: metrics.analyze(j['reference'], j['transcript'], phonetic_replace_groups = metrics.RU_PHONETIC_REPLACE_GROUPS), ref_tra))
 	json.dump(res, open(transcripts + '.errors.json', 'w'), indent = 2, sort_keys = True, ensure_ascii = False)
 
 def tra(transcripts):

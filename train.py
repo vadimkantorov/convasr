@@ -11,16 +11,17 @@ import torch.utils.data
 import torch.utils.tensorboard
 import torch.nn as nn
 import torch.nn.functional as F
-import dataset
-import transforms
-import decoders
-import models
-import optimizers
 import torchaudio
 try:
 	import apex
 except:
 	pass
+import dataset
+import transforms
+import decoders
+import metrics
+import models
+import optimizers
 
 def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
@@ -67,12 +68,13 @@ def traineval(args):
 					target_strings = labels.idx2str(dataset.unpack_targets(targets.tolist(), target_lengths.tolist()))
 					for k, (transcript, reference) in enumerate(zip(decoded_strings, target_strings)):
 						if isinstance(transcript, list):
-							transcript = min((decoders.compute_cer(t, reference), t) for t in transcript)[1]
-						cer, wer = decoders.compute_cer(transcript, reference), decoders.compute_wer(transcript, reference) 
+							transcript = min((metrics.cer(t, reference), t) for t in transcript)[1]
+						cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
 						if args.verbose:
 							print(batch_idx * len(inputs) + k, '/', len(val_data_loader) * len(inputs))
-							print(f'{val_dataset_name} REF: {reference}')
-							print(f'{val_dataset_name} HYP: {transcript}')
+							transcript_, reference_ = metrics.align(transcript, reference) if args.align else (transcript, reference)
+							print(f'{val_dataset_name} REF: {reference_}')
+							print(f'{val_dataset_name} HYP: {transcript_}')
 							print(f'{val_dataset_name} CER: {cer:.02%}  |  WER: {wer:.02%}')
 							print()
 						ref_tra_.append(dict(reference = reference, transcript = transcript, filename = filenames[k], cer = cer, wer = wer, loss = float(loss)))
@@ -228,6 +230,7 @@ if __name__ == '__main__':
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
 	parser.add_argument('--log-weight-distribution', action = 'store_true')
 	parser.add_argument('--verbose', action = 'store_true')
+	parser.add_argument('--align', action = 'store_true')
 	parser.add_argument('--decoder', default = 'GreedyDecoder', choices = ['GreedyDecoder', 'BeamSearchDecoder'])
 	parser.add_argument('--decoder-topk', type = int, default = 1)
 	parser.add_argument('--beam-width', type = int, default = 5000)

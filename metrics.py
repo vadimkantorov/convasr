@@ -1,5 +1,39 @@
-import argparse
 import Levenshtein
+
+RU_PHONETIC_REPLACE_GROUPS = ['АОЯ', 'БП', 'ЗСЦ', 'ВФ', 'ГКХ', 'ДТ', 'ЧЖШЩ', 'ЫЭЕИЙ', 'РЛ', 'ЮУ', 'ЪЬ', 'М']
+
+def cer(transcript, reference):
+	cer_ref_len = len(reference.replace(' ', '')) or 1
+	return Levenshtein.distance(transcript.replace(' ', ''), reference.replace(' ', '')) / cer_ref_len if transcript != reference else 0
+
+def wer(transcript, reference):
+	# build mapping of words to integers, Levenshtein package only accepts strings
+	b = set(transcript.split() + reference.split())
+	word2char = dict(zip(b, range(len(b))))
+	wer_ref_len = len(reference.split()) or 1
+	return Levenshtein.distance(''.join([chr(word2char[w]) for w in transcript.split()]), ''.join([chr(word2char[w]) for w in reference.split()])) / wer_ref_len if transcript != reference else 0
+
+def unused_levenshtein(a, b):
+	"""Calculates the Levenshtein distance between a and b.
+	The code was copied from: http://hetland.org/coding/python/levenshtein.py
+	"""
+	n, m = len(a), len(b)
+	if n > m:
+	# Make sure n <= m, to use O(min(n,m)) space
+		a, b = b, a
+		n, m = m, n
+
+	current = list(range(n + 1))
+	for i in range(1, m + 1):
+		previous, current = current, [i] + [0] * n
+		for j in range(1, n + 1):
+			add, delete = previous[j] + 1, current[j - 1] + 1
+			change = previous[j - 1]
+			if a[j - 1] != b[i - 1]:
+				change = change + 1
+			current[j] = min(add, delete, change)
+
+	return current[n]
 
 class Alignment(object):
 	SCORE_UNIFORM = 1
@@ -278,8 +312,7 @@ class Hirschberg(Alignment):
 			self.mode = mode
 		return self.align_rec(self.seq_a, self.seq_b)
 
-def analyze(ref, hyp, phonetic_replace_groups = []):
-	ref0, hyp0 = ref, hyp
+def align(hyp, ref):
 	ref, hyp = Needleman().align(list(ref), list(hyp))
 	r, h = '', ''
 	i = 0
@@ -296,6 +329,12 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 			r += ref[i]
 			h += hyp[i]
 			i += 1
+	return h, r
+
+def analyze(ref, hyp, phonetic_replace_groups = []):
+	ref0, hyp0 = ref, hyp
+	ref, hyp = Needleman().align(list(ref), list(hyp))
+	r, h = align(hyp, ref)
 
 	def words():
 		k = None
@@ -333,13 +372,12 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 		),
 		alignment = dict(ref = r, hyp = h),
 		input = dict(ref = ref0, hyp = hyp0),
-		cer = Levenshtein.distance(ref0.replace(' ', ''), hyp0.replace(' ', '')) / len(ref0.replace(' ', ''))
+		cer = cer(hyp0, ref0)
 	)
 	return a
 
-RU_PHONETIC_REPLACE_GROUPS = ['АОЯ', 'БП', 'ЗСЦ', 'ВФ', 'ГК', 'ДТ', 'ЧЖШЩ', 'ЫЭЕИЙ', 'РЛ', 'ЮУ', 'ЪЬ']
-
 if __name__ == '__main__':
+	import argparse
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--ref')
 	parser.add_argument('--hyp')
