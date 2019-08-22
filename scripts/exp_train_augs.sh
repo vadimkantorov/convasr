@@ -18,7 +18,7 @@ python3 train.py \
   --train-data-path data/mixed_train.csv \
   --val-data-path data/mixed_val.csv data/clean_val.csv data/calls_val.csv \
   --sample-rate 8000 \
-  --epochs 3 \
+  --epochs 2 \
   --train-waveform-transform SP --train-waveform-transform-prob 0.5 \
   --name SP
 
@@ -30,7 +30,7 @@ python3 train.py \
   --train-data-path data/mixed_train.csv \
   --val-data-path data/mixed_val.csv data/clean_val.csv data/calls_val.csv \
   --sample-rate 8000 \
-  --epochs 3 \
+  --epochs 2 \
   --train-waveform-transform AMRNB --train-waveform-transform-prob 0.5 \
   --name AMRNB
 
