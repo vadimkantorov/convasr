@@ -1,9 +1,9 @@
 export INPUTFILE=$1
 export OUTPUTDIR=$2
 export NJOBS=${3:-20}
-export SAMPLERATE=16000
-export FORMAT=oggopus
-export EXT=ogg
+export SAMPLERATE=${4:-16000}
+export FORMAT=${5:-oggopus}
+export EXT={6:-ogg}
 
 if [ -z $SPEECHKITAPIKEY ]; then
 	SPEECHKITAPIKEY=$(cat speechkitapikey.txt)
