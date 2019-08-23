@@ -1,5 +1,9 @@
 import torch
 
+class NoopLR(torch.optim.lr_scheduler._LRScheduler):
+	def get_lr(self):
+		return [group['lr'] for group in self.optimizer.param_groups]
+
 class PolynomialDecayLR(torch.optim.lr_scheduler._LRScheduler):
 	def __init__(self, optimizer, decay_steps, power = 1.0, begin_decay_at = 0, end_lr = 0.0, warmup_steps = 0, last_epoch = -1):
 		self.decay_steps = decay_steps

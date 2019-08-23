@@ -7,9 +7,10 @@ project:
       - data/*
       - ru_open_stt
       - '*.pt'
+      - scripts/experiments/*
 
 container:
-  projectDir: /workspace
+  projectDir: /project
   image: ubuntu:18.04
   ports: [6006]
   volumeMounts:
