@@ -27,7 +27,7 @@ instances:
       region: us-east-1
       availabilityZone: us-east-1a
       instanceType: p3.8xlarge # g3s.xlarge #t2.large #p3.8xlarge
-      maxPrice: 3.7
+      maxPrice: 4.0
       dockerDataRoot: /docker
       volumes:
         - name: docker
