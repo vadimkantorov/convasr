@@ -162,3 +162,13 @@ def normalize_signal(signal, eps = 1e-5):
 
 def normalize_features(features, eps = 1e-20):
 	return (features - features.mean(dim = -1, keepdim = True)) / (features.std(dim = -1, keepdim = True) + eps)
+
+def temporal_mask(features, lengths):
+	mask = torch.ones_like(features)
+	for m, l in zip(mask, lengths):
+		m[..., l:].zero_()
+	return mask
+
+def entropy(log_probs, lengths, dim = 1, eps = 1e-9):
+	e = (log_probs.exp() * log_probs).sum(dim = dim)
+	return -(e * temporal_mask(e, lengths)).sum(dim = -1) / (eps + lengths.type_as(log_probs))

@@ -66,7 +66,8 @@ def traineval(args):
 					loss = criterion(log_probs.permute(2, 0, 1), targets.to(args.device), output_lengths.to(args.device), target_lengths.to(args.device)).mean()
 					decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
 					target_strings = labels.idx2str(dataset.unpack_targets(targets.tolist(), target_lengths.tolist()))
-					for k, (transcript, reference) in enumerate(zip(decoded_strings, target_strings)):
+					entropy = models.entropy(log_probs, output_lengths, dim = 1)
+					for k, (transcript, reference, entropy) in enumerate(zip(decoded_strings, target_strings, entropy)):
 						if isinstance(transcript, list):
 							transcript = min((metrics.cer(t, reference), t) for t in transcript)[1]
 						cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
@@ -77,11 +78,11 @@ def traineval(args):
 							print(f'{val_dataset_name} HYP: {transcript_}')
 							print(f'{val_dataset_name} CER: {cer:.02%}  |  WER: {wer:.02%}')
 							print()
-						ref_tra_.append(dict(reference = reference, transcript = transcript, filename = filenames[k], cer = cer, wer = wer, loss = float(loss)))
+						ref_tra_.append(dict(reference = reference, transcript = transcript, filename = filenames[k], cer = cer, wer = wer, loss = float(loss), entropy = float(entropy)))
 						if not training and args.logits:
 							logits_.extend(logits.cpu())
-				cer_avg, wer_avg, loss_avg = [float(torch.tensor([x[k] for x in ref_tra_ if not math.isinf(x[k]) and not math.isnan(x[k])]).mean()) for k in ['cer', 'wer', 'loss']]
-				print(f'{args.experiment_id} {val_dataset_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
+				cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([x[k] for x in ref_tra_ if not math.isinf(x[k]) and not math.isnan(x[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
+				print(f'{args.experiment_id} {val_dataset_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
 				print()
 				with open(os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
 					json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
@@ -127,7 +128,7 @@ def traineval(args):
 		json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
 
 	tic = time.time()
-	loss_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0
+	loss_avg, entropy_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0, 0.0
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1./K) * avg
 	for epoch in range(epoch, args.epochs):
 		model.train()
@@ -138,6 +139,7 @@ def traineval(args):
 			output_lengths = models.compute_output_lengths(model, input_lengths)
 			logits = model(inputs.to(args.device), input_lengths)
 			log_probs = F.log_softmax(logits, dim = 1)
+			entropy = models.entropy(log_probs, output_lengths, dim = 1).mean()
 			loss = criterion(log_probs.permute(2, 0, 1), targets.to(args.device), output_lengths.to(args.device), target_lengths.to(args.device)).mean()
 			if not (torch.isinf(loss) or torch.isnan(loss)):
 				optimizer.zero_grad()
@@ -149,11 +151,12 @@ def traineval(args):
 				torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
 				optimizer.step()
 				loss_avg = moving_avg(loss_avg, float(loss), max = 1000)
+				entropy_avg = moving_avg(entropy_avg, float(entropy), max = 4)
 
 			time_ms_data, time_ms_model = (toc - tic) * 1000, (time.time() - toc) * 1000
 			time_ms_avg = moving_avg(time_ms_avg, time_ms_model, max = 10000)
 			lr = scheduler.get_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
-			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >9d}] loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:6.0f} <{time_ms_avg:4.0f}> +{time_ms_data:.2f} ms  | lr: {lr}')
+			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >9d}] ent: <{entropy_avg:.2f}>  loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:6.0f} <{time_ms_avg:4.0f}> +{time_ms_data:.2f} ms  | lr: {lr}')
 			tic = time.time()
 			scheduler.step()
 			iteration += 1
