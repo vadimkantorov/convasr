@@ -4,3 +4,8 @@ data/__pycache__/
 *.pyc
 *.pt
 scripts/experiments
+*.binary
+*.arpa
+*.zip
+*.tar
+*.tar.gz
