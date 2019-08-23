@@ -91,6 +91,9 @@ pip install git+https://github.com/parlance/ctcdecode
 
 # TTS generation
 ```shell
+# select top messages approx 700k cyrillic chars (a cyrillic char takes 2 bytes in UTF-8, hence x2 factor), dropping the last line
+head -c 1500000 tts_dataset.txt | head -n -1 > tts_dataset_100h.txt
+
 # using yandex speehkit tts
 # make sure your apikey has necessary roles, e.g. admin
 # export the API key or create a speechkitapikey.txt file

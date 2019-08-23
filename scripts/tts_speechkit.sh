@@ -3,11 +3,12 @@ export OUTPUTDIR=$2
 export NJOBS=${3:-20}
 export SAMPLERATE=${4:-16000}
 export FORMAT=${5:-oggopus}
-export EXT={6:-ogg}
+export EXT=${6:-ogg}
 
 if [ -z $SPEECHKITAPIKEY ]; then
 	SPEECHKITAPIKEY=$(cat speechkitapikey.txt)
 fi
+export SPEECHKITAPIKEY
 
 random_voice() {
 	P=(alyss jane oksana omazh zahar ermil)
@@ -18,7 +19,7 @@ random_emotion() {
 	echo ${P[RANDOM%${#P[@]}]}
 }
 random_speed() {
-	P=(0.7 0.8 1.0)
+	P=(0.8 1.0 1.2)
 	echo ${P[RANDOM%${#P[@]}]}
 }
 
@@ -28,4 +29,4 @@ export -f random_speed
 
 # https://cloud.yandex.ru/docs/speechkit/tts/request
 mkdir -p "$OUTPUTDIR"
-cat "$INPUTFILE" | parallel -j$NJOBS 'curl -s -X POST -H "Authorization: Api-Key $SPEECHKITAPIKEY"  -d "lang=ru-RU&sampleRateHergz=$SAMPLERATE&format=$FORMAT&voice=$(random_voice)&emotion=$(random_emotion)&speed=$(random_speed)" https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize --data-urlencode text={} > "$OUTPUTDIR/$(echo -n {} | md5sum | cut -d" " -f1).$EXT"'
+cat "$INPUTFILE" | parallel --progress -j$NJOBS 'curl -s -X POST -H "Authorization: Api-Key $SPEECHKITAPIKEY"  -d "lang=ru-RU&sampleRateHertz=$SAMPLERATE&format=$FORMAT&voice=$(random_voice)&emotion=$(random_emotion)&speed=$(random_speed)" https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize --data-urlencode text={} > "$OUTPUTDIR/$(echo -n {} | md5sum | cut -d" " -f1).$EXT"'
