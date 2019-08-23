@@ -97,5 +97,5 @@ pip install git+https://github.com/parlance/ctcdecode
 
 # run generation in ogg format with 10 workers
 export SPEECHKITAPIKEY=yourapikey
-bash scripts/speechkit.sh messages.txt data/messages 10
+bash scripts/tts_speechkit.sh messages.txt data/messages 10
 ```
