@@ -88,3 +88,14 @@ Dependencies: same as KenLM, `pip install wget`
 ```shell
 pip install git+https://github.com/parlance/ctcdecode
 ```
+
+# TTS generation
+```shell
+# using yandex speehkit tts
+# make sure your apikey has necessary roles, e.g. admin
+# export the API key or create a speechkitapikey.txt file
+
+# run generation in ogg format with 10 workers
+export SPEECHKITAPIKEY=yourapikey
+bash scripts/speechkit.sh messages.txt data/messages 10
+```
