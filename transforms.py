@@ -50,12 +50,14 @@ class RandomComposeSox(RandomCompose):
 		sox.set_input_file(audio_path)
 		if effect:
 			sox.append_effect_to_chain(*effect)
-		sox.append_effect_to_chain('rate', sample_rate)
-		sox.append_effect_to_chain('channels', 1)
-		signal, sample_rate = sox.sox_build_flow_effects()
+		#sox.append_effect_to_chain('rate', sample_rate)
+		#sox.append_effect_to_chain('channels', 1)
+		signal, sample_rate_ = sox.sox_build_flow_effects()
 		signal = signal[0].clone()
 		for audio_path in tmp_audio_path:
 			os.remove(audio_path)
+		if sample_rate is not None and sample_rate_ != sample_rate:
+			sample_rate_, signal = dataset.resample(signal, sample_rate_, sample_rate)
 		if normalize:
 			signal = models.normalize_signal(signal)
 		if effect == []:
