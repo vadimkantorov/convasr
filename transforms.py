@@ -50,13 +50,13 @@ class RandomComposeSox(RandomCompose):
 		sox = torchaudio.sox_effects.SoxEffectsChain()
 		if effect:
 			sox.append_effect_to_chain(*effect)
-		sox.append_effect_to_chain('rate', sample_rate)
 		sox.append_effect_to_chain('channels', 1)
+		sox.append_effect_to_chain('rate', sample_rate)
 		sox.set_input_file(audio_path)
 		signal, sample_rate_ = sox.sox_build_flow_effects()
 		sox.clear_chain()
 		torchaudio.shutdown_sox()
-		signal = torch.from_numpy(signal[0].numpy().copy())
+		signal = signal[0].numpy().copy()
 		for audio_path in tmp_audio_path:
 			os.remove(audio_path)
 		if sample_rate is not None and sample_rate_ != sample_rate:
