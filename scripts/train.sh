@@ -8,6 +8,7 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --val-iteration-interval 2500 \
   --sample-rate 8000 \
   --checkpoint data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80__8khz/checkpoint_epoch02_iter0050000.pt \
+  --train-waveform-transform SOX --train-waveform-transform-prob 1.0 \
   --epochs 3 
 #  --train-waveform-transform SOXAMRNB --train-waveform-transform-prob 1.0:w
 #  --checkpoint data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80__8khz/checkpoint_epoch01_iter0025000.pt \
