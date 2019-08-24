@@ -35,7 +35,7 @@ class RandomComposeSox(RandomCompose):
 			self.initialize_sox = False
 
 		effect = None
-		if random.random() < self.prob:
+		if self.transforms and random.random() < self.prob:
 			transform = random.choice(self.transforms)
 			effect = ['pitch', fixed_or_uniform(transform.n_steps) * 100] if isinstance(transform, PitchShift) else ['tempo', fixed_or_uniform(transform.rate)] if isinstance(transform, SpeedPerturbation) else ['gain', fixed_or_uniform(transform.gain_db)] if isinstance(transform, GainPerturbation) else 'transcode' if isinstance(transform, Transcode) else []
 

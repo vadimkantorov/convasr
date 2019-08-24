@@ -7,7 +7,7 @@ python3 train.py \
   --val-data-path data/mixed_val.csv data/clean_val.csv data/calls_val.csv \
   --sample-rate 8000 \
   --epochs 3 \
-  --train-waveform-transform PS --train-waveform-transform-prob 0.0 \
+  --train-waveform-transform SOX --train-waveform-transform-prob 1.0 \
   --name PS
 
 #python3 train.py \
