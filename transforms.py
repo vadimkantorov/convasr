@@ -175,6 +175,7 @@ class SpecAugment(object):
 
 		return spect
 
+SOX = lambda prob = 1.0: RandomComposeSox([], prob)
 AWN = lambda prob = 1.0: RandomComposeSox([AddWhiteNoise()], prob)
 PS = lambda prob = 1.0: RandomComposeSox([PitchShift()], prob)
 SP = lambda prob = 1.0: RandomComposeSox([SpeedPerturbation()], prob)

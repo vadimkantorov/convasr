@@ -1,8 +1,7 @@
 python3 train.py $@ \
-  --checkpoint data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80__8khz/checkpoint_epoch01_iter0025000.pt \
-  --val-batch-size 32 --val-data-path data/clean_val.csv data/mixed_val.csv data/calls_val.csv  ../sample_ok/sample_ok.convasr.csv 
-
-#  --decoder BeamSearchDecoder --beam-width 2000 --lm charlm/chats_06_noprune_char.binary #chats_03_prune.binary #
+  --checkpoint data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80__8khz/checkpoint_epoch01_iter0040000.pt \
+  --val-batch-size 32 --val-data-path ../sample_ok/sample_ok.convasr.csv \
+  --decoder BeamSearchDecoder --beam-width 20000 --lm chats_03_prune.binary --decoder-topk 5 # charlm/chats_06_noprune_char.binary #--lm data/ru_wiyalen_no_punkt.arpa.binary 
 
 #  --checkpoint data/checkpoint_epoch04_iter0124135.pt \
 
@@ -16,7 +15,7 @@ python3 train.py $@ \
 
 #--val-batch-size 64 --val-data-path ../sample_ok/sample_ok.convasr.csv \
 
-# --decoder BeamSearchDecoder --beam-width 20000 --lm chats_03_prune.binary #chats.binary #data/ru_wiyalen_no_punkt.arpa.binary
+# --decoder BeamSearchDecoder --beam-width 20000 --lm chats_03_prune.binary #chats.binary #
 
 #  --val-waveform-transform MixExternalNoise --val-waveform-transform-prob 1 --val-waveform-transform-args data/ru_open_stt_noise_small.csv --val-waveform-transform-debug-dir data/debug_aug \
 
