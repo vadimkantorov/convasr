@@ -31,7 +31,7 @@ class RandomComposeSox(RandomCompose):
 
 	def __call__(self, audio_path, sample_rate, normalize = True):
 		if self.initialize_sox:
-			torchaudio.initialize_sox()
+			#torchaudio.initialize_sox()
 			self.initialize_sox = False
 
 		effect = None
