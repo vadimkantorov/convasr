@@ -57,8 +57,11 @@ scripts:
         wget -q https://github.com/vadimkantorov/open_stt_splits/releases/download/with_excluded_by_cer/$f -P data
     done
     git checkout {{TAG}}
-    export MALLOC_CHECK_=2
-    [ ! -z "{{ARGS0}}" ] && gdb -ex r --args python train.py --experiments-dir /workspace/experiments {{ARGS0}}
+    export MALLOC_CHECK_=3
+    ulimit -c unlimited
+    echo /tmp/crash > /proc/sys/kernel/core_pattern
+    [ ! -z "{{ARGS0}}" ] && $(which python) train.py --experiments-dir /workspace/experiments {{ARGS0}}
+    #[ ! -z "{{ARGS0}}" ] && valgrind --tool=memcheck --leak-check=full $(which python) train.py --experiments-dir /workspace/experiments {{ARGS0}}
     #[ ! -z "{{ARGS1}}" ] && python train.py --experiments-dir /workspace/experiments {{ARGS1}}
     #[ ! -z "{{ARGS2}}" ] && python train.py --experiments-dir /workspace/experiments {{ARGS2}}
     #[ ! -z "{{ARGS3}}" ] && python train.py --experiments-dir /workspace/experiments {{ARGS3}}

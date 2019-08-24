@@ -52,7 +52,8 @@ class RandomComposeSox(RandomCompose):
 			sox.append_effect_to_chain(*effect)
 		sox.append_effect_to_chain('rate', sample_rate)
 		sox.append_effect_to_chain('channels', 1)
-		signal = sox.sox_build_flow_effects()[0][0]
+		signal, sample_rate = sox.sox_build_flow_effects()
+		signal = signal[0].clone()
 		for audio_path in tmp_audio_path:
 			os.remove(audio_path)
 		if normalize:
