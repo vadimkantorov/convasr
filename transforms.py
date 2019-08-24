@@ -50,7 +50,7 @@ class RandomComposeSox(RandomCompose):
 		sox.set_input_file(audio_path)
 		if effect:
 			sox.append_effect_to_chain(*effect)
-		#sox.append_effect_to_chain('rate', sample_rate)
+		sox.append_effect_to_chain('rate', sample_rate)
 		#sox.append_effect_to_chain('channels', 1)
 		signal, sample_rate_ = sox.sox_build_flow_effects()
 		signal = signal[0].clone()
