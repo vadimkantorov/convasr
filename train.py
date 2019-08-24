@@ -29,7 +29,7 @@ def set_random_seed(seed):
 
 def worker_init_fn(worker_idx):
 	set_random_seed(worker_idx)
-	torchaudio.initialize_sox()
+	#torchaudio.initialize_sox()
 
 def traineval(args):
 	checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoint else {}

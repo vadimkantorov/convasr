@@ -46,13 +46,15 @@ class RandomComposeSox(RandomCompose):
 			subprocess.check_call(['sox', '-V0', tmp_audio_path[0], '-t', 'wav', tmp_audio_path[1]])
 			audio_path, effect = tmp_audio_path[1], None
 
+		torchaudio.initialize_sox()
 		sox = torchaudio.sox_effects.SoxEffectsChain()
 		sox.set_input_file(audio_path)
 		if effect:
 			sox.append_effect_to_chain(*effect)
-		#sox.append_effect_to_chain('rate', sample_rate)
-		sox.append_effect_to_chain('channels', 1)
+		sox.append_effect_to_chain('rate', sample_rate)
+		#sox.append_effect_to_chain('channels', 1)
 		signal, sample_rate_ = sox.sox_build_flow_effects()
+		torchaudio.shutdown_sox()
 		signal = signal[0].clone()
 		for audio_path in tmp_audio_path:
 			os.remove(audio_path)
