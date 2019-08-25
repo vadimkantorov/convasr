@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 
+import dataset
 import metrics
 
 def errors(transcripts):
@@ -93,6 +94,14 @@ def words(train_data_path, val_data_path):
 		if c1 > 1 and c2 < 1000:
 			print(w, c1, c2)
 
+def reftra(ref, tra, output_path):
+	ref, tra = ([dataset.replace22(dataset.replace2(l.split(',')[1].strip().lower())) for l in open(f)] for f in [ref, tra])
+	cerwer = [dict(ref = ref_, tra = tra_, cer = metrics.cer(tra_, ref_), wer = metrics.wer(tra_, ref_)) for ref_, tra_ in zip(ref, tra)]
+	cer_avg = float(torch.tensor([d['cer'] for d in cerwer]).mean())
+	wer_avg = float(torch.tensor([d['wer'] for d in cerwer]).mean())
+	json.dump(cerwer, open(output_path, 'w'), sort_keys = True, indent = 2, ensure_ascii = False)
+	print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -122,6 +131,12 @@ if __name__ == '__main__':
 	cmd.add_argument('train_data_path')
 	cmd.add_argument('val_data_path')
 	cmd.set_defaults(func = words)
+
+	cmd = subparsers.add_parser('reftra')
+	cmd.add_argument('--ref', required = True)
+	cmd.add_argument('--tra', required = True)
+	cmd.add_argument('-o', '--output-path', default = 'data/reftra.json')
+	cmd.set_defaults(func = reftra)
 	
 	args = vars(parser.parse_args())
 	func = args.pop('func')
