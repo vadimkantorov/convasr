@@ -4,6 +4,7 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --train-batch-size 80 --val-batch-size 80 \
   --lr 1e-2 --weight-decay 1e-3 --optimizer SGD \
   --scheduler MultiStepLR --decay-milestones 25000 50000 \
+  --optimizer NovoGrad \
   --train-data-path data/mixed_train.csv \
   --val-data-path data/mixed_val.csv data/clean_val.csv ../sample_ok/sample_ok.convasr.csv \
   --val-iteration-interval 2500 \

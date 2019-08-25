@@ -31,10 +31,10 @@ class NovoGrad(torch.optim.Optimizer):
 		for group in self.param_groups:
 			for p in filter(lambda p: p.grad is not None, group['params']):
 				state = self.state[p]
-				g_2 =  torch.dot(p.grad.data, p.grad.data)
+				g_2 =  (p.grad.data ** 2).sum()
 				state['_grads_ema'] = g_2 if '_grads_ema' not in state else state['_grads_ema'] * group['betas'][1] + g_2 * (1. - group['betas'][1])
 
-				grad = (state['_grads_ema'] + group['eps']).rsqrt_().mul_(p.grad.data)
+				grad = p.grad.data / (state['_grads_ema'] + group['eps']).sqrt()
 				if group['weight_decay'] > 0:
 					grad.add_(group['weight_decay'], p.data)
 				if group['dampening']:
