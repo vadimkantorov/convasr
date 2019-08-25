@@ -158,6 +158,7 @@ def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_
 	return normalize_features(features) if normalize else features 
 
 def normalize_signal(signal, eps = 1e-5):
+	signal = signal.to(torch.float32)
 	return signal / (signal.abs().max() + eps)
 
 def normalize_features(features, eps = 1e-20):

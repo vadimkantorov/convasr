@@ -46,16 +46,19 @@ class RandomComposeSox(RandomCompose):
 			subprocess.check_call(['sox', '-V0', tmp_audio_path[0], '-t', 'wav', tmp_audio_path[1]])
 			audio_path, effect = tmp_audio_path[1], None
 
-		torchaudio.initialize_sox()
-		sox = torchaudio.sox_effects.SoxEffectsChain()
-		if effect:
-			sox.append_effect_to_chain(*effect)
-		sox.append_effect_to_chain('channels', 1)
-		sox.append_effect_to_chain('rate', sample_rate)
-		sox.set_input_file(audio_path)
-		signal, sample_rate_ = sox.sox_build_flow_effects()
-		sox.clear_chain()
-		torchaudio.shutdown_sox()
+		#torchaudio.initialize_sox()
+		#sox = torchaudio.sox_effects.SoxEffectsChain()
+		#if effect:
+		#	sox.append_effect_to_chain(*effect)
+		#sox.append_effect_to_chain('channels', 1)
+		#sox.append_effect_to_chain('rate', sample_rate)
+		#sox.set_input_file(audio_path)
+		#signal, sample_rate_ = sox.sox_build_flow_effects()
+		#sox.clear_chain()
+		#torchaudio.shutdown_sox()
+
+		signal, sample_rate = torch.as_tensor(subprocess.check_output(['sox', '-V0', audio_path] + ([effect[0], str(effect[1])] if effect else []) + ['-b', '16', '-e', 'signed', '--endian', 'little', '-r', str(sample_rate), '-c', '1', '-t', '-']), dtype = torch.int16), sample_rate
+
 		signal = signal[0]
 		for audio_path in tmp_audio_path:
 			os.remove(audio_path)
