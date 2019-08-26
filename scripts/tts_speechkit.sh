@@ -30,3 +30,8 @@ export -f random_speed
 # https://cloud.yandex.ru/docs/speechkit/tts/request
 mkdir -p "$OUTPUTDIR"
 cat "$INPUTFILE" | parallel --progress -j$NJOBS 'curl -s -X POST -H "Authorization: Api-Key $SPEECHKITAPIKEY" -d "lang=ru-RU&sampleRateHertz=$SAMPLERATE&format=$FORMAT&voice=$(random_voice)&emotion=$(random_emotion)&speed=$(random_speed)" "https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize" --data-urlencode text={} > "$OUTPUTDIR/$(echo -n {} | md5sum | cut -d" " -f1).$EXT"'
+
+while read line; do
+	AUDIOPATH="$OUTPUTDIR/"$(echo -n $line | md5sum | cut -d" " -f1).$EXT
+	echo "$AUDIOPATH,$line"
+done < "$INPUTFILE" > "$OUTPUTDIR.csv"
