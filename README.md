@@ -100,5 +100,5 @@ head -c 1500000 tts_dataset.txt | head -n -1 > tts_dataset_100h.txt
 
 # run generation in ogg format with 10 workers
 export SPEECHKITAPIKEY=yourapikey
-bash scripts/tts_speechkit.sh tts_dataset_100h.txt data/
+bash scripts/tts_speechkit.sh tts_dataset_100h.txt data/speechkit
 ```
