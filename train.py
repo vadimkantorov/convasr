@@ -204,7 +204,7 @@ if __name__ == '__main__':
 	parser.add_argument('--num-input-features', default = 64)
 	parser.add_argument('--train-data-path')
 	parser.add_argument('--val-data-path', nargs = '+')
-	parser.add_argument('--sample-rate', type = int, default = 16000)
+	parser.add_argument('--sample-rate', type = int, default = 8000)
 	parser.add_argument('--window-size', type = float, default = 0.02)
 	parser.add_argument('--window-stride', type = float, default = 0.01)
 	parser.add_argument('--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'])
