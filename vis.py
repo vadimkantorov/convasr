@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 
 import dataset
+import ru
 import metrics
 
 def errors(transcripts):
@@ -95,7 +96,8 @@ def words(train_data_path, val_data_path):
 			print(w, c1, c2)
 
 def reftra(ref, tra, output_path):
-	ref, tra = ([dataset.replace22(dataset.replace2(l.split(',')[1].strip().lower())) for l in open(f)] for f in [ref, tra])
+	labels = dataset.Labels(ru)
+	ref, tra = ([dataset.replacestar(dataset.replace22(dataset.replace2(labels.normalize_text(l.split(',')[1].strip().lower())))) for l in open(f)] for f in [ref, tra])
 	cerwer = [dict(ref = ref_, tra = tra_, cer = metrics.cer(tra_, ref_), wer = metrics.wer(tra_, ref_)) for ref_, tra_ in zip(ref, tra)]
 	cer_avg = float(torch.tensor([d['cer'] for d in cerwer]).mean())
 	wer_avg = float(torch.tensor([d['wer'] for d in cerwer]).mean())

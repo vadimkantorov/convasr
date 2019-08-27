@@ -80,6 +80,7 @@ class BucketingSampler(torch.utils.data.Sampler):
 
 replace2 = lambda s: ''.join(c if i == 0 or c != '2' else s[i - 1] for i, c in enumerate(s))
 replace22 =lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
+replacestar = lambda s: s.replace('*', '')
 
 class Labels(object):
 	blank = '|'
@@ -99,15 +100,15 @@ class Labels(object):
 		words = re.findall(r'-?\d+|-?\d+-\w+|\w+', text)
 		return list(filter(bool, (''.join([c for c in self.preprocess_word(w) if c.upper() in self.chr2idx_]).strip() for w in words)))
 
+	def normalize_text(self, text):
+		return ' '.join(self.find_words(text)).upper().strip() or '*'
+
 	def parse(self, text):
-		if text.startswith('!clean:'):
-			return ''.join(map(self.chr2idx, text.replace('!clean:', '', 1).strip()))
-		else:
-			chars = ' '.join(self.find_words(text)).upper().strip() or '*'
-			return [self.chr2idx(c) if i == 0 or c != chars[i - 1] else self.chr2idx('2') for i, c in enumerate(chars)]
+		chars = self.normalize_text(text)
+		return [self.chr2idx(c) if i == 0 or c != chars[i - 1] else self.chr2idx('2') for i, c in enumerate(chars)]
 
 	def idx2str(self, idx):
-		i2s = lambda i: '' if len(i) == 0 else replace22(replace2(''.join(map(self.idx2chr, i)))).strip() if not isinstance(i[0], list) else list(map(i2s, i))
+		i2s = lambda i: '' if len(i) == 0 else replacestar(replace22(replace2(''.join(map(self.idx2chr, i))))).strip() if not isinstance(i[0], list) else list(map(i2s, i))
 		return i2s(idx)
 
 	def chr2idx(self, chr):
