@@ -33,7 +33,6 @@ class RandomComposeSox(RandomCompose):
 		if self.initialize_sox:
 			#torchaudio.initialize_sox()
 			self.initialize_sox = False
-
 		effect = None
 		if self.transforms and random.random() < self.prob:
 			transform = random.choice(self.transforms)
@@ -57,13 +56,12 @@ class RandomComposeSox(RandomCompose):
 		#sox.clear_chain()
 		#torchaudio.shutdown_sox()
 
-		signal, sample_rate = torch.as_tensor(subprocess.check_output(['sox', '-V0', audio_path] + ([effect[0], str(effect[1])] if effect else []) + ['-b', '16', '-e', 'signed', '--endian', 'little', '-r', str(sample_rate), '-c', '1', '-t', '-']), dtype = torch.int16), sample_rate
+		signal, sample_rate_ = torch.as_tensor(bytearray(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', 'little', '-r', str(sample_rate), '-c', '1', '-t', 'raw', '-']  + ([effect[0], str(effect[1])] if effect else []))), dtype = torch.int16), sample_rate
 
-		signal = signal[0]
 		for audio_path in tmp_audio_path:
 			os.remove(audio_path)
 		if sample_rate is not None and sample_rate_ != sample_rate:
-			sample_rate_, signal = dataset.resample(signal, sample_rate_, sample_rate)
+			signal, sample_rate_ = dataset.resample(signal, sample_rate_, sample_rate)
 		if normalize:
 			signal = models.normalize_signal(signal)
 		if effect == []:
