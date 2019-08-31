@@ -40,14 +40,15 @@ for audio_path in audio_paths:
 	input_lengths = torch.IntTensor([[features.shape[-1]]])
 	logits = model(inputs.to(args.device), input_lengths)
 	log_probs = F.log_softmax(logits, dim = 1)
-
 	output_lengths = models.compute_output_lengths(model, input_lengths)
+	entropy = float(models.entropy(log_probs, output_lengths, dim = 1).mean())
 	transcript = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))[0]
 	open(transcript_path, 'w').write(transcript)
 
 	print(os.path.basename(audio_path))
 	if args.verbose:
 		print(transcript)
+	print(f'Entropy: {entropy:.2f}')
 	if os.path.exists(reference_path):
 		reference = labels.normalize_text(open(reference_path).read())
 		cer = metrics.cer(transcript, reference)
