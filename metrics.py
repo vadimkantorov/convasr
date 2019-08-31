@@ -1,5 +1,10 @@
 import Levenshtein
 
+def compare_time_series(a, b):
+	diff = a - b
+	cumsum = reversed(diff).cumsum()
+	return (cumsum / torch.arange(1, len(cumsum))).mean()
+
 def cer(transcript, reference):
 	cer_ref_len = len(reference.replace(' ', '')) or 1
 	return Levenshtein.distance(transcript.replace(' ', ''), reference.replace(' ', '')) / cer_ref_len if transcript != reference else 0
