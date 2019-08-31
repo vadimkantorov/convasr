@@ -1,5 +1,9 @@
 LABELS = "|АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ2* "
 
+PHONETIC_REPLACE_GROUPS = ['АОЯ', 'БП', 'ЗСЦ', 'ВФ', 'ГКХ', 'ДТ', 'ЧЖШЩ', 'ЫЭЕИЙ', 'РЛ', 'ЮУ', 'ЪЬ', 'М']
+
+VOWELS = 'аоийеёэыуюяАОИЙЕЁЭЫУЮЯ'
+
 def preprocess_text(text):        
     text = text.replace('*', ' ').replace('+', ' ').replace('%', 'процент*')
     text = text.replace('ё', 'е').replace('Ё', 'Е')

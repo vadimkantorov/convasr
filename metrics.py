@@ -1,7 +1,5 @@
 import Levenshtein
 
-RU_PHONETIC_REPLACE_GROUPS = ['АОЯ', 'БП', 'ЗСЦ', 'ВФ', 'ГКХ', 'ДТ', 'ЧЖШЩ', 'ЫЭЕИЙ', 'РЛ', 'ЮУ', 'ЪЬ', 'М']
-
 def cer(transcript, reference):
 	cer_ref_len = len(reference.replace(' ', '')) or 1
 	return Levenshtein.distance(transcript.replace(' ', ''), reference.replace(' ', '')) / cer_ref_len if transcript != reference else 0
@@ -334,7 +332,7 @@ def align(hyp, ref):
 def analyze(ref, hyp, phonetic_replace_groups = []):
 	ref0, hyp0 = ref, hyp
 	ref, hyp = Needleman().align(list(ref), list(hyp))
-	r, h = align(hyp, ref)
+	h, r = align(hyp, ref)
 
 	def words():
 		k = None
@@ -378,9 +376,10 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 
 if __name__ == '__main__':
 	import argparse
+	import ru
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--ref')
 	parser.add_argument('--hyp')
 	args = parser.parse_args()
 
-	print(analyze(args.ref, args.hyp, phonetic_replace_groups = RU_PHONETIC_REPLACE_GROUPS))
+	print(analyze(args.ref, args.hyp, phonetic_replace_groups = ru.PHONETIC_REPLACE_GROUPS))

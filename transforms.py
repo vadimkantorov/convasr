@@ -7,6 +7,7 @@ import dataset
 import librosa
 import torchaudio
 import models
+import numpy as np
 
 fixed_or_uniform = lambda r: random.uniform(*r) if isinstance(r, list) else r
 
@@ -53,10 +54,14 @@ class RandomComposeSox(RandomCompose):
 		#sox.append_effect_to_chain('rate', sample_rate)
 		#sox.set_input_file(audio_path)
 		#signal, sample_rate_ = sox.sox_build_flow_effects()
+		#signal = signal[0]
 		#sox.clear_chain()
 		#torchaudio.shutdown_sox()
+		#print(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', 'little', '-r', str(sample_rate), '-c', '1', '-t', 'raw', '-']  + ([effect[0], str(effect[1])] if effect else []))
 
-		signal, sample_rate_ = torch.as_tensor(bytearray(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', 'little', '-r', str(sample_rate), '-c', '1', '-t', 'raw', '-']  + ([effect[0], str(effect[1])] if effect else []))), dtype = torch.int16), sample_rate
+		#signal, sample_rate_ = torch.as_tensor(bytearray(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', 'little', '-r', str(sample_rate), '-c', '1', '-t', 'raw', '-']  + ([effect[0], str(effect[1])] if effect else []))), dtype = torch.int16), sample_rate
+
+		signal, sample_rate_ = torch.from_numpy(np.frombuffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', 'little', '-r', str(sample_rate), '-c', '1', '-t', 'raw', '-']  + ([effect[0], str(effect[1])] if effect else [])), dtype = np.int16)).to(torch.float32), sample_rate
 
 		for audio_path in tmp_audio_path:
 			os.remove(audio_path)

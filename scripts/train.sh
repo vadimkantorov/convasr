@@ -11,7 +11,6 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --train-waveform-transform PSSPAMRNB --train-waveform-transform-prob 0.5 \
   --epochs 3
 
-
 #  --checkpoint data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80__8khz/checkpoint_epoch02_iter0050000.pt \
 
 #  --train-waveform-transform SOXAMRNB --train-waveform-transform-prob 1.0:w

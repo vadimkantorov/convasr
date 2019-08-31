@@ -16,8 +16,10 @@ import metrics
 
 def errors(transcripts):
 	ref_tra = list(sorted(json.load(open(transcripts)), key = lambda j: j['cer']))
-	res = list(map(lambda j: metrics.analyze(j['reference'], j['transcript'], phonetic_replace_groups = metrics.RU_PHONETIC_REPLACE_GROUPS), ref_tra))
-	json.dump(res, open(transcripts + '.errors.json', 'w'), indent = 2, sort_keys = True, ensure_ascii = False)
+	utterances = list(map(lambda j: metrics.analyze(j['reference'], j['transcript'], phonetic_replace_groups = ru.PHONETIC_REPLACE_GROUPS), ref_tra))
+	full_form = {w.rstrip(ru.VOWELS) : w for utt in utterances for w in utt['words']['errors']}
+	words = collections.Counter(w.rstrip(ru.VOWELS) for utt in utterances for w in utt['words']['errors'])
+	json.dump(dict(utterances = utterances, words = {full_form[w] : cnt for w, cnt in words.items()}), open(transcripts + '.errors.json', 'w'), indent = 2, sort_keys = True, ensure_ascii = False)
 
 def tra(transcripts):
 	ref_tra = list(sorted(json.load(open(transcripts)), key = lambda j: j['cer']))
