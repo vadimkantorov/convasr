@@ -29,12 +29,12 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]
 
-		signal, sample_rate = (audio_path, self.sample_rate) if isinstance(self.waveform_transform, transforms.RandomComposeSox) else read_wav(audio_path, sample_rate = self.sample_rate)
+		signal, sample_rate = (audio_path, self.sample_rate) if isinstance(self.waveform_transform, transforms.SoxAug) else read_wav(audio_path, sample_rate = self.sample_rate)
 		if self.waveform_transform is not None:
 			signal, sample_rate = self.waveform_transform(signal, self.sample_rate)
 		
 		if self.waveform_transform_debug_dir:
-			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, f'{os.path.basename(audio_path)}'), self.sample_rate, signal.numpy())
+			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path)), self.sample_rate, signal.numpy())
 
 		features = models.logfbank(signal, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, normalize = self.normalize_features)
 		if self.feature_transform is not None:
@@ -79,7 +79,7 @@ class BucketingSampler(torch.utils.data.Sampler):
 		self.shuffled = True
 
 replace2 = lambda s: ''.join(c if i == 0 or c != '2' else s[i - 1] for i, c in enumerate(s))
-replace22 =lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
+replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
 replacestar = lambda s: s.replace('*', '')
 
 class Labels(object):
@@ -151,23 +151,15 @@ def collate_fn(batch):
 	targets = torch.IntTensor(targets)
 	return inputs, targets, filenames, input_percentages, target_sizes
 
-def read_wav(path, channel = -1, normalize = True, sample_rate = None, max_duration = None):
+def read_wav(path, normalize = True, sample_rate = None, max_duration = None):
 	sample_rate_, signal = scipy.io.wavfile.read(path)
-	if len(signal.shape) > 1:
-		if signal.shape[1] == 1:
-			signal = signal.squeeze()
-		elif channel == -1:
-			signal = signal.mean(1)
-		else:
-			signal = signal[:, channel] 
-		assert len(signal.shape) == 1
-
+	signal = (signal.squeeze() if signal.shape[1] == 1 else signal.mean(1)) if len(signal.shape) > 1 else signal
 	if max_duration is not None:
 		signal = signal[:int(max_duration * sample_rate_), ...]
+
 	signal = torch.from_numpy(signal).to(torch.float32)
 	if normalize:
 		signal = models.normalize_signal(signal)
-
 	if sample_rate is not None and sample_rate_ != sample_rate:
 		sample_rate_, signal = resample(signal, sample_rate_, sample_rate)
 
