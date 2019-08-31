@@ -33,7 +33,10 @@ def worker_init_fn(worker_idx):
 
 def traineval(args):
 	checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoint else {}
-	args.experiment_id = checkpoint.get('experiment_id', args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, train_waveform_transform = f'aug{args.train_waveform_transform[0]}{args.train_waveform_transform_prob or ""}' if args.train_waveform_transform else '').replace('e-0', 'e-').rstrip('_'))
+	args.experiment_id = args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, train_waveform_transform = f'aug{args.train_waveform_transform[0]}{args.train_waveform_transform_prob or ""}' if args.train_waveform_transform else '').replace('e-0', 'e-').rstrip('_')
+	if 'experiment_id' in checkpoint and not args.experiment_name:
+		args.experiment_id = checkpoint['experiment_id']
+
 	args.lang, args.model, args.num_input_features = checkpoint.get('lang', args.lang), checkpoint.get('model', args.model), checkpoint.get('num_input_features', args.num_input_features)
 	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, experiment_id = args.experiment_id)
 	if not args.train_data_path and checkpoint and 'args' in checkpoint:
@@ -120,9 +123,13 @@ def traineval(args):
 	epoch, iteration = 0, 0
 	if checkpoint:
 		#optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-		train_sampler.load_state_dict(checkpoint['sampler_state_dict'])
-		scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-		epoch, iteration = checkpoint['epoch'], 1 + checkpoint.get('iteration', int(args.checkpoint[args.checkpoint.find('iter') + 4: -3]))
+		if args.train_data_path == checkpoint['args']['train_data_path']:
+			train_sampler.load_state_dict(checkpoint['sampler_state_dict'])
+			scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+			epoch, iteration = checkpoint['epoch'], 1 + checkpoint.get('iteration', int(args.checkpoint[args.checkpoint.find('iter') + 4: -3]))
+		else:
+			epoch = 1 + checkpoint['epoch']
+
 	if args.fp16:
 		model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 	model = torch.nn.DataParallel(model)
@@ -187,13 +194,13 @@ if __name__ == '__main__':
 	parser.add_argument('--optimizer', choices = ['SGD', 'AdamW', 'NovoGrad'], default = 'SGD')
 	parser.add_argument('--max-norm', type = float, default = 100)
 	parser.add_argument('--lr', type = float, default = 5e-3)
-	parser.add_argument('--weight-decay', type = float, default = 1e-5)
+	parser.add_argument('--weight-decay', type = float, default = 1e-3)
 	parser.add_argument('--momentum', type = float, default = 0.9)
 	parser.add_argument('--nesterov', action = 'store_true')
 	parser.add_argument('--betas', nargs = '*', type = float, default = (0.9, 0.999))
 	parser.add_argument('--scheduler', choices = ['MultiStepLR', 'PolynomialDecayLR', 'StepLR'], default = None)
 	parser.add_argument('--decay-gamma', type = float, default = 0.1)
-	parser.add_argument('--decay-milestones', nargs = '*', type = int, default = [25000])
+	parser.add_argument('--decay-milestones', nargs = '*', type = int, default = [25000, 50000])
 	parser.add_argument('--decay-power', type = float, default = 2.0)
 	parser.add_argument('--decay-lr', type = float, default = 1e-5)
 	parser.add_argument('--decay-epochs', type = int, default = 5)

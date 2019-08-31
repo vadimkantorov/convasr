@@ -15,6 +15,14 @@ CSV (comma-separated) with 3 columns without header:
 2. Transcript
 3. Duration in seconds
 
+# Usage
+```shell
+# transcribe all .wav in a directory and compute CER with .wav.txt, save transcription in .wav.transcript.txt
+python3 transcribe.py \
+  --checkpoint data/experiments/Wav2LetterRu_NovoGrad_lr1e-2_wd1e-3_bs80_augPSSPAMRNB0.5/checkpoint_epoch02_iter0074481.pt \
+  --data-path data_dir
+```
+
 # Training on AWS Spot Instances with spotty
 ```shell
 # download the ru_open_stt dataset on an AWS EBS volume from a t2.large On-Demand instance
@@ -53,6 +61,12 @@ LD_LIBRARY_PATH=rnnoise/.libs bash scripts/augment.sh ../sample_ok/sample_ok.con
 # denoise with SOX
 sox data/noise/1560751355.653399.wav_1.wav -n noiseprof data/noise.prof
 bash scripts/augment.sh ../sample_ok/sample_ok.convasr.csv data/sample_ok.convasr.noisered "sox -V0 -t wav - -t wav - noisered data/noise.prof 0.5"
+
+# transcode OGG to WAV
+bash scripts/augment.sh data/speechkit.csv data/speechkit_wav "opusdec - --quiet --force-wav -"
+
+# print duration of a data file in hours
+bash script/duration.sh data/mixed_train.csv
 ```
 
 # Docker commands
@@ -94,7 +108,7 @@ pip install git+https://github.com/parlance/ctcdecode
 # select top messages approx 700k cyrillic chars (a cyrillic char takes 2 bytes in UTF-8, hence x2 factor), dropping the last line
 head -c 1500000 tts_dataset.txt | head -n -1 > tts_dataset_100h.txt
 
-# using yandex speehkit tts
+# using yandex speehkit tts with OGG
 # make sure your apikey has necessary roles, e.g. admin
 # export the API key or create a speechkitapikey.txt file
 
