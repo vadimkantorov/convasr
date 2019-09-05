@@ -131,12 +131,12 @@ def unpack_targets(targets, target_sizes):
 		offset += size
 	return unpacked
 
-# TODO: pad mini-batches
-def collate_fn(batch):
+def collate_fn(batch, pad_to = 16):
 	duration_in_frames = lambda example: example[0].shape[-1]
 	batch = sorted(batch, key = duration_in_frames, reverse=True)
 	longest_sample = max(batch, key = duration_in_frames)[0]
 	freq_size, max_seq_len = longest_sample.shape
+	max_seq_len = (1 + (max_seq_len // pad_to)) * pad_to
 	inputs = torch.zeros(len(batch), freq_size, max_seq_len, device = batch[0][0].device, dtype = batch[0][0].dtype)
 	input_percentages = torch.FloatTensor(len(batch))
 	target_sizes = torch.IntTensor(len(batch))
