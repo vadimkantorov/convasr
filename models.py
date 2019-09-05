@@ -9,8 +9,9 @@ import librosa
 #TODO: apply conv masking
 
 class Wav2LetterRu(nn.Sequential):
-	def __init__(self, num_classes, num_input_features):
-		def conv_bn_relu_dropout(kernel_size, num_channels, stride = 1, padding = None, dropout = 0.2, batch_norm_momentum = 0.1):
+	def __init__(self, num_classes, num_input_features, dropout = [0.2] * 9):
+		dropout_ = lambda i: dropout[i] if isinstance(dropout, list) else dropout
+		def conv_bn_relu_dropout(kernel_size, num_channels, stride, dropout, padding = None, batch_norm_momentum = 0.1):
 			return nn.Sequential(collections.OrderedDict(zip(['0', '1', '2'], [ #['conv', 'bn', 'relu_dropout'], [
 				nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, padding = padding if padding is not None else max(1, kernel_size // 2), bias = False),
 				nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum),
@@ -19,15 +20,15 @@ class Wav2LetterRu(nn.Sequential):
 			)
 
 		layers = [
-			conv_bn_relu_dropout(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2),
-			conv_bn_relu_dropout(kernel_size = 13, num_channels = (768, 768), stride = 1),
-			conv_bn_relu_dropout(kernel_size = 13, num_channels = (768, 768), stride = 1),
-			conv_bn_relu_dropout(kernel_size = 13, num_channels = (768, 768), stride = 1),
-			conv_bn_relu_dropout(kernel_size = 13, num_channels = (768, 768), stride = 1),
-			conv_bn_relu_dropout(kernel_size = 13, num_channels = (768, 768), stride = 1),
-			conv_bn_relu_dropout(kernel_size = 13, num_channels = (768, 768), stride = 1),
-			conv_bn_relu_dropout(kernel_size = 31, num_channels = (768, 2048), stride = 1),
-			conv_bn_relu_dropout(kernel_size = 1,  num_channels = (2048, 2048), stride = 1),
+			conv_bn_relu_dropout(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2, dropout = dropout_(0)),
+			conv_bn_relu_dropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout_(1)),
+			conv_bn_relu_dropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout_(2)),
+			conv_bn_relu_dropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout_(3)),
+			conv_bn_relu_dropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout_(4)),
+			conv_bn_relu_dropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout_(5)),
+			conv_bn_relu_dropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout_(6)),
+			conv_bn_relu_dropout(kernel_size = 31, num_channels = (768, 2048), stride = 1, dropout = dropout_(7)),
+			conv_bn_relu_dropout(kernel_size = 1,  num_channels = (2048, 2048), stride = 1, dropout = dropout_(8)),
 			nn.Conv1d(2048, num_classes, kernel_size = 1, stride = 1)
 		]
 		super().__init__(*layers)
@@ -111,6 +112,9 @@ class JasperNet(nn.ModuleList):
 
 def compute_output_lengths(model, input_lengths):
 	return input_lengths.int() // 2
+
+def compute_capacity(model):
+	return sum(p.numel() for p in model.parameters())
 
 class ReLUDropoutInplace(torch.nn.Module):
 	def __init__(self, p):

@@ -66,13 +66,7 @@ def meanstd(logits):
 	plt.subplots_adjust(top = 0.99, bottom=0.01, hspace=0.8, wspace=0.4)
 	plt.savefig(logits + '.jpg', dpi = 150)
 
-def entropy(logits):
-	L = torch.load(logits, map_location = 'cpu')
-	entropy = lambda x, dim = 0, eps = 1e-16: -(x * (x + eps).log()).sum(dim = dim)
-	e = [entropy(F.softmax(l, dim = 1), dim = 1).mean() for l in L['logits']]
-	print(os.path.basename(logits), 'Entropy:', float(torch.tensor(e).mean()))
-
-def cer(experiments_dir, experiment_id):
+def cer(experiments_dir, experiment_id, entropy):
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
 	for f in sorted(glob.glob(os.path.join(experiment_dir, f'transcripts_*.json'))):
@@ -80,7 +74,7 @@ def cer(experiments_dir, experiment_id):
 		iteration = f[eidx:].replace('.json', '')
 		val_dataset_name = f[f.find('transcripts_') + len('transcripts_'):eidx]
 		checkpoint = os.path.join(experiment_id, 'checkpoint_' + f[eidx:].replace('.json', '.pt'))
-		cer = float(torch.tensor([j['cer'] for j in json.load(open(f))]).mean())
+		cer = float(torch.tensor([j['cer' if not entropy else 'entropy'] for j in json.load(open(f))]).mean())
 		res[iteration].append((val_dataset_name, cer, checkpoint))
 	val_dataset_names = sorted(set(val_dataset_name for r in res.values() for val_dataset_name, cer, checkpoint in r))
 	print('iteration\t' + '\t'.join(val_dataset_names) + '\tcheckpoint')
@@ -118,13 +112,10 @@ if __name__ == '__main__':
 	cmd.add_argument('--logits', default = 'data/logits.pt')
 	cmd.set_defaults(func = meanstd)
 
-	cmd = subparsers.add_parser('entropy')
-	cmd.add_argument('--logits', default = 'data/logits.pt')
-	cmd.set_defaults(func = entropy)
-
 	cmd = subparsers.add_parser('cer')
 	cmd.add_argument('experiment_id')
 	cmd.add_argument('--experiments-dir', default = 'data/experiments')
+	cmd.add_argument('--entropy', action = 'store_true')
 	cmd.set_defaults(func = cer)
 
 	cmd = subparsers.add_parser('errors')

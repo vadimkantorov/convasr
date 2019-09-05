@@ -10,6 +10,7 @@ import models
 import numpy as np
 
 fixed_or_uniform = lambda r: random.uniform(*r) if isinstance(r, list) else r
+fixed_or_choice = lambda r: random.choice(r) if isinstance(r, list) else r
 
 class RandomCompose(object):
 	def __init__(self, transforms, prob):
@@ -35,7 +36,7 @@ class SoxAug(RandomCompose):
 		tuple_if_str = lambda t: (t, defaults.get(t)) if isinstance(t, str) else t
 		if self.transforms and random.random() < self.prob:
 			transform = tuple_if_str(random.choice(self.transforms))
-			effect = ([transform[0], fixed_or_uniform(transform[1])] if transform[0] in defaults else transform[0]) if isinstance(transform, tuple) else []
+			effect = ([transform[0], fixed_or_choice(transform[1])] if transform[0] in defaults else transform[0]) if isinstance(transform, tuple) else []
 
 		tmp_audio_path = []
 		if effect and isinstance(effect, str) and effect.startswith('transcode'):
@@ -80,7 +81,7 @@ class SoxAug(RandomCompose):
 
 class AddWhiteNoise(object):
 	def __init__(self, noise_level = 0.025):
-		self.noise_level = noise_level
+		self.noise_level = float(noise_level)
 
 	def __call__(self, signal, sample_rate):
 		noise = torch.randn_like(signal).clamp(-1, 1)
@@ -136,7 +137,7 @@ class SpecAugment(object):
 		self.width_time_mask = width_time_mask
 		self.width_freq_mask = width_freq_mask
 
-	def __call__(self, spect):
+	def __call__(self, spect, sample_rate):
 		replace_val = spect.mean() if self.replace_strategy == 'mean' else 0
 
 		for idx in range(self.n_freq_mask):
@@ -149,7 +150,7 @@ class SpecAugment(object):
 			t0 = random.randint(0, spect.shape[1] - t)
 			spect[:, t0:t0 + t] = replace_val
 
-		return spect
+		return spect, sample_rate
 
 AWN = lambda prob = 1.0: SoxAug([AddWhiteNoise()], prob)
 PS = lambda prob = 1.0: SoxAug(['pitch'], prob)

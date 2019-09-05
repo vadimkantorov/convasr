@@ -3,6 +3,7 @@ import gc
 import json
 import math
 import time
+import shutil
 import random
 import argparse
 import importlib
@@ -12,10 +13,7 @@ import torch.utils.tensorboard
 import torch.nn as nn
 import torch.nn.functional as F
 import torchaudio
-try:
-	import apex
-except:
-	pass
+import apex
 import dataset
 import transforms
 import decoders
@@ -29,7 +27,6 @@ def set_random_seed(seed):
 
 def worker_init_fn(worker_idx):
 	set_random_seed(worker_idx)
-	#torchaudio.initialize_sox()
 
 def traineval(args):
 	checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoint else {}
@@ -55,7 +52,7 @@ def traineval(args):
 		args.val_waveform_transform_debug_dir = os.path.join(args.val_waveform_transform_debug_dir, str(val_waveform_transform) if isinstance(val_waveform_transform, transforms.RandomCompose) else val_waveform_transform.__class__.__name__)
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.SpectrogramDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = worker_init_fn) for val_data_path in args.val_data_path}
-	model = getattr(models, args.model)(num_classes = len(labels), num_input_features = args.num_input_features)
+	model = getattr(models, args.model)(num_classes = len(labels), num_input_features = args.num_input_features, dropout = args.dropout)
 	criterion = nn.CTCLoss(blank = labels.blank_idx, reduction = 'none').to(args.device)
 	decoder = decoders.GreedyDecoder(labels) if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 
@@ -83,7 +80,7 @@ def traineval(args):
 							transcript_, reference_ = metrics.align(transcript, reference) if args.align else (transcript, reference)
 							print(f'{val_dataset_name} REF: {reference_}')
 							print(f'{val_dataset_name} HYP: {transcript_}')
-							print(f'{val_dataset_name} CER: {cer:.02%}  |  WER: {wer:.02%}')
+							print(f'{val_dataset_name} WER: {wer:.02%} | CER: {cer:.02%}')
 							print()
 						ref_tra_.append(dict(reference = reference, transcript = transcript, filename = filenames[k], cer = cer, wer = wer, loss = float(loss), entropy = float(entropy)))
 						if not training and args.logits:
@@ -94,14 +91,16 @@ def traineval(args):
 				with open(os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
 					json.dump(ref_tra_, f, ensure_ascii = False, indent = 2, sort_keys = True)
 				if training:
-					tensorboard.add_scalars(f'{args.experiment_id}/{val_dataset_name}', dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
+					tensorboard.add_scalars('datasets/' + val_dataset_name, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
 					tensorboard.flush()
 				elif args.logits:
 					torch.save(dict(logits = logits_, ref_tra = ref_tra_), args.logits.format(val_dataset_name = val_dataset_name))
-		if training:
+		if training and not args.checkpoint_skip:
 			optimizer_state_dict = None # optimizer.state_dict()
 			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = train_sampler.state_dict(batch_idx), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features), os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
-			model.train()
+		model.train()
+
+	print(' Model capacity:', int(models.compute_capacity(model) / 1e6), 'million parameters\n')
 
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'])
@@ -123,19 +122,25 @@ def traineval(args):
 	epoch, iteration = 0, 0
 	if checkpoint:
 		#optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+		iteration = 1 + checkpoint.get('iteration', int(args.checkpoint[args.checkpoint.find('iter') + 4: -3]))
+		epoch = checkpoint['epoch']
 		if args.train_data_path == checkpoint['args']['train_data_path']:
 			train_sampler.load_state_dict(checkpoint['sampler_state_dict'])
 			scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-			epoch, iteration = checkpoint['epoch'], 1 + checkpoint.get('iteration', int(args.checkpoint[args.checkpoint.find('iter') + 4: -3]))
 		else:
-			epoch = 1 + checkpoint['epoch']
+			epoch += 1
 
 	if args.fp16:
 		model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 	model = torch.nn.DataParallel(model)
 
 	os.makedirs(args.experiment_dir, exist_ok = True)
-	tensorboard = torch.utils.tensorboard.SummaryWriter(os.path.join(args.experiment_dir, 'tensorboard'))
+	tensorboard_dir = os.path.join(args.experiment_dir, 'tensorboard')
+	if checkpoint and args.experiment_name:
+		tensorboard_dir_checkpoint = os.path.join(os.path.dirname(args.checkpoint), 'tensorboard')
+		if os.path.exists(tensorboard_dir_checkpoint) and not os.path.exists(tensorboard_dir):
+			shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
+	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
 	with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
 		json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
 
@@ -177,9 +182,9 @@ def traineval(args):
 				evaluate_model(epoch, iteration)
 
 			if iteration % args.log_iteration_interval == 0:
-				tensorboard.add_scalars(f'{args.experiment_id}/{train_dataset_name}', dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
+				tensorboard.add_scalars('datasets/' + train_dataset_name, dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
 				for param_name, param in model.module.named_parameters():
-					tag = args.experiment_id + '_params/' + param_name.replace('.', '/')
+					tag = 'params/' + param_name.replace('.', '/')
 					norm, grad_norm = param.norm(), param.grad.norm()
 					ratio = grad_norm / (1e-9 + norm)
 					tensorboard.add_scalars(tag, dict(norm = float(norm), grad_norm = float(grad_norm), ratio = float(ratio)), iteration)
@@ -209,6 +214,7 @@ if __name__ == '__main__':
 	parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
 	parser.add_argument('--epochs', type = int, default = 10)
 	parser.add_argument('--num-input-features', default = 64)
+	parser.add_argument('--dropout', type = float, nargs = '*', default = 0.2)
 	parser.add_argument('--train-data-path')
 	parser.add_argument('--val-data-path', nargs = '+')
 	parser.add_argument('--sample-rate', type = int, default = 8000)
@@ -220,6 +226,7 @@ if __name__ == '__main__':
 	parser.add_argument('--val-batch-size', type = int, default = 64)
 	parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 	parser.add_argument('--checkpoint')
+	parser.add_argument('--checkpoint-skip', action = 'store_true')
 	parser.add_argument('--experiments-dir', default = 'data/experiments')
 	parser.add_argument('--experiment-dir', default = '{experiments_dir}/{experiment_id}')
 	parser.add_argument('--transcripts', default = 'data/transcripts_{val_dataset_name}.json')

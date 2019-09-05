@@ -43,7 +43,7 @@ class NovoGrad(torch.optim.Optimizer):
 				state['momentum_buffer'] = state['momentum_buffer'].mul_(group['betas'][0]).add_(grad) if 'momentum_buffer' in state else grad
 				p.data.add_(-group['lr'], state['momentum_buffer'])
 
-def larc(param_groups, larc_eta = 1e-3, larc_mode = 'clip', min_update = 1e-7, eps = 1e-7):
+def larc_(param_groups, larc_mode = 'clip', eps = 1e-7, min_update = 1e-7, larc_eta = 0.1):#1e-3):
 	for group in param_groups:
 		for p in filter(lambda p: p.grad is not None, group['params']):
 			v_norm = p.data.norm()

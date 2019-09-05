@@ -8,7 +8,7 @@ while read line; do
     AUDIOPATH=$(echo $line | cut -d ',' -f1)
     REST=$(echo $line | cut -d ',' -f2-3)
     OUTPUTAUDIO=$OUTPUTDIR/$(basename "$AUDIOPATH")
-	OUTPUTWAV=${OUTPUTAUDIO%%.*}.wav
+	OUTPUTWAV=${OUTPUTAUDIO%.*}.wav
     bash -c "$CMD" >$OUTPUTWAV <$AUDIOPATH
 	>&2 echo Converted $AUDIOPATH to $OUTPUTWAV
     echo "$OUTPUTWAV,$REST"
