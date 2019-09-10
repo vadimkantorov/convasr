@@ -57,14 +57,14 @@ class BabbleNet(nn.Sequential):
 			super().__init__(
 				MBConvBlock(kernel_size = 11, num_channels = (num_input_features, 256), stride = 2, dropout = 0.2, simple = True),
 
-				MBConvBlock(kernel_size = 11, num_channels = (256, 256), stride = 1, dropout = 0.2),
-				MBConvBlock(kernel_size = 13, num_channels = (256, 384), stride = 1, dropout = 0.2),
-				MBConvBlock(kernel_size = 17, num_channels = (384, 512), stride = 1, dropout = 0.2),
+				MBConvBlock(kernel_size = 11, num_channels = (256, 256), stride = 1, dropout = 0.2, expansion = 2),
+				MBConvBlock(kernel_size = 13, num_channels = (256, 384), stride = 1, dropout = 0.2, expansion = 2),
+				MBConvBlock(kernel_size = 17, num_channels = (384, 512), stride = 1, dropout = 0.2, expansion = 2),
 				MBConvBlock(kernel_size = 21, num_channels = (512, 640), stride = 1, dropout = 0.2),
 				MBConvBlock(kernel_size = 25, num_channels = (640, 768), stride = 1, dropout = 0.2),
 
 				MBConvBlock(kernel_size = 29, num_channels = (768, 896), stride = 1, dropout = 0.4, dilation = 2),
-				MBConvBlock(kernel_size = 1,  num_channels = (896, 1024), stride = 1, dropout = 0.4),
+				MBConvBlock(kernel_size =  1, num_channels =(896, 1024), stride = 1, dropout = 0.4),
 				nn.Conv1d(1024, num_classes, kernel_size = 1)
 			)
 
@@ -215,7 +215,7 @@ class MaskedConv1d(nn.Conv1d):
 
 def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, dither = 1e-5, preemph = 0.97, normalize = True, eps = 1e-20):
 	signal = normalize_signal(signal)
-	signal = torch.cat([signal[:1], signal[1:] - preemph * signal[:-1]])
+	signal = torch.cat([signal[..., :1], signal[..., 1:] - preemph * signal[..., :-1]], dim = -1)
 	win_length, hop_length = int(window_size * sample_rate), int(window_stride * sample_rate)
 	n_fft = 2 ** math.ceil(math.log2(win_length))
 	signal += dither * torch.randn_like(signal)
@@ -227,7 +227,7 @@ def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_
 
 def normalize_signal(signal, eps = 1e-5):
 	signal = signal.to(torch.float32)
-	return signal / (signal.abs().max() + eps)
+	return signal / (signal.abs().max(dim = -1, keepdim = True).values + eps)
 
 def normalize_features(features, eps = 1e-20):
 	return (features - features.mean(dim = -1, keepdim = True)) / (features.std(dim = -1, keepdim = True) + eps)

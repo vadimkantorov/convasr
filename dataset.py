@@ -2,6 +2,7 @@ import os
 import re
 import csv
 import gzip
+import time
 import math
 import random
 import numpy as np
@@ -36,6 +37,7 @@ class SpectrogramDataset(torch.utils.data.Dataset):
 		if self.waveform_transform_debug_dir:
 			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path)), self.sample_rate, signal.numpy())
 
+		#features = signal
 		features = models.logfbank(signal, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, normalize = self.normalize_features)
 		if self.feature_transform is not None:
 			features, sample_rate = self.feature_transform(features, self.sample_rate)
@@ -135,19 +137,15 @@ def unpack_targets(targets, target_sizes):
 	return unpacked
 
 def collate_fn(batch, pad_to = 16):
-	duration_in_frames = lambda example: example[0].shape[-1]
-	batch = sorted(batch, key = duration_in_frames, reverse=True)
-	longest_sample = max(batch, key = duration_in_frames)[0]
-	freq_size, max_seq_len = longest_sample.shape
-	max_seq_len = (1 + (max_seq_len // pad_to)) * pad_to
-	inputs = torch.zeros(len(batch), freq_size, max_seq_len, device = batch[0][0].device, dtype = batch[0][0].dtype)
+	batch = list(sorted(batch, key = lambda example: example[0].shape[-1], reverse=True))
+	max_seq_len = (1 + (batch[0][0].shape[-1] // pad_to)) * pad_to
+	inputs = torch.zeros(len(batch), *(batch[0][0].shape[:-1] + (max_seq_len, )), device = batch[0][0].device, dtype = batch[0][0].dtype)
 	input_percentages = torch.FloatTensor(len(batch))
 	target_sizes = torch.IntTensor(len(batch))
 	targets, filenames = [], []
-	for k, (tensor, target, filename) in enumerate(batch):
-		seq_len = tensor.shape[1]
-		inputs[k, :, :seq_len] = tensor
-		input_percentages[k] = seq_len / float(max_seq_len)
+	for k, (input, target, filename) in enumerate(batch):
+		inputs[k, ..., :input.shape[-1]] = input
+		input_percentages[k] = input.shape[-1] / float(max_seq_len)
 		target_sizes[k] = len(target)
 		targets.extend(target)
 		filenames.append(filename)
@@ -155,6 +153,7 @@ def collate_fn(batch, pad_to = 16):
 	return inputs, targets, filenames, input_percentages, target_sizes
 
 def read_wav(path, normalize = True, sample_rate = None, max_duration = None):
+	tic = time.time()
 	sample_rate_, signal = scipy.io.wavfile.read(path)
 	signal = (signal.squeeze() if signal.shape[1] == 1 else signal.mean(1)) if len(signal.shape) > 1 else signal
 	if max_duration is not None:
@@ -166,6 +165,7 @@ def read_wav(path, normalize = True, sample_rate = None, max_duration = None):
 	if sample_rate is not None and sample_rate_ != sample_rate:
 		sample_rate_, signal = resample(signal, sample_rate_, sample_rate)
 
+	#print(time.time() - tic)
 	return signal, sample_rate_
 
 def resample(signal, sample_rate_, sample_rate):
