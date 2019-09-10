@@ -7,17 +7,17 @@ import torch.nn.functional as F
 import librosa
 
 class MBConvBlock(nn.Module):
-	def __init__(self, kernel_size, num_channels, stride = 1, dilation = 1, dropout = 0.2, repeat = 1, expansion = 1, squeeze_excitation_ratio = 0.25, separable = False, padding = None, simple = False, batch_norm_momentum = 0.1):
+	def __init__(self, kernel_size, num_channels, stride = 1, dilation = 1, dropout = 0.2, repeat = 1, expansion = 1, squeeze_excitation_ratio = 0.25, batch_norm_momentum = 0.1, separable = True, simple = False):
 		super().__init__()
 		in_channels, out_channels = num_channels
-		padding = padding if padding is not None else max(1, dilation * (kernel_size // 2))
+		padding = max(1, dilation * ((kernel_size - 1) // 2))
 
 		self.subblocks = nn.ModuleList()
 		for k in range(repeat):
 			in_channels_ = in_channels if k == 0 else out_channels
 			exp_channels = in_channels * expansion if not simple else out_channels
 			se_channels = int(exp_channels * squeeze_excitation_ratio)
-			groups = exp_channels if separable else 1
+			groups = exp_channels if (separable and not simple) else 1
 
 			self.subblocks.append(nn.ModuleDict(dict(
 				expand = nn.Sequential(
@@ -45,7 +45,6 @@ class MBConvBlock(nn.Module):
 	def forward(self, x):
 		if self.simple:
 			return self.subblocks[0].expand(x)
-
 		y = x
 		for subblock in self.subblocks:
 			y = subblock.expand(y)
@@ -56,16 +55,16 @@ class MBConvBlock(nn.Module):
 class BabbleNet(nn.Sequential):
 	def __init__(self, num_classes, num_input_features, dropout = 0.2, repeat = 1, batch_norm_momentum = 0.1):
 			super().__init__(
-				MBConvBlock(kernel_size = 11, num_channels = (num_input_features, 256), dropout = dropout, stride = 2, simple = True),
+				MBConvBlock(kernel_size = 11, num_channels = (num_input_features, 256), stride = 2, dropout = 0.2, simple = True),
 
-				MBConvBlock(kernel_size = 11, num_channels = (256, 256), dropout = dropout, repeat = repeat),
-				MBConvBlock(kernel_size = 13, num_channels = (256, 384), dropout = dropout, repeat = repeat),
-				MBConvBlock(kernel_size = 17, num_channels = (384, 512), dropout = dropout, repeat = repeat),
-				MBConvBlock(kernel_size = 21, num_channels = (512, 640), dropout = dropout, repeat = repeat),
-				MBConvBlock(kernel_size = 25, num_channels = (640, 768), dropout = dropout, repeat = repeat),
-					
-				MBConvBlock(kernel_size = 29, num_channels = (768, 896), dropout = 0.4, dilation = 2),
-				MBConvBlock(kernel_size = 1, num_channels = (896, 1024), dropout = 0.4),
+				MBConvBlock(kernel_size = 11, num_channels = (256, 256), stride = 1, dropout = 0.2),
+				MBConvBlock(kernel_size = 13, num_channels = (256, 384), stride = 1, dropout = 0.2),
+				MBConvBlock(kernel_size = 17, num_channels = (384, 512), stride = 1, dropout = 0.2),
+				MBConvBlock(kernel_size = 21, num_channels = (512, 640), stride = 1, dropout = 0.2),
+				MBConvBlock(kernel_size = 25, num_channels = (640, 768), stride = 1, dropout = 0.2),
+
+				MBConvBlock(kernel_size = 29, num_channels = (768, 896), stride = 1, dropout = 0.4, dilation = 2),
+				MBConvBlock(kernel_size = 1,  num_channels = (896, 1024), stride = 1, dropout = 0.4),
 				nn.Conv1d(1024, num_classes, kernel_size = 1)
 			)
 
