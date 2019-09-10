@@ -1,6 +1,6 @@
 python3 train.py $@ \
   --checkpoint data/experiments/Wav2LetterRu_NovoGrad_lr1e-2_wd1e-3_bs80_augPSSPAMRNB0.5/checkpoint_epoch02_iter0074481.pt \
-  --val-batch-size 32 --val-data-path data/clean_val.csv ../sample_ok/sample_ok.convasr.csv data/sample_ok_s16.csv
+  --val-batch-size 32 --val-data-path data/clean_val.csv ../sample_ok/sample_ok.convasr.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv
 
 #  --decoder BeamSearchDecoder --beam-width 20000 --lm chats_03_prune.binary --decoder-topk 20000 # charlm/chats_06_noprune_char.binary #--lm data/ru_wiyalen_no_punkt.arpa.binary 
 #  --checkpoint data/experiments/Wav2LetterRu_SGD_lr1e-2_wd1e-3_bs80__8khz/checkpoint_epoch02_iter0070000.pt \

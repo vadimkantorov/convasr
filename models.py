@@ -6,8 +6,73 @@ import torch.nn as nn
 import torch.nn.functional as F
 import librosa
 
-#TODO: apply conv masking
+class MBConvBlock(nn.Module):
+	def __init__(self, kernel_size, num_channels, stride = 1, dilation = 1, dropout = 0.2, repeat = 1, expansion = 1, squeeze_excitation_ratio = 0.25, separable = False, padding = None, simple = False, batch_norm_momentum = 0.1):
+		super().__init__()
+		in_channels, out_channels = num_channels
+		padding = padding if padding is not None else max(1, dilation * (kernel_size // 2))
 
+		self.subblocks = nn.ModuleList()
+		for k in range(repeat):
+			in_channels_ = in_channels if k == 0 else out_channels
+			exp_channels = in_channels * expansion if not simple else out_channels
+			se_channels = int(exp_channels * squeeze_excitation_ratio)
+			groups = exp_channels if separable else 1
+
+			self.subblocks.append(nn.ModuleDict(dict(
+				expand = nn.Sequential(
+					nn.Conv1d(in_channels_, exp_channels, kernel_size, stride = stride, bias = False, padding = padding, groups = groups, dilation = dilation),
+					nn.BatchNorm1d(exp_channels, momentum = batch_norm_momentum),
+					ReLUDropout(p = dropout, inplace = True)
+				),
+
+				squeeze_and_excite = nn.Sequential(
+					nn.Conv1d(exp_channels, se_channels, kernel_size = 1),
+					nn.ReLU(inplace = True),
+					nn.Conv1d(se_channels, exp_channels, kernel_size = 1),
+					nn.Sigmoid()
+				) if not simple else nn.Identity(),
+
+				reduce = nn.Sequential(
+					nn.Conv1d(exp_channels, out_channels, bias = False, stride = 1, kernel_size = 1),
+					nn.BatchNorm1d(out_channels, momentum = batch_norm_momentum),
+				) if not simple else nn.Identity()
+			)))
+
+		self.residual = nn.Identity() if in_channels == out_channels or simple else nn.Sequential(nn.Conv1d(in_channels, out_channels, kernel_size = 1, stride = stride), nn.BatchNorm1d(out_channels, momentum = batch_norm_momentum))
+		self.simple = simple
+	
+	def forward(self, x):
+		if self.simple:
+			return self.subblocks[0].expand(x)
+
+		y = x
+		for subblock in self.subblocks:
+			y = subblock.expand(y)
+			y = y * subblock.squeeze_and_excite(y)
+			y = subblock.reduce(y)
+		return y + self.residual(x) if x.shape[-1] == y.shape[-1] else y
+
+class BabbleNet(nn.Sequential):
+	def __init__(self, num_classes, num_input_features, dropout = 0.2, repeat = 1, batch_norm_momentum = 0.1):
+			super().__init__(
+				MBConvBlock(kernel_size = 11, num_channels = (num_input_features, 256), dropout = dropout, stride = 2, simple = True),
+
+				MBConvBlock(kernel_size = 11, num_channels = (256, 256), dropout = dropout, repeat = repeat),
+				MBConvBlock(kernel_size = 13, num_channels = (256, 384), dropout = dropout, repeat = repeat),
+				MBConvBlock(kernel_size = 17, num_channels = (384, 512), dropout = dropout, repeat = repeat),
+				MBConvBlock(kernel_size = 21, num_channels = (512, 640), dropout = dropout, repeat = repeat),
+				MBConvBlock(kernel_size = 25, num_channels = (640, 768), dropout = dropout, repeat = repeat),
+					
+				MBConvBlock(kernel_size = 29, num_channels = (768, 896), dropout = 0.4, dilation = 2),
+				MBConvBlock(kernel_size = 1, num_channels = (896, 1024), dropout = 0.4),
+				nn.Conv1d(1024, num_classes, kernel_size = 1)
+			)
+
+	def forward(self, x, input_lengths):
+		return super().forward(x)
+
+#TODO: apply conv masking
 class Wav2LetterRu(nn.Sequential):
 	def __init__(self, num_classes, num_input_features, dropout = [0.2] * 9):
 		dropout_ = lambda i: dropout[i] if isinstance(dropout, list) else dropout
@@ -15,7 +80,7 @@ class Wav2LetterRu(nn.Sequential):
 			return nn.Sequential(collections.OrderedDict(zip(['0', '1', '2'], [ #['conv', 'bn', 'relu_dropout'], [
 				nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, padding = padding if padding is not None else max(1, kernel_size // 2), bias = False),
 				nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum),
-				ReLUDropoutInplace(p = dropout)
+				ReLUDropout(p = dropout, inplace = True)
 				]))
 			)
 
@@ -63,7 +128,7 @@ class JasperNet(nn.ModuleList):
 	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1):
 		def conv_bn_relu_dropout_residual(kernel_size, num_channels, dropout = 0, stride = 1, dilation = 1, padding = 0, batch_norm_momentum = 0.1, repeat = 1, num_channels_residual = []):
 				return nn.ModuleDict(dict(
-					relu_dropout = ReLUDropoutInplace(p = dropout),
+					relu_dropout = ReLUDropout(p = dropout, inplace = True),
 					conv = nn.ModuleList([nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, padding = padding, bias = False) for i in range(repeat)]),
 					bn = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat)]),
 					conv_residual = nn.ModuleList([nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual]),
@@ -116,8 +181,8 @@ def compute_output_lengths(model, input_lengths):
 def compute_capacity(model):
 	return sum(p.numel() for p in model.parameters())
 
-class ReLUDropoutInplace(torch.nn.Module):
-	def __init__(self, p):
+class ReLUDropout(torch.nn.Module):
+	def __init__(self, p, inplace):
 		super().__init__()
 		self.p = p
 

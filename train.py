@@ -56,13 +56,13 @@ def traineval(args):
 	criterion = nn.CTCLoss(blank = labels.blank_idx, reduction = 'none').to(args.device)
 	decoder = decoders.GreedyDecoder(labels) if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 
-	def evaluate_model(epoch = None, iteration = None):
+	def evaluate_model(epoch = None, iteration = None, batch_idx = None):
 		training = epoch is not None and iteration is not None
 		model.eval()
 		with torch.no_grad():
 			for val_dataset_name, val_data_loader in val_data_loaders.items():
 				logits_, ref_tra_ = [], []
-				for batch_idx, (inputs, targets, filenames, input_percentages, target_lengths) in enumerate(val_data_loader):
+				for batch_idx_, (inputs, targets, filenames, input_percentages, target_lengths) in enumerate(val_data_loader):
 					input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
 					output_lengths = models.compute_output_lengths(model, input_lengths)
 					logits = model(inputs.to(args.device), input_lengths)
@@ -76,7 +76,7 @@ def traineval(args):
 							transcript = min((metrics.cer(t, reference), t) for t in transcript)[1]
 						cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
 						if args.verbose:
-							print(batch_idx * len(inputs) + k, '/', len(val_data_loader) * len(inputs))
+							print(batch_idx_ * len(inputs) + k, '/', len(val_data_loader) * len(inputs))
 							transcript_, reference_ = metrics.align(transcript, reference) if args.align else (transcript, reference)
 							print(f'{val_dataset_name} REF: {reference_}')
 							print(f'{val_dataset_name} HYP: {transcript_}')
@@ -125,7 +125,7 @@ def traineval(args):
 		iteration = 1 + checkpoint.get('iteration', int(args.checkpoint[args.checkpoint.find('iter') + 4: -3]))
 		epoch = checkpoint['epoch']
 		if args.train_data_path == checkpoint['args']['train_data_path']:
-			train_sampler.load_state_dict(checkpoint['sampler_state_dict'])
+			train_sampler.load_state_dict(checkpoint['sampler_state_dict']); train_sampler.batch_idx = 10000
 			scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 		else:
 			epoch += 1
@@ -150,7 +150,7 @@ def traineval(args):
 	for epoch in range(epoch, args.epochs):
 		model.train()
 		train_sampler.shuffle(epoch)
-		for batch_idx, (inputs, targets, filenames, input_percentages, target_lengths) in enumerate(train_data_loader):
+		for batch_idx, (inputs, targets, filenames, input_percentages, target_lengths) in enumerate(train_data_loader, start = train_sampler.batch_idx):
 			toc = time.time()
 			input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
 			output_lengths = models.compute_output_lengths(model, input_lengths)
@@ -179,7 +179,7 @@ def traineval(args):
 			iteration += 1
 
 			if args.val_iteration_interval is not None and iteration > 0 and iteration % args.val_iteration_interval == 0:
-				evaluate_model(epoch, iteration)
+				evaluate_model(epoch, iteration, batch_idx)
 
 			if iteration % args.log_iteration_interval == 0:
 				tensorboard.add_scalars('datasets/' + train_dataset_name, dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
@@ -192,7 +192,7 @@ def traineval(args):
 						tensorboard.add_histogram(tag, param, iteration)
 						tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
 
-		evaluate_model(epoch, iteration)
+		evaluate_model(epoch, iteration, batch_idx)
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()

@@ -154,32 +154,42 @@ class SpecAugment(object):
 		return spect, sample_rate
 
 class SpecPerlinNoise(object):
-	def __init__(self, noise_level = 0.2):
-		self.noise_level = 0.2
+	def __init__(self, noise_level = 0.4):
+		self.noise_level = float(noise_level)
 
-	def __call__(self, spect, sample_rate, kernel_size = 8, fade = lambda t: 6*t**5 - 15*t**4 + 10*t**3):
-		shape = [(1 + s // (2 * kernel_size)) * (2 * kernel_size) for s in spect.shape]
+	def __call__(self, spect, sample_rate, kernel_size = 8, octaves=1, persistence=0.5, fade = lambda t: 6*t**5 - 15*t**4 + 10*t**3):
+		def rand_perlin_2d(spect, kernel_size):
+			shape = [(1 + s // (2 * kernel_size)) * (2 * kernel_size) for s in spect.shape]
 
-		delta = (kernel_size / shape[0], kernel_size / shape[1])
-		d = (shape[0] // kernel_size, shape[1] // kernel_size)
-		grid = torch.stack(torch.meshgrid(torch.arange(0, kernel_size, delta[0]), torch.arange(0, kernel_size, delta[1])), dim = -1) % 1
+			delta = (kernel_size / shape[0], kernel_size / shape[1])
+			d = (shape[0] // kernel_size, shape[1] // kernel_size)
+			grid = torch.stack(torch.meshgrid(torch.arange(0, kernel_size, delta[0]), torch.arange(0, kernel_size, delta[1])), dim = -1) % 1
 
-		angles = 2*math.pi*torch.rand(kernel_size+1, kernel_size+1)
-		gradients = torch.stack((torch.cos(angles), torch.sin(angles)), dim = -1)
-		g00 = gradients[0:-1,0:-1].repeat_interleave(d[0], 0).repeat_interleave(d[1], 1)
-		g10 = gradients[1:  ,0:-1].repeat_interleave(d[0], 0).repeat_interleave(d[1], 1)
-		g01 = gradients[0:-1,1:  ].repeat_interleave(d[0], 0).repeat_interleave(d[1], 1)
-		g11 = gradients[1:  ,1:  ].repeat_interleave(d[0], 0).repeat_interleave(d[1], 1)
+			angles = 2*math.pi*torch.rand(kernel_size+1, kernel_size+1)
+			gradients = torch.stack((torch.cos(angles), torch.sin(angles)), dim = -1)
+			g00 = gradients[0:-1,0:-1].repeat_interleave(d[0], 0).repeat_interleave(d[1], 1)
+			g10 = gradients[1:  ,0:-1].repeat_interleave(d[0], 0).repeat_interleave(d[1], 1)
+			g01 = gradients[0:-1,1:  ].repeat_interleave(d[0], 0).repeat_interleave(d[1], 1)
+			g11 = gradients[1:  ,1:  ].repeat_interleave(d[0], 0).repeat_interleave(d[1], 1)
 
-		sum_stack = lambda grid, grad, d0, d1: (torch.stack((grid[:spect.shape[0],:spect.shape[1],0] + d0  , grid[:spect.shape[0],:spect.shape[1],1] + d1  ), dim = -1) * grad[:spect.shape[0], :spect.shape[1]]).sum(dim = -1)
-		n00 = sum_stack(grid, g00, 0, 0)
-		n10 = sum_stack(grid, g10, -1, 0)
-		n01 = sum_stack(grid, g01, 0, -1)
-		n11 = sum_stack(grid, g11, -1,-1)
-		t = fade(grid[:spect.shape[0], :spect.shape[1]])
-		n0 = torch.lerp(n00, n10, t[:, :, 0])
-		n1 = torch.lerp(n01, n11, t[:, :, 0])
-		return spect + self.noise_level * math.sqrt(2) * torch.lerp(n0, n1, t[:, :, 1]), sample_rate
+			sum_stack = lambda grid, grad, d0, d1: (torch.stack((grid[:spect.shape[0],:spect.shape[1],0] + d0  , grid[:spect.shape[0],:spect.shape[1],1] + d1  ), dim = -1) * grad[:spect.shape[0], :spect.shape[1]]).sum(dim = -1)
+			n00 = sum_stack(grid, g00, 0, 0)
+			n10 = sum_stack(grid, g10, -1, 0)
+			n01 = sum_stack(grid, g01, 0, -1)
+			n11 = sum_stack(grid, g11, -1,-1)
+			t = fade(grid[:spect.shape[0], :spect.shape[1]])
+			n0 = torch.lerp(n00, n10, t[:, :, 0])
+			n1 = torch.lerp(n01, n11, t[:, :, 0])
+			return math.sqrt(2) * torch.lerp(n0, n1, t[:, :, 1])
+
+		noise = torch.zeros_like(spect)
+		frequency = 1
+		amplitude = 1
+		for _ in range(octaves):
+			noise += amplitude * rand_perlin_2d(spect, frequency*kernel_size)
+			frequency *= 2
+			amplitude *= persistence
+		return spect + self.noise_level * noise, sample_rate
 
 AWN = lambda prob = 1.0: SoxAug([AddWhiteNoise()], prob)
 PS = lambda prob = 1.0: SoxAug(['pitch'], prob)
