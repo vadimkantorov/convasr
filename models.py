@@ -17,7 +17,7 @@ class MBConvBlock(nn.Module):
 			in_channels_ = in_channels if k == 0 else out_channels
 			exp_channels = in_channels * expansion if not simple else out_channels
 			se_channels = int(exp_channels * squeeze_excitation_ratio)
-			groups = exp_channels if (separable and not simple) else 1
+			groups = in_channels if (separable and not simple) else 1
 
 			self.subblocks.append(nn.ModuleDict(dict(
 				expand = nn.Sequential(
@@ -55,17 +55,25 @@ class MBConvBlock(nn.Module):
 class BabbleNet(nn.Sequential):
 	def __init__(self, num_classes, num_input_features, dropout = 0.2, repeat = 1, batch_norm_momentum = 0.1):
 			super().__init__(
-				MBConvBlock(kernel_size = 11, num_channels = (num_input_features, 256), stride = 2, dropout = 0.2, simple = True),
+				MBConvBlock(kernel_size = 11, num_channels = (num_input_features, 64), stride = 2, dropout = 0.2, simple = True),
 
-				MBConvBlock(kernel_size = 11, num_channels = (256, 256), stride = 1, dropout = 0.2, expansion = 2),
-				MBConvBlock(kernel_size = 13, num_channels = (256, 384), stride = 1, dropout = 0.2, expansion = 2),
-				MBConvBlock(kernel_size = 17, num_channels = (384, 512), stride = 1, dropout = 0.2, expansion = 2),
-				MBConvBlock(kernel_size = 21, num_channels = (512, 640), stride = 1, dropout = 0.2),
-				MBConvBlock(kernel_size = 25, num_channels = (640, 768), stride = 1, dropout = 0.2),
+				#MBConvBlock(kernel_size = 11, num_channels = (64, 64), stride = 1, dropout = 0.2, expansion = 4),
+				#MBConvBlock(kernel_size = 11, num_channels = (64, 96), stride = 1, dropout = 0.2, expansion = 4),
+				#MBConvBlock(kernel_size = 13, num_channels = (96, 128), stride = 1, dropout = 0.2, expansion = 4),
+				#MBConvBlock(kernel_size = 17, num_channels = (128, 160), stride = 1, dropout = 0.2, expansion = 4),
+				#MBConvBlock(kernel_size = 21, num_channels = (160, 192), stride = 1, dropout = 0.2, expansion = 4),
+				#MBConvBlock(kernel_size = 25, num_channels = (192, 224), stride = 1, dropout = 0.2, expansion = 4),
 
-				MBConvBlock(kernel_size = 29, num_channels = (768, 896), stride = 1, dropout = 0.4, dilation = 2),
-				MBConvBlock(kernel_size =  1, num_channels =(896, 1024), stride = 1, dropout = 0.4),
-				nn.Conv1d(1024, num_classes, kernel_size = 1)
+				MBConvBlock(kernel_size = 11, num_channels = (64, 192), stride = 1, dropout = 0.2, expansion = 4),
+				MBConvBlock(kernel_size = 11, num_channels = (192, 192), stride = 1, dropout = 0.2, expansion = 4),
+				MBConvBlock(kernel_size = 11, num_channels = (192, 192), stride = 1, dropout = 0.2, expansion = 4),
+				MBConvBlock(kernel_size = 11, num_channels = (192, 192), stride = 1, dropout = 0.2, expansion = 4),
+				MBConvBlock(kernel_size = 11, num_channels = (192, 192), stride = 1, dropout = 0.2, expansion = 4),
+				MBConvBlock(kernel_size = 11, num_channels = (192, 192), stride = 1, dropout = 0.2, expansion = 4),
+
+				MBConvBlock(kernel_size = 31, num_channels = (192, 2048), stride = 1, dropout = 0.2, simple = True),
+				MBConvBlock(kernel_size =  1, num_channels = (2048,2048), stride = 1, dropout = 0.2, simple = True),
+				nn.Conv1d(2048, num_classes, kernel_size = 1)
 			)
 
 	def forward(self, x, input_lengths):
@@ -134,7 +142,7 @@ class JasperNet(nn.ModuleList):
 					bn_residual = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual])
 				))
 
-		prologue = [conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (num_input_features, 256), dropout = 0.2, padding = 5, stride = 2)]
+		PROLOgue = [conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (num_input_features, 256), dropout = 0.2, padding = 5, stride = 2)]
 		backbone = [
 				conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, padding = 5, repeat = repeat, num_channels_residual = [256]),
 				conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, padding = 5, repeat = repeat, num_channels_residual = [256, 256]),

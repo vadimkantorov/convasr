@@ -90,6 +90,7 @@ class Labels(object):
 	space = ' '
 	word_start = '<'
 	word_end = '>'
+	repeat = '2'
 
 	def __init__(self, lang):
 		self.idx2chr_ = lang.LABELS
@@ -106,11 +107,12 @@ class Labels(object):
 		return list(filter(bool, (''.join([c for c in self.preprocess_word(w) if c.upper() in self.chr2idx_]).strip() for w in words)))
 
 	def normalize_text(self, text):
-		return ' '.join(f'<{w}>' for w in self.find_words(text)).upper().strip() or '*' 
+		return ' '.join(f'{w}' for w in self.find_words(text)).upper().strip() or '*' 
+		#return ''.join(f'<{w}>' for w in self.find_words(text)).upper().strip() or '*' 
 
 	def parse(self, text):
 		chars = self.normalize_text(text)
-		return [self.chr2idx(c) if i == 0 or c != chars[i - 1] else self.chr2idx('2') for i, c in enumerate(chars)]
+		return [self.chr2idx(c) if i == 0 or c != chars[i - 1] else self.chr2idx(self.repeat) for i, c in enumerate(chars)]
 
 	def idx2str(self, idx):
 		i2s = lambda i: '' if len(i) == 0 else replacestar(replace22(replace2(replacespace(''.join(map(self.idx2chr, i)))))).strip() if not isinstance(i[0], list) else list(map(i2s, i))
@@ -153,7 +155,6 @@ def collate_fn(batch, pad_to = 16):
 	return inputs, targets, filenames, input_percentages, target_sizes
 
 def read_wav(path, normalize = True, sample_rate = None, max_duration = None):
-	tic = time.time()
 	sample_rate_, signal = scipy.io.wavfile.read(path)
 	signal = (signal.squeeze() if signal.shape[1] == 1 else signal.mean(1)) if len(signal.shape) > 1 else signal
 	if max_duration is not None:
@@ -165,7 +166,6 @@ def read_wav(path, normalize = True, sample_rate = None, max_duration = None):
 	if sample_rate is not None and sample_rate_ != sample_rate:
 		sample_rate_, signal = resample(signal, sample_rate_, sample_rate)
 
-	#print(time.time() - tic)
 	return signal, sample_rate_
 
 def resample(signal, sample_rate_, sample_rate):

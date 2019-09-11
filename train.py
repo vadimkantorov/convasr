@@ -1,5 +1,5 @@
 import os
-import gc
+import sys
 import json
 import math
 import time
@@ -101,6 +101,8 @@ def traineval(args):
 			optimizer_state_dict = None # optimizer.state_dict()
 			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = train_sampler.state_dict(batch_idx), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features), os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
 		model.train()
+		if iteration and args.iterations and iteration >= args.iterations:
+			sys.exit(0)
 
 	print(' Model capacity:', int(models.compute_capacity(model) / 1e6), 'million parameters\n')
 
@@ -217,11 +219,12 @@ if __name__ == '__main__':
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
 	parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
 	parser.add_argument('--epochs', type = int, default = 10)
+	parser.add_argument('--iterations', type = int, default = None)
 	parser.add_argument('--num-input-features', default = 64)
 	parser.add_argument('--dropout', type = float, nargs = '*', default = 0.2)
 	parser.add_argument('--train-data-path')
 	parser.add_argument('--val-data-path', nargs = '+')
-	parser.add_argument('--sample-rate', type = int, default = 16_000)
+	parser.add_argument('--sample-rate', type = int, default = 8_000)
 	parser.add_argument('--window-size', type = float, default = 0.02)
 	parser.add_argument('--window-stride', type = float, default = 0.01)
 	parser.add_argument('--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'])
