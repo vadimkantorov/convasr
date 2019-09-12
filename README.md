@@ -71,8 +71,11 @@ bash scripts/augment.sh ../sample_ok/sample_ok.convasr.csv data/sample_ok_f32 "s
 # convert f32le to s16le
 bash scripts/augment.sh data/sample_ok_f32.csv data/sample_ok_s16 "sox -V0 -t wav - -r 16k -b 16 -e signed -t wav -c 1 -"
 
-# print duration of a data file in hours
+# print total duration of a data file in hours
 bash script/duration.sh data/mixed_train.csv
+
+# print total duration of audio files in a directory
+ls mydir/*.wav | xargs soxi -D | awk '{sum += $1} END {print sum / 60; print "minutes"}'
 ```
 
 # Docker commands
