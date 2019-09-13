@@ -76,9 +76,9 @@ class InvertedResidual(nn.Module):
 class BabbleNet(nn.Sequential):
 	def __init__(self, num_classes, num_input_features, dropout = 0.2, repeat = 1, batch_norm_momentum = 0.1):
 			super().__init__(
-				ConvBNReLUDropout(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2, dropout = dropout),
+				ConvBNReLUDropout(kernel_size = 13, num_channels = (num_input_features, 192), stride = 2, dropout = dropout),
 
-				ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 192), stride = 1, dropout = dropout),
+				#ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 192), stride = 1, dropout = dropout),
 				InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
 				InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
 				InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
