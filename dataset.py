@@ -13,7 +13,7 @@ import librosa
 import models
 import transforms
 
-class SpectrogramDataset(torch.utils.data.Dataset):
+class AudioTextDataset(torch.utils.data.Dataset):
 	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, waveform_transform = None, feature_transform = None, max_duration = 20, normalize_features = True, waveform_transform_debug_dir = None):
 		self.window_stride = window_stride
 		self.window_size = window_size

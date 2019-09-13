@@ -80,6 +80,15 @@ class SoxAug(RandomCompose):
 			signal, sample_rate = transform(signal, sample_rate) 
 		return signal, sample_rate
 
+class Quantization(object):
+	def __init__(self, quantization_channels = [128, 256]):
+		self.quantization_channels = quantization_channels
+	
+	def __call__(self, signal, sample_rate):
+		quantization_channels = fixed_or_choice(self.quantization_channels)
+		quantized = torchaudio.functional.mu_law_encoding(signal, quantization_channels)
+		return torchaudio.functinal.mu_law_decoding(quantized, quantization_channels)
+
 class AddWhiteNoise(object):
 	def __init__(self, noise_level = 0.025):
 		self.noise_level = float(noise_level)

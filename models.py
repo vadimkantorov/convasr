@@ -6,8 +6,24 @@ import torch.nn as nn
 import torch.nn.functional as F
 import librosa
 
-class MBConvBlock(nn.Module):
-	def __init__(self, kernel_size, num_channels, stride = 1, dilation = 1, dropout = 0.2, expansion = 1, squeeze_excitation_ratio = 0.25, batch_norm_momentum = 0.1, separable = True, simple = False):
+class ConvBNReLUDropout(nn.Sequential):
+	def __init__(self, kernel_size, num_channels, stride = 1, dropout = 0, batch_norm_momentum = 0.1, residual = True):
+		super().__init__(collections.OrderedDict(zip(['0', '1', '2'], [ #['conv', 'bn', 'relu_dropout'], [
+			nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, padding = max(1, kernel_size // 2), bias = False),
+			nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum),
+			ReLUDropout(p = dropout, inplace = True)
+			]))
+		)
+		self.residual = residual
+
+	def forward(self, x):
+		y = super().forward(x)
+		if not self.residual or self[0].in_channels != self[0].out_channels or y.shape[-1] != x.shape[-1]:
+			return y
+		return y + x
+
+class InvertedResidual(nn.Module):
+	def __init__(self, kernel_size, num_channels, stride = 1, dilation = 1, dropout = 0.2, expansion = 1, squeeze_excitation_ratio = 0.25, batch_norm_momentum = 0.1, separable = True, simple = False, residual = True):
 		super().__init__()
 		in_channels, out_channels = num_channels
 		padding = (kernel_size - 1) // 2
@@ -42,14 +58,14 @@ class MBConvBlock(nn.Module):
 			nn.BatchNorm1d(out_channels, momentum = batch_norm_momentum),
 		) if not simple else nn.Identity()
 
-		self.residual = nn.Sequential(
+		self.residual = None if not residual else nn.Sequential(
 			nn.Conv1d(in_channels, out_channels, kernel_size = 1, stride = stride, bias = False), 
 			nn.BatchNorm1d(out_channels, momentum = batch_norm_momentum)
-		) if not simple or in_channels != out_channels else nn.Identity() 
+		) if not simple or in_channels != out_channels else nn.Identity()
 	
 	def forward(self, x):
 		if self.simple:
-			return self.conv(x)
+			return self.conv(x) + self.residual(x) if self.residual is not None else self.conv(x)
 
 		y = self.expand(x)
 		y = self.conv(y)
@@ -60,59 +76,39 @@ class MBConvBlock(nn.Module):
 class BabbleNet(nn.Sequential):
 	def __init__(self, num_classes, num_input_features, dropout = 0.2, repeat = 1, batch_norm_momentum = 0.1):
 			super().__init__(
-				MBConvBlock(kernel_size = 13, num_channels = (num_input_features, 64), stride = 2, dropout = dropout, simple = True),
+				ConvBNReLUDropout(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2, dropout = dropout),
 
-				MBConvBlock(kernel_size = 13, num_channels = (64, 192), stride = 1, dropout = dropout, expansion = 4),
-				MBConvBlock(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-				MBConvBlock(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-				MBConvBlock(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-				MBConvBlock(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-				MBConvBlock(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
+				ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 192), stride = 1, dropout = dropout),
+				InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
+				InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
+				InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
+				InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
+				InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
+				ConvBNReLUDropout(kernel_size = 13, num_channels = (192, 768), stride = 1, dropout = dropout),
 
-				MBConvBlock(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-				MBConvBlock(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-				MBConvBlock(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-
-				#MBConvBlock(kernel_size = 13, num_channels = (192, 768), stride = 1, dropout = dropout, simple = True),
-				#MBConvBlock(kernel_size = 31, num_channels = (768, 2048), stride = 1, dropout = dropout, simple = True),
-
-				MBConvBlock(kernel_size = 31, num_channels = (192, 2048), stride = 1, dropout = dropout, simple = True),
-				MBConvBlock(kernel_size =  1, num_channels = (2048,2048), stride = 1, dropout = dropout, simple = True),
+				ConvBNReLUDropout(kernel_size = 31, num_channels = (768, 2048), stride = 1, dropout = dropout),
+				ConvBNReLUDropout(kernel_size = 1,  num_channels = (2048, 2048), stride = 1, dropout = dropout),
 				nn.Conv1d(2048, num_classes, kernel_size = 1)
 			)
 
 	def forward(self, x, input_lengths):
 		return super().forward(x)
 
-class ConvBNReLUDropout(nn.Sequential):
-	def __init__(self, kernel_size, num_channels, stride, dropout, padding = None, batch_norm_momentum = 0.1, residual = True):
-		self.__init__(collections.OrderedDict(zip(['0', '1', '2'], [ #['conv', 'bn', 'relu_dropout'], [
-			nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, padding = padding if padding is not None else max(1, kernel_size // 2), bias = False),
-			nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum),
-			ReLUDropout(p = dropout, inplace = True)
-			]))
-		)
-		self.residual = residual
-
-	def forward(self, x):
-		return super().forward(x) if not self.residual or self[0].in_channels != self[0].out_channels else x + super().forward(x)
-
 #TODO: apply conv masking
 class Wav2LetterRu(nn.Sequential):
 	def __init__(self, num_classes, num_input_features, dropout = 0.2):
-		dropout = dropout if isinstance(dropout, list) else [dropout] * 9
 		layers = [
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2, dropout = dropout[0]),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2, dropout = dropout),
 			
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout[1]),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout[2]),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout[3]),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout[4]),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout[5]),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout[6]),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
 
-			ConvBNReLUDropout(kernel_size = 31, num_channels = (768, 2048), stride = 1, dropout = dropout[7]),
-			ConvBNReLUDropout(kernel_size = 1,  num_channels = (2048, 2048), stride = 1, dropout = dropout[8]),
+			ConvBNReLUDropout(kernel_size = 31, num_channels = (768, 2048), stride = 1, dropout = dropout),
+			ConvBNReLUDropout(kernel_size = 1,  num_channels = (2048, 2048),stride = 1, dropout = dropout),
 			nn.Conv1d(2048, num_classes, kernel_size = 1, stride = 1)
 		]
 		super().__init__(*layers)
