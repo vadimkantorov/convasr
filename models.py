@@ -56,7 +56,7 @@ class InvertedResidual(nn.Module):
 		self.reduce = nn.Sequential(
 			nn.Conv1d(exp_channels, out_channels, kernel_size = 1, stride = 1, bias = False),
 			nn.BatchNorm1d(out_channels, momentum = batch_norm_momentum),
-		) if not simple else nn.Identity()
+		)
 
 		self.residual = None if not residual else nn.Sequential(
 			nn.Conv1d(in_channels, out_channels, kernel_size = 1, stride = stride, bias = False), 
@@ -65,7 +65,7 @@ class InvertedResidual(nn.Module):
 	
 	def forward(self, x):
 		if self.simple:
-			return self.conv(x) + self.residual(x) if self.residual is not None else self.conv(x)
+			return self.reduce(self.conv(x)) + self.residual(x) if self.residual is not None else self.conv(x)
 
 		y = self.expand(x)
 		y = self.conv(y)
@@ -76,9 +76,9 @@ class InvertedResidual(nn.Module):
 class BabbleNet(nn.Sequential):
 	def __init__(self, num_classes, num_input_features, dropout = 0.2, repeat = 1, batch_norm_momentum = 0.1):
 			super().__init__(
-				ConvBNReLUDropout(kernel_size = 13, num_channels = (num_input_features, 192), stride = 2, dropout = dropout),
+				ConvBNReLUDropout(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2, dropout = dropout),
 
-				#ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 192), stride = 1, dropout = dropout),
+				ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 192), stride = 1, dropout = dropout),
 				InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
 				InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
 				InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
