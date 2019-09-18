@@ -95,11 +95,14 @@ class Labels(object):
 	def __init__(self, lang, bpe = None):
 		self.preprocess_text = lang.preprocess_text
 		self.preprocess_word = lang.preprocess_word
-		self.bpe = sentencepiece.SentencePieceProcessor(bpe) if bpe is not None else None
+		self.bpe = None
+		if bpe:
+			self.bpe = sentencepiece.SentencePieceProcessor()
+			self.bpe.Load(bpe)
 		self.idx2chr = lang.LABELS
-		self.chr2idx = {l: i for i, l in enumerate(self.idx2chr_ + self.repeat + self.space + self.blank)}
-		self.blank_idx = len(self)
-		sefl.space_idx = self.blank_idx - 1
+		self.chr2idx = {l: i for i, l in enumerate(self.idx2chr + self.repeat + self.space + self.blank)}
+		self.blank_idx = len(self) - 1
+		self.space_idx = self.blank_idx - 1
 		self.repeat_idx = self.blank_idx - 2
 
 	def find_words(self, text):

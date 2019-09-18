@@ -30,7 +30,7 @@ def worker_init_fn(worker_idx):
 
 def traineval(args):
 	checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoint else {}
-	args.experiment_id = args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, train_waveform_transform = f'aug{args.train_waveform_transform[0]}{args.train_waveform_transform_prob or ""}' if args.train_waveform_transform else '', train_feature_transform = f'aug{args.train_feature_transform[0]}{args.train_feature_transform_prob or ""}' if args.train_feature_transform else '').replace('e-0', 'e-').rstrip('_')
+	args.experiment_id = args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, bpe = 'bpe' if args.bpe else '', train_waveform_transform = f'aug{args.train_waveform_transform[0]}{args.train_waveform_transform_prob or ""}' if args.train_waveform_transform else '', train_feature_transform = f'aug{args.train_feature_transform[0]}{args.train_feature_transform_prob or ""}' if args.train_feature_transform else '').replace('e-0', 'e-').rstrip('_')
 	if 'experiment_id' in checkpoint and not args.experiment_name:
 		args.experiment_id = checkpoint['experiment_id']
 
@@ -62,12 +62,11 @@ def traineval(args):
 		with torch.no_grad():
 			for val_dataset_name, val_data_loader in val_data_loaders.items():
 				logits_, ref_tra_ = [], []
-				for batch_idx_, (inputs, targets, filenames, input_percentages, target_lengths) in enumerate(val_data_loader):
-					inputs, targets, input_percentages, target_lengths = inputs.to(args.device), targets.to(args.device), input_percentages.to(args.device), target_lengths.to(args.device)
+				for batch_idx_, (inputs, targets, filenames, input_lengths_fraction, target_lengths) in enumerate(val_data_loader):
+					inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
 					#inputs = models.logfbank(inputs, train_dataset.sample_rate, train_dataset.window_size, train_dataset.window_stride, train_dataset.window, train_dataset.num_input_features, normalize = train_dataset.normalize_features)
-					input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
-					output_lengths = models.compute_output_lengths(model, input_lengths)
-					logits = model(inputs, input_lengths)
+					logits = model(inputs, input_lengths_fraction)
+					output_lengths = models.compute_output_lengths(model, logits, input_lengths_fraction)
 					log_probs = F.log_softmax(logits, dim = 1)
 					loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths).mean()
 					decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
@@ -98,6 +97,7 @@ def traineval(args):
 				elif args.logits:
 					torch.save(dict(logits = logits_, ref_tra = ref_tra_), args.logits.format(val_dataset_name = val_dataset_name))
 		if training and not args.checkpoint_skip:
+			#TODO: amp.state_dict()
 			optimizer_state_dict = None # optimizer.state_dict()
 			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = train_sampler.state_dict(batch_idx), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features), os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
 		model.train()
@@ -154,13 +154,12 @@ def traineval(args):
 	for epoch in range(epoch, args.epochs):
 		model.train()
 		train_sampler.shuffle(epoch)
-		for batch_idx, (inputs, targets, filenames, input_percentages, target_lengths) in enumerate(train_data_loader, start = train_sampler.batch_idx):
+		for batch_idx, (inputs, targets, filenames, input_lengths_fraction, target_lengths) in enumerate(train_data_loader, start = train_sampler.batch_idx):
 			toc = time.time()
-			inputs, targets, input_percentages, target_lengths = inputs.to(args.device), targets.to(args.device), input_percentages.to(args.device), target_lengths.to(args.device)
+			inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
 			#inputs = models.logfbank(inputs, train_dataset.sample_rate, train_dataset.window_size, train_dataset.window_stride, train_dataset.window, train_dataset.num_input_features, normalize = train_dataset.normalize_features)
-			input_lengths = (input_percentages.cpu() * inputs.shape[-1]).int()
-			output_lengths = models.compute_output_lengths(model, input_lengths)
-			logits = model(inputs, input_lengths)
+			logits = model(inputs, input_lengths_fraction)
+			output_lengths = models.compute_output_lengths(model, logits, input_lengths_fraction)
 			log_probs = F.log_softmax(logits, dim = 1)
 			entropy = models.entropy(log_probs, output_lengths, dim = 1).mean()
 			loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths).mean()
@@ -241,7 +240,7 @@ if __name__ == '__main__':
 	parser.add_argument('--args', default = 'args.json')
 	parser.add_argument('--model', default = 'Wav2LetterRu')
 	parser.add_argument('--seed', type = int, default = 1)
-	parser.add_argument('--experiment-id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{train_waveform_transform}_{train_feature_transform}_{experiment_name}')
+	parser.add_argument('--experiment-id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{train_waveform_transform}_{train_feature_transform}_{experiment_name}_{bpe}')
 	parser.add_argument('--experiment-name', '--name', default = '')
 	parser.add_argument('--dry', action = 'store_true')
 	parser.add_argument('--lang', default = 'ru')
