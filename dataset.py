@@ -85,7 +85,7 @@ replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in e
 replacestar = lambda s: s.replace('*', '')
 replacespace = lambda s: s.replace('<', ' ').replace('>', ' ')
 
-class Labels(object):
+class Labels:
 	blank = '|'
 	space = ' '
 	word_start = '<'

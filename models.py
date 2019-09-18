@@ -8,7 +8,7 @@ import librosa
 
 #TODO: apply conv masking
 class ConvBNReLUDropout(nn.ModuleDict):
-	def __init__(self, kernel_size, num_channels, stride = 1, dropout = 0, batch_norm_momentum = 0.1, residual = True, groups = 1, num_channels_residual = [], repeat = 1):
+	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, residual = True, groups = 1, num_channels_residual = [], repeat = 1):
 		#modules.append(nn.Hardtanh(0, max_value, inplace = True))
 		super().__init__(dict(
 			conv = nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, padding = max(1, kernel_size // 2), bias = False, groups = groups),
@@ -23,29 +23,24 @@ class ConvBNReLUDropout(nn.ModuleDict):
 		y = self.relu_dropout(self.bn(self.conv(x)))
 		return y if (not self.residual or self.conv.in_channels != self.conv.out_channels or y.shape[-1] != x.shape[-1]) else y + x
 
+class ConvBN(nn.Sequential):
+	def __init__(self, num_channels, kernel_size = 1, stride = 1, batch_norm_momentum = 0.1):
+		super().__init__(
+			nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, bias = False),
+			nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum)
+		)
+
 class InvertedResidual(nn.Module):
 	def __init__(self, kernel_size, num_channels, stride = 1, dilation = 1, dropout = 0.2, expansion = 1, squeeze_excitation_ratio = 0.25, batch_norm_momentum = 0.1, separable = True, simple = False, residual = True):
 		super().__init__()
 		in_channels, out_channels = num_channels
-		padding = (kernel_size - 1) // 2
 		exp_channels = in_channels * expansion if not simple else out_channels
 		se_channels = int(exp_channels * squeeze_excitation_ratio)
 		groups = exp_channels if (separable and not simple) else 1
 
 		self.simple = simple
-
-		self.expand = nn.Sequential(
-			nn.Conv1d(in_channels, exp_channels, kernel_size = 1, stride = stride, bias = False),
-			nn.BatchNorm1d(exp_channels, momentum = batch_norm_momentum),
-			ReLUDropout(p = dropout, inplace = True)
-		) if not simple else nn.Identity()
-
-		self.conv = nn.Sequential(
-			nn.Conv1d(exp_channels if not simple else in_channels, exp_channels, kernel_size, stride = stride, bias = False, padding = padding, groups = groups),
-			nn.BatchNorm1d(exp_channels, momentum = batch_norm_momentum),
-			ReLUDropout(p = dropout, inplace = True)
-		)
-
+		self.expand = ConvBNReLUDropout(num_channels = (in_channels, exp_channels), stride = stride, batch_norm_momentum = batch_norm_momentum) if not simple else nn.Identity()
+		self.conv = ConvBNReLUDropout(kernel_size = kernel_size, num_channels = (exp_channels if not simple else in_channels, exp_channels), stride = stride, groups = groups, dropout = dropout, batch_norm_momentum = batch_norm_momentum)
 		self.squeeze_and_excite = nn.Sequential(
 			nn.AdaptiveAvgPool1d(1),
 			nn.Conv1d(exp_channels, se_channels, kernel_size = 1),
@@ -53,16 +48,8 @@ class InvertedResidual(nn.Module):
 			nn.Conv1d(se_channels, exp_channels, kernel_size = 1),
 			nn.Sigmoid()
 		) if not simple else nn.Identity()
-
-		self.reduce = nn.Sequential(
-			nn.Conv1d(exp_channels, out_channels, kernel_size = 1, stride = 1, bias = False),
-			nn.BatchNorm1d(out_channels, momentum = batch_norm_momentum),
-		)
-
-		self.residual = None if not residual else nn.Sequential(
-			nn.Conv1d(in_channels, out_channels, kernel_size = 1, stride = stride, bias = False), 
-			nn.BatchNorm1d(out_channels, momentum = batch_norm_momentum)
-		) if not simple or in_channels != out_channels else nn.Identity()
+		self.reduce = ConvBN(num_channels = (exp_channels, out_channel), batch_norm_momentum = batch_norm_momentum)
+		self.residual = ConvBN(num_channels = (in_channels, out_channels), batch_norm_momentum = batch_norm_momentum) if residual and (not simple or in_channels != out_channels) else nn.Identity() if residual else None
 	
 	def forward(self, x):
 		if self.simple:
@@ -199,7 +186,7 @@ def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_
 	n_fft = 2 ** math.ceil(math.log2(win_length))
 	signal += dither * torch.randn_like(signal)
 	window = getattr(torch, window)(win_length, periodic = False).type_as(signal)
-	#mel_basis = torchaudio.functional.create_fb_matrix(n_fft, n_mels = num_input_features, fmin = 0, fmax = int(sample_rate/2)) # when https://github.com/pytorch/audio/issues/287 is fixed
+	#mel_basis = torchaudio.functional.create_fb_matrix(n_fft, n_mels = num_input_features, fmin = 0, fmax = int(sample_rate/2)).t() # when https://github.com/pytorch/audio/issues/287 is fixed
 	mel_basis = torch.from_numpy(librosa.filters.mel(sample_rate, n_fft, n_mels=num_input_features, fmin=0, fmax=int(sample_rate/2))).type_as(signal)
 	power_spectrum = torch.stft(signal, n_fft, hop_length = hop_length, win_length = win_length, window = window, pad_mode = 'reflect', center = True).pow(2).sum(dim = -1)
 	features = torch.log(torch.matmul(mel_basis, power_spectrum) + eps)

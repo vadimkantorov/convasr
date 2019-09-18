@@ -25,6 +25,7 @@ python3 transcribe.py \
 
 # BPE pretrained models for Russian
 ```shell
+# from https://nlp.h-its.org/bpemb/ru/
 wget https://nlp.h-its.org/bpemb/ru/ru.wiki.bpe.vs5000.vocab -P data
 wget https://nlp.h-its.org/bpemb/ru/ru.wiki.bpe.vs5000.model -P data
 ```
