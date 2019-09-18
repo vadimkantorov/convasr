@@ -44,7 +44,7 @@ def traineval(args):
 		return
 	set_random_seed(args.seed)
 
-	labels = dataset.Labels(importlib.import_module(args.lang))
+	labels = dataset.Labels(importlib.import_module(args.lang), bpe = args.bpe)
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
 	val_waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob)
 	val_feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob)
@@ -265,5 +265,6 @@ if __name__ == '__main__':
 	parser.add_argument('--beam-alpha', type = float, default = 0.3)
 	parser.add_argument('--beam-beta', type = float, default = 1.0)
 	parser.add_argument('--lm')
+	parser.add_argument('--bpe')
 	
 	traineval(parser.parse_args())

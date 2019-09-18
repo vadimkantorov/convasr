@@ -141,37 +141,42 @@ class Wav2LetterVanilla(nn.Sequential):
 		return super().forward(x)
 
 class JasperNet(nn.ModuleList):
-	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 2):
+	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, dropout = 'ignored'):
 		def conv_bn_relu_dropout_residual(kernel_size, num_channels, dropout = 0, stride = 1, dilation = 1, padding = 0, batch_norm_momentum = 0.1, repeat = 1, num_channels_residual = []):
-				return nn.ModuleDict(dict(
-					relu_dropout = ReLUDropout(p = dropout, inplace = True),
-					conv = nn.ModuleList([nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, padding = padding, bias = False) for i in range(repeat)]),
-					bn = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat)]),
-					conv_residual = nn.ModuleList([nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual]),
-					bn_residual = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual])
-				))
+			return nn.ModuleDict(dict(
+				relu_dropout = ReLUDropout(p = dropout, inplace = True),
+				conv = nn.ModuleList([nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, padding = dilation * (kernel_size // 2) if kernel_size > 1 else 0, bias = False) for i in range(repeat)]),
+				bn = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat)]),
+				conv_residual = nn.ModuleList([nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual]),
+				bn_residual = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual])
+			))
 
 		prologue = [conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (num_input_features, 256), dropout = 0.2, padding = 5, stride = 2)]
-		backbone = [
-				conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, padding = 5, repeat = repeat, num_channels_residual = [256]),
-				conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, padding = 5, repeat = repeat, num_channels_residual = [256, 256]),
-				conv_bn_relu_dropout_residual(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, padding = 6, repeat = repeat, num_channels_residual = [256, 256, 256]),
-				conv_bn_relu_dropout_residual(kernel_size = 13, num_channels = (384, 384), dropout = 0.2, padding = 6, repeat = repeat, num_channels_residual = [256, 256, 256, 384]),
-				conv_bn_relu_dropout_residual(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, padding = 8, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384]),
-				conv_bn_relu_dropout_residual(kernel_size = 17, num_channels = (512, 512), dropout = 0.2, padding = 8, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512]),
-				conv_bn_relu_dropout_residual(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, padding = 10, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512]),
-				conv_bn_relu_dropout_residual(kernel_size = 21, num_channels = (640, 640), dropout = 0.3, padding = 10, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640]),
-				conv_bn_relu_dropout_residual(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, padding = 12, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640]),
-				conv_bn_relu_dropout_residual(kernel_size = 25, num_channels = (768, 768), dropout = 0.3, padding = 12, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640, 768]),
-			] if num_subblocks == 2 else [
-				conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, padding = 5,  repeat = repeat, num_channels_residual = [256]),
-				conv_bn_relu_dropout_residual(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, padding = 6,  repeat = repeat, num_channels_residual = [256, 256]),
-				conv_bn_relu_dropout_residual(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, padding = 8,  repeat = repeat, num_channels_residual = [256, 256, 384]),
-				conv_bn_relu_dropout_residual(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, padding = 10, repeat = repeat, num_channels_residual = [256, 256, 384, 512]),
-				conv_bn_relu_dropout_residual(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, padding = 12, repeat = repeat, num_channels_residual = [256, 256, 384, 512, 640])
+		
+		if num_subblocks == 1:
+			backbone = [
+				conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = repeat, num_channels_residual = [256]),
+				conv_bn_relu_dropout_residual(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256]),
+				conv_bn_relu_dropout_residual(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 384]),
+				conv_bn_relu_dropout_residual(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 384, 512]),
+				conv_bn_relu_dropout_residual(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 384, 512, 640])
 			]
+		elif num_subblocks == 2:
+			backbone = [
+				conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = repeat, num_channels_residual = [256]),
+				conv_bn_relu_dropout_residual(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256]),
+				conv_bn_relu_dropout_residual(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256]),
+				conv_bn_relu_dropout_residual(kernel_size = 13, num_channels = (384, 384), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256, 384]),
+				conv_bn_relu_dropout_residual(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384]),
+				conv_bn_relu_dropout_residual(kernel_size = 17, num_channels = (512, 512), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512]),
+				conv_bn_relu_dropout_residual(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512]),
+				conv_bn_relu_dropout_residual(kernel_size = 21, num_channels = (640, 640), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640]),
+				conv_bn_relu_dropout_residual(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640]),
+				conv_bn_relu_dropout_residual(kernel_size = 25, num_channels = (768, 768), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640, 768])
+			]
+
 		epilogue = [
-			conv_bn_relu_dropout_residual(kernel_size = 29, num_channels = (768, 896), dropout = 0.4, padding = 28, dilation = dilation),
+			conv_bn_relu_dropout_residual(kernel_size = 29, num_channels = (768, 896), dropout = 0.4, dilation = dilation),
 			conv_bn_relu_dropout_residual(kernel_size = 1, num_channels = (896, 1024), dropout = 0.4),
 
 			nn.Conv1d(1024, num_classes, kernel_size = 1)

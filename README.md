@@ -23,6 +23,12 @@ python3 transcribe.py \
   --data-path data_dir
 ```
 
+# BPE pretrained models for Russian
+```shell
+wget https://nlp.h-its.org/bpemb/ru/ru.wiki.bpe.vs5000.vocab -P data
+wget https://nlp.h-its.org/bpemb/ru/ru.wiki.bpe.vs5000.model -P data
+```
+
 # Training on AWS Spot Instances with spotty
 ```shell
 # download the ru_open_stt dataset on an AWS EBS volume from a t2.large On-Demand instance
