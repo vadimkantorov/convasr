@@ -99,8 +99,7 @@ class Labels:
 		if bpe:
 			self.bpe = sentencepiece.SentencePieceProcessor()
 			self.bpe.Load(bpe)
-		self.idx2chr = lang.LABELS
-		self.chr2idx = {l: i for i, l in enumerate(self.idx2chr + self.repeat + self.space + self.blank)}
+		self.alphabet = lang.LABELS.lower()
 		self.blank_idx = len(self) - 1
 		self.space_idx = self.blank_idx - 1
 		self.repeat_idx = self.blank_idx - 2
@@ -109,15 +108,16 @@ class Labels:
 		text = re.sub(r'([^\W\d]+)2', r'\1', text)
 		text = self.preprocess_text(text)
 		words = re.findall(r'-?\d+|-?\d+-\w+|\w+', text)
-		return list(filter(bool, (''.join([c for c in self.preprocess_word(w) if c in self]).strip() for w in words)))
+		return list(filter(bool, (''.join(c for c in self.preprocess_word(w) if c in self).strip() for w in words)))
 
 	def normalize_text(self, text):
-		return ' '.join(f'{w}' for w in self.find_words(text)).upper().strip() or '*' 
+		return ' '.join(self.find_words(text)).lower().strip() or '*' 
 		#return ''.join(f'<{w}>' for w in self.find_words(text)).upper().strip() or '*' 
 
 	def parse(self, text):
 		chars = self.normalize_text(text)
-		return [self.chr2idx[chr] if i == 0 or chr != chars[i - 1] else self.repeat_idx for i, chr in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars)
+		chr2idx = {l: i for i, l in enumerate(self.alphabet + self.repeat + self.space + self.blank)}
+		return [chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars)
 
 	def normalize_transcript(self, text):
 		return functools.reduce(lambda text, func: func(text), [replacespace, replace2, replace22, replacestar, str.strip], text)
@@ -127,16 +127,16 @@ class Labels:
 		return i2s(idx)
 
 	def __getitem__(self, idx):
-		return self.idx2chr[idx] if self.bpe is None else self.bpe.IdToPiece(idx)
+		return {self.blank_idx : self.blank, self.repeat_idx : self.repeat, self.space_idx : self.space}.get(idx) or (self.alphabet[idx] if self.bpe is None else self.bpe.IdToPiece(idx))
 
 	def __len__(self):
-		return (len(self.idx2chr) if self.bpe is None else len(self.bpe)) + len([self.repeat, self.space, self.blank])
+		return (len(self.alphabet) if self.bpe is None else len(self.bpe)) + len([self.repeat, self.space, self.blank])
 
 	def __str__(self):
-		return self.idx2chr
+		return self.alphabet
 	
 	def __contains__(self, chr):
-		return chr.upper() in self.idx2chr
+		return chr.lower() in self.alphabet
 
 def unpack_targets(packed_targets, target_lengths):
 	targets, offset = [], 0

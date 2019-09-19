@@ -9,7 +9,6 @@ import librosa
 #TODO: apply conv masking
 class ConvBNReLUDropout(nn.ModuleDict):
 	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, residual = True, groups = 1, num_channels_residual = [], repeat = 1):
-		#modules.append(nn.Hardtanh(0, max_value, inplace = True))
 		super().__init__(dict(
 			conv = nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, padding = max(1, kernel_size // 2), bias = False, groups = groups),
 			bn = nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum),
@@ -89,7 +88,7 @@ class BabbleNet(nn.Sequential):
 			nn.Conv1d(2048, num_classes, kernel_size = 1)
 		)
 
-	def forward(self, x, input_lengths):
+	def forward(self, x, input_lengths_fracion):
 		return super().forward(x)
 
 class Wav2LetterRu(nn.Sequential):
@@ -109,10 +108,11 @@ class Wav2LetterRu(nn.Sequential):
 			nn.Conv1d(width_large, num_classes, kernel_size = 1, stride = 1)
 		)
 
-	def forward(self, x, input_lengths):
+	def forward(self, x, input_lengths_fracion):
 		return super().forward(x)
 
-class Wav2LetterVanilla(nn.Sequential):
+class Wav2Letter(nn.Sequential):
+	# TODO: use hardtanh 20
 	def __init__(self, num_classes, num_input_features, dilation = 2):
 		super().__init__(
 			ConvBNReLUDropout(kernel_size = 11, num_channels = (num_input_features, 256), stride = 2, padding = 5),
@@ -126,7 +126,7 @@ class Wav2LetterVanilla(nn.Sequential):
 			nn.Conv1d(1024, num_classes, kernel_size = 1)
 		)
 
-	def forward(self, x, input_lengths):
+	def forward(self, x, input_lengths_fracion):
 		return super().forward(x)
 
 class JasperNet(nn.ModuleList):
@@ -166,7 +166,7 @@ class JasperNet(nn.ModuleList):
 		]
 		super().__init__(prologue + backbone + epilogue)
 
-	def forward(self, x, input_lengths):
+	def forward(self, x, input_lengths_fracion):
 		residual = []
 		for i, block in enumerate(list(self)[:-1]):
 			for conv, bn in zip(block.conv[:-1], block.bn[:-1]):
@@ -199,8 +199,8 @@ def normalize_signal(signal, eps = 1e-5):
 def normalize_features(features, eps = 1e-20):
 	return (features - features.mean(dim = -1, keepdim = True)) / (features.std(dim = -1, keepdim = True) + eps)
 
-def temporal_mask(x, lengths = None, fractions = None):
-	lengths = lengths if lengths is not None else compute_output_lengths(x, fractions)
+def temporal_mask(x, lengths = None, lengths_fraction = None):
+	lengths = lengths if lengths is not None else compute_output_lengths(x, lenghts_fraction)
 	mask = torch.ones_like(x)
 	for m, l in zip(mask, lengths):
 		m[..., l:].zero_()
@@ -210,8 +210,8 @@ def entropy(log_probs, lengths, dim = 1, eps = 1e-9):
 	e = (log_probs.exp() * log_probs).sum(dim = dim)
 	return -(e * temporal_mask(e, lengths)).sum(dim = -1) / (eps + lengths.type_as(log_probs))
 
-def compute_output_lengths(model, x, fractions):
-	return (fractions * x.shape[-1] + 0.5).int()
+def compute_output_lengths(model, x, lengths_fraction):
+	return (lengths_fraction * x.shape[-1] + 0.5).int()
 
 def compute_capacity(model):
 	return sum(p.numel() for p in model.parameters())
