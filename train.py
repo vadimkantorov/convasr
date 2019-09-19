@@ -65,12 +65,11 @@ def traineval(args):
 				for batch_idx_, (inputs, targets, filenames, input_lengths_fraction, target_lengths) in enumerate(val_data_loader):
 					inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
 					#inputs = models.logfbank(inputs, train_dataset.sample_rate, train_dataset.window_size, train_dataset.window_stride, train_dataset.window, train_dataset.num_input_features, normalize = train_dataset.normalize_features)
-					logits = model(inputs, input_lengths_fraction)
-					output_lengths = models.compute_output_lengths(model, logits, input_lengths_fraction)
+					logits, output_lenghts = model(inputs, input_lengths_fraction)
 					log_probs = F.log_softmax(logits, dim = 1)
 					loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths).mean()
 					decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
-					target_strings = labels.idx2str(dataset.unpack_targets(targets.tolist(), target_lengths.tolist()))
+					target_strings = labels.idx2str(targets.tolist(), lengths = target_lengths)
 					entropy = models.entropy(log_probs, output_lengths, dim = 1)
 					for k, (transcript, reference, entropy) in enumerate(zip(decoded_strings, target_strings, entropy)):
 						if isinstance(transcript, list):
@@ -158,8 +157,7 @@ def traineval(args):
 			toc = time.time()
 			inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
 			#inputs = models.logfbank(inputs, train_dataset.sample_rate, train_dataset.window_size, train_dataset.window_stride, train_dataset.window, train_dataset.num_input_features, normalize = train_dataset.normalize_features)
-			logits = model(inputs, input_lengths_fraction)
-			output_lengths = models.compute_output_lengths(model, logits, input_lengths_fraction)
+			logits, output_lengths = model(inputs, input_lengths_fraction)
 			log_probs = F.log_softmax(logits, dim = 1)
 			entropy = models.entropy(log_probs, output_lengths, dim = 1).mean()
 			loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths).mean()

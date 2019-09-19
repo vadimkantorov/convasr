@@ -117,14 +117,14 @@ class Labels:
 	def parse(self, text):
 		chars = self.normalize_text(text)
 		chr2idx = {l: i for i, l in enumerate(self.alphabet + self.repeat + self.space + self.blank)}
-		return [chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars)
+		return torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
 	def normalize_transcript(self, text):
 		return functools.reduce(lambda text, func: func(text), [replacespace, replace2, replace22, replacestar, str.strip], text)
 
-	def idx2str(self, idx):
+	def idx2str(self, idx, lengths = None):
 		i2s = lambda i: '' if len(i) == 0 else self.normalize_transcript(''.join(map(self.__getitem__, i)) if self.bpe is None else self.bpe.DecodeIds(i)) if not isinstance(i[0], list) else list(map(i2s, i))
-		return i2s(idx)
+		return i2s(idx if lengths is None else [i[:l] for i, l in zip(idx, lengths)])
 
 	def __getitem__(self, idx):
 		return {self.blank_idx : self.blank, self.repeat_idx : self.repeat, self.space_idx : self.space}.get(idx) or (self.alphabet[idx] if self.bpe is None else self.bpe.IdToPiece(idx))
@@ -138,27 +138,19 @@ class Labels:
 	def __contains__(self, chr):
 		return chr.lower() in self.alphabet
 
-def unpack_targets(packed_targets, target_lengths):
-	targets, offset = [], 0
-	for length in target_lengths:
-		targets.append(packed_targets[offset:offset + length])
-		offset += length
-	return targets
-
 def collate_fn(batch, pad_to = 16):
-	batch = list(sorted(batch, key = lambda example: example[0].shape[-1], reverse = True))
-	max_seq_len = (1 + (batch[0][0].shape[-1] // pad_to)) * pad_to
-	inputs = torch.zeros(len(batch), *(batch[0][0].shape[:-1] + (max_seq_len, )), device = batch[0][0].device, dtype = batch[0][0].dtype)
-	input_percentages = torch.FloatTensor(len(batch))
-	target_lengths = torch.IntTensor(len(batch))
-	packed_targets, filenames = [], []
-	for k, (input, target, filename) in enumerate(batch):
+	inputs_max_len, targets_max_len = [(1 + max(b[k].shape[-1] for b in batch) // pad_to) * pad_to for k in [0, 1]]
+	sample_inputs, sample_targets, sample_audio_path = batch[0]
+	inputs = torch.zeros(len(batch), *(sample_inputs.shape[:-1] + (inputs_max_len,)), device = sample_inputs.device, dtype = sample_inputs.dtype)
+	targets = torch.zeros(len(batch), *(sample_targets.shape[:-1] + (targets_max_len,)), device = sample_targets.device, dtype = sample_targets.dtype)
+	input_percentages, target_lengths, audio_paths = [], [], []
+	for k, (input, target, audio_path) in enumerate(batch):
 		inputs[k, ..., :input.shape[-1]] = input
-		input_percentages[k] = input.shape[-1] / float(max_seq_len)
-		target_lengths[k] = len(target)
-		packed_targets.extend(target)
-		filenames.append(filename)
-	return inputs, torch.IntTensor(packed_targets), filenames, input_percentages, target_lengths
+		targets[k, ..., :target.shape[-1]] = target
+		input_percentages.append(input.shape[-1] / float(inputs_max_len))
+		target_lengths.append(len(target))
+		audio_paths.append(audio_path)
+	return inputs, targets, audio_paths, torch.FloatTensor(input_percentages), torch.IntTensor(target_lengths)
 
 def read_wav(path, normalize = True, sample_rate = None, max_duration = None):
 	sample_rate_, signal = scipy.io.wavfile.read(path)

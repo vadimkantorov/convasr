@@ -8,26 +8,21 @@ import librosa
 
 #TODO: apply conv masking
 class ConvBNReLUDropout(nn.ModuleDict):
-	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, residual = True, groups = 1, num_channels_residual = [], repeat = 1):
+	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, residual = True, groups = 1, num_channels_residual = [], repeat = 1, relu_dropout = True):
 		super().__init__(dict(
 			conv = nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, padding = max(1, kernel_size // 2), bias = False, groups = groups),
 			bn = nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum),
-			relu_dropout = ReLUDropout(p = dropout, inplace = True),
+			relu_dropout = ReLUDropout(p = dropout, inplace = True) if relu_dropout else None,
 			conv_residual = nn.ModuleList([nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual]) if num_channels_residual else None,
 			bn_residual = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual]) if num_channels_residual else None
 		))
 		self.residual = residual
 
 	def forward(self, x):
-		y = self.relu_dropout(self.bn(self.conv(x)))
+		y = self.bn(self.conv(x))
+		if self.relu_dropout is not None:
+			y = self.relu_dropout(y)
 		return y if (not self.residual or self.conv.in_channels != self.conv.out_channels or y.shape[-1] != x.shape[-1]) else y + x
-
-class ConvBN(nn.Sequential):
-	def __init__(self, num_channels, kernel_size = 1, stride = 1, batch_norm_momentum = 0.1):
-		super().__init__(
-			nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, bias = False),
-			nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum)
-		)
 
 class InvertedResidual(nn.Module):
 	def __init__(self, kernel_size, num_channels, stride = 1, dilation = 1, dropout = 0.2, expansion = 1, squeeze_excitation_ratio = 0.25, batch_norm_momentum = 0.1, separable = True, simple = False, residual = True):
@@ -47,8 +42,8 @@ class InvertedResidual(nn.Module):
 			nn.Conv1d(se_channels, exp_channels, kernel_size = 1),
 			nn.Sigmoid()
 		) if not simple else nn.Identity()
-		self.reduce = ConvBN(num_channels = (exp_channels, out_channel), batch_norm_momentum = batch_norm_momentum)
-		self.residual = ConvBN(num_channels = (in_channels, out_channels), batch_norm_momentum = batch_norm_momentum) if residual and (not simple or in_channels != out_channels) else nn.Identity() if residual else None
+		self.reduce = ConvBNReLUDropout(num_channels = (exp_channels, out_channel), batch_norm_momentum = batch_norm_momentum, relu_dropout = False)
+		self.residual = ConvBNReLUDropout(num_channels = (in_channels, out_channels), batch_norm_momentum = batch_norm_momentum, relu_dropout = False) if residual and (not simple or in_channels != out_channels) else nn.Identity() if residual else None
 	
 	def forward(self, x):
 		if self.simple:
@@ -89,7 +84,8 @@ class BabbleNet(nn.Sequential):
 		)
 
 	def forward(self, x, input_lengths_fracion):
-		return super().forward(x)
+		logits = super().forward(x)
+		return logits, compute_output_lengths(logits, input_lengths_fraction)
 
 class Wav2LetterRu(nn.Sequential):
 	def __init__(self, num_classes, num_input_features, dropout = 0.2, width_large = 2048, kernel_size_large = 31):
@@ -109,7 +105,8 @@ class Wav2LetterRu(nn.Sequential):
 		)
 
 	def forward(self, x, input_lengths_fracion):
-		return super().forward(x)
+		logits = super().forward(x)
+		return logits, compute_output_lengths(logits, input_lengths_fraction)
 
 class Wav2Letter(nn.Sequential):
 	# TODO: use hardtanh 20
@@ -127,7 +124,8 @@ class Wav2Letter(nn.Sequential):
 		)
 
 	def forward(self, x, input_lengths_fracion):
-		return super().forward(x)
+		logits = super().forward(x)
+		return logits, compute_output_lengths(logits, input_lengths_fraction)
 
 class JasperNet(nn.ModuleList):
 	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, dropout = 'ignored'):
@@ -177,7 +175,8 @@ class JasperNet(nn.ModuleList):
 				x = x + bn(conv(r))
 			x = block.relu_dropout(x)
 			residual.append(x)
-		return self[-1](x)
+		logits = self[-1](x)
+		return logits, compute_output_lengths(logits, input_lengths_fraction)
 
 def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, dither = 1e-5, preemph = 0.97, normalize = True, eps = 1e-20):
 	signal = normalize_signal(signal)
@@ -210,7 +209,7 @@ def entropy(log_probs, lengths, dim = 1, eps = 1e-9):
 	e = (log_probs.exp() * log_probs).sum(dim = dim)
 	return -(e * temporal_mask(e, lengths)).sum(dim = -1) / (eps + lengths.type_as(log_probs))
 
-def compute_output_lengths(model, x, lengths_fraction):
+def compute_output_lengths(x, lengths_fraction):
 	return (lengths_fraction * x.shape[-1] + 0.5).int()
 
 def compute_capacity(model):
