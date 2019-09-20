@@ -49,36 +49,35 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		return len(self.ids)
 
 class BucketingSampler(torch.utils.data.Sampler):
-	def __init__(self, data_source, batch_size=1):
-		super(BucketingSampler, self).__init__(data_source)
-		self.data_source = data_source
-		ids = list(range(0, len(data_source)))
-		self.bins = [ids[i:i + batch_size] for i in range(0, len(ids), batch_size)]
+	def __init__(self, dataset, batch_size=1):
+		super(BucketingSampler, self).__init__(dataset)
+		self.dataset = dataset
+		example_indices = list(sorted(range(len(dataset)), key = lambda k: dataset.ids[k][-1]))
+		self.batches = [example_indices[i:i + batch_size] for i in range(0, len(example_indices), batch_size)]
 		self.batch_idx = 0
-		self.shuffled = False
 
 	def __iter__(self):
-		for ids in self.bins[self.batch_idx:]:
-			random.shuffle(ids)
-			yield ids
+		generator = torch.Generator()
+		generator.manual_seed(self.epoch)
+		shuffled = [self.batches[k] for k in torch.randperm(len(self.batches), generator = generator).tolist()]
+		for batch in shuffled[self.batch_idx:]:
+			yield batch
+			self.batch_idx += 1
 		self.batch_idx = 0
 
 	def __len__(self):
-		return len(self.bins)
+		return len(self.batches)
 
-	def shuffle(self, epoch):
-		if not self.shuffled:
-			random.shuffle(self.bins)
-			self.batch_idx = 0
-		self.shuffled = False
+	def set_epoch(self, epoch):
+		self.epoch = epoch
 
 	def state_dict(self, batch_idx):
-		return dict(bins = self.bins, batch_idx = batch_idx)
+		return dict(batches = self.batches, batch_idx = batch_idx, epoch = self.epoch)
 
 	def load_state_dict(self, state_dict):
-		self.bins = state_dict['bins']
+		self.batches = state_dict['batches']
 		self.batch_idx = state_dict['batch_idx']
-		self.shuffled = True
+		self.epoch = state_dict['epoch']
 
 replace2 = lambda s: ''.join(c if i == 0 or c != '2' else s[i - 1] for i, c in enumerate(s))
 replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
@@ -141,8 +140,8 @@ class Labels:
 def collate_fn(batch, pad_to = 16):
 	inputs_max_len, targets_max_len = [(1 + max(b[k].shape[-1] for b in batch) // pad_to) * pad_to for k in [0, 1]]
 	sample_inputs, sample_targets, sample_audio_path = batch[0]
-	inputs = torch.zeros(len(batch), *(sample_inputs.shape[:-1] + (inputs_max_len,)), device = sample_inputs.device, dtype = sample_inputs.dtype)
-	targets = torch.zeros(len(batch), *(sample_targets.shape[:-1] + (targets_max_len,)), device = sample_targets.device, dtype = sample_targets.dtype)
+	inputs = sample_inputs.new_zeros(len(batch), *(sample_inputs.shape[:-1] + (inputs_max_len,)))
+	targets = sample_targets.new_zeros(len(batch), *(sample_targets.shape[:-1] + (targets_max_len,)))
 	input_percentages, target_lengths, audio_paths = [], [], []
 	for k, (input, target, audio_path) in enumerate(batch):
 		inputs[k, ..., :input.shape[-1]] = input

@@ -65,7 +65,7 @@ def traineval(args):
 				for batch_idx_, (inputs, targets, filenames, input_lengths_fraction, target_lengths) in enumerate(val_data_loader):
 					inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
 					#inputs = models.logfbank(inputs, train_dataset.sample_rate, train_dataset.window_size, train_dataset.window_stride, train_dataset.window, train_dataset.num_input_features, normalize = train_dataset.normalize_features)
-					logits, output_lenghts = model(inputs, input_lengths_fraction)
+					logits, output_lengths = model(inputs, input_lengths_fraction)
 					log_probs = F.log_softmax(logits, dim = 1)
 					loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths).mean()
 					decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
@@ -152,7 +152,7 @@ def traineval(args):
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1./K) * avg
 	for epoch in range(epoch, args.epochs):
 		model.train()
-		train_sampler.shuffle(epoch)
+		train_sampler.set_epoch(epoch)
 		for batch_idx, (inputs, targets, filenames, input_lengths_fraction, target_lengths) in enumerate(train_data_loader, start = train_sampler.batch_idx):
 			toc = time.time()
 			inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)

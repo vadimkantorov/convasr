@@ -66,7 +66,19 @@ def meanstd(logits):
 	plt.subplots_adjust(top = 0.99, bottom=0.01, hspace=0.8, wspace=0.4)
 	plt.savefig(logits + '.jpg', dpi = 150)
 
-def cer(experiments_dir, experiment_id, entropy, loss, include):
+def cer(experiments_dir, experiment_id, entropy, loss):
+	if experiment_id.endswith('.json'):
+		labels = dataset.Labels(ru)
+		reftra = json.load(open(experiment_id))
+		for reftra_ in reftra:
+			hyp = labels.normalize_transcript(labels.normalize_text(reftra_['transcript']))
+			ref = labels.normalize_transcript(labels.normalize_text(reftra_['reference']))
+			reftra_['cer'] = metrics.cer(hyp, ref)
+			reftra_['wer'] = metrics.wer(hyp, ref)
+		cer_avg, wer_avg = [float(torch.tensor([r[k] for r in reftra]).mean()) for k in ['cer', 'wer']]
+		print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')
+		return
+
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
 	for f in sorted(glob.glob(os.path.join(experiment_dir, f'transcripts_*.json'))):
@@ -74,7 +86,7 @@ def cer(experiments_dir, experiment_id, entropy, loss, include):
 		iteration = f[eidx:].replace('.json', '')
 		val_dataset_name = f[f.find('transcripts_') + len('transcripts_'):eidx]
 		checkpoint = os.path.join(experiment_id, 'checkpoint_' + f[eidx:].replace('.json', '.pt'))
-		cer = torch.tensor([j['entropy' if entropy else 'loss' if loss else 'cer'] for j in json.load(open(f)) if include in j['filename']] or [0.0])
+		cer = torch.tensor([j['entropy' if entropy else 'loss' if loss else 'cer'] for j in json.load(open(f))] or [0.0])
 		res[iteration].append((val_dataset_name, float(cer.mean()), checkpoint))
 	val_dataset_names = sorted(set(val_dataset_name for r in res.values() for val_dataset_name, cer, checkpoint in r))
 	print('iteration\t' + '\t'.join(val_dataset_names) + '\tcheckpoint')
@@ -90,15 +102,6 @@ def words(train_data_path, val_data_path):
 		c2 = train_cnt[w]
 		if c1 > 1 and c2 < 1000:
 			print(w, c1, c2)
-
-def reftra(ref, tra, output_path):
-	labels = dataset.Labels(ru)
-	ref, tra = ([dataset.replacestar(dataset.replace22(dataset.replace2(labels.normalize_text(l.split(',')[1].strip().lower())))) for l in open(f)] for f in [ref, tra])
-	cerwer = [dict(ref = ref_, tra = tra_, cer = metrics.cer(tra_, ref_), wer = metrics.wer(tra_, ref_)) for ref_, tra_ in zip(ref, tra)]
-	cer_avg = float(torch.tensor([d['cer'] for d in cerwer]).mean())
-	wer_avg = float(torch.tensor([d['wer'] for d in cerwer]).mean())
-	json.dump(cerwer, open(output_path, 'w'), sort_keys = True, indent = 2, ensure_ascii = False)
-	print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -117,7 +120,6 @@ if __name__ == '__main__':
 	cmd.add_argument('--experiments-dir', default = 'data/experiments')
 	cmd.add_argument('--entropy', action = 'store_true')
 	cmd.add_argument('--loss', action = 'store_true')
-	cmd.add_argument('--include', default = '')
 	cmd.set_defaults(func = cer)
 
 	cmd = subparsers.add_parser('errors')
@@ -129,12 +131,6 @@ if __name__ == '__main__':
 	cmd.add_argument('val_data_path')
 	cmd.set_defaults(func = words)
 
-	cmd = subparsers.add_parser('reftra')
-	cmd.add_argument('--ref', required = True)
-	cmd.add_argument('--tra', required = True)
-	cmd.add_argument('-o', '--output-path', default = 'data/reftra.json')
-	cmd.set_defaults(func = reftra)
-	
 	args = vars(parser.parse_args())
 	func = args.pop('func')
 	func(**args)

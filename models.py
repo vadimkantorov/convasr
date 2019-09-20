@@ -83,7 +83,7 @@ class BabbleNet(nn.Sequential):
 			nn.Conv1d(2048, num_classes, kernel_size = 1)
 		)
 
-	def forward(self, x, input_lengths_fracion):
+	def forward(self, x, input_lengths_fraction):
 		logits = super().forward(x)
 		return logits, compute_output_lengths(logits, input_lengths_fraction)
 
@@ -104,7 +104,7 @@ class Wav2LetterRu(nn.Sequential):
 			nn.Conv1d(width_large, num_classes, kernel_size = 1, stride = 1)
 		)
 
-	def forward(self, x, input_lengths_fracion):
+	def forward(self, x, input_lengths_fraction):
 		logits = super().forward(x)
 		return logits, compute_output_lengths(logits, input_lengths_fraction)
 
@@ -123,7 +123,7 @@ class Wav2Letter(nn.Sequential):
 			nn.Conv1d(1024, num_classes, kernel_size = 1)
 		)
 
-	def forward(self, x, input_lengths_fracion):
+	def forward(self, x, input_lengths_fraction):
 		logits = super().forward(x)
 		return logits, compute_output_lengths(logits, input_lengths_fraction)
 
@@ -164,7 +164,7 @@ class JasperNet(nn.ModuleList):
 		]
 		super().__init__(prologue + backbone + epilogue)
 
-	def forward(self, x, input_lengths_fracion):
+	def forward(self, x, input_lengths_fraction):
 		residual = []
 		for i, block in enumerate(list(self)[:-1]):
 			for conv, bn in zip(block.conv[:-1], block.bn[:-1]):
