@@ -67,7 +67,7 @@ def traineval(args):
 					#inputs = models.logfbank(inputs, train_dataset.sample_rate, train_dataset.window_size, train_dataset.window_stride, train_dataset.window, train_dataset.num_input_features, normalize = train_dataset.normalize_features)
 					logits, output_lengths = model(inputs, input_lengths_fraction)
 					log_probs = F.log_softmax(logits, dim = 1)
-					loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths)
+					loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths).mean()
 					decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
 					target_strings = labels.idx2str(targets.tolist(), lengths = target_lengths)
 					entropy = models.entropy(log_probs, output_lengths, dim = 1)
