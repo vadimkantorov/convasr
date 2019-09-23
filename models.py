@@ -8,13 +8,13 @@ import librosa
 
 #TODO: apply conv masking
 class ConvBNReLUDropout(nn.ModuleDict):
-	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, residual = True, groups = 1, num_channels_residual = [], repeat = 1, relu_dropout = True):
+	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, residual = True, groups = 1, num_channels_residual = [], repeat = 1, relu_dropout = True, dilation = 1):
 		super().__init__(dict(
-			conv = nn.Conv1d(num_channels[0], num_channels[1], kernel_size = kernel_size, stride = stride, padding = max(1, kernel_size // 2), bias = False, groups = groups),
-			bn = nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum),
+			conv = nn.ModuleList(nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, padding = dilation * max(1, kernel_size // 2), bias = False, groups = groups, dilation = dilation) for i in range(repeat)),
+			bn = nn.ModuleList(nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat)),
 			relu_dropout = ReLUDropout(p = dropout, inplace = True) if relu_dropout else None,
-			conv_residual = nn.ModuleList([nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual]) if num_channels_residual else None,
-			bn_residual = nn.ModuleList([nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual]) if num_channels_residual else None
+			conv_residual = nn.ModuleList(nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual) if num_channels_residual else None,
+			bn_residual = nn.ModuleList(nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual) if num_channels_residual else None
 		))
 		self.residual = residual
 
@@ -129,37 +129,37 @@ class Wav2Letter(nn.Sequential):
 
 class JasperNet(nn.ModuleList):
 	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, dropout = 'ignored'):
-		prologue = [ConvBNReluDropout(kernel_size = 11, num_channels = (num_input_features, 256), dropout = 0.2, padding = 5, stride = 2)]
+		prologue = [ConvBNReLUDropout(kernel_size = 11, num_channels = (num_input_features, 256), dropout = 0.2, stride = 2)]
 		
 		if num_subblocks == 1:
 			backbone = [
-				ConvBNReluDropout(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = repeat, num_channels_residual = [256]),
-				ConvBNReluDropout(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256]),
-				ConvBNReluDropout(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 384]),
-				ConvBNReluDropout(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 384, 512]),
-				ConvBNReluDropout(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 384, 512, 640])
+				ConvBNReLUDropout(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = repeat, num_channels_residual = [256]),
+				ConvBNReLUDropout(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256]),
+				ConvBNReLUDropout(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 384]),
+				ConvBNReLUDropout(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 384, 512]),
+				ConvBNReLUDropout(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 384, 512, 640])
 			]
 		elif num_subblocks == 2:
 			backbone = [
-				ConvBNReluDropout(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = repeat, num_channels_residual = [256]),
-				ConvBNReluDropout(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256]),
+				ConvBNReLUDropout(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = repeat, num_channels_residual = [256]),
+				ConvBNReLUDropout(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256]),
 				
-				ConvBNReluDropout(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256]),
-				ConvBNReluDropout(kernel_size = 13, num_channels = (384, 384), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256, 384]),
+				ConvBNReLUDropout(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256]),
+				ConvBNReLUDropout(kernel_size = 13, num_channels = (384, 384), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256, 384]),
 				
-				ConvBNReluDropout(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384]),
-				ConvBNReluDropout(kernel_size = 17, num_channels = (512, 512), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512]),
+				ConvBNReLUDropout(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384]),
+				ConvBNReLUDropout(kernel_size = 17, num_channels = (512, 512), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512]),
 				
-				ConvBNReluDropout(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512]),
-				ConvBNReluDropout(kernel_size = 21, num_channels = (640, 640), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640]),
+				ConvBNReLUDropout(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512]),
+				ConvBNReLUDropout(kernel_size = 21, num_channels = (640, 640), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640]),
 				
-				ConvBNReluDropout(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640]),
-				ConvBNReluDropout(kernel_size = 25, num_channels = (768, 768), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640, 768])
+				ConvBNReLUDropout(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640]),
+				ConvBNReLUDropout(kernel_size = 25, num_channels = (768, 768), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640, 768])
 			]
 
 		epilogue = [
-			ConvBNReluDropout(kernel_size = 29, num_channels = (768, 896), dropout = 0.4, dilation = dilation),
-			ConvBNReluDropout(kernel_size = 1, num_channels = (896, 1024), dropout = 0.4),
+			ConvBNReLUDropout(kernel_size = 29, num_channels = (768, 896), dropout = 0.4, dilation = dilation),
+			ConvBNReLUDropout(kernel_size = 1, num_channels = (896, 1024), dropout = 0.4),
 			nn.Conv1d(1024, num_classes, kernel_size = 1)
 		]
 		super().__init__(prologue + backbone + epilogue)
@@ -171,8 +171,9 @@ class JasperNet(nn.ModuleList):
 				x = bn(conv(x))
 				x = block.relu_dropout(x)
 			x = block.bn[-1](block.conv[-1](x))
-			for conv, bn, r in zip(block.conv_residual, block.bn_residual, residual if i < len(self) - 3 else []):
-				x = x + bn(conv(r))
+			if block.conv_residual is not None and block.bn_residual is not None:
+				for conv, bn, r in zip(block.conv_residual, block.bn_residual, residual if i < len(self) - 3 else []):
+					x = x + bn(conv(r))
 			x = block.relu_dropout(x)
 			residual.append(x)
 		logits = self[-1](x)

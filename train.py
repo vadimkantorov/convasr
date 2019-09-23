@@ -43,6 +43,8 @@ def traineval(args):
 	if args.dry:
 		return
 	set_random_seed(args.seed)
+	if args.cudnn == 'benchmark':
+		torch.backends.cudnn.benchmark = True
 
 	labels = dataset.Labels(importlib.import_module(args.lang), bpe = args.bpe)
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
@@ -153,6 +155,7 @@ def traineval(args):
 	for epoch in range(epoch, args.epochs):
 		model.train()
 		train_sampler.set_epoch(epoch)
+		time_epoch_start = time.time()
 		for batch_idx, (inputs, targets, filenames, input_lengths_fraction, target_lengths) in enumerate(train_data_loader, start = train_sampler.batch_idx):
 			toc = time.time()
 			inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
@@ -196,6 +199,7 @@ def traineval(args):
 						tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
 
 		evaluate_model(epoch, iteration, batch_idx)
+		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -238,6 +242,7 @@ if __name__ == '__main__':
 	parser.add_argument('--args', default = 'args.json')
 	parser.add_argument('--model', default = 'Wav2LetterRu')
 	parser.add_argument('--seed', type = int, default = 1)
+	parser.add_argument('--cudnn', default = 'benchmark')
 	parser.add_argument('--experiment-id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{train_waveform_transform}_{train_feature_transform}_{experiment_name}_{bpe}')
 	parser.add_argument('--experiment-name', '--name', default = '')
 	parser.add_argument('--dry', action = 'store_true')
