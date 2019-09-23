@@ -111,6 +111,9 @@ bin/lmplz -o 4 <text.csv >lm.arpa
 
 # binarize the estimated ARPA model
 bin/build_binary /dev/stdin lm.bin <lm.arpa
+
+# extract training transcripts
+cut -d',' -f 2 data/mixed_train.csv > data/mixed_train.txt
 ```
 
 # Beam search decoder

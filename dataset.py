@@ -132,7 +132,7 @@ class Labels:
 		return (len(self.alphabet) if self.bpe is None else len(self.bpe)) + len([self.repeat, self.space, self.blank])
 
 	def __str__(self):
-		return self.alphabet
+		return self.alphabet + ''.join([self.repeat, self.space, self.blank])
 	
 	def __contains__(self, chr):
 		return chr.lower() in self.alphabet
