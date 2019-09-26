@@ -13,7 +13,7 @@ import numpy as np
 fixed_or_uniform = lambda r: random.uniform(*r) if isinstance(r, list) else r
 fixed_or_choice = lambda r: random.choice(r) if isinstance(r, list) else r
 
-class RandomCompose(object):
+class RandomCompose:
 	def __init__(self, transforms, prob):
 		self.transforms = transforms
 		self.prob = prob
@@ -80,16 +80,16 @@ class SoxAug(RandomCompose):
 			signal, sample_rate = transform(signal, sample_rate) 
 		return signal, sample_rate
 
-class Quantization(object):
-	def __init__(self, quantization_channels = [128, 256]):
+class Quantization:
+	def __init__(self, quantization_channels = 16):
 		self.quantization_channels = quantization_channels
 	
 	def __call__(self, signal, sample_rate):
 		quantization_channels = fixed_or_choice(self.quantization_channels)
 		quantized = torchaudio.functional.mu_law_encoding(signal, quantization_channels)
-		return torchaudio.functinal.mu_law_decoding(quantized, quantization_channels)
+		return torchaudio.functional.mu_law_decoding(quantized, quantization_channels), sample_rate
 
-class AddWhiteNoise(object):
+class AddWhiteNoise:
 	def __init__(self, noise_level = 0.025):
 		self.noise_level = float(noise_level)
 
@@ -98,7 +98,7 @@ class AddWhiteNoise(object):
 		noise_level = fixed_or_uniform(self.noise_level)
 		return signal + noise * noise_level, sample_rate
 
-class MixExternalNoise(object):
+class MixExternalNoise:
 	def __init__(self, noise_level, noise_data_path, cache = False):
 		self.noise_level = noise_level
 		self.noise_data_path = noise_data_path
@@ -114,7 +114,7 @@ class MixExternalNoise(object):
 		noise = torch.cat([noise] * (1 + len(signal) // len(noise)))[:len(signal)]
 		return signal + noise * noise_level, sample_rate
 
-class SpecLowPass(object):
+class SpecLowPass:
 	def __init__(self, freq):
 		self.freq = int(freq)
 
@@ -124,7 +124,7 @@ class SpecLowPass(object):
 		spect[n_freq:] = 0
 		return spect, sample_rate
 
-class SpecHighPass(object):
+class SpecHighPass:
 	def __init__(self, freq):
 		self.freq = int(freq)
 
@@ -134,22 +134,19 @@ class SpecHighPass(object):
 		spect[:n_freq] = 0
 		return spect, sample_rate
 
-class SpecAugment(object):
-	def __init__(self, n_freq_mask = 2, n_time_mask = 2, width_freq_mask = 6, width_time_mask = 6, replace_strategy = None):
+class SpecAugment:
+	def __init__(self, n_freq_mask = 2, n_time_mask = 5, width_freq_mask = 6, width_time_mask = 10):
 		# fb code: https://github.com/facebookresearch/wav2letter/commit/04c3d80bf66fe749466cd427afbcc936fbdec5cd
 		# width_freq_mask = 27, width_time_mask = 100, and n_freq_mask/n_time_mask = 2
 		# google code: https://github.com/tensorflow/lingvo/blob/master/lingvo/core/spectrum_augmenter.py#L37-L42
 		# width_freq_mask = 10 and width_time_mask = 50, and n_freq_mask/n_time_mask = 2
 
-		self.replace_strategy = replace_strategy
 		self.n_time_mask = n_time_mask
 		self.n_freq_mask = n_freq_mask
 		self.width_time_mask = width_time_mask
 		self.width_freq_mask = width_freq_mask
 
-	def __call__(self, spect, sample_rate):
-		replace_val = spect.mean() if self.replace_strategy == 'mean' else 0
-
+	def __call__(self, spect, sample_rate, replace_val = 0):
 		for idx in range(self.n_freq_mask):
 			f = random.randint(0, self.width_freq_mask)
 			f0 = random.randint(0, spect.shape[0] - f)
@@ -162,11 +159,11 @@ class SpecAugment(object):
 
 		return spect, sample_rate
 
-class SpecPerlinNoise(object):
+class SpecPerlinNoise:
 	def __init__(self, noise_level = 0.4):
 		self.noise_level = float(noise_level)
 
-	def __call__(self, spect, sample_rate, kernel_size = 8, octaves=1, persistence=0.5, fade = lambda t: 6*t**5 - 15*t**4 + 10*t**3):
+	def __call__(self, spect, sample_rate, kernel_size = 8, octaves=4, persistence=0.5, fade = lambda t: 6*t**5 - 15*t**4 + 10*t**3):
 		def rand_perlin_2d(spect, kernel_size):
 			shape = [(1 + s // (2 * kernel_size)) * (2 * kernel_size) for s in spect.shape]
 

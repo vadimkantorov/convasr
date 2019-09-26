@@ -61,46 +61,47 @@ def traineval(args):
 	def evaluate_model(epoch = None, iteration = None, batch_idx = None):
 		training = epoch is not None and iteration is not None
 		model.eval()
-		with torch.no_grad():
-			for val_dataset_name, val_data_loader in val_data_loaders.items():
-				logits_, ref_tra_ = [], []
-				for batch_idx_, (inputs, targets, filenames, input_lengths_fraction, target_lengths) in enumerate(val_data_loader):
-					inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
-					#inputs = models.logfbank(inputs, train_dataset.sample_rate, train_dataset.window_size, train_dataset.window_stride, train_dataset.window, train_dataset.num_input_features, normalize = train_dataset.normalize_features)
+		for val_dataset_name, val_data_loader in val_data_loaders.items():
+			features_, logits_, ref_tra_ = [], [], []
+			for batch_idx_, (inputs, targets, filenames, input_lengths_fraction, target_lengths) in enumerate(val_data_loader):
+				inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
+				#inputs = models.logfbank(inputs, train_dataset.sample_rate, train_dataset.window_size, train_dataset.window_stride, train_dataset.window, train_dataset.num_input_features, normalize = train_dataset.normalize_features)
+				with torch.no_grad():
 					logits, output_lengths = model(inputs, input_lengths_fraction)
 					log_probs = F.log_softmax(logits, dim = 1)
 					loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths).mean()
-					decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
-					target_strings = labels.idx2str(targets.tolist(), lengths = target_lengths)
-					entropy = models.entropy(log_probs, output_lengths, dim = 1)
-					for k, (transcript, reference, entropy) in enumerate(zip(decoded_strings, target_strings, entropy)):
-						if isinstance(transcript, list):
-							transcript = min((metrics.cer(t, reference), t) for t in transcript)[1]
-						cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
-						if args.align:
-							transcript_, reference_ = metrics.align(transcript, reference)
-							reference_ = ' ' + reference_
-						else:
-							transcript_, reference_ = transcript, reference
-						if args.verbose:
-							print(iteration, ':', batch_idx_ * len(inputs) + k, '/', len(val_data_loader) * len(inputs))
-							print(f'{val_dataset_name} REF: {reference_}')
-							print(f'{val_dataset_name} HYP: {transcript_}')
-							print(f'{val_dataset_name} WER: {wer:.02%} | CER: {cer:.02%}')
-							print()
-						ref_tra_.append(dict(reference = reference_, transcript = transcript_, filename = filenames[k], cer = cer, wer = wer, loss = float(loss), entropy = float(entropy)))
-						if not training and args.logits:
-							logits_.extend(logits.cpu())
-				cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([x[k] for x in ref_tra_ if not math.isinf(x[k]) and not math.isnan(x[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
-				print(f'{args.experiment_id} {val_dataset_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
-				print()
-				with open(os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
-					json.dump(list(sorted(ref_tra_, key = lambda ref_tra: ref_tra['cer'], reverse = True)), f, ensure_ascii = False, indent = 2, sort_keys = True)
-				if training:
-					tensorboard.add_scalars('datasets/' + val_dataset_name, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
-					tensorboard.flush()
-				elif args.logits:
-					torch.save(dict(logits = logits_, ref_tra = ref_tra_), args.logits.format(val_dataset_name = val_dataset_name))
+				decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
+				target_strings = labels.idx2str(targets, lengths = target_lengths)
+				entropy = models.entropy(log_probs, output_lengths, dim = 1)
+				for k, (transcript, reference, entropy) in enumerate(zip(decoded_strings, target_strings, entropy)):
+					if isinstance(transcript, list):
+						transcript = min((metrics.cer(t, reference), t) for t in transcript)[1]
+					cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
+					if args.align:
+						transcript_, reference_ = metrics.align(transcript, reference)
+						reference_ = ' ' + reference_
+					else:
+						transcript_, reference_ = transcript, reference
+					if args.verbose:
+						print(iteration, ':', batch_idx_ * len(inputs) + k, '/', len(val_data_loader) * len(inputs))
+						print(f'{val_dataset_name} REF: {reference_}')
+						print(f'{val_dataset_name} HYP: {transcript_}')
+						print(f'{val_dataset_name} WER: {wer:.02%} | CER: {cer:.02%}')
+						print()
+					ref_tra_.append(dict(reference = reference_, transcript = transcript_, audio_path = filenames[k], filename = os.path.basename(filenames[k]), cer = cer, wer = wer, loss = float(loss), entropy = float(entropy)))
+					if not training and args.logits:
+						logits_.extend(logits.cpu())
+						features_.extend(features.cpu())
+			cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([x[k] for x in ref_tra_ if not math.isinf(x[k]) and not math.isnan(x[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
+			print(f'{args.experiment_id} {val_dataset_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
+			print()
+			with open(os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
+				json.dump(list(sorted(ref_tra_, key = lambda ref_tra: ref_tra['cer'], reverse = True)), f, ensure_ascii = False, indent = 2, sort_keys = True)
+			if training:
+				tensorboard.add_scalars('datasets/' + val_dataset_name, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
+				tensorboard.flush()
+			elif args.logits:
+				torch.save([ref_tra.update(dict(logits = logits, features = features)) or ref_tra for features, logits, ref_tra in zip(features_, logits_, ref_tra_)], args.logits.format(val_dataset_name = val_dataset_name))
 		if training and not args.checkpoint_skip:
 			#TODO: amp.state_dict()
 			optimizer_state_dict = None # optimizer.state_dict()
@@ -134,7 +135,7 @@ def traineval(args):
 		iteration = 1 + checkpoint.get('iteration', int(args.checkpoint[args.checkpoint.find('iter') + 4: -3]))
 		epoch = checkpoint['epoch']
 		if args.train_data_path == checkpoint['args']['train_data_path']:
-			train_sampler.load_state_dict(checkpoint['sampler_state_dict']); train_sampler.batch_idx = 10000
+			train_sampler.load_state_dict(checkpoint['sampler_state_dict'])
 			scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 		else:
 			epoch += 1
@@ -164,8 +165,9 @@ def traineval(args):
 			toc = time.time()
 			inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
 			#inputs = models.logfbank(inputs, train_dataset.sample_rate, train_dataset.window_size, train_dataset.window_stride, train_dataset.window, train_dataset.num_input_features, normalize = train_dataset.normalize_features)
-			logits, output_lengths = model(inputs, input_lengths_fraction)
-			log_probs = F.log_softmax(logits, dim = 1)
+			with torch.enable_grad():
+				logits, output_lengths = model(inputs, input_lengths_fraction)
+				log_probs = F.log_softmax(logits, dim = 1)
 			entropy = models.entropy(log_probs, output_lengths, dim = 1).mean()
 			loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths).mean()
 			if not (torch.isinf(loss) or torch.isnan(loss)):
@@ -226,7 +228,7 @@ if __name__ == '__main__':
 	parser.add_argument('--epochs', type = int, default = 10)
 	parser.add_argument('--iterations', type = int, default = None)
 	parser.add_argument('--num-input-features', default = 64)
-	parser.add_argument('--dropout', type = float, nargs = '*', default = 0.2)
+	parser.add_argument('--dropout', type = float, default = 0.2)
 	parser.add_argument('--train-data-path')
 	parser.add_argument('--val-data-path', nargs = '+')
 	parser.add_argument('--sample-rate', type = int, default = 8_000)

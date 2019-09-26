@@ -2,6 +2,7 @@ import os
 import collections
 import glob
 import json
+import io
 import argparse
 import base64
 import matplotlib
@@ -13,6 +14,9 @@ import torch.nn.functional as F
 import dataset
 import ru
 import metrics
+import models
+
+labels = dataset.Labels(ru)
 
 def errors(transcripts):
 	ref_tra = list(sorted(json.load(open(transcripts)), key = lambda j: j['cer']))
@@ -68,7 +72,6 @@ def meanstd(logits):
 
 def cer(experiments_dir, experiment_id, entropy, loss):
 	if experiment_id.endswith('.json'):
-		labels = dataset.Labels(ru)
 		reftra = json.load(open(experiment_id))
 		for reftra_ in reftra:
 			hyp = labels.normalize_transcript(labels.normalize_text(reftra_['transcript']))
@@ -103,6 +106,54 @@ def words(train_data_path, val_data_path):
 		if c1 > 1 and c2 < 1000:
 			print(w, c1, c2)
 
+def vis(logits, MAX_ENTROPY = 1.0):
+	ticks = lambda labelsize = 3, length = 0: plt.gca().tick_params(axis='both', which='both', labelsize=labelsize, length=length) or [ax.set_linewidth(0) for ax in plt.gca().spines.values()]
+	html = open(output_path + '.html', 'w')
+	html.write('<html><body>') 
+	for segment in torch.load(logits):
+		audio_path, filename, features, logits = map(segment.get, ['audio_path', 'filename', 'features', 'logits'])
+		log_probs = F.log_softmax(logits, dim = 0)
+		entropy = models.entropy(log_probs, dim = 0, sum = False)
+		margin = models.margin(log_probs, dim = 0)
+		energy = features.exp().sum(dim = 0)[::2]
+
+		plt.figure(figsize = (5, 0.7))
+		plt.suptitle(filename, fontsize = 4)
+		plt.plot(energy / energy.max(), 'b', linewidth = 0.3)
+		plt.plot(entropy, 'r', linewidth = 0.3)
+		plt.hlines(1.0, 0, entropy.shape[-1] - 1, linewidth = 0.5)
+		bad = entropy > MAX_ENTROPY
+		bad_ = torch.cat([bad[-1:], bad[:-1]])
+		for begin, end in zip((bad & ~bad_).nonzero().squeeze(1).tolist(), (~bad & bad_).nonzero().squeeze(1).tolist()):
+			plt.axvspan(begin, end, color='red', alpha=0.5)
+
+		plt.ylim(0, 2)
+		plt.xlim(0, entropy.shape[-1] - 1)
+		plt.xticks(torch.arange(entropy.shape[-1]), labels.idx2str(log_probs.argmax(dim = 0), eps = True))
+		ticks()
+		plt.subplots_adjust(left=0, right=1, top=1, bottom=0.2)
+		buf = io.BytesIO()
+		plt.savefig(buf, format = 'jpg', dpi = 300)
+		plt.close()
+		
+		encoded = base64.b64encode(buf.getvalue()).decode('utf-8').replace('\n', '')
+		html.write(f'<img style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>')
+		encoded = base64.b64encode(open(audio_path, 'rb').read()).decode('utf-8').replace('\n', '')
+		html.write(f'<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio><hr/>')
+	html.write('''<script>
+		Array.from(document.querySelectorAll('img')).map(img => {
+			img.onclick = (evt) => {
+				const img = evt.target;
+				const dim = img.getBoundingClientRect();
+				const x = (evt.clientX - dim.left) / dim.width;
+				const audio = img.nextSibling;
+				audio.currentTime = x * audio.duration;
+				audio.play();
+			};
+		});
+	</script>''')
+	html.write('</body></html>')
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -130,6 +181,10 @@ if __name__ == '__main__':
 	cmd.add_argument('train_data_path')
 	cmd.add_argument('val_data_path')
 	cmd.set_defaults(func = words)
+
+	cmd = subparsers.add_parser('vis')
+	cmd.add_argument('logits')
+	cmd.set_defaults(func = vis)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')

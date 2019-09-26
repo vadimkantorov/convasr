@@ -8,7 +8,7 @@ import librosa
 
 #TODO: apply conv masking
 class ConvBNReLUDropout(nn.ModuleDict):
-	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, residual = True, groups = 1, num_channels_residual = [], repeat = 1, relu_dropout = True, dilation = 1):
+	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, residual = True, groups = 1, num_channels_residual = [], repeat = 1, relu_dropout = True, dilation = 1, separable = False):
 		super().__init__(dict(
 			conv = nn.ModuleList(nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, padding = dilation * max(1, kernel_size // 2), bias = False, groups = groups, dilation = dilation) for i in range(repeat)),
 			bn = nn.ModuleList(nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat)),
@@ -128,38 +128,42 @@ class Wav2Letter(nn.Sequential):
 		return logits, compute_output_lengths(logits, input_lengths_fraction)
 
 class JasperNet(nn.ModuleList):
-	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, dropout = 'ignored'):
-		prologue = [ConvBNReLUDropout(kernel_size = 11, num_channels = (num_input_features, 256), dropout = 0.2, stride = 2)]
+	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, dropout = 'ignored', dropout_small = 0.2, dropout_medium = 0.3, dropout_large = 0.4, separable = False):
+		dropout_small = dropout_small if dropout != 0 else 0
+		dropout_medium = dropout_medium if dropout != 0 else 0
+		#dropout_large = dropout_large if dropout != 0 else 0
+
+		prologue = [ConvBNReLUDropout(kernel_size = 11, num_channels = (num_input_features, 256), dropout = dropout_small, stride = 2)]
 		
 		if num_subblocks == 1:
 			backbone = [
-				ConvBNReLUDropout(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = repeat, num_channels_residual = [256]),
-				ConvBNReLUDropout(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256]),
-				ConvBNReLUDropout(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 384]),
-				ConvBNReLUDropout(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 384, 512]),
-				ConvBNReLUDropout(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 384, 512, 640])
+				ConvBNReLUDropout(kernel_size = 11, num_channels = (256, 256), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256]),
+				ConvBNReLUDropout(kernel_size = 13, num_channels = (256, 384), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256, 256]),
+				ConvBNReLUDropout(kernel_size = 17, num_channels = (384, 512), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 384]),
+				ConvBNReLUDropout(kernel_size = 21, num_channels = (512, 640), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 384, 512]),
+				ConvBNReLUDropout(kernel_size = 25, num_channels = (640, 768), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 384, 512, 640])
 			]
 		elif num_subblocks == 2:
 			backbone = [
-				ConvBNReLUDropout(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = repeat, num_channels_residual = [256]),
-				ConvBNReLUDropout(kernel_size = 11, num_channels = (256, 256), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256]),
+				ConvBNReLUDropout(kernel_size = 11, num_channels = (256, 256), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256]),
+				ConvBNReLUDropout(kernel_size = 11, num_channels = (256, 256), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256, 256]),
 				
-				ConvBNReLUDropout(kernel_size = 13, num_channels = (256, 384), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256]),
-				ConvBNReLUDropout(kernel_size = 13, num_channels = (384, 384), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256, 384]),
+				ConvBNReLUDropout(kernel_size = 13, num_channels = (256, 384), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256]),
+				ConvBNReLUDropout(kernel_size = 13, num_channels = (384, 384), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256, 384]),
 				
-				ConvBNReLUDropout(kernel_size = 17, num_channels = (384, 512), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384]),
-				ConvBNReLUDropout(kernel_size = 17, num_channels = (512, 512), dropout = 0.2, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512]),
+				ConvBNReLUDropout(kernel_size = 17, num_channels = (384, 512), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256, 384, 384]),
+				ConvBNReLUDropout(kernel_size = 17, num_channels = (512, 512), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256, 384, 384, 512]),
 				
-				ConvBNReLUDropout(kernel_size = 21, num_channels = (512, 640), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512]),
-				ConvBNReLUDropout(kernel_size = 21, num_channels = (640, 640), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640]),
+				ConvBNReLUDropout(kernel_size = 21, num_channels = (512, 640), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256, 384, 384, 512, 512]),
+				ConvBNReLUDropout(kernel_size = 21, num_channels = (640, 640), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640]),
 				
-				ConvBNReLUDropout(kernel_size = 25, num_channels = (640, 768), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640]),
-				ConvBNReLUDropout(kernel_size = 25, num_channels = (768, 768), dropout = 0.3, repeat = repeat, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640, 768])
+				ConvBNReLUDropout(kernel_size = 25, num_channels = (640, 768), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640]),
+				ConvBNReLUDropout(kernel_size = 25, num_channels = (768, 768), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640, 768])
 			]
 
 		epilogue = [
-			ConvBNReLUDropout(kernel_size = 29, num_channels = (768, 896), dropout = 0.4, dilation = dilation),
-			ConvBNReLUDropout(kernel_size = 1, num_channels = (896, 1024), dropout = 0.4),
+			ConvBNReLUDropout(kernel_size = 29, num_channels = (768, 896), dropout = dropout_large, dilation = dilation),
+			ConvBNReLUDropout(kernel_size = 1, num_channels = (896, 1024), dropout = dropout_large),
 			nn.Conv1d(1024, num_classes, kernel_size = 1)
 		]
 		super().__init__(prologue + backbone + epilogue)
@@ -206,9 +210,15 @@ def temporal_mask(x, lengths = None, lengths_fraction = None):
 		m[..., l:].zero_()
 	return mask
 
-def entropy(log_probs, lengths, dim = 1, eps = 1e-9):
-	e = (log_probs.exp() * log_probs).sum(dim = dim)
-	return -(e * temporal_mask(e, lengths)).sum(dim = -1) / (eps + lengths.type_as(log_probs))
+def entropy(log_probs, lengths = None, dim = 1, eps = 1e-9, sum = True):
+	e = -(log_probs.exp() * log_probs).sum(dim = dim)
+	if lengths is not None:
+		e = e * temporal_mask(e, lengths)
+	return (e.sum(dim = -1) / (eps + lengths.type_as(log_probs)) if lengths is not None else e.mean(dim = -1)) if sum else e
+
+def margin(log_probs, dim = 1):
+	probs = log_probs.exp()
+	return torch.sub(*probs.topk(2, dim = dim).values)
 
 def compute_output_lengths(x, lengths_fraction):
 	return (lengths_fraction * x.shape[-1] + 0.5).int()

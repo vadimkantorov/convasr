@@ -121,8 +121,9 @@ class Labels:
 	def normalize_transcript(self, text):
 		return functools.reduce(lambda text, func: func(text), [replacespace, replace2, replace22, replacestar, str.strip], text)
 
-	def idx2str(self, idx, lengths = None):
-		i2s = lambda i: '' if len(i) == 0 else self.normalize_transcript(''.join(map(self.__getitem__, i)) if self.bpe is None else self.bpe.DecodeIds(i)) if not isinstance(i[0], list) else list(map(i2s, i))
+	def idx2str(self, idx, lengths = None, eps = False):
+		i2s_ = lambda i: self.normalize_transcript(''.join(map(self.__getitem__, i)) if self.bpe is None else self.bpe.DecodeIds(i)) if not eps else ''.join('.' if idx == self.blank_idx else self[idx] if k == 0 or idx == self.space_idx or idx != i[k - 1] else '_' for k, idx in enumerate(i))
+		i2s = lambda i: '' if len(i) == 0 else i2s_(torch.as_tensor(i).tolist()) if not isinstance(i[0], list) else list(map(i2s, i))
 		return i2s(idx if lengths is None else [i[:l] for i, l in zip(idx, lengths)])
 
 	def __getitem__(self, idx):

@@ -63,7 +63,7 @@ bash scripts/augment.sh data/clean_val.csv data/clean_val_gsm "sox -V0 -t wav - 
 bash scripts/augment.sh data/clean_val.csv data/clean_val_amrnb "sox -V0 -t wav - -r 8k -c 1 -t amr-nb - | sox -V0 -r 8k -t amr-nb - -t wav -b 16 -e signed -r 8k -c 1 -"
 
 # denoise with RNNnoise
-LD_LIBRARY_PATH=rnnoise/.libs bash scripts/augment.sh ../sample_ok/sample_ok.convasr.csv data/sample_ok.convasr.rnnoise "sox -t wav - -r 48k --bits 16 --encoding signed-integer --endian little -t raw - | ./rnnoise/examples/rnnoise_demo /dev/stdin /dev/stdout | sox -t raw -r 48k --encoding signed-integer --endian little --bits 16 - -t wav -b 16 -e signed -r 16k -c 1 -"
+LD_LIBRARY_PATH=rnnoise/.libs bash scripts/augment.sh ../sample_ok/sample_ok.convasr.csv data/sample_ok.convasr.rnnoise "sox -t wav - -r 48k --bits 16 --encoding signed-integer --endian little -t raw - | ./rnnoise/examples/rnnoise_demo /dev/stdin /dev/stdout | sox -t raw -r 48k --encoding signed-integer --endian little --bits 16 - -t wav -b 16 -e signed -r 8k -c 1 -"
 
 # denoise with SOX
 sox data/noise/1560751355.653399.wav_1.wav -n noiseprof data/noise.prof
@@ -74,6 +74,9 @@ bash scripts/augment.sh data/speechkit.csv data/speechkit_wav "opusdec - --quiet
 
 # convert s16le to f32le
 bash scripts/augment.sh ../sample_ok/sample_ok.convasr.csv data/sample_ok_f32 "sox -V0 -t wav - -r 16k -b 32 -e float -t wav -c 1 -"
+
+# denoise with https://github.com/francoisgermain/SpeechDenoisingWithDeepFeatureLosses
+python senet_infer.py -d ../data/sample_ok.convasr.1.sox -m models
 
 # convert f32le to s16le
 bash scripts/augment.sh data/sample_ok_f32.csv data/sample_ok_s16 "sox -V0 -t wav - -r 16k -b 16 -e signed -t wav -c 1 -"
