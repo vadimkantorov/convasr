@@ -121,8 +121,8 @@ class Labels:
 	def normalize_transcript(self, text):
 		return functools.reduce(lambda text, func: func(text), [replacespace, replace2, replace22, replacestar, str.strip], text)
 
-	def idx2str(self, idx, lengths = None, eps = False):
-		i2s_ = lambda i: self.normalize_transcript(''.join(map(self.__getitem__, i)) if self.bpe is None else self.bpe.DecodeIds(i)) if not eps else ''.join('.' if idx == self.blank_idx else self[idx] if k == 0 or idx == self.space_idx or idx != i[k - 1] else '_' for k, idx in enumerate(i))
+	def idx2str(self, idx, lengths = None, blank = None, repeat = None):
+		i2s_ = lambda i: self.normalize_transcript(''.join(map(self.__getitem__, i)) if self.bpe is None else self.bpe.DecodeIds(i)) if not blank else ''.join(blank if idx == self.blank_idx else self[idx] if k == 0 or idx == self.space_idx or idx != i[k - 1] else (repeat if repeat is not None else self[idx]) for k, idx in enumerate(i))
 		i2s = lambda i: '' if len(i) == 0 else i2s_(torch.as_tensor(i).tolist()) if not isinstance(i[0], list) else list(map(i2s, i))
 		return i2s(idx if lengths is None else [i[:l] for i, l in zip(idx, lengths)])
 
@@ -152,15 +152,15 @@ def collate_fn(batch, pad_to = 16):
 		audio_paths.append(audio_path)
 	return inputs, targets, audio_paths, torch.FloatTensor(input_percentages), torch.IntTensor(target_lengths)
 
-def read_wav(path, normalize = True, sample_rate = None, max_duration = None):
+def read_wav(path, normalize = True, stereo = False, sample_rate = None, max_duration = None):
 	sample_rate_, signal = scipy.io.wavfile.read(path)
-	signal = (signal.squeeze() if signal.shape[1] == 1 else signal.mean(1)) if len(signal.shape) > 1 else signal
+	signal = (signal if stereo else signal.squeeze(1) if signal.shape[1] == 1 else signal.mean(1)) if len(signal.shape) > 1 else (signal if not stereo else signal[..., None])
 	if max_duration is not None:
 		signal = signal[:int(max_duration * sample_rate_), ...]
 
 	signal = torch.from_numpy(signal).to(torch.float32)
 	if normalize:
-		signal = models.normalize_signal(signal)
+		signal = models.normalize_signal(signal, dim = 0)
 	if sample_rate is not None and sample_rate_ != sample_rate:
 		sample_rate_, signal = resample(signal, sample_rate_, sample_rate)
 

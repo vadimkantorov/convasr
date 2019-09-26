@@ -196,12 +196,12 @@ def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_
 	features = torch.log(torch.matmul(mel_basis, power_spectrum) + eps)
 	return normalize_features(features) if normalize else features 
 
-def normalize_signal(signal, eps = 1e-5):
+def normalize_signal(signal, dim = -1, eps = 1e-5):
 	signal = signal.to(torch.float32)
-	return signal / (signal.abs().max(dim = -1, keepdim = True).values + eps)
+	return signal / (signal.abs().max(dim = dim, keepdim = True).values + eps)
 
-def normalize_features(features, eps = 1e-20):
-	return (features - features.mean(dim = -1, keepdim = True)) / (features.std(dim = -1, keepdim = True) + eps)
+def normalize_features(features, dim = -1, eps = 1e-20):
+	return (features - features.mean(dim = dim, keepdim = True)) / (features.std(dim = dim, keepdim = True) + eps)
 
 def temporal_mask(x, lengths = None, lengths_fraction = None):
 	lengths = lengths if lengths is not None else compute_output_lengths(x, lenghts_fraction)

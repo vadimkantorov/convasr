@@ -101,7 +101,7 @@ def traineval(args):
 				tensorboard.add_scalars('datasets/' + val_dataset_name, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
 				tensorboard.flush()
 			elif args.logits:
-				torch.save([ref_tra.update(dict(logits = logits, features = features)) or ref_tra for features, logits, ref_tra in zip(features_, logits_, ref_tra_)], args.logits.format(val_dataset_name = val_dataset_name))
+				torch.save(list(sorted([ref_tra.update(dict(logits = logits, features = features)) or ref_tra for features, logits, ref_tra in zip(features_, logits_, ref_tra_)], key = lambda j: j['cer'], reverse = True)), args.logits.format(val_dataset_name = val_dataset_name))
 		if training and not args.checkpoint_skip:
 			#TODO: amp.state_dict()
 			optimizer_state_dict = None # optimizer.state_dict()

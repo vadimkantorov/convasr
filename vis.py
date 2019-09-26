@@ -129,7 +129,7 @@ def vis(logits, MAX_ENTROPY = 1.0):
 
 		plt.ylim(0, 2)
 		plt.xlim(0, entropy.shape[-1] - 1)
-		plt.xticks(torch.arange(entropy.shape[-1]), labels.idx2str(log_probs.argmax(dim = 0), eps = True))
+		plt.xticks(torch.arange(entropy.shape[-1]), labels.idx2str(log_probs.argmax(dim = 0), eps = '.', repeat = '_'))
 		ticks()
 		plt.subplots_adjust(left=0, right=1, top=1, bottom=0.2)
 		buf = io.BytesIO()
