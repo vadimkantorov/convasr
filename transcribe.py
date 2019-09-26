@@ -1,4 +1,5 @@
 import os
+import json
 import base64
 import argparse
 import importlib
@@ -28,12 +29,15 @@ model.eval()
 decoder = decoders.GreedyDecoder(labels)
 torch.set_grad_enabled(False)
 
+assert args.output_path
 if args.output_path:
 	os.makedirs(args.output_path, exist_ok = True)
 
 audio_paths = [args.data_path] if os.path.isfile(args.data_path) else [os.path.join(args.data_path, f) for f in os.listdir(args.data_path) if f.endswith('.wav')]
 for audio_path in audio_paths:
+	reference_path = audio_path + '.json'
 	signal_, sample_rate = dataset.read_wav(audio_path, sample_rate = sample_rate, stereo = True)
+	reference = json.load(open(reference_path)) if os.path.exists(reference_path) else None
 	log_probs_ = []
 
 	for channel, signal in enumerate(signal_.t()):
@@ -48,33 +52,38 @@ for audio_path in audio_paths:
 		print(transcript)
 		print()
 
-	#reference_path = audio_path + '.txt' 
-	#if os.path.exists(reference_path):
-	#	reference = labels.normalize_text(open(reference_path).read())
-	#	cer = metrics.cer(transcript, reference)
-	#	print(f'CER: {cer:.02%}')
-	#print()
-
-	if args.output_path:
+		#reference_path = audio_path + '.txt' 
+		#if os.path.exists(reference_path):
+		#	reference = labels.normalize_text(open(reference_path).read())
+		#	cer = metrics.cer(transcript, reference)
+		#	print(f'CER: {cer:.02%}')
+		#print()
+		replaceblankrepeat = lambda r: r.replace(labels.blank, '').replace('_', '')
 		segments = []
 		for channel, log_probs in enumerate(log_probs_):
-			MODEL_STRIDE = 2
-			begin, end = map(list, zip(*[(i*window_stride * MODEL_STRIDE, i*window_stride * MODEL_STRIDE + window_size) for i in range(log_probs.shape[-1])]))
 			transcript = labels.idx2str(log_probs.argmax(dim = 0), blank = labels.blank, repeat = '_')
-			k = 0
-			for i in range(len(transcript) + 1):
-				if(i > 0 and (i == len(transcript) or transcript[i] == ' ') and (i == len(transcript) or end[i - 1] - begin[k] > args.max_segment_seconds)):
-					segments.append([channel, begin[k], end[i - 1], transcript[k:i].replace(labels.blank, '').replace('_', '') ])
-					k = i + 1
+			MODEL_STRIDE = 2
+			if reference is None:
+				begin, end = zip(*[(i*window_stride * MODEL_STRIDE, i*window_stride * MODEL_STRIDE + window_size) for i in range(log_probs.shape[-1])])
+				k = 0
+				for i in range(len(transcript) + 1):
+					if(i > 0 and (i == len(transcript) or transcript[i] == ' ') and (i == len(transcript) or end[i - 1] - begin[k] > args.max_segment_seconds)):
+						segments.append([begin[min(k, len(begin) - 1)], end[i - 1], replaceblankrepeat(transcript[min(k, len(transcript) - 1):i]), '', channel])
+						k = i + 1
+			else:
+				for r in reference[channel]:
+					begin, end = r['begin'], r['end']
+					b, e = [int(t // window_stride // MODEL_STRIDE) for t in [begin, end]]
+					segments.append([begin, end, replaceblankrepeat(transcript[b:e]), r['reference'], channel])
 	
 		html = open(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), 'w')
 		html.write('<html><head><meta charset="UTF-8"><style>.channel0{background-color:violet} .channel1{background-color:lightblue}</style></head><body>')
 		html.write(f'<h4>{os.path.basename(audio_path)}</h4>')
 		encoded = base64.b64encode(open(audio_path, 'rb').read()).decode('utf-8').replace('\n', '')
 		html.write(f'<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>')
-		html.write(f'<h3>transcript</h3><hr />')
-		html.write('<table><thead><tr><th>#</th><th>from</th><th>to</th><th>transcript</th></tr></thead><tbody>')
-		html.write(''.join(f'<tr class="channel{c}"><td><strong>{c}</strong></td><td>{b:.02}</td><td>{e:.02}</td><td><a onclick="play({b:.02}); return false;" href="#" target="_blank">{t}</a></td></tr>' for c, b, e, t in segments))
+		html.write(f'<h3>transcript</h3><h3 style="background-color:lightgray">reference</h3><hr/>')
+		html.write('<table><thead><tr><th>#</th><th>begin</th><th>end</th><th>transcript</th><th>reference</th></tr></thead><tbody>')
+		html.write(''.join(f'<tr class="channel{c}"><td><strong>{c}</strong></td><td>{b:.02f}</td><td>{e:.02f}</td><td><a onclick="play({b:.02f}); return false;" href="#" target="_blank">{t}</a></td><td>{r}</td></tr>' for b, e, t, r, c in sorted(segments)))
 		html.write('</tbody></table>')
 		html.write('''<script>
 			const segments = SEGMENTS;
@@ -88,11 +97,12 @@ for audio_path in audio_paths:
 
 			document.querySelector('audio').ontimeupdate = (evt) =>
 			{
-				const h3 = document.querySelector('h3');
+				const [h3hyp, h3ref] = document.querySelectorAll('h3');
 				const time = evt.target.currentTime;
-				const [channel, begin, end, transcript] = segments.find(segment => segment[1] <= time && time <= segment[2]);
-				h3.className = `channel${channel}`;
-				h3.innerText = transcript;
+				const [begin, end, transcript, reference, channel] = segments.find(([begin, end, transcript, reference, channel]) => begin <= time && time <= end);
+				h3hyp.className = `channel${channel}`;
+				h3hyp.innerText = transcript;
+				h3ref.innerText = reference;
 			};
 		</script>'''.replace('SEGMENTS', repr(segments)))
 		html.write('</body></html>')
