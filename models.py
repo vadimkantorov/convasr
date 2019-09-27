@@ -5,24 +5,29 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import librosa
+import inplace_abn
 
 #TODO: apply conv masking
 class ConvBNReLUDropout(nn.ModuleDict):
-	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, residual = True, groups = 1, num_channels_residual = [], repeat = 1, relu_dropout = True, dilation = 1, separable = False):
+	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, residual = True, groups = 1, num_channels_residual = [], repeat = 1, relu_dropout = True, dilation = 1, separable = False, inplace = False):
 		super().__init__(dict(
 			conv = nn.ModuleList(nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, padding = dilation * max(1, kernel_size // 2), bias = False, groups = groups, dilation = dilation) for i in range(repeat)),
 			bn = nn.ModuleList(nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat)),
 			relu_dropout = ReLUDropout(p = dropout, inplace = True) if relu_dropout else None,
 			conv_residual = nn.ModuleList(nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual) if num_channels_residual else None,
-			bn_residual = nn.ModuleList(nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual) if num_channels_residual else None
+			bn_residual = nn.ModuleList(nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual) if num_channels_residual else None,
+			bn_inplace = inplace_abn.InPlaceABN(num_channels[1], momentum = batch_norm_momentum) if inplace else None
 		))
 		self.residual = residual
 
 	def forward(self, x):
-		y = self.bn(self.conv(x))
-		if self.relu_dropout is not None:
-			y = self.relu_dropout(y)
-		return y if (not self.residual or self.conv.in_channels != self.conv.out_channels or y.shape[-1] != x.shape[-1]) else y + x
+		if self.bn_inplace is not None:
+			y = self.bn_inplace(self.conv[0](x))
+		else:
+			y = self.bn[0](self.conv[0](x))
+			if self.relu_dropout is not None:
+				y = self.relu_dropout(y)
+		return y if (not self.residual or self.conv[0].in_channels != self.conv[0].out_channels or y.shape[-1] != x.shape[-1]) else y + x
 
 class InvertedResidual(nn.Module):
 	def __init__(self, kernel_size, num_channels, stride = 1, dilation = 1, dropout = 0.2, expansion = 1, squeeze_excitation_ratio = 0.25, batch_norm_momentum = 0.1, separable = True, simple = False, residual = True):
@@ -92,12 +97,12 @@ class Wav2LetterRu(nn.Sequential):
 		super().__init__(
 			ConvBNReLUDropout(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2, dropout = dropout),
 			
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout, inplace = True),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout, inplace = True),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout, inplace = True),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout, inplace = True),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout, inplace = True),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout, inplace = True),
 
 			ConvBNReLUDropout(kernel_size = kernel_size_large, num_channels = (768, width_large), stride = 1, dropout = dropout),
 			ConvBNReLUDropout(kernel_size = 1,  num_channels = (width_large, width_large),stride = 1, dropout = dropout),
@@ -210,8 +215,8 @@ def temporal_mask(x, lengths = None, lengths_fraction = None):
 		m[..., l:].zero_()
 	return mask
 
-def entropy(log_probs, lengths = None, dim = 1, eps = 1e-9, sum = True):
-	e = -(log_probs.exp() * log_probs).sum(dim = dim)
+def entropy(log_probs, lengths = None, dim = 1, eps = 1e-9, sum = True, keepdim = False):
+	e = -(log_probs.exp() * log_probs).sum(dim = dim, keepdim = keepdim)
 	if lengths is not None:
 		e = e * temporal_mask(e, lengths)
 	return (e.sum(dim = -1) / (eps + lengths.type_as(log_probs)) if lengths is not None else e.mean(dim = -1)) if sum else e

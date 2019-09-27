@@ -84,7 +84,7 @@ def cer(experiments_dir, experiment_id, entropy, loss):
 
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
-	for f in sorted(glob.glob(os.path.join(experiment_dir, f'transcripts_*.json'))):
+	for f in filter(lambda f: not f.endswith('.errors.json'), sorted(glob.glob(os.path.join(experiment_dir, f'transcripts_*.json')))):
 		eidx = f.find('epoch')
 		iteration = f[eidx:].replace('.json', '')
 		val_dataset_name = f[f.find('transcripts_') + len('transcripts_'):eidx]
@@ -154,6 +154,38 @@ def vis(logits, MAX_ENTROPY = 1.0):
 	</script>''')
 	html.write('</body></html>')
 
+def checksegments(audio_path, segments):
+		html = open(os.path.basename(audio_path) + '.html', 'w')
+		html.write('<html><head><meta charset="UTF-8"><style>.channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .on{background-color:green} .off{background-color:red}</style></head><body>')
+		html.write(f'<h4>{os.path.basename(audio_path)}</h4>')
+		encoded = base64.b64encode(open(audio_path, 'rb').read()).decode('utf-8').replace('\n', '')
+		html.write(f'<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>')
+		html.write('<div>channel #0</div><div>channel #1</div>')
+		html.write('<table><thead><tr><th>#</th><th>begin</th><th>end</th></tr></thead><tbody>')
+		html.write(''.join(f'<tr class="channel{c}"><td><strong>{c}</strong></td><td><a onclick="play({b:.02f}); return false;" href="#" target="_blank">{b:.02f}</a></td><td>{e:.02f}</td><td></tr>' for b, e, c in sorted(json.load(open(segments)))))
+		html.write('</tbody></table>')
+		html.write('''<script>
+			const segments = SEGMENTS;
+
+			function play(time)
+			{
+				const audio = document.querySelector('audio');
+				audio.currentTime = time;
+				audio.play();
+			};
+
+			document.querySelector('audio').ontimeupdate = (evt) =>
+			{
+				const [div0, div1] = document.querySelectorAll('div');
+				const time = evt.target.currentTime;
+				const [begin0, end0, channel0] = segments.find(([begin, end, channel]) => channel == 0 && begin <= time && time <= end) || [null, null, 0];
+				const [begin1, end1, channel1] = segments.find(([begin, end, channel]) => channel == 1 && begin <= time && time <= end) || [null, null, 1];
+				div0.className = begin0 ? 'on' : 'off';
+				div1.className = begin1 ? 'on' : 'off';
+			};
+		</script>'''.replace('SEGMENTS', repr(segments)))
+	
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -185,6 +217,11 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('vis')
 	cmd.add_argument('logits')
 	cmd.set_defaults(func = vis)
+
+	cmd = subparsers.add_parser('checksegments')
+	cmd.add_argument('--audio-path')
+	cmd.add_argument('--segments')
+	cmd.set_defaults(func = checksegments)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')
