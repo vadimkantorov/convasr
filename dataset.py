@@ -122,9 +122,12 @@ class Labels:
 		return functools.reduce(lambda text, func: func(text), [replacespace, replace2, replace22, replacestar, str.strip], text)
 
 	def idx2str(self, idx, lengths = None, blank = None, repeat = None):
-		i2s_ = lambda i: self.normalize_transcript(''.join(map(self.__getitem__, i)) if self.bpe is None else self.bpe.DecodeIds(i)) if not blank else ''.join(blank if idx == self.blank_idx else self[idx] if k == 0 or idx == self.space_idx or idx != i[k - 1] else (repeat if repeat is not None else self[idx]) for k, idx in enumerate(i))
-		i2s = lambda i: '' if len(i) == 0 else i2s_(torch.as_tensor(i).tolist()) if not isinstance(i[0], list) else list(map(i2s, i))
-		return i2s(idx if lengths is None else [i[:l] for i, l in zip(idx, lengths)])
+		i2s_ = lambda i: '' if len(i) == 0 else self.normalize_transcript(''.join(map(self.__getitem__, i)) if self.bpe is None else self.bpe.DecodeIds(i)) if not blank else ''.join(blank if idx == self.blank_idx else self[idx] if k == 0 or idx == self.space_idx or idx != i[k - 1] else (repeat if repeat is not None else self[idx]) for k, idx in enumerate(i))
+		i2s = lambda i: i2s_(i) if len(i) == 0 or not isinstance(i[0], list) else list(map(i2s, i))
+		if torch.is_tensor(idx):
+			idx = idx.tolist()
+		idx = idx if lengths is None else [i[:l] for i, l in zip(idx, lengths)]
+		return i2s(idx)
 
 	def __getitem__(self, idx):
 		return {self.blank_idx : self.blank, self.repeat_idx : self.repeat, self.space_idx : self.space}.get(idx) or (self.alphabet[idx] if self.bpe is None else self.bpe.IdToPiece(idx))

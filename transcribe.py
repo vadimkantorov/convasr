@@ -83,7 +83,7 @@ for audio_path in audio_paths:
 		html.write(f'<h4>{os.path.basename(audio_path)}</h4>')
 		encoded = base64.b64encode(open(audio_path, 'rb').read()).decode('utf-8').replace('\n', '')
 		html.write(f'<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>')
-		html.write(f'<h3 class="channel0">transcript #0</h3><h3 class="channel1">transcript #1</h3><h3 class="channel0 reference">reference #0</h3><h3 class="channel1 reference">reference #1</h3> <hr/>')
+		html.write(f'<h3 class="channel0">transcript #0:<span></span></h3><h3 class="channel1">transcript #1:<span></span></h3><h3 class="channel0 reference">reference #0:<span></span></h3><h3 class="channel1 reference">reference #1:<span></span></h3> <hr/>')
 		html.write('<table><thead><tr><th>#</th><th>begin</th><th>end</th><th>transcript</th><th>reference</th></tr></thead><tbody>')
 		html.write(''.join(f'<tr class="channel{c}"><td><strong>{c}</strong></td><td>{b:.02f}</td><td>{e:.02f}</td><td><a onclick="play({b:.02f}); return false;" href="#" target="_blank">{t}</a></td><td>{r}</td></tr>' for b, e, t, r, c in sorted(segments)))
 		html.write('</tbody></table>')
@@ -99,15 +99,15 @@ for audio_path in audio_paths:
 
 			document.querySelector('audio').ontimeupdate = (evt) =>
 			{
-				const [h3hyp0, h3hyp1, h3ref0, h3ref1] = document.querySelectorAll('h3');
+				const [spanhyp0, spanhyp1, spanref0, spanref1] = document.querySelectorAll('span');
 				const time = evt.target.currentTime;
 				const [begin0, end0, transcript0, reference0, channel0] = segments.find(([begin, end, transcript, reference, channel]) => channel == 0 && begin <= time && time <= end) || [null, null, '', '', 0];
 				const [begin1, end1, transcript1, reference1, channel1] = segments.find(([begin, end, transcript, reference, channel]) => channel == 1 && begin <= time && time <= end) || [null, null, '', '', 1];
 
-				h3hyp0.innerText = transcript0;
-				h3hyp1.innerText = transcript1;
-				h3ref0.innerText = reference0;
-				h3ref1.innerText = reference1;
+				spanhyp0.innerText = transcript0;
+				spanhyp1.innerText = transcript1;
+				spanref0.innerText = reference0;
+				spanref1.innerText = reference1;
 			};
 		</script>'''.replace('SEGMENTS', repr(segments)))
 		html.write('</body></html>')

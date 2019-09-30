@@ -5,7 +5,76 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import librosa
-import inplace_abn
+#import inplace_abn
+
+class BatchNormInplaceFunction(torch.autograd.function.Function):
+	@staticmethod
+	def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, training, activation):
+		self.activation = activation
+
+		input = input.contiguous()
+		if training:
+			#mean, invstd = torch.batch_norm_stats(input, eps)
+			mean, var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum)
+			invstd = var.add_(eps).sqrt_().reciprocal_()
+		else:
+			mean, var = running_mean, running_var
+			invstd = var.add(eps).sqrt().reciprocal()
+
+		out = torch.batch_norm_elemt(input, input, weight, bias, mean, invstd, eps)
+		if activation[0] == 'leaky_relu':
+			out = F.leaky_relu_(out, *activation[1:])
+
+		if training:
+			self.save_for_backward(out, weight, bias, mean, invstd)
+		return out
+
+	@staticmethod
+	def backward(self, grad_output):
+		grad_output = grad_output.contiguous()
+		saved_input, weight, bias, mean, invstd = self.saved_tensors
+
+		if self.activation[0] == 'leaky_relu':
+			mask = torch.ones_like(grad_output).masked_fill_(saved_input < 0, self.activation[1])
+			grad_output *= mask
+			saved_input /= mask
+
+		reshape = lambda x: x.view(-1, *[1]*(len(saved_input.shape) - 2))
+		saved_input -= reshape(bias)
+		saved_input /= reshape(weight)
+		saved_input /= reshape(invstd)
+		saved_input += reshape(mean)
+		
+		mean_dy, mean_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(
+			grad_output,
+			saved_input,
+			mean,
+			invstd,
+			weight,
+			self.needs_input_grad[0],
+			self.needs_input_grad[1],
+			self.needs_input_grad[2]
+		)
+
+		grad_input = torch.batch_norm_backward_elemt(
+			grad_output,
+			saved_input,
+			mean,
+			invstd,
+			weight,
+			mean_dy,
+			mean_dy_xmu
+		)
+
+		return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
+
+class BatchNormInplace(nn.modules.batchnorm._BatchNorm):
+	def __init__(self, *args, activation = ('leaky_relu', 0.01), **kwargs):
+		super().__init__(*args, **kwargs)
+		self.activation = activation
+
+	def forward(self, input):
+		return BatchNormInplaceFunction.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training, self.activation)
 
 #TODO: apply conv masking
 class ConvBNReLUDropout(nn.ModuleDict):
@@ -16,7 +85,12 @@ class ConvBNReLUDropout(nn.ModuleDict):
 			relu_dropout = ReLUDropout(p = dropout, inplace = True) if relu_dropout else None,
 			conv_residual = nn.ModuleList(nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual) if num_channels_residual else None,
 			bn_residual = nn.ModuleList(nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual) if num_channels_residual else None,
-			bn_inplace = inplace_abn.InPlaceABN(num_channels[1], momentum = batch_norm_momentum) if inplace else None
+			bn_inplace = BatchNormInplace(num_channels[1], momentum = batch_norm_momentum) if inplace else None,
+			#bn_inplace = nn.Sequential(
+			#	#nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum),
+			#	BatchNormInplace(num_channels[1], momentum = batch_norm_momentum),
+			#	#nn.ReLU()
+			#	) if inplace else None #inplace_abn.InPlaceABN(num_channels[1], momentum = batch_norm_momentum) if inplace else None
 		))
 		self.residual = residual
 
@@ -27,7 +101,7 @@ class ConvBNReLUDropout(nn.ModuleDict):
 			y = self.bn[0](self.conv[0](x))
 			if self.relu_dropout is not None:
 				y = self.relu_dropout(y)
-		return y if (not self.residual or self.conv[0].in_channels != self.conv[0].out_channels or y.shape[-1] != x.shape[-1]) else y + x
+		return y if (not self.residual or self.conv[0].in_channels != self.conv[0].out_channels or y.shape[-1] != x.shape[-1]) else y.add_(x)
 
 class InvertedResidual(nn.Module):
 	def __init__(self, kernel_size, num_channels, stride = 1, dilation = 1, dropout = 0.2, expansion = 1, squeeze_excitation_ratio = 0.25, batch_norm_momentum = 0.1, separable = True, simple = False, residual = True):
@@ -93,16 +167,16 @@ class BabbleNet(nn.Sequential):
 		return logits, compute_output_lengths(logits, input_lengths_fraction)
 
 class Wav2LetterRu(nn.Sequential):
-	def __init__(self, num_classes, num_input_features, dropout = 0.2, width_large = 2048, kernel_size_large = 31):
+	def __init__(self, num_classes, num_input_features, dropout = 0.2, width_large = 2048, kernel_size_large = 29):
 		super().__init__(
 			ConvBNReLUDropout(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2, dropout = dropout),
 			
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout, inplace = True),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout, inplace = True),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout, inplace = True),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout, inplace = True),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout, inplace = True),
-			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout, inplace = True),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBNReLUDropout(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
 
 			ConvBNReLUDropout(kernel_size = kernel_size_large, num_channels = (768, width_large), stride = 1, dropout = dropout),
 			ConvBNReLUDropout(kernel_size = 1,  num_channels = (width_large, width_large),stride = 1, dropout = dropout),
@@ -142,9 +216,9 @@ class JasperNet(nn.ModuleList):
 		
 		if num_subblocks == 1:
 			backbone = [
-				ConvBNReLUDropout(kernel_size = 11, num_channels = (256, 256), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256]),
-				ConvBNReLUDropout(kernel_size = 13, num_channels = (256, 384), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256, 256]),
-				ConvBNReLUDropout(kernel_size = 17, num_channels = (384, 512), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 384]),
+				ConvBNReLUDropout(kernel_size = 11, num_channels = (256, 256), dropout = dropout_small,  repeat = repeat, separable = separable, num_channels_residual = [256]),
+				ConvBNReLUDropout(kernel_size = 13, num_channels = (256, 384), dropout = dropout_small,  repeat = repeat, separable = separable, num_channels_residual = [256, 256]),
+				ConvBNReLUDropout(kernel_size = 17, num_channels = (384, 512), dropout = dropout_small,  repeat = repeat, separable = separable, num_channels_residual = [256, 256, 384]),
 				ConvBNReLUDropout(kernel_size = 21, num_channels = (512, 640), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 384, 512]),
 				ConvBNReLUDropout(kernel_size = 25, num_channels = (640, 768), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 384, 512, 640])
 			]
