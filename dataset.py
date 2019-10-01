@@ -14,7 +14,7 @@ import models
 import transforms
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, waveform_transform = None, feature_transform = None, max_duration = 20, normalize_features = True, waveform_transform_debug_dir = None):
+	def __init__(self, data_or_path, sample_rate, window_size, window_stride, window, num_input_features, labels, waveform_transform = None, feature_transform = None, max_duration = None, normalize_features = True, waveform_transform_debug_dir = None):
 		self.window_stride = window_stride
 		self.window_size = window_size
 		self.sample_rate = sample_rate
@@ -25,7 +25,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.feature_transform = feature_transform
 		self.normalize_features = normalize_features
 		self.waveform_transform_debug_dir = waveform_transform_debug_dir
-		self.ids = [(row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or float(row[2]) < max_duration] if isinstance(data_or_path, str) else [d for d in data_or_path if d[-1] == -1 or d[-1] < max_duration]
+		self.ids = [(row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or (max_duration is not None and float(row[2]) < max_duration)] if isinstance(data_or_path, str) else [d for d in data_or_path if d[-1] == -1 or (max_duration is not None and d[-1] < max_duration)]
 
 	def __getitem__(self, index):
 		audio_path, transcript, duration = self.ids[index]

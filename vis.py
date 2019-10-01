@@ -154,37 +154,53 @@ def vis(logits, MAX_ENTROPY = 1.0):
 	</script>''')
 	html.write('</body></html>')
 
-def checksegments(audio_path, segments):
-		html = open(os.path.basename(audio_path) + '.html', 'w')
-		html.write('<html><head><meta charset="UTF-8"><style>.channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .on{background-color:green} .off{background-color:red}</style></head><body>')
-		html.write(f'<h4>{os.path.basename(audio_path)}</h4>')
-		encoded = base64.b64encode(open(audio_path, 'rb').read()).decode('utf-8').replace('\n', '')
-		html.write(f'<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>')
-		html.write('<div>channel #0</div><div>channel #1</div>')
-		html.write('<table><thead><tr><th>#</th><th>begin</th><th>end</th></tr></thead><tbody>')
-		html.write(''.join(f'<tr class="channel{c}"><td><strong>{c}</strong></td><td><a onclick="play({b:.02f}); return false;" href="#" target="_blank">{b:.02f}</a></td><td>{e:.02f}</td><td></tr>' for b, e, c in sorted(json.load(open(segments)))))
-		html.write('</tbody></table>')
-		html.write('''<script>
-			const segments = SEGMENTS;
+def checksegments(audio_path):
+	encode_audio = lambda audio_path: base64.b64encode(open(audio_path, 'rb').read()).decode('utf-8').replace('\n', '')
+	segments = list(sorted([j['begin'], j['end'], j['channel'], j['segment_path']] for j in json.load(open(audio_path + '.json'))))
+	html = open(audio_path + '.html', 'w')
+	html.write('<html><head><meta charset="UTF-8"><style>.channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .on{background-color:green} .off{background-color:red}</style></head><body>')
+	html.write(f'<h4>{os.path.basename(audio_path)}</h4>')
+	html.write(f'<audio style="width:100%" controls src="data:audio/wav;base64,{encode_audio(audio_path)}"></audio>')
+	html.write('<div>channel #0:&nbsp;<span></span></div><div>channel #1:&nbsp;<span></span></div>')
+	html.write('<table><thead><tr><th>#</th><th>begin</th><th>end</th><th style="width:100%">segment</th></tr></thead><tbody>')
+	html.write(''.join(f'<tr class="channel{c}"><td><strong>{c}</strong></td><td><a onclick="play({b:.02f}); return false;" href="#" target="_blank">{b:.02f}</a></td><td>{e:.02f}</td><td><audio style="width:100%" controls src="data:audio/wav;base64,{encode_audio(s)}"></audio></td></tr>' for b, e, c, s in segments))
+	html.write('</tbody></table>')
+	html.write('''<script>
+		const segments = SEGMENTS;
 
-			function play(time)
-			{
-				const audio = document.querySelector('audio');
-				audio.currentTime = time;
-				audio.play();
-			};
+		function play(time)
+		{
+			const audio = document.querySelector('audio');
+			audio.currentTime = time;
+			audio.play();
+		};
 
-			document.querySelector('audio').ontimeupdate = (evt) =>
-			{
-				const [div0, div1] = document.querySelectorAll('div');
-				const time = evt.target.currentTime;
-				const [begin0, end0, channel0] = segments.find(([begin, end, channel]) => channel == 0 && begin <= time && time <= end) || [null, null, 0];
-				const [begin1, end1, channel1] = segments.find(([begin, end, channel]) => channel == 1 && begin <= time && time <= end) || [null, null, 1];
-				div0.className = begin0 ? 'on' : 'off';
-				div1.className = begin1 ? 'on' : 'off';
-			};
-		</script>'''.replace('SEGMENTS', repr(segments)))
-	
+		document.querySelector('audio').ontimeupdate = (evt) =>
+		{
+			const [div0, div1] = document.querySelectorAll('div');
+			const [span0, span1] = document.querySelectorAll('span');
+			const time = evt.target.currentTime;
+			const [begin0, end0, channel0, segment_path0] = segments.find(([begin, end, channel, segment_path]) => channel == 0 && begin <= time && time <= end) || [null, null, 0, null];
+			const [begin1, end1, channel1, segment_path1] = segments.find(([begin, end, channel, segment_path]) => channel == 1 && begin <= time && time <= end) || [null, null, 1, null];
+			div0.className = begin0 ? 'on' : 'off';
+			div1.className = begin1 ? 'on' : 'off';
+			span0.innerText = begin0 ? `${begin0.toFixed(2)}-${end0.toFixed(2)}` : '';
+			span1.innerText = begin1 ? `${begin1.toFixed(2)}-${end1.toFixed(2)}` : '';
+		};
+	</script>'''.replace('SEGMENTS', repr(segments)))
+	html.write('</body></html>')
+
+def parseslicing(slicing):
+	by_audio_name = collections.defaultdict(list)
+	for line in open(slicing):
+		splitted = line.split('\t')
+		audio_name = splitted[1]
+		begin, end = splitted[0].split('_')[0].split('-')
+		channel = splitted[2]
+		by_audio_name[audio_name].append(dict(begin = float(begin), end = float(end), channel = int(channel), segment_path = os.path.join(os.path.dirname(slicing), splitted[0])))
+
+	for audio_name, segments in by_audio_name.items():
+		json.dump(segments, open(os.path.join(os.path.dirname(slicing), 'source', audio_name + '.json'), 'w'), indent = 2, sort_keys = True)
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -219,9 +235,12 @@ if __name__ == '__main__':
 	cmd.set_defaults(func = vis)
 
 	cmd = subparsers.add_parser('checksegments')
-	cmd.add_argument('--audio-path')
-	cmd.add_argument('--segments')
+	cmd.add_argument('audio_path')
 	cmd.set_defaults(func = checksegments)
+
+	cmd = subparsers.add_parser('parseslicing')
+	cmd.add_argument('--slicing')
+	cmd.set_defaults(func = parseslicing)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')
