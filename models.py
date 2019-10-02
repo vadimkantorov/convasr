@@ -78,18 +78,27 @@ class BatchNormInplace(nn.modules.batchnorm._BatchNorm):
 
 #TODO: apply conv masking
 class ConvBN(nn.ModuleDict):
-	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, residual = True, groups = 1, num_channels_residual = [], repeat = 1, relu_dropout = True, dilation = 1, separable = False):
+	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, residual = False, groups = 1, num_channels_residual = [], repeat = 1, dilation = 1, separable = False):
 		super().__init__(dict(
 			conv = nn.ModuleList(nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, padding = dilation * max(1, kernel_size // 2), bias = False, groups = groups, dilation = dilation) for i in range(repeat)),
-			bn = nn.ModuleList(BatchNormInplace(num_channels[1], momentum = batch_norm_momentum, activation = ('leaky_relu', 0.01) if repeat == 1 or i != repeat - 1 else None) for i in range(repeat)),
+			bn = nn.ModuleList(BatchNormInplace(num_channels[1], momentum = batch_norm_momentum, activation = ('leaky_relu', 0.01) if (not residual) or repeat == 1 or i != repeat - 1 else None) for i in range(repeat)),
 			conv_residual = nn.ModuleList(nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual),
 			bn_residual = nn.ModuleList(BatchNormInplace(num_channels[1], momentum = batch_norm_momentum, activation = None) for in_channels in num_channels_residual)
 		))
 		self.residual = residual
 
 	def forward(self, x, residual = []):
-		y = self.bn[0](self.conv[0](x))
-		return y if (not self.residual or self.conv[0].in_channels != self.conv[0].out_channels or y.shape[-1] != x.shape[-1]) else y + x
+		y = x
+		for conv, bn in zip(self.conv, self.bn):
+			y = bn(conv(y))
+
+		if residual:
+			y = F.relu(y + sum(bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)))
+		
+		elif self.residual and (self.conv[0].in_channels == self.conv[0].out_channels and y.shape[-1] == x.shape[-1]):
+			y = F.relu(y + x)
+		
+		return y
 
 class InvertedResidual(nn.Module):
 	def __init__(self, kernel_size, num_channels, stride = 1, dilation = 1, dropout = 0.2, expansion = 1, squeeze_excitation_ratio = 0.25, batch_norm_momentum = 0.1, separable = True, simple = False, residual = True):
@@ -237,12 +246,9 @@ class JasperNet(nn.ModuleList):
 
 	def forward(self, x, input_lengths_fraction):
 		residual = []
-		for i, block in enumerate(list(self)[:-1]):
-			for conv, bn in zip(block.conv, block.bn):
-				x = bn(conv(x))
-			x = F.relu(x + sum(bn(conv(r)) for conv, bn, r in zip(block.conv_residual, block.bn_residual, residual if i < len(self) - 3 else [])))
+		for i, subblock in enumerate(list(self)[:-1]):
+			x = subblock(x, residual = residual if i < len(self) - 3 else [])
 			residual.append(x)
-
 		logits = self[-1](x)
 		return logits, compute_output_lengths(logits, input_lengths_fraction)
 
