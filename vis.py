@@ -239,7 +239,7 @@ if __name__ == '__main__':
 	cmd.set_defaults(func = checksegments)
 
 	cmd = subparsers.add_parser('parseslicing')
-	cmd.add_argument('--slicing')
+	cmd.add_argument('slicing')
 	cmd.set_defaults(func = parseslicing)
 
 	args = vars(parser.parse_args())

@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import librosa
-#import inplace_abn
 
 class BatchNormInplaceFunction(torch.autograd.function.Function):
 	@staticmethod
@@ -88,7 +87,7 @@ class ConvBN(nn.ModuleDict):
 		))
 		self.residual = residual
 
-	def forward(self, x):
+	def forward(self, x, residual = []):
 		y = self.bn[0](self.conv[0](x))
 		return y if (not self.residual or self.conv[0].in_channels != self.conv[0].out_channels or y.shape[-1] != x.shape[-1]) else y + x
 
@@ -241,10 +240,9 @@ class JasperNet(nn.ModuleList):
 		for i, block in enumerate(list(self)[:-1]):
 			for conv, bn in zip(block.conv, block.bn):
 				x = bn(conv(x))
-			for conv, bn, r in zip(block.conv_residual, block.bn_residual, residual if i < len(self) - 3 else []):
-				x = x + bn(conv(r))
-			x = F.relu(x)
+			x = F.relu(x + sum(bn(conv(r)) for conv, bn, r in zip(block.conv_residual, block.bn_residual, residual if i < len(self) - 3 else [])))
 			residual.append(x)
+
 		logits = self[-1](x)
 		return logits, compute_output_lengths(logits, input_lengths_fraction)
 

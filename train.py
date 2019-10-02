@@ -70,15 +70,12 @@ def traineval(args):
 					logits, output_lengths = model(inputs, input_lengths_fraction)
 					log_probs = F.log_softmax(logits, dim = 1)
 					loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths).mean()
+				entropy = models.entropy(log_probs, output_lengths, dim = 1)
 				decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
 				target_strings = labels.idx2str(targets, lengths = target_lengths)
-				entropy = models.entropy(log_probs, output_lengths, dim = 1)
 				for k, (transcript, reference, entropy) in enumerate(zip(decoded_strings, target_strings, entropy)):
-					try:
-						if isinstance(transcript, list):
-							transcript = min((metrics.cer(t, reference), t) for t in transcript)[1]
-					except:
-						import IPython; IPython.embed()
+					if isinstance(transcript, list):
+						transcript = min((metrics.cer(t, reference), t) for t in transcript)[1]
 					cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
 					if args.align:
 						transcript_, reference_ = metrics.align(transcript, reference)
@@ -109,7 +106,6 @@ def traineval(args):
 			#TODO: amp.state_dict()
 			optimizer_state_dict = None # optimizer.state_dict()
 			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = train_sampler.state_dict(batch_idx), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
-		model.train()
 		if iteration and args.iterations and iteration >= args.iterations:
 			sys.exit(0)
 
@@ -136,12 +132,18 @@ def traineval(args):
 	if checkpoint:
 		#optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 		iteration = 1 + checkpoint.get('iteration', int(args.checkpoint[args.checkpoint.find('iter') + 4: -3]))
-		epoch = checkpoint['epoch']
 		if args.train_data_path == checkpoint['args']['train_data_path']:
 			train_sampler.load_state_dict(checkpoint['sampler_state_dict'])
 			scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+
+			if train_sampler.batch_idx + 1 == len(train_sampler):
+				train_sampler.set_epoch(train_sampler.epoch + 1)
+			else:
+				train_sampler.batch_idx += 1
+
+			epoch = train_sampler.epoch
 		else:
-			epoch += 1
+			epoch += checkpoint['epoch'] + 1
 
 	if args.fp16:
 		model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
@@ -171,19 +173,19 @@ def traineval(args):
 			with torch.enable_grad():
 				logits, output_lengths = model(inputs, input_lengths_fraction)
 				log_probs = F.log_softmax(logits, dim = 1)
-			entropy = models.entropy(log_probs, output_lengths, dim = 1).mean()
-			loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths).mean()
-			if not (torch.isinf(loss) or torch.isnan(loss)):
-				optimizer.zero_grad()
-				if args.fp16:
-					with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
-						scaled_loss.backward()
-				else:
-					loss.backward()
-				torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
-				optimizer.step()
-				loss_avg = moving_avg(loss_avg, float(loss), max = 1000)
-				entropy_avg = moving_avg(entropy_avg, float(entropy), max = 4)
+				loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths).mean()
+				entropy = models.entropy(log_probs, output_lengths, dim = 1).mean()
+				if not (torch.isinf(loss) or torch.isnan(loss)):
+					optimizer.zero_grad()
+					if args.fp16:
+						with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
+							scaled_loss.backward()
+					else:
+						loss.backward()
+					torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
+					optimizer.step()
+					loss_avg = moving_avg(loss_avg, float(loss), max = 1000)
+					entropy_avg = moving_avg(entropy_avg, float(entropy), max = 4)
 
 			time_ms_data, time_ms_model = (toc - tic) * 1000, (time.time() - toc) * 1000
 			time_ms_avg = moving_avg(time_ms_avg, time_ms_model, max = 10000)
@@ -195,6 +197,7 @@ def traineval(args):
 
 			if args.val_iteration_interval is not None and iteration > 0 and iteration % args.val_iteration_interval == 0:
 				evaluate_model(epoch, iteration, batch_idx)
+				model.train()
 
 			if iteration % args.log_iteration_interval == 0:
 				tensorboard.add_scalars('datasets/' + train_dataset_name, dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
@@ -207,7 +210,7 @@ def traineval(args):
 						tensorboard.add_histogram(tag, param, iteration)
 						tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
 
-		evaluate_model(epoch, iteration, batch_idx)
+		evaluate_model(epoch, iteration)
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
 
 if __name__ == '__main__':
@@ -278,6 +281,6 @@ if __name__ == '__main__':
 	parser.add_argument('--lm')
 	parser.add_argument('--bpe')
 	parser.add_argument('--timeout', type = float, default = 0)
-	parser.add_argument('--max-duration', type = float, default = 20)
+	parser.add_argument('--max-duration', type = float, default = 10)
 	
 	traineval(parser.parse_args())

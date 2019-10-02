@@ -55,6 +55,7 @@ class BucketingSampler(torch.utils.data.Sampler):
 		example_indices = list(sorted(range(len(dataset)), key = lambda k: dataset.ids[k][-1]))
 		self.batches = [example_indices[i:i + batch_size] for i in range(0, len(example_indices), batch_size)]
 		self.batch_idx = 0
+		self.epoch = 0
 
 	def __iter__(self):
 		generator = torch.Generator()
@@ -63,13 +64,13 @@ class BucketingSampler(torch.utils.data.Sampler):
 		for batch in shuffled[self.batch_idx:]:
 			yield batch
 			self.batch_idx += 1
-		self.batch_idx = 0
 
 	def __len__(self):
 		return len(self.batches)
 
 	def set_epoch(self, epoch):
 		self.epoch = epoch
+		self.batch_idx = 0
 
 	def state_dict(self, batch_idx):
 		return dict(batches = self.batches, batch_idx = batch_idx, epoch = self.epoch)
