@@ -8,7 +8,7 @@ import librosa
 
 class BatchNormInplaceFunction(torch.autograd.function.Function):
 	@staticmethod
-	def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, training, activation):
+	def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, training, activation, *residual):
 		self.activation = activation
 
 		input = input.contiguous()
@@ -21,16 +21,19 @@ class BatchNormInplaceFunction(torch.autograd.function.Function):
 			invstd = var.add(eps).sqrt().reciprocal()
 
 		out = torch.batch_norm_elemt(input, input, weight, bias, mean, invstd, eps)
+
+		for r in residual:
+			out += r
+
 		if self.activation and self.activation[0] == 'leaky_relu':
 			out = F.leaky_relu_(out, *activation[1:])
 
-		if training:
-			self.save_for_backward(out, weight, bias, mean, invstd)
+		self.save_for_backward(out, weight, bias, mean, invstd, *residual)
 		return out
 
 	@staticmethod
 	def backward(self, grad_output):
-		saved_input, weight, bias, mean, invstd = self.saved_tensors
+		saved_input, weight, bias, mean, invstd, *residual = self.saved_tensors
 		grad_output = grad_output.contiguous()
 		saved_input = saved_input.contiguous()
 		reshape = lambda x: x.view(-1, *[1]*(len(saved_input.shape) - 2))
@@ -39,6 +42,9 @@ class BatchNormInplaceFunction(torch.autograd.function.Function):
 			mask = torch.ones_like(grad_output).masked_fill_(saved_input < 0, self.activation[1])
 			grad_output *= mask
 			saved_input /= mask
+
+		for r in residual:
+			saved_input -= r
 
 		saved_input -= reshape(bias)
 		saved_input /= reshape(weight)
@@ -66,15 +72,15 @@ class BatchNormInplaceFunction(torch.autograd.function.Function):
 			mean_dy_xmu
 		)
 
-		return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
+		return (grad_input, grad_weight, grad_bias, None, None, None, None, None, None) + tuple([grad_output] * len(residual))
 
 class BatchNormInplace(nn.modules.batchnorm._BatchNorm):
 	def __init__(self, *args, activation = ('leaky_relu', 0.01), **kwargs):
 		super().__init__(*args, **kwargs)
 		self.activation = activation
 
-	def forward(self, input):
-		return BatchNormInplaceFunction.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training, self.activation)
+	def forward(self, input, residual = []):
+		return BatchNormInplaceFunction.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training, self.activation, *residual)
 
 #TODO: apply conv masking
 class ConvBN(nn.ModuleDict):
@@ -89,11 +95,7 @@ class ConvBN(nn.ModuleDict):
 	def forward(self, x, residual = []):
 		y = x
 		for conv, bn in zip(self.conv, self.bn):
-			y = bn(conv(y))
-
-		if residual:
-			y = F.relu(y + sum(bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)))
-		
+			y = bn(conv(y), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)])
 		return y
 
 class InvertedResidual(nn.Module):
