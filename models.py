@@ -82,10 +82,10 @@ class BatchNormInplace(nn.modules.batchnorm._BatchNorm):
 
 #TODO: apply conv masking
 class ConvBN(nn.ModuleDict):
-	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual = [], repeat = 1, dilation = 1, separable = False):
+	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual = [], repeat = 1, dilation = 1, separable = False, activation = ('leaky_relu', 0.01)):
 		super().__init__(dict(
 			conv = nn.ModuleList(nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, padding = dilation * max(1, kernel_size // 2), bias = False, groups = groups, dilation = dilation) for i in range(repeat)),
-			bn = nn.ModuleList(BatchNormInplace(num_channels[1], momentum = batch_norm_momentum, activation = ('leaky_relu', 0.01) if repeat == 1 or i != repeat - 1 else None) for i in range(repeat)),
+			bn = nn.ModuleList(BatchNormInplace(num_channels[1], momentum = batch_norm_momentum, activation = activation) for i in range(repeat)),
 			conv_residual = nn.ModuleList(nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual),
 			bn_residual = nn.ModuleList(BatchNormInplace(num_channels[1], momentum = batch_norm_momentum, activation = None) for in_channels in num_channels_residual)
 		))
@@ -200,7 +200,7 @@ class Wav2Letter(nn.Sequential):
 		return logits, compute_output_lengths(logits, input_lengths_fraction)
 
 class JasperNet(nn.ModuleList):
-	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 2, dilation = 1, dropout = 'ignored', dropout_small = 0.2, dropout_medium = 0.3, dropout_large = 0.4, separable = False):
+	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, dropout = 'ignored', dropout_small = 0.2, dropout_medium = 0.3, dropout_large = 0.4, separable = False):
 		dropout_small = dropout_small if dropout != 0 else 0
 		dropout_medium = dropout_medium if dropout != 0 else 0
 		#dropout_large = dropout_large if dropout != 0 else 0
