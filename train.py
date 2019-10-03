@@ -122,8 +122,8 @@ def traineval(args):
 
 	train_waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob)
 	train_feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob)
-	train_dataset = dataset.AudioTextDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = train_waveform_transform, feature_transform = train_feature_transform, max_duration = args.max_duration)
-	train_dataset_name = os.path.basename(args.train_data_path)
+	train_dataset = dataset.AudioTextDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = train_waveform_transform, feature_transform = train_feature_transform, max_duration = args.max_duration, mixing = args.train_data_mixing)
+	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
 	train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
 	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler, worker_init_fn = worker_init_fn, timeout = args.timeout)
 	optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else apex.optimizers.FusedNovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'FusedNovoGrad' else None
@@ -235,7 +235,8 @@ if __name__ == '__main__':
 	parser.add_argument('--iterations', type = int, default = None)
 	parser.add_argument('--num-input-features', default = 64)
 	parser.add_argument('--dropout', type = float, default = 0.2)
-	parser.add_argument('--train-data-path')
+	parser.add_argument('--train-data-path', nargs = '*')
+	parser.add_argument('--train-data-mixing', type = float, nargs = '*')
 	parser.add_argument('--val-data-path', nargs = '+')
 	parser.add_argument('--sample-rate', type = int, default = 8_000)
 	parser.add_argument('--window-size', type = float, default = 0.02)
