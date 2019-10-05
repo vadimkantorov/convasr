@@ -14,7 +14,7 @@ import models
 import transforms
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, sample_rate, window_size, window_stride, window, num_input_features, labels, mixing = None, waveform_transform = None, feature_transform = None, max_duration = None, normalize_features = True, waveform_transform_debug_dir = None):
+	def __init__(self, source_paths, sample_rate, window_size, window_stride, window, num_input_features, labels, waveform_transform = None, feature_transform = None, max_duration = None, normalize_features = True, waveform_transform_debug_dir = None):
 		self.window_stride = window_stride
 		self.window_size = window_size
 		self.sample_rate = sample_rate
@@ -26,11 +26,15 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.normalize_features = normalize_features
 		self.waveform_transform_debug_dir = waveform_transform_debug_dir
 
-		self.ids = [[(row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or (max_duration is not None and float(row[2]) < max_duration)] for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])]
-		self.ids = [x for l in self.ids for x in l]
+		self.ids = [[(os.path.basename(data_or_path), row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or (max_duration is not None and float(row[2]) < max_duration)] for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])]
 
 	def __getitem__(self, index):
-		audio_path, transcript, duration = self.ids[index]
+		for ids in self.ids:
+			if index < len(ids):
+				dataset_name, audio_path, transcript, duration = ids[index]
+				break
+			else:
+				index -= len(ids)
 
 		signal, sample_rate = (audio_path, self.sample_rate) if isinstance(self.waveform_transform, transforms.SoxAug) else read_wav(audio_path, sample_rate = self.sample_rate)
 		if self.waveform_transform is not None:
@@ -45,19 +49,18 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			features, sample_rate = self.feature_transform(features, self.sample_rate)
 
 		transcript = self.labels.parse(transcript)
-		return features, transcript, audio_path
+		return features, transcript, audio_path, dataset_name
 
 	def __len__(self):
-		return len(self.ids)
+		return sum(map(len, self.ids))
 
 class BucketingSampler(torch.utils.data.Sampler):
-	def __init__(self, dataset, batch_size=1):
+	def __init__(self, dataset, batch_size = 1, mixing = None):
 		super(BucketingSampler, self).__init__(dataset)
 		self.dataset = dataset
-		example_indices = list(sorted(range(len(dataset)), key = lambda k: dataset.ids[k][-1]))
+		example_indices = list(sorted(range(len(dataset)), key = lambda k: dataset.ids[0][k][-1]))
 		self.batches = [example_indices[i:i + batch_size] for i in range(0, len(example_indices), batch_size)]
-		self.batch_idx = 0
-		self.epoch = 0
+		self.shuffle(epoch = 0)
 
 	def __iter__(self):
 		generator = torch.Generator()
@@ -70,7 +73,7 @@ class BucketingSampler(torch.utils.data.Sampler):
 	def __len__(self):
 		return len(self.batches)
 
-	def set_epoch(self, epoch):
+	def shuffle(self, epoch):
 		self.epoch = epoch
 		self.batch_idx = 0
 
@@ -78,9 +81,7 @@ class BucketingSampler(torch.utils.data.Sampler):
 		return dict(batches = self.batches, batch_idx = batch_idx, epoch = self.epoch)
 
 	def load_state_dict(self, state_dict):
-		self.batches = state_dict['batches']
-		self.batch_idx = state_dict['batch_idx']
-		self.epoch = state_dict['epoch']
+		self.batches, self.batch_idx, self.epoch = map(state_dict.get, ['batches', 'batch_idx', 'epoch'])
 
 replace2 = lambda s: ''.join(c if i == 0 or c != '2' else s[i - 1] for i, c in enumerate(s))
 replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
@@ -146,17 +147,18 @@ class Labels:
 
 def collate_fn(batch, pad_to = 16):
 	inputs_max_len, targets_max_len = [(1 + max(b[k].shape[-1] for b in batch) // pad_to) * pad_to for k in [0, 1]]
-	sample_inputs, sample_targets, sample_audio_path = batch[0]
+	sample_inputs, sample_targets, *_ = batch[0]
 	inputs = sample_inputs.new_zeros(len(batch), *(sample_inputs.shape[:-1] + (inputs_max_len,)))
 	targets = sample_targets.new_zeros(len(batch), *(sample_targets.shape[:-1] + (targets_max_len,)))
-	input_percentages, target_lengths, audio_paths = [], [], []
-	for k, (input, target, audio_path) in enumerate(batch):
+	input_percentages, target_lengths, audio_paths, dataset_names = [], [], [], []
+	for k, (input, target, audio_path, dataset_name) in enumerate(batch):
 		inputs[k, ..., :input.shape[-1]] = input
 		targets[k, ..., :target.shape[-1]] = target
 		input_percentages.append(input.shape[-1] / float(inputs_max_len))
 		target_lengths.append(len(target))
 		audio_paths.append(audio_path)
-	return inputs, targets, audio_paths, torch.FloatTensor(input_percentages), torch.IntTensor(target_lengths)
+		dataset_names.append(dataset_name)
+	return inputs, targets, torch.FloatTensor(input_percentages), torch.IntTensor(target_lengths), audio_paths, dataset_names
 
 def read_wav(path, normalize = True, stereo = False, sample_rate = None, max_duration = None):
 	sample_rate_, signal = scipy.io.wavfile.read(path)

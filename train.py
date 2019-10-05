@@ -63,7 +63,7 @@ def traineval(args):
 		model.eval()
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
 			features_, logits_, ref_tra_ = [], [], []
-			for batch_idx_, (inputs, targets, filenames, input_lengths_fraction, target_lengths) in enumerate(val_data_loader):
+			for batch_idx_, (inputs, targets, input_lengths_fraction, target_lengths, filenames, dataset_names) in enumerate(val_data_loader):
 				inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
 				#inputs = models.logfbank(inputs, train_dataset.sample_rate, train_dataset.window_size, train_dataset.window_stride, train_dataset.window, train_dataset.num_input_features, normalize = train_dataset.normalize_features)
 				with torch.no_grad():
@@ -105,7 +105,7 @@ def traineval(args):
 		if training and not args.checkpoint_skip:
 			#TODO: amp.state_dict()
 			optimizer_state_dict = None # optimizer.state_dict()
-			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = train_sampler.state_dict(batch_idx), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
+			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(batch_idx), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
 		if iteration and args.iterations and iteration >= args.iterations:
 			sys.exit(0)
 
@@ -124,8 +124,8 @@ def traineval(args):
 	train_feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob)
 	train_dataset = dataset.AudioTextDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = train_waveform_transform, feature_transform = train_feature_transform, max_duration = args.max_duration, mixing = args.train_data_mixing)
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
-	train_sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
-	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = train_sampler, worker_init_fn = worker_init_fn, timeout = args.timeout)
+	sampler = dataset.BucketingSampler(train_dataset, batch_size=args.train_batch_size)
+	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, sampler = sampler, worker_init_fn = worker_init_fn, timeout = args.timeout)
 	optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else apex.optimizers.FusedNovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'FusedNovoGrad' else None
 	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else optimizers.NoopLR(optimizer) 
 	epoch, iteration = 0, 0
@@ -133,15 +133,15 @@ def traineval(args):
 		#optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 		iteration = 1 + checkpoint.get('iteration', int(args.checkpoint[args.checkpoint.find('iter') + 4: -3]))
 		if args.train_data_path == checkpoint['args']['train_data_path']:
-			train_sampler.load_state_dict(checkpoint['sampler_state_dict'])
+			sampler.load_state_dict(checkpoint['sampler_state_dict'])
 			scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
-			if train_sampler.batch_idx + 1 == len(train_sampler):
-				train_sampler.set_epoch(train_sampler.epoch + 1)
+			if sampler.batch_idx + 1 == len(sampler):
+				sampler.shuffle(epoch = sampler.epoch + 1)
 			else:
-				train_sampler.batch_idx += 1
+				sampler.batch_idx += 1
 
-			epoch = train_sampler.epoch
+			epoch = sampler.epoch
 		else:
 			epoch += checkpoint['epoch'] + 1
 
@@ -164,9 +164,9 @@ def traineval(args):
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1./K) * avg
 	for epoch in range(epoch, args.epochs):
 		model.train()
-		train_sampler.set_epoch(epoch)
+		sampler.shuffle(epoch)
 		time_epoch_start = time.time()
-		for batch_idx, (inputs, targets, filenames, input_lengths_fraction, target_lengths) in enumerate(train_data_loader, start = train_sampler.batch_idx):
+		for batch_idx, (inputs, targets, input_lengths_fraction, target_lengths, filenames, dataset_names) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc = time.time()
 			inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
 			#inputs = models.logfbank(inputs, train_dataset.sample_rate, train_dataset.window_size, train_dataset.window_stride, train_dataset.window, train_dataset.num_input_features, normalize = train_dataset.normalize_features)
