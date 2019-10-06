@@ -59,7 +59,7 @@ class BucketingSampler(torch.utils.data.Sampler):
 		super().__init__(dataset)
 		self.dataset = dataset
 		self.batch_size = batch_size
-		self.mixing = mixing
+		self.mixing = mixing or ([1 / len(self.dataset.ids)] * len(self.dataset.ids))
 		self.shuffle(epoch = 0)
 
 	def __iter__(self):
@@ -84,10 +84,10 @@ class BucketingSampler(torch.utils.data.Sampler):
 		self.shuffled = [batches[k] for k in torch.randperm(len(batches), generator = generator).tolist()]
 
 	def state_dict(self, batch_idx):
-		return dict(epoch = self.epoch, batch_idx = batch_idx, batches = self.batches, shuffled = self.shuffled)
+		return dict(epoch = self.epoch, batch_idx = batch_idx, shuffled = self.shuffled)
 
 	def load_state_dict(self, state_dict):
-		self.epoch, self.batch_idx, self.batches, self.shuffled = map(state_dict.get, ['epoch', 'batch_idx', 'batches', 'shuffled'])
+		self.epoch, self.batch_idx, self.shuffled = map(state_dict.get, ['epoch', 'batch_idx', 'shuffled'])
 
 replace2 = lambda s: ''.join(c if i == 0 or c != '2' else s[i - 1] for i, c in enumerate(s))
 replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
