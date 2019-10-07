@@ -82,16 +82,16 @@ def traineval(args):
 						print(iteration, ':', batch_idx_ * len(inputs) + k, '/', len(val_data_loader) * len(inputs))
 						print(f'{val_dataset_name} REF: {reference_}')
 						print(f'{val_dataset_name} HYP: {transcript_}')
-						print(f'{val_dataset_name} WER: {wer:.02%} | CER: {cer:.02%}')
-						print()
+						print(f'{val_dataset_name} WER: {wer:.02%} | CER: {cer:.02%}\n')
 					ref_tra_.append(dict(reference = reference_, transcript = transcript_, audio_path = audio_path, filename = os.path.basename(audio_path), cer = cer, wer = wer, loss = float(loss), entropy = float(entropy)))
 					if not training and args.logits:
 						logits_.extend(logits.cpu())
 						features_.extend(features.cpu())
 			cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([x[k] for x in ref_tra_ if not math.isinf(x[k]) and not math.isnan(x[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
-			print(f'{args.experiment_id} {val_dataset_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}')
-			print()
-			with open(os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name), 'w') as f:
+			transcripts_path = os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name)
+			print(f'{args.experiment_id} {val_dataset_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} | Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}\n')
+
+			with open(transcripts_path, 'w') as f:
 				json.dump(list(sorted(ref_tra_, key = lambda ref_tra: ref_tra['cer'], reverse = True)), f, ensure_ascii = False, indent = 2, sort_keys = True)
 			if training:
 				tensorboard.add_scalars('datasets/' + val_dataset_name, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 

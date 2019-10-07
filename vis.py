@@ -10,7 +10,6 @@ matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
-
 import dataset
 import ru
 import metrics
@@ -80,12 +79,13 @@ def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer20, cer30, cer4
 			reftra_['wer'] = metrics.wer(hyp, ref)
 		cer_avg, wer_avg = [float(torch.tensor([r[k] for r in reftra]).mean()) for k in ['cer', 'wer']]
 		print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')
-		loss_ = torch.tensor([r['loss'] for r in reftra])
+		loss_ = torch.tensor([r['loss'] / len(r['reference']) for r in reftra])
 		loss_ = loss_[~(torch.isnan(loss_) | torch.isinf(loss_))]
-		bins = torch.linspace(loss_.min(), loss_.max(), steps = 10)
-		hist = torch.histc(loss_, bins = 10)
+		min, max, steps = 0.0, 2.0, 20
+		bins = torch.linspace(min, max, steps = steps)
+		hist = torch.histc(loss_, bins = steps, min = min, max = max)
 		for b, h in zip(bins.tolist(), hist.tolist()):
-			print(f'{b:.02f}\t{h}')
+			print(f'{b:.02f}\t{h:.0f}')
 
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
