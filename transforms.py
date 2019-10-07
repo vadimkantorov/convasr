@@ -93,7 +93,10 @@ class AddWhiteNoise:
 	def __init__(self, noise_level = 0.025):
 		self.noise_level = float(noise_level)
 
-	def __call__(self, signal, sample_rate):
+	def __call__(self, signal, sample_rate, dataset_name = ''):
+		if 'tts' not in dataset_name:
+			return signal, sample_rate
+
 		noise = torch.randn_like(signal).clamp(-1, 1)
 		noise_level = fixed_or_uniform(self.noise_level)
 		return signal + noise * noise_level, sample_rate

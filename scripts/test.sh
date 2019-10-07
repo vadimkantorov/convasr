@@ -1,7 +1,7 @@
 python3 train.py $@ \
-  --checkpoint data/experiments/JasperNet_NovoGrad_lr1e-2_wd1e-3_bs80___jasperbig/checkpoint_epoch02_iter0062500.pt \
-  --align --val-batch-size 32 --val-data-path ../sample_ok/sample_ok.convasr.csv data/tts_dataset/tts_dataset_val.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv \
-  --val-feature-transform SpecPerlinNoise 1
+  --checkpoint data/experiments/JasperNet_NovoGrad_lr1e-2_wd1e-3_bs80___testabn4/checkpoint_epoch02_iter0065000.pt \
+  --val-data-path data/mixed_val.csv data/clean_val.csv ../sample_ok/sample_ok.convasr.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv data/tts_dataset/tts_dataset_val.csv
+
 #  --val-waveform-transform AddWhiteNoise
 #  --decoder BeamSearchDecoder --beam-width 5000 --decoder-topk 5000 #--lm  chats_05_prune.binary  #charlm/chats_06_noprune_char.binary # #--lm data/ru_wiyalen_no_punkt.arpa.binary 
 

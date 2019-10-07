@@ -132,18 +132,17 @@ def traineval(args):
 	if checkpoint:
 		#optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 		iteration = 1 + checkpoint.get('iteration', int(args.checkpoint[args.checkpoint.find('iter') + 4: -3]))
-		if args.train_data_path == checkpoint['args']['train_data_path']:
+		if True:#args.train_data_path == checkpoint['args']['train_data_path']:
 			sampler.load_state_dict(checkpoint['sampler_state_dict'])
 			scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
 			if sampler.batch_idx + 1 == len(sampler):
-				sampler.shuffle(epoch = sampler.epoch + 1)
+				sampler.shuffle(epoch = sampler.epoch + 1, batch_idx = 0)
 			else:
-				sampler.batch_idx += 1
-
-			epoch = sampler.epoch
+				sampler.shuffle(epoch = sampler.epoch, batch_idx = sampler.batch_idx + 1)
+				#sampler.batch_idx += 1
 		else:
-			epoch += checkpoint['epoch'] + 1
+			sampler.shuffle(epoch = sampler.epoch + 1)
 
 	if args.fp16:
 		model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
@@ -162,9 +161,8 @@ def traineval(args):
 	tic = time.time()
 	loss_avg, entropy_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0, 0.0
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1./K) * avg
-	for epoch in range(epoch, args.epochs):
+	for epoch in range(sampler.epoch, args.epochs):
 		model.train()
-		sampler.shuffle(epoch)
 		time_epoch_start = time.time()
 		for batch_idx, (inputs, targets, input_lengths_fraction, target_lengths, filenames, dataset_names) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc = time.time()
@@ -210,6 +208,7 @@ def traineval(args):
 						tensorboard.add_histogram(tag, param, iteration)
 						tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
 
+		sampler.shuffle(epoch)
 		evaluate_model(epoch, iteration)
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
 

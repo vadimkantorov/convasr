@@ -38,7 +38,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 		signal, sample_rate = (audio_path, self.sample_rate) if isinstance(self.waveform_transform, transforms.SoxAug) else read_wav(audio_path, sample_rate = self.sample_rate)
 		if self.waveform_transform is not None:
-			signal, sample_rate = self.waveform_transform(signal, self.sample_rate)
+			signal, sample_rate = self.waveform_transform(signal, self.sample_rate, dataset_name = dataset_name)
 		
 		if self.waveform_transform_debug_dir:
 			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path)), self.sample_rate, signal.numpy())
@@ -46,13 +46,42 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		#features = signal
 		features = models.logfbank(signal, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, normalize = self.normalize_features)
 		if self.feature_transform is not None:
-			features, sample_rate = self.feature_transform(features, self.sample_rate)
+			features, sample_rate = self.feature_transform(features, self.sample_rate, dataset_name = dataset_name)
 
 		transcript = self.labels.parse(transcript)
 		return features, transcript, audio_path, dataset_name
 
 	def __len__(self):
 		return sum(map(len, self.ids))
+
+#class BucketingSampler(torch.utils.data.Sampler):
+#	def __init__(self, dataset, batch_size = 1, mixing = None):
+#		super(BucketingSampler, self).__init__(dataset)
+#		self.dataset = dataset
+#		example_indices = list(sorted(range(len(dataset)), key = lambda k: dataset.ids[0][k][-1]))
+#		self.batches = [example_indices[i:i + batch_size] for i in range(0, len(example_indices), batch_size)]
+#		self.shuffle(epoch = 0)
+#
+#	def __iter__(self):
+#		generator = torch.Generator()
+#		generator.manual_seed(self.epoch)
+#		shuffled = [self.batches[k] for k in torch.randperm(len(self.batches), generator = generator).tolist()]
+#		for batch in shuffled[self.batch_idx:]:
+#			yield batch
+#			self.batch_idx += 1
+#
+#	def __len__(self):
+#		return len(self.batches)
+#
+#	def shuffle(self, epoch):
+#		self.epoch = epoch
+#		self.batch_idx = 0
+#
+#	def state_dict(self, batch_idx):
+#		return dict(batches = self.batches, batch_idx = batch_idx, epoch = self.epoch)
+#
+#	def load_state_dict(self, state_dict):
+#		self.batches, self.batch_idx, self.epoch = map(state_dict.get, ['batches', 'batch_idx', 'epoch'])
 
 class BucketingSampler(torch.utils.data.Sampler):
 	def __init__(self, dataset, batch_size = 1, mixing = None):
@@ -70,9 +99,9 @@ class BucketingSampler(torch.utils.data.Sampler):
 	def __len__(self):
 		return len(self.shuffled)
 
-	def shuffle(self, epoch):
+	def shuffle(self, epoch, batch_idx = 0):
 		self.epoch = epoch
-		self.batch_idx = 0
+		self.batch_idx = batch_idx
 		generator = torch.Generator()
 		generator.manual_seed(self.epoch)
 
@@ -87,7 +116,7 @@ class BucketingSampler(torch.utils.data.Sampler):
 		return dict(epoch = self.epoch, batch_idx = batch_idx, shuffled = self.shuffled)
 
 	def load_state_dict(self, state_dict):
-		self.epoch, self.batch_idx, self.shuffled = map(state_dict.get, ['epoch', 'batch_idx', 'shuffled'])
+		self.epoch, self.batch_idx, self.shuffled = state_dict['epoch'], state_dict['batch_idx'], (state_dict.get('shuffled') or self.shuffled)
 
 replace2 = lambda s: ''.join(c if i == 0 or c != '2' else s[i - 1] for i, c in enumerate(s))
 replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
