@@ -12,42 +12,34 @@ class BatchNormInplaceFunction(torch.autograd.function.Function):
 		self.activation = activation
 
 		input = input.contiguous()
-		if training:
-			mean, var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum)
-			invstd = var.add_(eps).sqrt_().reciprocal_()
-		else:
-			mean, var = running_mean, running_var
-			invstd = var.add(eps).sqrt().reciprocal()
+		mean, var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum) if training else (running_mean, running_var) 
+		invstd = var.add(eps).sqrt_().reciprocal_()
 
-		out = torch.batch_norm_elemt(input, input, weight, bias, mean, invstd, eps)
+		output = torch.batch_norm_elemt(input, input, weight, bias, mean, invstd, 0)
 		for r in residual:
-			out += r
+			output += r
 
 		if self.activation and self.activation[0] == 'leaky_relu':
-			out = F.leaky_relu_(out, *activation[1:])
+			F.leaky_relu_(output, self.activation[1])
 
-		self.save_for_backward(out, weight, bias, mean, invstd, *residual)
-		return out
+		self.save_for_backward(output, weight, bias, mean, invstd, *residual)
+		return output
 
 	@staticmethod
 	def backward(self, grad_output):
-		saved_input, weight, bias, mean, invstd, *residual = self.saved_tensors
+		saved_output, weight, bias, mean, invstd, *residual = self.saved_tensors
 		grad_output = grad_output.contiguous()
-		saved_input = saved_input.contiguous()
-		reshape = lambda x: x.view(-1, *[1]*(len(saved_input.shape) - 2))
+		saved_output = saved_output.contiguous()
 
 		if self.activation and self.activation[0] == 'leaky_relu':
-			mask = torch.ones_like(grad_output).masked_fill_(saved_input < 0, self.activation[1])
+			mask = torch.ones_like(grad_output).masked_fill_(saved_output < 0, self.activation[1])
 			grad_output *= mask
-			saved_input /= mask
+			saved_output /= mask
 
 		for r in residual:
-			saved_input -= r
+			saved_output -= r
 
-		saved_input -= reshape(bias)
-		saved_input /= reshape(weight)
-		saved_input /= reshape(invstd)
-		saved_input += reshape(mean)
+		saved_input = torch.batch_norm_elemt(saved_output, saved_output, 1. / invstd, mean, bias, 1. / weight, 0)
 		
 		mean_dy, mean_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(
 			grad_output,
