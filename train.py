@@ -69,26 +69,22 @@ def traineval(args):
 				with torch.no_grad():
 					logits, output_lengths = model(inputs, input_lengths_fraction)
 					log_probs = F.log_softmax(logits, dim = 1)
-					loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths).mean()
+					loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths)
 				entropy = models.entropy(log_probs, output_lengths, dim = 1)
 				decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
 				target_strings = labels.idx2str(targets, lengths = target_lengths)
-				for k, (transcript, reference, entropy) in enumerate(zip(decoded_strings, target_strings, entropy)):
+				for k, (audio_path, transcript, reference, entropy, loss) in enumerate(zip(filenames, decoded_strings, target_strings, entropy, loss)):
 					if isinstance(transcript, list):
 						transcript = min((metrics.cer(t, reference), t) for t in transcript)[1]
 					cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
-					if args.align:
-						transcript_, reference_ = metrics.align(transcript, reference)
-						reference_ = ' ' + reference_
-					else:
-						transcript_, reference_ = transcript, reference
+					transcript_, reference_ = metrics.align(transcript, reference, prepend_space_to_reference = True) if args.align else (transcript, reference)
 					if args.verbose:
 						print(iteration, ':', batch_idx_ * len(inputs) + k, '/', len(val_data_loader) * len(inputs))
 						print(f'{val_dataset_name} REF: {reference_}')
 						print(f'{val_dataset_name} HYP: {transcript_}')
 						print(f'{val_dataset_name} WER: {wer:.02%} | CER: {cer:.02%}')
 						print()
-					ref_tra_.append(dict(reference = reference_, transcript = transcript_, audio_path = filenames[k], filename = os.path.basename(filenames[k]), cer = cer, wer = wer, loss = float(loss), entropy = float(entropy)))
+					ref_tra_.append(dict(reference = reference_, transcript = transcript_, audio_path = audio_path, filename = os.path.basename(audio_path), cer = cer, wer = wer, loss = float(loss), entropy = float(entropy)))
 					if not training and args.logits:
 						logits_.extend(logits.cpu())
 						features_.extend(features.cpu())
@@ -114,6 +110,7 @@ def traineval(args):
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'])
 	model.to(args.device)
+
 	if not args.train_data_path:
 		if args.fp16:
 			model = apex.amp.initialize(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
@@ -132,7 +129,8 @@ def traineval(args):
 	if checkpoint:
 		#optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 		iteration = 1 + checkpoint.get('iteration', int(args.checkpoint[args.checkpoint.find('iter') + 4: -3]))
-		if True:#args.train_data_path == checkpoint['args']['train_data_path']:
+		tolist_ = lambda x: x if isinstance(x, list) else [x]
+		if args.train_data_path == tolist_(checkpoint['args']['train_data_path']):
 			sampler.load_state_dict(checkpoint['sampler_state_dict'])
 			scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 

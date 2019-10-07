@@ -315,7 +315,7 @@ class Hirschberg(Alignment):
 			self.mode = mode
 		return self.align_rec(self.seq_a, self.seq_b)
 
-def align(hyp, ref):
+def align(hyp, ref, prepend_space_to_reference = False):
 	ref, hyp = Needleman().align(list(ref), list(hyp))
 	r, h = '', ''
 	i = 0
@@ -332,7 +332,7 @@ def align(hyp, ref):
 			r += ref[i]
 			h += hyp[i]
 			i += 1
-	return h, r
+	return h, ((' ' if prepend_space_to_reference else '') + r)
 
 def analyze(ref, hyp, phonetic_replace_groups = []):
 	ref0, hyp0 = ref, hyp

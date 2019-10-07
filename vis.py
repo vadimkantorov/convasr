@@ -70,7 +70,7 @@ def meanstd(logits):
 	plt.subplots_adjust(top = 0.99, bottom=0.01, hspace=0.8, wspace=0.4)
 	plt.savefig(logits + '.jpg', dpi = 150)
 
-def cer(experiments_dir, experiment_id, entropy, loss):
+def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer20, cer30, cer40, cer50):
 	if experiment_id.endswith('.json'):
 		reftra = json.load(open(experiment_id))
 		for reftra_ in reftra:
@@ -80,7 +80,12 @@ def cer(experiments_dir, experiment_id, entropy, loss):
 			reftra_['wer'] = metrics.wer(hyp, ref)
 		cer_avg, wer_avg = [float(torch.tensor([r[k] for r in reftra]).mean()) for k in ['cer', 'wer']]
 		print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')
-		return
+		loss_ = torch.tensor([r['loss'] for r in reftra])
+		loss_ = loss_[~(torch.isnan(loss_) | torch.isinf(loss_))]
+		bins = torch.linspace(loss_.min(), loss_.max(), steps = 10)
+		hist = torch.histc(loss_, bins = 10)
+		for b, h in zip(bins.tolist(), hist.tolist()):
+			print(f'{b:.02f}\t{h}')
 
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
@@ -89,8 +94,12 @@ def cer(experiments_dir, experiment_id, entropy, loss):
 		iteration = f[eidx:].replace('.json', '')
 		val_dataset_name = f[f.find('transcripts_') + len('transcripts_'):eidx]
 		checkpoint = os.path.join(experiment_id, 'checkpoint_' + f[eidx:].replace('.json', '.pt'))
-		cer = torch.tensor([j['entropy' if entropy else 'loss' if loss else 'cer'] for j in json.load(open(f))] or [0.0])
-		res[iteration].append((val_dataset_name, float(cer.mean()), checkpoint))
+		val = torch.tensor([j['entropy' if entropy else 'loss' if loss else 'cer'] for j in json.load(open(f))] or [0.0])
+
+		if cer10 or cer20 or cer30 or cer40 or cer50:
+			val = (val < 0.1 * [False, cer10, cer20, cer30, cer40, cer50].index(True)).float()
+		
+		res[iteration].append((val_dataset_name, float(val.mean()), checkpoint))
 	val_dataset_names = sorted(set(val_dataset_name for r in res.values() for val_dataset_name, cer, checkpoint in r))
 	print('iteration\t' + '\t'.join(val_dataset_names) + '\tcheckpoint')
 	for iteration, r in res.items():
@@ -219,6 +228,11 @@ if __name__ == '__main__':
 	cmd.add_argument('--experiments-dir', default = 'data/experiments')
 	cmd.add_argument('--entropy', action = 'store_true')
 	cmd.add_argument('--loss', action = 'store_true')
+	cmd.add_argument('--cer10', action = 'store_true')
+	cmd.add_argument('--cer20', action = 'store_true')
+	cmd.add_argument('--cer30', action = 'store_true')
+	cmd.add_argument('--cer40', action = 'store_true')
+	cmd.add_argument('--cer50', action = 'store_true')
 	cmd.set_defaults(func = cer)
 
 	cmd = subparsers.add_parser('errors')
