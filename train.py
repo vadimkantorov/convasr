@@ -69,7 +69,7 @@ def traineval(args):
 				with torch.no_grad():
 					logits, output_lengths = model(inputs, input_lengths_fraction)
 					log_probs = F.log_softmax(logits, dim = 1)
-					loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths)
+					loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths) / target_lengths
 				entropy = models.entropy(log_probs, output_lengths, dim = 1)
 				decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
 				target_strings = labels.idx2str(targets, lengths = target_lengths)
@@ -156,7 +156,7 @@ def traineval(args):
 	with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
 		json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
 
-	tic = time.time()
+	tic, toc_fwd, toc_bwd = time.time(), time.time(), time.time()
 	loss_avg, entropy_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0, 0.0
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1./K) * avg
 	for epoch in range(sampler.epoch, args.epochs):
@@ -169,9 +169,12 @@ def traineval(args):
 			with torch.enable_grad():
 				logits, output_lengths = model(inputs, input_lengths_fraction)
 				log_probs = F.log_softmax(logits, dim = 1)
-				loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths).mean()
+				loss_ = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths)# / target_lengths
+				#loss_, loss = loss_.mean(), (loss_ * target_lengths).mean()
+				loss_ = loss = loss_.mean()
 				entropy = models.entropy(log_probs, output_lengths, dim = 1).mean()
 				if not (torch.isinf(loss) or torch.isnan(loss)):
+					toc_fwd = time.time()
 					optimizer.zero_grad()
 					if args.fp16:
 						with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -180,13 +183,15 @@ def traineval(args):
 						loss.backward()
 					torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
 					optimizer.step()
-					loss_avg = moving_avg(loss_avg, float(loss), max = 1000)
+					loss_avg = moving_avg(loss_avg, float(loss_), max = 1000)
 					entropy_avg = moving_avg(entropy_avg, float(entropy), max = 4)
+					toc_bwd = time.time()
 
-			time_ms_data, time_ms_model = (toc - tic) * 1000, (time.time() - toc) * 1000
+			ms = lambda sec: sec * 1000
+			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = ms(toc - tic), ms(toc_fwd - toc), ms(toc_bwd - toc_fwd), ms(time.time() - toc)	
 			time_ms_avg = moving_avg(time_ms_avg, time_ms_model, max = 10000)
 			lr = scheduler.get_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
-			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}>  loss: {float(loss): 7.2f} <{loss_avg: 7.2f}> time: {time_ms_model:6.0f} <{time_ms_avg:4.0f}> +{time_ms_data:.2f} ms  | lr: {lr:.5f}')
+			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}>  loss: {float(loss_): 7.2f} <{loss_avg: 7.2f}> time: ({inputs.shape[-1]: >3d}) {time_ms_data:.2f}+{time_ms_fwd:4.0f}+{time_ms_bwd:4.0f} <{time_ms_avg:4.0f}> | lr: {lr:.5f}')
 			tic = time.time()
 			scheduler.step()
 			iteration += 1

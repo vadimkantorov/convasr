@@ -10,8 +10,8 @@ class BatchNormInplaceFunction(torch.autograd.function.Function):
 	@staticmethod
 	def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, training, activation, *residual):
 		self.activation = activation
-
-		input = input.contiguous()
+		assert input.is_contiguous()
+		
 		mean, var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum) if training else (running_mean, running_var) 
 		invstd = var.add(eps).sqrt_().reciprocal_()
 
@@ -28,8 +28,7 @@ class BatchNormInplaceFunction(torch.autograd.function.Function):
 	@staticmethod
 	def backward(self, grad_output):
 		saved_output, weight, bias, mean, invstd, *residual = self.saved_tensors
-		grad_output = grad_output.contiguous()
-		saved_output = saved_output.contiguous()
+		assert grad_output.is_contiguous() and saved_output.is_contiguous()
 
 		if self.activation and self.activation[0] == 'leaky_relu':
 			mask = torch.ones_like(grad_output).masked_fill_(saved_output < 0, self.activation[1])
@@ -40,7 +39,12 @@ class BatchNormInplaceFunction(torch.autograd.function.Function):
 			saved_output -= r
 
 		saved_input = torch.batch_norm_elemt(saved_output, saved_output, 1. / invstd, mean, bias, 1. / weight, 0)
-		
+		#saved_input = saved_output; reshape = lambda x: x.view(-1, *[1]*(len(saved_input.shape) - 2))
+		#saved_input -= reshape(bias)
+		#saved_input /= reshape(weight)
+		#saved_input /= reshape(invstd)
+		#saved_input += reshape(mean)
+
 		mean_dy, mean_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(
 			grad_output,
 			saved_input,
@@ -85,7 +89,10 @@ class ConvBN(nn.ModuleDict):
 	def forward(self, x, residual = []):
 		y = x
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
-			y = bn(conv(y), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)] if i == len(self.conv) - 1 else [])
+			try:
+				y = bn(conv(y), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)] if i == len(self.conv) - 1 else [])
+			except:
+				import IPython; IPython.embed()
 		return y
 
 class InvertedResidual(nn.Module):
