@@ -56,67 +56,38 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 class BucketingSampler(torch.utils.data.Sampler):
 	def __init__(self, dataset, batch_size = 1, mixing = None):
-		super(BucketingSampler, self).__init__(dataset)
+		super().__init__(dataset)
 		self.dataset = dataset
-		example_indices = list(sorted(range(len(dataset)), key = lambda k: dataset.ids[0][k][-1]))
-		self.batches = [example_indices[i:i + batch_size] for i in range(0, len(example_indices), batch_size)]
+		self.batch_size = batch_size
+		self.mixing = mixing or ([1 / len(self.dataset.ids)] * len(self.dataset.ids))
 		self.shuffle(epoch = 0)
 
 	def __iter__(self):
-		generator = torch.Generator()
-		generator.manual_seed(self.epoch)
-		shuffled = [self.batches[k] for k in torch.randperm(len(self.batches), generator = generator).tolist()]
-		for batch in shuffled[self.batch_idx:]:
+		for batch in self.shuffled[self.batch_idx:]:
 			yield batch
 			self.batch_idx += 1
 
 	def __len__(self):
-		return len(self.batches)
+		return len(self.shuffled)
 
-	def shuffle(self, epoch):
+	def shuffle(self, epoch, batch_idx = 0):
 		self.epoch = epoch
-		self.batch_idx = 0
+		self.batch_idx = batch_idx
+		generator = torch.Generator()
+		generator.manual_seed(self.epoch)
+
+		mixing = [int(m * self.batch_size) for m in self.mixing]
+		chunk = lambda xs, chunks: [xs[i * batch_size : (1 + i) * batch_size] for batch_size in [ len(xs) // chunks ] for i in range(chunks)]
+		num_batches = int(len(self.dataset.ids[0]) // self.batch_size + 0.5)
+		inds = [chunk(i, num_batches) for k, subset in enumerate(self.dataset.ids) for i in [sum(map(len, self.dataset.ids[:k])) + torch.arange(len(subset))]]
+		batches = [torch.cat([i[torch.randperm(len(i), generator = generator)[:m]] for i, m in zip(t, mixing)]).tolist() for t in zip(*inds)]
+		self.shuffled = [batches[k] for k in torch.randperm(len(batches), generator = generator).tolist()]
 
 	def state_dict(self, batch_idx):
-		return dict(batches = self.batches, batch_idx = batch_idx, epoch = self.epoch)
+		return dict(epoch = self.epoch, batch_idx = batch_idx, shuffled = self.shuffled)
 
 	def load_state_dict(self, state_dict):
-		self.batches, self.batch_idx, self.epoch = map(state_dict.get, ['batches', 'batch_idx', 'epoch'])
-
-#class BucketingSampler(torch.utils.data.Sampler):
-#	def __init__(self, dataset, batch_size = 1, mixing = None):
-#		super().__init__(dataset)
-#		self.dataset = dataset
-#		self.batch_size = batch_size
-#		self.mixing = mixing or ([1 / len(self.dataset.ids)] * len(self.dataset.ids))
-#		self.shuffle(epoch = 0)
-#
-#	def __iter__(self):
-#		for batch in self.shuffled[self.batch_idx:]:
-#			yield batch
-#			self.batch_idx += 1
-#
-#	def __len__(self):
-#		return len(self.shuffled)
-#
-#	def shuffle(self, epoch, batch_idx = 0):
-#		self.epoch = epoch
-#		self.batch_idx = batch_idx
-#		generator = torch.Generator()
-#		generator.manual_seed(self.epoch)
-#
-#		mixing = [int(m * self.batch_size) for m in self.mixing]
-#		chunk = lambda xs, chunks: [xs[i * batch_size : (1 + i) * batch_size] for batch_size in [ len(xs) // chunks ] for i in range(chunks)]
-#		num_batches = int(len(self.dataset.ids[0]) // self.batch_size + 0.5)
-#		inds = [chunk(i, num_batches) for k, subset in enumerate(self.dataset.ids) for i in [sum(map(len, self.dataset.ids[:k])) + torch.arange(len(subset))]]
-#		batches = [torch.cat([i[torch.randperm(len(i), generator = generator)[:m]] for i, m in zip(t, mixing)]).tolist() for t in zip(*inds)]
-#		self.shuffled = [batches[k] for k in torch.randperm(len(batches), generator = generator).tolist()]
-#
-#	def state_dict(self, batch_idx):
-#		return dict(epoch = self.epoch, batch_idx = batch_idx, shuffled = self.shuffled)
-#
-#	def load_state_dict(self, state_dict):
-#		self.epoch, self.batch_idx, self.shuffled = state_dict['epoch'], state_dict['batch_idx'], (state_dict.get('shuffled') or self.shuffled)
+		self.epoch, self.batch_idx, self.shuffled = state_dict['epoch'], state_dict['batch_idx'], (state_dict.get('shuffled') or self.shuffled)
 
 replace2 = lambda s: ''.join(c if i == 0 or c != '2' else s[i - 1] for i, c in enumerate(s))
 replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
@@ -180,7 +151,7 @@ class Labels:
 	def __contains__(self, chr):
 		return chr.lower() in self.alphabet
 
-def collate_fn(batch, pad_to = 128):
+def collate_fn(batch, pad_to = 16):
 	inputs_max_len, targets_max_len = [(1 + max(b[k].shape[-1] for b in batch) // pad_to) * pad_to for k in [0, 1]]
 	sample_inputs, sample_targets, *_ = batch[0]
 	inputs = sample_inputs.new_zeros(len(batch), *(sample_inputs.shape[:-1] + (inputs_max_len,)))

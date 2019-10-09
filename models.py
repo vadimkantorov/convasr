@@ -39,11 +39,6 @@ class BatchNormInplaceFunction(torch.autograd.function.Function):
 			saved_output -= r
 
 		saved_input = torch.batch_norm_elemt(saved_output, saved_output, 1. / invstd, mean, bias, 1. / weight, 0)
-		#saved_input = saved_output; reshape = lambda x: x.view(-1, *[1]*(len(saved_input.shape) - 2))
-		#saved_input -= reshape(bias)
-		#saved_input /= reshape(weight)
-		#saved_input /= reshape(invstd)
-		#saved_input += reshape(mean)
 
 		mean_dy, mean_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(
 			grad_output,
@@ -89,10 +84,7 @@ class ConvBN(nn.ModuleDict):
 	def forward(self, x, residual = []):
 		y = x
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
-			try:
-				y = bn(conv(y), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)] if i == len(self.conv) - 1 else [])
-			except:
-				import IPython; IPython.embed()
+			y = bn(conv(y), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)] if i == len(self.conv) - 1 else [])
 		return y
 
 class InvertedResidual(nn.Module):
