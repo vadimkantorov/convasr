@@ -52,7 +52,7 @@ def traineval(args):
 	if args.val_waveform_transform_debug_dir:
 		args.val_waveform_transform_debug_dir = os.path.join(args.val_waveform_transform_debug_dir, str(val_waveform_transform) if isinstance(val_waveform_transform, transforms.RandomCompose) else val_waveform_transform.__class__.__name__)
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform, max_duration = 20), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = worker_init_fn, timeout = args.timeout) for val_data_path in args.val_data_path}
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, parse_transcript = len(args.train_data_path) > 0, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform, max_duration = 20), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = worker_init_fn, timeout = args.timeout) for val_data_path in args.val_data_path}
 	model = getattr(models, args.model)(num_classes = len(labels), num_input_features = args.num_input_features, dropout = args.dropout)
 	criterion = nn.CTCLoss(blank = labels.blank_idx, reduction = 'none').to(args.device)
 	decoder = decoders.GreedyDecoder(labels) if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
@@ -63,18 +63,16 @@ def traineval(args):
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
 			features_, logits_, ref_tra_ = [], [], []
 			for batch_idx_, (inputs, targets, input_lengths_fraction, target_lengths, filenames, dataset_names) in enumerate(val_data_loader):
-				inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
 				#inputs = models.logfbank(inputs, train_dataset.sample_rate, train_dataset.window_size, train_dataset.window_stride, train_dataset.window, train_dataset.num_input_features, normalize = train_dataset.normalize_features)
 				with torch.no_grad():
-					logits, output_lengths = model(inputs, input_lengths_fraction)
+					logits, output_lengths = model(inputs.to(args.device), input_lengths_fraction.to(args.device))
 					log_probs = F.log_softmax(logits, dim = 1)
-					loss = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths) / target_lengths
+					loss = criterion(log_probs.permute(2, 0, 1), targets.to(args.device), output_lengths, target_lengths.to(args.device)).cpu() / target_lengths if args.train_data_path else [float('inf')] * len(inputs)
 				entropy = models.entropy(log_probs, output_lengths, dim = 1)
 				decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
-				target_strings = labels.idx2str(targets, lengths = target_lengths)
+				target_strings = labels.idx2str(targets, lengths = target_lengths) if args.train_data_path else targets
 				for k, (audio_path, transcript, reference, entropy, loss) in enumerate(zip(filenames, decoded_strings, target_strings, entropy, loss)):
-					if isinstance(transcript, list):
-						transcript = min((metrics.cer(t, reference), t) for t in transcript)[1]
+					transcript, reference = min((metrics.cer(t, r), (t, r)) for r in reference.split(';') for t in (transcript if isinstance(transcript, list) else [transcript]))[1]
 					cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
 					transcript_, reference_ = metrics.align(transcript, reference, prepend_space_to_reference = True) if args.align else (transcript, reference)
 					if args.verbose:
@@ -236,7 +234,7 @@ if __name__ == '__main__':
 	parser.add_argument('--iterations', type = int, default = None)
 	parser.add_argument('--num-input-features', default = 64)
 	parser.add_argument('--dropout', type = float, default = 0.2)
-	parser.add_argument('--train-data-path', nargs = '*')
+	parser.add_argument('--train-data-path', nargs = '*', default = [])
 	parser.add_argument('--train-data-mixing', type = float, nargs = '*')
 	parser.add_argument('--val-data-path', nargs = '+')
 	parser.add_argument('--sample-rate', type = int, default = 8_000)

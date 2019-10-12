@@ -14,7 +14,7 @@ import models
 import transforms
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, sample_rate, window_size, window_stride, window, num_input_features, labels, waveform_transform = None, feature_transform = None, max_duration = None, normalize_features = True, waveform_transform_debug_dir = None):
+	def __init__(self, source_paths, sample_rate, window_size, window_stride, window, num_input_features, labels, parse_transcript = True, waveform_transform = None, feature_transform = None, max_duration = None, normalize_features = True, waveform_transform_debug_dir = None):
 		self.window_stride = window_stride
 		self.window_size = window_size
 		self.sample_rate = sample_rate
@@ -25,8 +25,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.feature_transform = feature_transform
 		self.normalize_features = normalize_features
 		self.waveform_transform_debug_dir = waveform_transform_debug_dir
+		self.parse_transcript = parse_transcript
 
-		self.ids = [list(sorted(((os.path.basename(data_or_path), row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if len(row) <= 2 or (max_duration is not None and float(row[2]) < max_duration)), key = lambda t: t[-1])) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])]
+		self.ids = [list(sorted(((os.path.basename(data_or_path), row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if True and len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path), delimiter=',') if len(row) <= 2 or (max_duration is not None and True and float(row[2]) < max_duration)), key = lambda t: t[-1])) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])]
 
 	def __getitem__(self, index):
 		for ids in self.ids:
@@ -48,7 +49,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		if self.feature_transform is not None:
 			features, sample_rate = self.feature_transform(features, self.sample_rate, dataset_name = dataset_name)
 
-		transcript = self.labels.parse(transcript)
+		transcript = self.labels.parse(transcript, idx = self.parse_transcript)
 		return features, transcript, audio_path, dataset_name
 
 	def __len__(self):
@@ -120,11 +121,14 @@ class Labels:
 		return list(filter(bool, (''.join(c for c in self.preprocess_word(w) if c in self).strip() for w in words)))
 
 	def normalize_text(self, text):
-		return ' '.join(self.find_words(text)).lower().strip() or '*' 
+		return ';'.join(' '.join(self.find_words(part)).lower().strip() for part in text.split(';')) or '*' 
 		#return ''.join(f'<{w}>' for w in self.find_words(text)).upper().strip() or '*' 
 
-	def parse(self, text):
+	def parse(self, text, idx = True):
 		chars = self.normalize_text(text)
+		if not idx:
+			return chars
+
 		chr2idx = {l: i for i, l in enumerate(self.alphabet + self.repeat + self.space + self.blank)}
 		return torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
@@ -152,14 +156,17 @@ class Labels:
 		return chr.lower() in self.alphabet
 
 def collate_fn(batch, pad_to = 16):
-	inputs_max_len, targets_max_len = [(1 + max(b[k].shape[-1] for b in batch) // pad_to) * pad_to for k in [0, 1]]
 	sample_inputs, sample_targets, *_ = batch[0]
+	inputs_max_len, targets_max_len = [(1 + max( (b[k].shape[-1] if torch.is_tensor(b[k]) else len(b[k]))  for b in batch) // pad_to) * pad_to for k in [0, 1]]
 	inputs = sample_inputs.new_zeros(len(batch), *(sample_inputs.shape[:-1] + (inputs_max_len,)))
-	targets = sample_targets.new_zeros(len(batch), *(sample_targets.shape[:-1] + (targets_max_len,)))
+	targets = sample_targets.new_zeros(len(batch), *(sample_targets.shape[:-1] + (targets_max_len,))) if torch.is_tensor(sample_targets) else []
 	input_percentages, target_lengths, audio_paths, dataset_names = [], [], [], []
 	for k, (input, target, audio_path, dataset_name) in enumerate(batch):
 		inputs[k, ..., :input.shape[-1]] = input
-		targets[k, ..., :target.shape[-1]] = target
+		if torch.is_tensor(target):
+			targets[k, ..., :target.shape[-1]] = target
+		else:
+			targets.append(target)
 		input_percentages.append(input.shape[-1] / float(inputs_max_len))
 		target_lengths.append(len(target))
 		audio_paths.append(audio_path)

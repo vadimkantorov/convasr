@@ -1,90 +1,27 @@
 import os
 import math
 import collections
+import functools
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import librosa
 
-class BatchNormInplaceFunction(torch.autograd.function.Function):
-	@staticmethod
-	def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, training, activation, *residual):
-		self.activation = activation
-		assert input.is_contiguous()
-		
-		mean, var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum) if training else (running_mean, running_var) 
-		invstd = var.add(eps).sqrt_().reciprocal_()
-
-		output = torch.batch_norm_elemt(input, input, weight, bias, mean, invstd, 0)
-		for r in residual:
-			output += r
-
-		if self.activation and self.activation[0] == 'leaky_relu':
-			F.leaky_relu_(output, self.activation[1])
-
-		self.save_for_backward(output, weight, bias, mean, invstd, *residual)
-		return output
-
-	@staticmethod
-	def backward(self, grad_output):
-		saved_output, weight, bias, mean, invstd, *residual = self.saved_tensors
-		assert grad_output.is_contiguous() and saved_output.is_contiguous()
-
-		if self.activation and self.activation[0] == 'leaky_relu':
-			mask = torch.ones_like(grad_output).masked_fill_(saved_output < 0, self.activation[1])
-			grad_output *= mask
-			saved_output /= mask
-
-		for r in residual:
-			saved_output -= r
-
-		saved_input = torch.batch_norm_elemt(saved_output, saved_output, 1. / invstd, mean, bias, 1. / weight, 0)
-
-		mean_dy, mean_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(
-			grad_output,
-			saved_input,
-			mean,
-			invstd,
-			weight,
-			self.needs_input_grad[0],
-			self.needs_input_grad[1],
-			self.needs_input_grad[2]
-		)
-
-		grad_input = torch.batch_norm_backward_elemt(
-			grad_output,
-			saved_input,
-			mean,
-			invstd,
-			weight,
-			mean_dy,
-			mean_dy_xmu
-		)
-
-		return (grad_input, grad_weight, grad_bias, None, None, None, None, None, None) + tuple([grad_output] * len(residual))
-
-class BatchNormInplace(nn.modules.batchnorm._BatchNorm):
-	def __init__(self, *args, activation = ('leaky_relu', 0.01), **kwargs):
-		super().__init__(*args, **kwargs)
-		self.activation = activation
-
-	def forward(self, input, residual = []):
-		return BatchNormInplaceFunction.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training, self.activation, *residual)
-
-#TODO: apply conv masking
 class ConvBN(nn.ModuleDict):
-	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual = [], repeat = 1, dilation = 1, separable = False, activation = ('leaky_relu', 0.01)):
+	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual = [], repeat = 1, dilation = 1, separable = False, inplace = False, activation = 'relu', temporal_mask = False):#('leaky_relu', 0.0001)):
 		super().__init__(dict(
 			conv = nn.ModuleList(nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, padding = dilation * max(1, kernel_size // 2), bias = False, groups = groups, dilation = dilation) for i in range(repeat)),
-			bn = nn.ModuleList(BatchNormInplace(num_channels[1], momentum = batch_norm_momentum, activation = activation) for i in range(repeat)),
+			bn = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, activation = activation, inplace = inplace) for i in range(repeat)),
 			conv_residual = nn.ModuleList(nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual),
-			bn_residual = nn.ModuleList(BatchNormInplace(num_channels[1], momentum = batch_norm_momentum, activation = None) for in_channels in num_channels_residual)
+			bn_residual = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, activation = None, inplace = inplace) for in_channels in num_channels_residual)
 		))
+		self.temporal_mask = temporal_mask
 
-	def forward(self, x, residual = []):
+	def forward(self, x, lengths_fraction = None, residual = []):
 		y = x
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
 			y = bn(conv(y), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)] if i == len(self.conv) - 1 else [])
+			y = y * temporal_mask(y, lengths_fraction = lengths_fraction) if (self.temporal_mask and lengths_fraction is not None) else y
 		return y
 
 class InvertedResidual(nn.Module):
@@ -117,78 +54,6 @@ class InvertedResidual(nn.Module):
 		y = y * self.squeeze_and_excite(y)
 		y = self.reduce(y)
 		return y + self.residual(x)
-
-class ReLUDropout(torch.nn.Dropout):
-	def forward(self, input):
-		if self.training and self.p > 0:
-			p1m = 1. - self.p
-			mask = torch.rand_like(input) < p1m
-			mask *= (input > 0)
-			return input.masked_fill_(~mask, 0).div_(p1m) if self.inplace else (input.masked_fill(~mask, 0) / p1m)
-		else:
-			return input.clamp_(min = 0) if self.inplace else input.clamp(min = 0)
-
-class BabbleNet(nn.Sequential):
-	def __init__(self, num_classes, num_input_features, dropout = 0.2, repeat = 1, batch_norm_momentum = 0.1):
-		super().__init__(
-			ConvBN(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2, dropout = dropout),
-
-			ConvBN(kernel_size = 13, num_channels = (768, 192), stride = 1, dropout = dropout),
-			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-			ConvBN(kernel_size = 13, num_channels = (192, 768), stride = 1, dropout = dropout),
-
-			ConvBN(kernel_size = 31, num_channels = (768, 2048), stride = 1, dropout = dropout),
-			ConvBN(kernel_size = 1,  num_channels = (2048, 2048), stride = 1, dropout = dropout),
-			nn.Conv1d(2048, num_classes, kernel_size = 1)
-		)
-
-	def forward(self, x, input_lengths_fraction):
-		logits = super().forward(x)
-		return logits, compute_output_lengths(logits, input_lengths_fraction)
-
-class Wav2LetterRu(nn.Sequential):
-	def __init__(self, num_classes, num_input_features, dropout = 0.2, width_large = 2048, kernel_size_large = 29):
-		super().__init__(
-			ConvBN(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2, dropout = dropout),
-			
-			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-
-			ConvBN(kernel_size = kernel_size_large, num_channels = (768, width_large), stride = 1, dropout = dropout),
-			ConvBN(kernel_size = 1,  num_channels = (width_large, width_large),stride = 1, dropout = dropout),
-			nn.Conv1d(width_large, num_classes, kernel_size = 1, stride = 1)
-		)
-
-	def forward(self, x, input_lengths_fraction):
-		logits = super().forward(x)
-		return logits, compute_output_lengths(logits, input_lengths_fraction)
-
-class Wav2Letter(nn.Sequential):
-	# TODO: use hardtanh 20
-	def __init__(self, num_classes, num_input_features, dilation = 2):
-		super().__init__(
-			ConvBN(kernel_size = 11, num_channels = (num_input_features, 256), stride = 2, padding = 5),
-			ConvBN(kernel_size = 11, num_channels = (256, 256), repeat = 3, padding = 5),
-			ConvBN(kernel_size = 13, num_channels = (256, 384), repeat = 3, padding = 6),
-			ConvBN(kernel_size = 17, num_channels = (384, 512), repeat = 3, padding = 8),
-			ConvBN(kernel_size = 21, num_channels = (512, 640), repeat = 3, padding = 10),
-			ConvBN(kernel_size = 25, num_channels = (640, 768), repeat = 3, padding = 12),
-			ConvBN(kernel_size = 29, num_channels = (768, 896), repeat = 1, padding = 28, dilation = dilation),
-			ConvBN(kernel_size = 1, num_channels = (896, 1024), repeat = 1),
-			nn.Conv1d(1024, num_classes, kernel_size = 1)
-		)
-
-	def forward(self, x, input_lengths_fraction):
-		logits = super().forward(x)
-		return logits, compute_output_lengths(logits, input_lengths_fraction)
 
 class JasperNet(nn.ModuleList):
 	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, dropout = 'ignored', dropout_small = 0.2, dropout_medium = 0.3, dropout_large = 0.4, separable = False):
@@ -231,13 +96,147 @@ class JasperNet(nn.ModuleList):
 		]
 		super().__init__(prologue + backbone + epilogue)
 
-	def forward(self, x, input_lengths_fraction):
+	def forward(self, x, lengths_fraction):
 		residual = []
 		for i, subblock in enumerate(list(self)[:-1]):
-			x = subblock(x, residual = residual if i < len(self) - 3 else [])
+			x = subblock(x, residual = residual if i < len(self) - 3 else [], lengths_fraction = lengths_fraction)
 			residual.append(x)
 		logits = self[-1](x)
-		return logits, compute_output_lengths(logits, input_lengths_fraction)
+		return logits, compute_output_lengths(logits, lengths_fraction)
+
+class Wav2Letter(nn.Sequential):
+	# TODO: use hardtanh 20
+	def __init__(self, num_classes, num_input_features, dilation = 2):
+		super().__init__(
+			ConvBN(kernel_size = 11, num_channels = (num_input_features, 256), stride = 2, padding = 5),
+			ConvBN(kernel_size = 11, num_channels = (256, 256), repeat = 3, padding = 5),
+			ConvBN(kernel_size = 13, num_channels = (256, 384), repeat = 3, padding = 6),
+			ConvBN(kernel_size = 17, num_channels = (384, 512), repeat = 3, padding = 8),
+			ConvBN(kernel_size = 21, num_channels = (512, 640), repeat = 3, padding = 10),
+			ConvBN(kernel_size = 25, num_channels = (640, 768), repeat = 3, padding = 12),
+			ConvBN(kernel_size = 29, num_channels = (768, 896), repeat = 1, padding = 28, dilation = dilation),
+			ConvBN(kernel_size = 1, num_channels = (896, 1024), repeat = 1),
+			nn.Conv1d(1024, num_classes, kernel_size = 1)
+		)
+
+	def forward(self, x, lengths_fraction):
+		logits = super().forward(x)
+		return logits, compute_output_lengths(logits, lengths_fraction)
+
+class Wav2LetterRu(nn.Sequential):
+	def __init__(self, num_classes, num_input_features, dropout = 0.2, width_large = 2048, kernel_size_large = 29):
+		super().__init__(
+			ConvBN(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2, dropout = dropout),
+			
+			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+
+			ConvBN(kernel_size = kernel_size_large, num_channels = (768, width_large), stride = 1, dropout = dropout),
+			ConvBN(kernel_size = 1,  num_channels = (width_large, width_large),stride = 1, dropout = dropout),
+			nn.Conv1d(width_large, num_classes, kernel_size = 1, stride = 1)
+		)
+
+	def forward(self, x, lengths_fraction):
+		logits = super().forward(x)
+		return logits, compute_output_lengths(logits, lengths_fraction)
+
+class BabbleNet(nn.Sequential):
+	def __init__(self, num_classes, num_input_features, dropout = 0.2, repeat = 1, batch_norm_momentum = 0.1):
+		super().__init__(
+			ConvBN(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2, dropout = dropout),
+
+			ConvBN(kernel_size = 13, num_channels = (768, 192), stride = 1, dropout = dropout),
+			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
+			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
+			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
+			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
+			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
+			ConvBN(kernel_size = 13, num_channels = (192, 768), stride = 1, dropout = dropout),
+
+			ConvBN(kernel_size = 31, num_channels = (768, 2048), stride = 1, dropout = dropout),
+			ConvBN(kernel_size = 1,  num_channels = (2048, 2048), stride = 1, dropout = dropout),
+			nn.Conv1d(2048, num_classes, kernel_size = 1)
+		)
+
+	def forward(self, x, lengths_fraction):
+		logits = super().forward(x)
+		return logits, compute_output_lengths(logits, lengths_fraction)
+
+class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
+	def __init__(self, *args, activation = None, inplace = False, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.activation = activation
+		self.inplace = inplace
+
+	def _check_input_dim(self, input):
+		return True
+
+	def forward(self, input, residual = []):
+		assert not (self.inplace and self.activation == 'relu')
+		if self.inplace:
+			y = ActivatedBatchNorm.Function.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training, self.activation, *residual)
+		else:
+			y = super().forward(input) + sum(residual)#(functools.reduce(lambda acc, x: acc.add_(x), residual, torch.zeros_like(residual[0])) if len(residual) > 1 else sum(residual))
+			if self.activation == 'relu':
+				F.relu_(y)
+			elif self.activation and self.activation[0] == 'leaky_relu':
+				F.leaky_relu_(y, self.activation[1])
+		return y
+
+	class Function(torch.autograd.function.Function):
+		@staticmethod
+		def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, training, activation, *residual):
+			self.activation = activation
+			assert input.is_contiguous()
+			
+			mean, var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum) if training else (running_mean, running_var) 
+			invstd = var.add(eps).sqrt_().reciprocal_()
+
+			output = torch.batch_norm_elemt(input, input, weight, bias, mean, invstd, 0)
+			for r in residual:
+				output += r
+
+			if self.activation and self.activation[0] == 'leaky_relu':
+				F.leaky_relu_(output, self.activation[1])
+
+			self.save_for_backward(output, weight, bias, mean, invstd, *residual)
+			return output
+
+		@staticmethod
+		def backward(self, grad_output):
+			saved_output, weight, bias, mean, invstd, *residual = self.saved_tensors
+			assert grad_output.is_contiguous() and saved_output.is_contiguous()
+
+			if self.activation and self.activation[0] == 'leaky_relu':
+				mask = torch.ones_like(grad_output).masked_fill_(saved_output < 0, self.activation[1])
+				grad_output *= mask
+				saved_output /= mask
+
+			for r in residual:
+				saved_output -= r
+
+			saved_input = torch.batch_norm_elemt(saved_output, saved_output, 1. / invstd, mean, bias, 1. / weight, 0)
+			mean_dy, mean_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(grad_output, saved_input, mean, invstd,	weight,	self.needs_input_grad[0], self.needs_input_grad[1],	self.needs_input_grad[2])
+			grad_input = torch.batch_norm_backward_elemt(grad_output, saved_input, mean, invstd, weight, mean_dy, mean_dy_xmu)
+
+			return (grad_input, grad_weight, grad_bias, None, None, None, None, None, None) + tuple([grad_output] * len(residual))
+
+class ReLUDropout(torch.nn.Dropout):
+	def forward(self, input):
+		return relu_dropout(input, p = self.p, training = self.training, inplace = self.inplace)
+
+def relu_dropout(x, p = 0, inplace = False, training = False):
+	if not training or p == 0:
+		return x.clamp_(min = 0) if inplace else x.clamp(min = 0)
+	
+	p1m = 1. - self.p
+	mask = torch.rand_like(x) < p1m
+	mask *= (x > 0)
+	return x.masked_fill_(~mask, 0).mul_(1. / p1m) if inplace else (x.masked_fill(~mask, 0) * (1. / p1m))
 
 def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, dither = 1e-5, preemph = 0.97, normalize = True, eps = 1e-20):
 	signal = normalize_signal(signal)
@@ -260,11 +259,12 @@ def normalize_features(features, dim = -1, eps = 1e-20):
 	return (features - features.mean(dim = dim, keepdim = True)) / (features.std(dim = dim, keepdim = True) + eps)
 
 def temporal_mask(x, lengths = None, lengths_fraction = None):
-	lengths = lengths if lengths is not None else compute_output_lengths(x, lenghts_fraction)
-	mask = torch.ones_like(x)
-	for m, l in zip(mask, lengths):
-		m[..., l:].zero_()
-	return mask
+	lengths = lengths if lengths is not None else compute_output_lengths(x, lengths_fraction)
+	#mask = torch.ones_like(x)
+	#for m, l in zip(mask, lengths):
+	#	m[..., l:].zero_()
+	#return mask
+	return (torch.arange(x.shape[-1], device = x.device, dtype = lengths.dtype).unsqueeze(0) < lengths.unsqueeze(1)).view(x.shape[:1] + (1, )*(len(x.shape) - 2) + x.shape[-1:])
 
 def entropy(log_probs, lengths = None, dim = 1, eps = 1e-9, sum = True, keepdim = False):
 	e = -(log_probs.exp() * log_probs).sum(dim = dim, keepdim = keepdim)
@@ -277,7 +277,7 @@ def margin(log_probs, dim = 1):
 	return torch.sub(*probs.topk(2, dim = dim).values)
 
 def compute_output_lengths(x, lengths_fraction):
-	return (lengths_fraction * x.shape[-1] + 0.5).int()
+	return (lengths_fraction * x.shape[-1]).ceil().int()
 
 def compute_capacity(model):
 	return sum(p.numel() for p in model.parameters())
