@@ -8,10 +8,10 @@ import torch.nn.functional as F
 import librosa
 
 class ConvBN(nn.ModuleDict):
-	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual = [], repeat = 1, dilation = 1, separable = False, inplace = False, activation = 'relu', temporal_mask = False):#('leaky_relu', 0.0001)):
+	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual = [], repeat = 1, dilation = 1, separable = False, inplace = False, activation = 'relu', temporal_mask = True):#('leaky_relu', 0.0001)):
 		super().__init__(dict(
 			conv = nn.ModuleList(nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, padding = dilation * max(1, kernel_size // 2), bias = False, groups = groups, dilation = dilation) for i in range(repeat)),
-			bn = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, activation = activation, inplace = inplace) for i in range(repeat)),
+			bn = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, activation = activation, inplace = inplace, dropout = dropout) for i in range(repeat)),
 			conv_residual = nn.ModuleList(nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual),
 			bn_residual = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, activation = None, inplace = inplace) for in_channels in num_channels_residual)
 		))
@@ -167,22 +167,24 @@ class BabbleNet(nn.Sequential):
 		return logits, compute_output_lengths(logits, lengths_fraction)
 
 class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
-	def __init__(self, *args, activation = None, inplace = False, **kwargs):
+	def __init__(self, *args, activation = None, inplace = False, dropout = 0, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.activation = activation
 		self.inplace = inplace
+		self.dropout = dropout
 
 	def _check_input_dim(self, input):
 		return True
 
 	def forward(self, input, residual = []):
-		assert not (self.inplace and self.activation == 'relu')
+		assert not (self.inplace and self.activation == 'relu') and not (self.training and self.activation == 'leaky_relu' and self.dropout > 0)
+
 		if self.inplace:
 			y = ActivatedBatchNorm.Function.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training, self.activation, *residual)
 		else:
 			y = super().forward(input) + sum(residual)#(functools.reduce(lambda acc, x: acc.add_(x), residual, torch.zeros_like(residual[0])) if len(residual) > 1 else sum(residual))
 			if self.activation == 'relu':
-				F.relu_(y)
+				y = relu_dropout(y, p = self.dropout, inplace = True, training = self.training)
 			elif self.activation and self.activation[0] == 'leaky_relu':
 				F.leaky_relu_(y, self.activation[1])
 		return y

@@ -155,7 +155,7 @@ class Labels:
 	def __contains__(self, chr):
 		return chr.lower() in self.alphabet
 
-def collate_fn(batch, pad_to = 16):
+def collate_fn(batch, pad_to = 128):
 	sample_inputs, sample_targets, *_ = batch[0]
 	inputs_max_len, targets_max_len = [(1 + max( (b[k].shape[-1] if torch.is_tensor(b[k]) else len(b[k]))  for b in batch) // pad_to) * pad_to for k in [0, 1]]
 	inputs = sample_inputs.new_zeros(len(batch), *(sample_inputs.shape[:-1] + (inputs_max_len,)))
