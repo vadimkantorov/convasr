@@ -235,8 +235,8 @@ def relu_dropout(x, p = 0, inplace = False, training = False):
 	
 	p1m = 1. - self.p
 	mask = torch.rand_like(x) < p1m
-	mask *= (x > 0)
-	return x.masked_fill_(~mask, 0).mul_(1. / p1m) if inplace else (x.masked_fill(~mask, 0) * (1. / p1m))
+	mask &= (x > 0)
+	return x.masked_fill_(~mask, 0).div_(p1m) if inplace else (x.masked_fill(~mask, 0) / p1m)
 
 def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, dither = 1e-5, preemph = 0.97, normalize = True, eps = 1e-20):
 	signal = normalize_signal(signal)
