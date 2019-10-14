@@ -235,7 +235,7 @@ def relu_dropout(x, p = 0, inplace = False, training = False):
 	if not training or p == 0:
 		return x.clamp_(min = 0) if inplace else x.clamp(min = 0)
 	
-	p1m = 1. - self.p
+	p1m = 1 - p
 	mask = torch.rand_like(x) < p1m
 	mask &= (x > 0)
 	return x.masked_fill_(~mask, 0).div_(p1m) if inplace else (x.masked_fill(~mask, 0) / p1m)

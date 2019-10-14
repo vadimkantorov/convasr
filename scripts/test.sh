@@ -1,13 +1,12 @@
 python3 train.py $@ \
-  --checkpoint data/experiments/JasperNet_NovoGrad_lr1e-2_wd1e-3_bs80___mask128/checkpoint_epoch02_iter0062500.pt \
-  --val-data-path data/valset11102019/valset11102019.0.csv data/valset11102019/valset11102019.1.csv data/valset11102019/valset11102019._.csv
-
-#  --val-data-path data/mixed_val.csv data/clean_val.csv ../sample_ok/sample_ok.convasr.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv data/tts_dataset/tts_dataset_val.csv data/valset11102019/valset11102019.csv
+  --checkpoint data/experiments/JasperNet_NovoGrad_lr1e-2_wd1e-3_bs80___mask128reludropout/checkpoint_epoch02_iter0055000.pt \
+  --val-data-multiref --val-data-path \
+    data/valset11102019/valset_2019-10-11_0.csv data/valset11102019/valset_2019-10-11_1.csv data/valset11102019/valset_2019-10-11.csv \
+    ../sample_ok/sample_ok.convasr.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv data/tts_dataset/tts_dataset_val.csv \
+    data/mixed_val.csv data/clean_val.csv
 
 #  --val-waveform-transform AddWhiteNoise
 #  --decoder BeamSearchDecoder --beam-width 5000 --decoder-topk 5000 #--lm  chats_05_prune.binary  #charlm/chats_06_noprune_char.binary # #--lm data/ru_wiyalen_no_punkt.arpa.binary 
-
-
 
 # --decoder BeamSearchDecoder --beam-width 20000 --lm chats_03_prune.binary #chats.binary #
 
@@ -16,8 +15,6 @@ python3 train.py $@ \
 #  --val-waveform-transform MixExternalNoise --val-waveform-transform-prob 1 --val-waveform-transform-args data/sample_ok.noise.csv --val-waveform-transform-debug-dir data/debug_aug \
 
 #  --val-waveform-transform SOXAWN --val-waveform-transform-debug-dir data/debug_aug \
-
-
 
 #  data/adapted.csv 
 #  --val-batch-size 40 --val-data-path  ../open_stt_splits/splits/clean_val.csv ../open_stt_splits/splits/mixed_val.csv ../sample_ok/sample_ok.convasr.csv \
