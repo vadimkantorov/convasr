@@ -79,13 +79,13 @@ for audio_path in audio_paths:
 					segments.append([begin, end, replaceblankrepeat(transcript[b:e]), r['reference'], channel])
 	
 		html = open(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), 'w')
-		html.write('<html><head><meta charset="UTF-8"><style>.channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4}</style></head><body>')
+		html.write('<html><head><meta charset="UTF-8"><style>.channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
 		html.write(f'<h4>{os.path.basename(audio_path)}</h4>')
 		encoded = base64.b64encode(open(audio_path, 'rb').read()).decode('utf-8').replace('\n', '')
 		html.write(f'<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>')
-		html.write(f'<h3 class="channel0">transcript #0:<span></span></h3><h3 class="channel1">transcript #1:<span></span></h3><h3 class="channel0 reference">reference #0:<span></span></h3><h3 class="channel1 reference">reference #1:<span></span></h3> <hr/>')
-		html.write('<table><thead><tr><th>#</th><th>begin</th><th>end</th><th>transcript</th><th>reference</th></tr></thead><tbody>')
-		html.write(''.join(f'<tr class="channel{c}"><td><strong>{c}</strong></td><td>{b:.02f}</td><td>{e:.02f}</td><td><a onclick="play({b:.02f}); return false;" href="#" target="_blank">{t}</a></td><td>{r}</td></tr>' for b, e, t, r, c in sorted(segments)))
+		html.write(f'<h3 class="channel0 channel">transcript #0:<span></span></h3><h3 class="channel1 channel">transcript #1:<span></span></h3><h3 class="channel0 reference channel">reference #0:<span></span></h3><h3 class="channel1 reference channel">reference #1:<span></span></h3> <hr/>')
+		html.write('<table><thead><th>begin</th><th>end</th><th>transcript</th></tr></thead><tbody>')
+		html.write(''.join(f'<tr class="channel{c}"><td>{b:.02f}</td><td>{e:.02f}</td><td><a onclick="play({b:.02f}); return false;" href="#" target="_blank">{t}</a></td>' + (f'<td>{r}</td></tr><tr class="channel{c} reference"><td></td><td></td><td>{r}</td></tr>' if r else '') for b, e, t, r, c in sorted(segments)))
 		html.write('</tbody></table>')
 		html.write('''<script>
 			const segments = SEGMENTS;
