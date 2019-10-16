@@ -8,52 +8,49 @@ import torch.nn.functional as F
 import librosa
 
 class ConvBN(nn.ModuleDict):
-	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual = [], repeat = 1, dilation = 1, separable = False, inplace = False, activation = 'relu', temporal_mask = True):#('leaky_relu', 0.0001)):
+	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual = [], repeat = 1, dilation = 1, separable = False, temporal_mask = True, inplace = True, activation = ('leaky_relu', 0.01)):
 		super().__init__(dict(
 			conv = nn.ModuleList(nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, padding = dilation * max(1, kernel_size // 2), bias = False, groups = groups, dilation = dilation) for i in range(repeat)),
-			bn = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, activation = activation, inplace = inplace, dropout = dropout) for i in range(repeat)),
+			bn = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, activation = activation, inplace = inplace, dropout = 0 if inplace else dropout) for i in range(repeat)),
 			conv_residual = nn.ModuleList(nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual),
 			bn_residual = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, activation = None, inplace = inplace) for in_channels in num_channels_residual)
 		))
 		self.temporal_mask = temporal_mask
 
 	def forward(self, x, lengths_fraction = None, residual = []):
+		#expansion = 1, squeeze_excitation_ratio = 0.25):
+		#in_channels, out_channels = num_channels
+		#exp_channels = in_channels * expansion if not simple else out_channels
+		#se_channels = int(exp_channels * squeeze_excitation_ratio)
+		#groups = exp_channels if (separable and not simple) else 1
+
+		#self.simple = simple
+		#self.expand = ConvBN(num_channels = (in_channels, exp_channels), stride = stride, batch_norm_momentum = batch_norm_momentum) if not simple else nn.Identity()
+		#self.conv = ConvBN(kernel_size = kernel_size, num_channels = (exp_channels if not simple else in_channels, exp_channels), stride = stride, groups = groups, dropout = dropout, batch_norm_momentum = batch_norm_momentum)
+		#self.squeeze_and_excite = nn.Sequential(
+		#	nn.AdaptiveAvgPool1d(1),
+		#	nn.Conv1d(exp_channels, se_channels, kernel_size = 1),
+		#	nn.ReLU(inplace = True),
+		#	nn.Conv1d(se_channels, exp_channels, kernel_size = 1),
+		#	nn.Sigmoid()
+		#) if not simple else nn.Identity()
+		#self.reduce = ConvBN(num_channels = (exp_channels, out_channel), batch_norm_momentum = batch_norm_momentum, relu_dropout = False)
+		#self.residual = ConvBN(num_channels = (in_channels, out_channels), batch_norm_momentum = batch_norm_momentum, relu_dropout = False) if residual and (not simple or in_channels != out_channels) else nn.Identity() if residual else None
+	
+		#def forward(self, x):
+		#if self.simple:
+		#	return self.reduce(self.conv(x)) + self.residual(x) if self.residual is not None else self.conv(x)
+		#y = self.expand(x)
+		#y = self.conv(y)
+		#y = y * self.squeeze_and_excite(y)
+		#y = self.reduce(y)
+		#return y + self.residual(x)
+		
 		y = x
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
 			y = bn(conv(y), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)] if i == len(self.conv) - 1 else [])
 			y = y * temporal_mask(y, lengths_fraction = lengths_fraction) if (self.temporal_mask and lengths_fraction is not None) else y
 		return y
-
-class InvertedResidual(nn.Module):
-	def __init__(self, kernel_size, num_channels, stride = 1, dilation = 1, dropout = 0.2, expansion = 1, squeeze_excitation_ratio = 0.25, batch_norm_momentum = 0.1, separable = True, simple = False, residual = True):
-		super().__init__()
-		in_channels, out_channels = num_channels
-		exp_channels = in_channels * expansion if not simple else out_channels
-		se_channels = int(exp_channels * squeeze_excitation_ratio)
-		groups = exp_channels if (separable and not simple) else 1
-
-		self.simple = simple
-		self.expand = ConvBN(num_channels = (in_channels, exp_channels), stride = stride, batch_norm_momentum = batch_norm_momentum) if not simple else nn.Identity()
-		self.conv = ConvBN(kernel_size = kernel_size, num_channels = (exp_channels if not simple else in_channels, exp_channels), stride = stride, groups = groups, dropout = dropout, batch_norm_momentum = batch_norm_momentum)
-		self.squeeze_and_excite = nn.Sequential(
-			nn.AdaptiveAvgPool1d(1),
-			nn.Conv1d(exp_channels, se_channels, kernel_size = 1),
-			nn.ReLU(inplace = True),
-			nn.Conv1d(se_channels, exp_channels, kernel_size = 1),
-			nn.Sigmoid()
-		) if not simple else nn.Identity()
-		self.reduce = ConvBN(num_channels = (exp_channels, out_channel), batch_norm_momentum = batch_norm_momentum, relu_dropout = False)
-		self.residual = ConvBN(num_channels = (in_channels, out_channels), batch_norm_momentum = batch_norm_momentum, relu_dropout = False) if residual and (not simple or in_channels != out_channels) else nn.Identity() if residual else None
-	
-	def forward(self, x):
-		if self.simple:
-			return self.reduce(self.conv(x)) + self.residual(x) if self.residual is not None else self.conv(x)
-
-		y = self.expand(x)
-		y = self.conv(y)
-		y = y * self.squeeze_and_excite(y)
-		y = self.reduce(y)
-		return y + self.residual(x)
 
 class JasperNet(nn.ModuleList):
 	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, dropout = 'ignored', dropout_small = 0.2, dropout_medium = 0.3, dropout_large = 0.4, separable = False):
@@ -177,16 +174,17 @@ class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 		return True
 
 	def forward(self, input, residual = []):
-		assert not (self.inplace and self.activation == 'relu') and not (self.training and self.activation == 'leaky_relu' and self.dropout > 0)
+		assert not (self.inplace and self.activation == 'relu')
 
 		if self.inplace:
 			y = ActivatedBatchNorm.Function.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training, self.activation, *residual)
+			y = F.dropout(y, p = self.dropout, training = training)
 		else:
 			y = super().forward(input) + sum(residual)#(functools.reduce(lambda acc, x: acc.add_(x), residual, torch.zeros_like(residual[0])) if len(residual) > 1 else sum(residual))
 			if self.activation == 'relu':
 				y = relu_dropout(y, p = self.dropout, inplace = True, training = self.training)
 			elif self.activation and self.activation[0] == 'leaky_relu':
-				F.leaky_relu_(y, self.activation[1])
+				y = F.leaky_relu_(y, self.activation[1])
 		return y
 
 	class Function(torch.autograd.function.Function):
@@ -227,10 +225,6 @@ class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 
 			return (grad_input, grad_weight, grad_bias, None, None, None, None, None, None) + tuple([grad_output] * len(residual))
 
-class ReLUDropout(torch.nn.Dropout):
-	def forward(self, input):
-		return relu_dropout(input, p = self.p, training = self.training, inplace = self.inplace)
-
 def relu_dropout(x, p = 0, inplace = False, training = False):
 	if not training or p == 0:
 		return x.clamp_(min = 0) if inplace else x.clamp(min = 0)
@@ -238,7 +232,8 @@ def relu_dropout(x, p = 0, inplace = False, training = False):
 	p1m = 1 - p
 	mask = torch.rand_like(x) < p1m
 	mask &= (x > 0)
-	return x.masked_fill_(~mask, 0).div_(p1m) if inplace else (x.masked_fill(~mask, 0) / p1m)
+	mask.logical_not_()
+	return x.masked_fill_(mask, 0).div_(p1m) if inplace else (x.masked_fill(mask, 0) / p1m)
 
 def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, dither = 1e-5, preemph = 0.97, normalize = True, eps = 1e-20):
 	signal = normalize_signal(signal)
@@ -262,10 +257,6 @@ def normalize_features(features, dim = -1, eps = 1e-20):
 
 def temporal_mask(x, lengths = None, lengths_fraction = None):
 	lengths = lengths if lengths is not None else compute_output_lengths(x, lengths_fraction)
-	#mask = torch.ones_like(x)
-	#for m, l in zip(mask, lengths):
-	#	m[..., l:].zero_()
-	#return mask
 	return (torch.arange(x.shape[-1], device = x.device, dtype = lengths.dtype).unsqueeze(0) < lengths.unsqueeze(1)).view(x.shape[:1] + (1, )*(len(x.shape) - 2) + x.shape[-1:])
 
 def entropy(log_probs, lengths = None, dim = 1, eps = 1e-9, sum = True, keepdim = False):

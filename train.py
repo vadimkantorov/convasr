@@ -62,16 +62,15 @@ def traineval(args):
 		model.eval()
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
 			features_, logits_, ref_tra_ = [], [], []
-			for batch_idx_, (inputs, targets, input_lengths_fraction, target_lengths, filenames, dataset_names) in enumerate(val_data_loader):
+			for batch_idx_, (inputs, targets, input_lengths_fraction, target_lengths, references, filenames, dataset_names) in enumerate(val_data_loader):
 				#inputs = models.logfbank(inputs, train_dataset.sample_rate, train_dataset.window_size, train_dataset.window_stride, train_dataset.window, train_dataset.num_input_features, normalize = train_dataset.normalize_features)
 				with torch.no_grad():
 					logits, output_lengths = model(inputs.to(args.device), input_lengths_fraction.to(args.device))
 					log_probs = F.log_softmax(logits, dim = 1)
 					loss = criterion(log_probs.permute(2, 0, 1), targets.to(args.device), output_lengths, target_lengths.to(args.device)).cpu() / target_lengths if args.train_data_path else [float('inf')] * len(inputs)
 				entropy = models.entropy(log_probs, output_lengths, dim = 1)
-				decoded_strings = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
-				target_strings = labels.idx2str(targets, lengths = target_lengths) if args.train_data_path else targets
-				for k, (audio_path, transcript, reference, entropy, loss) in enumerate(zip(filenames, decoded_strings, target_strings, entropy, loss)):
+				decoded = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
+				for k, (audio_path, transcript, reference, entropy, loss) in enumerate(zip(filenames, decoded, references, entropy, loss)):
 					transcript, reference = min((metrics.cer(t, r), (t, r)) for r in reference.split(';') for t in (transcript if isinstance(transcript, list) else [transcript]))[1]
 					cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
 					transcript_, reference_ = metrics.align(transcript, reference, prepend_space_to_reference = True) if args.align else (transcript, reference)
@@ -155,11 +154,11 @@ def traineval(args):
 
 	tic, toc_fwd, toc_bwd = time.time(), time.time(), time.time()
 	loss_avg, entropy_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0, 0.0
-	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1./K) * avg
+	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1. / K) * avg
 	for epoch in range(sampler.epoch, args.epochs):
 		model.train()
 		time_epoch_start = time.time()
-		for batch_idx, (inputs, targets, input_lengths_fraction, target_lengths, filenames, dataset_names) in enumerate(train_data_loader, start = sampler.batch_idx):
+		for batch_idx, (inputs, targets, input_lengths_fraction, target_lengths, *_) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc = time.time()
 			inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
 			#inputs = models.logfbank(inputs, train_dataset.sample_rate, train_dataset.window_size, train_dataset.window_stride, train_dataset.window, train_dataset.num_input_features, normalize = train_dataset.normalize_features)

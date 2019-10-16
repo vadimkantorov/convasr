@@ -32,7 +32,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	def __getitem__(self, index):
 		for ids in self.ids:
 			if index < len(ids):
-				dataset_name, audio_path, transcript, duration = ids[index]
+				dataset_name, audio_path,reference, duration = ids[index]
 				break
 			else:
 				index -= len(ids)
@@ -49,8 +49,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		if self.feature_transform is not None:
 			features, sample_rate = self.feature_transform(features, self.sample_rate, dataset_name = dataset_name)
 
-		transcript = self.labels.parse(transcript, idx = self.parse_transcript)
-		return features, transcript, audio_path, dataset_name
+		reference_normalized, targets = self.labels.parse(reference)
+		return features, targets, reference_normalized, audio_path, dataset_name
 
 	def __len__(self):
 		return sum(map(len, self.ids))
@@ -124,14 +124,11 @@ class Labels:
 		return ';'.join(' '.join(self.find_words(part)).lower().strip() for part in text.split(';')) or '*' 
 		#return ''.join(f'<{w}>' for w in self.find_words(text)).upper().strip() or '*' 
 
-	def parse(self, text, idx = True):
-		chars = self.normalize_text(text)
-		if not idx:
-			return chars
-
-		chars = chars.split(';')[0]
+	def parse(self, text):
+		normalized = self.normalize_text(text)
+		chars = normalized.split(';')[0]
 		chr2idx = {l: i for i, l in enumerate(self.alphabet + self.repeat + self.space + self.blank)}
-		return torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
+		return normalized, torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
 	def normalize_transcript(self, text):
 		return functools.reduce(lambda text, func: func(text), [replacespace, replace2, replace22, replacestar, str.strip], text)
@@ -161,18 +158,16 @@ def collate_fn(batch, pad_to = 128):
 	inputs_max_len, targets_max_len = [(1 + max( (b[k].shape[-1] if torch.is_tensor(b[k]) else len(b[k]))  for b in batch) // pad_to) * pad_to for k in [0, 1]]
 	inputs = sample_inputs.new_zeros(len(batch), *(sample_inputs.shape[:-1] + (inputs_max_len,)))
 	targets = sample_targets.new_zeros(len(batch), *(sample_targets.shape[:-1] + (targets_max_len,))) if torch.is_tensor(sample_targets) else []
-	input_percentages, target_lengths, audio_paths, dataset_names = [], [], [], []
-	for k, (input, target, audio_path, dataset_name) in enumerate(batch):
+	input_percentages, target_lengths, transcripts, audio_paths, dataset_names = [], [], [], [], []
+	for k, (input, target, transcript, audio_path, dataset_name) in enumerate(batch):
 		inputs[k, ..., :input.shape[-1]] = input
-		if torch.is_tensor(target):
-			targets[k, ..., :target.shape[-1]] = target
-		else:
-			targets.append(target)
-		input_percentages.append(input.shape[-1] / float(inputs_max_len))
+		targets[k, ..., :target.shape[-1]] = target
+		input_percentages.append(input.shape[-1] / float(inputs.shape[-1]))
 		target_lengths.append(len(target))
+		transcripts.append(transcript)
 		audio_paths.append(audio_path)
 		dataset_names.append(dataset_name)
-	return inputs, targets, torch.FloatTensor(input_percentages), torch.IntTensor(target_lengths), audio_paths, dataset_names
+	return inputs, targets, torch.FloatTensor(input_percentages), torch.IntTensor(target_lengths), transcripts, audio_paths, dataset_names
 
 def read_wav(path, normalize = True, stereo = False, sample_rate = None, max_duration = None):
 	sample_rate_, signal = scipy.io.wavfile.read(path)
