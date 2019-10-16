@@ -194,7 +194,7 @@ class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 			assert input.is_contiguous()
 			
 			mean, var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum) if training else (running_mean, running_var) 
-			invstd = var.add(eps).sqrt_().reciprocal_()
+			invstd = (var + eps).sqrt_().reciprocal_()
 
 			output = torch.batch_norm_elemt(input, input, weight, bias, mean, invstd, 0)
 			for r in residual:
