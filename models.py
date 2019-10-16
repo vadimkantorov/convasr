@@ -178,7 +178,7 @@ class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 
 		if self.inplace:
 			y = ActivatedBatchNorm.Function.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training, self.activation, *residual)
-			y = F.dropout(y, p = self.dropout, training = training)
+			y = F.dropout(y, p = self.dropout, training = self.training)
 		else:
 			y = super().forward(input) + sum(residual)#(functools.reduce(lambda acc, x: acc.add_(x), residual, torch.zeros_like(residual[0])) if len(residual) > 1 else sum(residual))
 			if self.activation == 'relu':
