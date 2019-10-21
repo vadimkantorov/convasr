@@ -1,9 +1,8 @@
 python3 train.py $@ \
-  --checkpoint data/experiments/JasperNet_NovoGrad_lr1e-2_wd1e-3_bs80___mask128reludropout/checkpoint_epoch02_iter0055000.pt \
-  --val-data-multiref --val-data-path \
-    data/valset11102019/valset_2019-10-11_0.csv data/valset11102019/valset_2019-10-11_1.csv data/valset11102019/valset_2019-10-11.csv \
-    ../sample_ok/sample_ok.convasr.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv data/tts_dataset/tts_dataset_val.csv \
-    data/mixed_val.csv data/clean_val.csv
+  --checkpoint data/experiments/JasperNet_NovoGrad_lr1e-2_wd1e-3_bs80___mask128leakyreluinplace/checkpoint_epoch02_iter0060000.pt \
+  --val-data-multiref --val-data-path ../sample_ok/sample_ok.convasr.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv data/tts_dataset/tts_dataset_val.csv #\
+    #data/valset11102019/valset_2019-10-11_0.csv data/valset11102019/valset_2019-10-11_1.csv data/valset11102019/valset_2019-10-11.csv \
+    #data/mixed_val.csv data/clean_val.csv
 
 #  --val-waveform-transform AddWhiteNoise
 #  --decoder BeamSearchDecoder --beam-width 5000 --decoder-topk 5000 #--lm  chats_05_prune.binary  #charlm/chats_06_noprune_char.binary # #--lm data/ru_wiyalen_no_punkt.arpa.binary 

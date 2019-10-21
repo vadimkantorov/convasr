@@ -14,7 +14,7 @@ import models
 import transforms
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, sample_rate, window_size, window_stride, window, num_input_features, labels, parse_transcript = True, waveform_transform = None, feature_transform = None, max_duration = None, normalize_features = True, waveform_transform_debug_dir = None):
+	def __init__(self, source_paths, sample_rate, window_size, window_stride, window, num_input_features, labels, waveform_transform = None, feature_transform = None, max_duration = None, normalize_features = True, waveform_transform_debug_dir = None):
 		self.window_stride = window_stride
 		self.window_size = window_size
 		self.sample_rate = sample_rate
@@ -25,7 +25,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.feature_transform = feature_transform
 		self.normalize_features = normalize_features
 		self.waveform_transform_debug_dir = waveform_transform_debug_dir
-		self.parse_transcript = parse_transcript
 
 		self.ids = [list(sorted(((os.path.basename(data_or_path), row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if True and len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path), delimiter=',') if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1])) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])]
 
@@ -84,16 +83,11 @@ class BucketingSampler(torch.utils.data.Sampler):
 		batches = [torch.cat([i[torch.randperm(len(i), generator = generator)[:m]] for i, m in zip(t, mixing)]).tolist() for t in zip(*inds)]
 		self.shuffled = [batches[k] for k in torch.randperm(len(batches), generator = generator).tolist()]
 
-	def state_dict(self, batch_idx):
-		return dict(epoch = self.epoch, batch_idx = batch_idx, shuffled = self.shuffled)
+	def state_dict(self):
+		return dict(epoch = self.epoch, batch_idx = self.batch_idx, shuffled = self.shuffled)
 
 	def load_state_dict(self, state_dict):
 		self.epoch, self.batch_idx, self.shuffled = state_dict['epoch'], state_dict['batch_idx'], (state_dict.get('shuffled') or self.shuffled)
-
-replace2 = lambda s: ''.join(c if i == 0 or c != '2' else s[i - 1] for i, c in enumerate(s))
-replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
-replacestar = lambda s: s.replace('*', '')
-replacespace = lambda s: s.replace('<', ' ').replace('>', ' ')
 
 class Labels:
 	blank = '|'
@@ -103,13 +97,14 @@ class Labels:
 	repeat = '2'
 
 	def __init__(self, lang, bpe = None):
+		self.lang = lang
 		self.preprocess_text = lang.preprocess_text
 		self.preprocess_word = lang.preprocess_word
 		self.bpe = None
 		if bpe:
 			self.bpe = sentencepiece.SentencePieceProcessor()
 			self.bpe.Load(bpe)
-		self.alphabet = lang.LABELS.lower()
+		self.alphabet = self.lang.LABELS.lower()
 		self.blank_idx = len(self) - 1
 		self.space_idx = self.blank_idx - 1
 		self.repeat_idx = self.blank_idx - 2
@@ -130,11 +125,17 @@ class Labels:
 		chr2idx = {l: i for i, l in enumerate(self.alphabet + self.repeat + self.space + self.blank)}
 		return normalized, torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
-	def normalize_transcript(self, text):
-		return functools.reduce(lambda text, func: func(text), [replacespace, replace2, replace22, replacestar, str.strip], text)
+	def postprocess_transcript(self, text, phonetic_replace_groups = []):
+		replace2 = lambda s: ''.join(c if i == 0 or c != '2' else s[i - 1] for i, c in enumerate(s))
+		replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
+		replacestar = lambda s: s.replace('*', '')
+		replacespace = lambda s: s.replace('<', ' ').replace('>', ' ')
+		replacephonetic = lambda s: s.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g.lower()})
+
+		return functools.reduce(lambda text, func: func(text), [replacespace, replace2, replace22, replacestar, replacephonetic, str.strip], text)
 
 	def idx2str(self, idx, lengths = None, blank = None, repeat = None):
-		i2s_ = lambda i: '' if len(i) == 0 else self.normalize_transcript(''.join(map(self.__getitem__, i)) if self.bpe is None else self.bpe.DecodeIds(i)) if not blank else ''.join(blank if idx == self.blank_idx else self[idx] if k == 0 or idx == self.space_idx or idx != i[k - 1] else (repeat if repeat is not None else self[idx]) for k, idx in enumerate(i))
+		i2s_ = lambda i: '' if len(i) == 0 else ''.join(map(self.__getitem__, i)) if self.bpe is None else self.bpe.DecodeIds(i) if not blank else ''.join(blank if idx == self.blank_idx else self[idx] if k == 0 or idx == self.space_idx or idx != i[k - 1] else (repeat if repeat is not None else self[idx]) for k, idx in enumerate(i))
 		i2s = lambda i: i2s_(i) if len(i) == 0 or not isinstance(i[0], list) else list(map(i2s, i))
 		if torch.is_tensor(idx):
 			idx = idx.tolist()

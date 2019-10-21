@@ -42,7 +42,7 @@ RUN conda install -y -c pytorch magma-cuda100
 RUN conda install -y pytorch cudatoolkit=10.0 -c pytorch
 RUN pip install torchaudio -f https://download.pytorch.org/whl/torch_stable.html
 
-RUN pip install future cython librosa python-levenshtein tqdm wget tensorboard==1.14.0
+RUN pip install future cython librosa python-levenshtein tqdm wget tensorboard
 RUN pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex
 RUN pip install git+https://github.com/parlance/ctcdecode
 RUN pip install awscli

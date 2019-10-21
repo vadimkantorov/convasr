@@ -7,45 +7,30 @@ import torch.nn as nn
 import torch.nn.functional as F
 import librosa
 
-class ConvBN(nn.ModuleDict):
-	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual = [], repeat = 1, dilation = 1, separable = False, temporal_mask = True, inplace = True, activation = ('leaky_relu', 0.01)):
-		super().__init__(dict(
-			conv = nn.ModuleList(nn.Conv1d(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, padding = dilation * max(1, kernel_size // 2), bias = False, groups = groups, dilation = dilation) for i in range(repeat)),
-			bn = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, activation = activation, inplace = inplace, dropout = 0 if inplace else dropout) for i in range(repeat)),
-			conv_residual = nn.ModuleList(nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual),
-			bn_residual = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, activation = None, inplace = inplace) for in_channels in num_channels_residual)
-		))
+class ConvSamePadding(nn.Sequential):
+	def __init__(self, in_channels, out_channels, kernel_size, stride, dilation, bias, groups, separable):
+		padding = dilation * max(1, kernel_size // 2)
+		if separable:
+			assert dilation == 1
+			super().__init__(
+				nn.Conv1d(in_channels, out_channels, kernel_size = kernel_size, stride = stride, padding = padding, dgroups = in_channels, bias = bias),
+				nn.Conv1d(out_channels, out_channels, kernel_size = 1, bias = bias)
+			)
+		else:
+			super().__init__(
+				nn.Conv1d(in_channels, out_channels, kernel_size = kernel_size, stride = stride, padding = padding, dilation = dilation, groups = groups, bias = bias)
+			)
+
+class ConvBN(nn.Module):
+	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual = [], repeat = 1, dilation = 1, separable = False, temporal_mask = True, inplace = False, nonlinearity = 'relu'):
+		super().__init__()
+		self.conv = nn.ModuleList(ConvSamePadding(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, separable = separable, bias = False, groups = groups) for i in range(repeat))
+		self.bn = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, nonlinearity = nonlinearity, inplace = inplace, dropout = dropout) for i in range(repeat))
+		self.conv_residual = nn.ModuleList(nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual)
+		self.bn_residual = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, nonlinearity = None, inplace = inplace) for in_channels in num_channels_residual)
 		self.temporal_mask = temporal_mask
 
 	def forward(self, x, lengths_fraction = None, residual = []):
-		#expansion = 1, squeeze_excitation_ratio = 0.25):
-		#in_channels, out_channels = num_channels
-		#exp_channels = in_channels * expansion if not simple else out_channels
-		#se_channels = int(exp_channels * squeeze_excitation_ratio)
-		#groups = exp_channels if (separable and not simple) else 1
-
-		#self.simple = simple
-		#self.expand = ConvBN(num_channels = (in_channels, exp_channels), stride = stride, batch_norm_momentum = batch_norm_momentum) if not simple else nn.Identity()
-		#self.conv = ConvBN(kernel_size = kernel_size, num_channels = (exp_channels if not simple else in_channels, exp_channels), stride = stride, groups = groups, dropout = dropout, batch_norm_momentum = batch_norm_momentum)
-		#self.squeeze_and_excite = nn.Sequential(
-		#	nn.AdaptiveAvgPool1d(1),
-		#	nn.Conv1d(exp_channels, se_channels, kernel_size = 1),
-		#	nn.ReLU(inplace = True),
-		#	nn.Conv1d(se_channels, exp_channels, kernel_size = 1),
-		#	nn.Sigmoid()
-		#) if not simple else nn.Identity()
-		#self.reduce = ConvBN(num_channels = (exp_channels, out_channel), batch_norm_momentum = batch_norm_momentum, relu_dropout = False)
-		#self.residual = ConvBN(num_channels = (in_channels, out_channels), batch_norm_momentum = batch_norm_momentum, relu_dropout = False) if residual and (not simple or in_channels != out_channels) else nn.Identity() if residual else None
-	
-		#def forward(self, x):
-		#if self.simple:
-		#	return self.reduce(self.conv(x)) + self.residual(x) if self.residual is not None else self.conv(x)
-		#y = self.expand(x)
-		#y = self.conv(y)
-		#y = y * self.squeeze_and_excite(y)
-		#y = self.reduce(y)
-		#return y + self.residual(x)
-		
 		y = x
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
 			y = bn(conv(y), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)] if i == len(self.conv) - 1 else [])
@@ -56,7 +41,7 @@ class JasperNet(nn.ModuleList):
 	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, dropout = 'ignored', dropout_small = 0.2, dropout_medium = 0.3, dropout_large = 0.4, separable = False):
 		dropout_small = dropout_small if dropout != 0 else 0
 		dropout_medium = dropout_medium if dropout != 0 else 0
-		#dropout_large = dropout_large if dropout != 0 else 0
+		dropout_large = dropout_large if dropout != 0 else 0
 
 		prologue = [ConvBN(kernel_size = 11, num_channels = (num_input_features, 256), dropout = dropout_small, stride = 2)]
 		
@@ -164,33 +149,37 @@ class BabbleNet(nn.Sequential):
 		return logits, compute_output_lengths(logits, lengths_fraction)
 
 class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
-	def __init__(self, *args, activation = None, inplace = False, dropout = 0, **kwargs):
+	def __init__(self, *args, nonlinearity = None, inplace = False, dropout = 0, squeeze_and_excite = None, **kwargs):
 		super().__init__(*args, **kwargs)
-		self.activation = activation
+		self.nonlinearity = nonlinearity
 		self.inplace = inplace
 		self.dropout = dropout
+		self.squeeze_and_excite = squeeze_and_excite
 
 	def _check_input_dim(self, input):
 		return True
 
 	def forward(self, input, residual = []):
-		assert not (self.inplace and self.activation == 'relu')
+		assert not (self.inplace and self.nonlinearity == 'relu')
 
 		if self.inplace:
-			y = ActivatedBatchNorm.Function.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training, self.activation, *residual)
+			y = ActivatedBatchNorm.Function.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training, self.nonlinearity, *residual)
 			y = F.dropout(y, p = self.dropout, training = self.training)
 		else:
-			y = super().forward(input) + sum(residual)#(functools.reduce(lambda acc, x: acc.add_(x), residual, torch.zeros_like(residual[0])) if len(residual) > 1 else sum(residual))
-			if self.activation == 'relu':
+			y = super().forward(input)
+			s = y * (self.squeeze_and_excite(y) if self.squeeze_and_excite is not None else 1)
+			y = y + sum(residual) #(functools.reduce(lambda acc, x: acc.add_(x), residual, torch.zeros_like(residual[0])) if len(residual) > 1 else sum(residual))
+			if self.nonlinearity == 'relu':
 				y = relu_dropout(y, p = self.dropout, inplace = True, training = self.training)
-			elif self.activation and self.activation[0] == 'leaky_relu':
-				y = F.leaky_relu_(y, self.activation[1])
+			elif self.nonlinearity and self.nonlinearity[0] == 'leaky_relu':
+				y = F.leaky_relu_(y, self.nonlinearity[1])
+				y = F.dropout(y, p = self.dropout, training = self.training)
 		return y
 
 	class Function(torch.autograd.function.Function):
 		@staticmethod
-		def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, training, activation, *residual):
-			self.activation = activation
+		def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, training, nonlinearity, *residual):
+			self.nonlinearity = nonlinearity
 			assert input.is_contiguous()
 			
 			mean, var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum) if training else (running_mean, running_var) 
@@ -200,8 +189,8 @@ class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 			for r in residual:
 				output += r
 
-			if self.activation and self.activation[0] == 'leaky_relu':
-				F.leaky_relu_(output, self.activation[1])
+			if self.nonlinearity and self.nonlinearity[0] == 'leaky_relu':
+				F.leaky_relu_(output, self.nonlinearity[1])
 
 			self.save_for_backward(output, weight, bias, mean, invstd, *residual)
 			return output
@@ -211,8 +200,8 @@ class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 			saved_output, weight, bias, mean, invstd, *residual = self.saved_tensors
 			assert grad_output.is_contiguous() and saved_output.is_contiguous()
 
-			if self.activation and self.activation[0] == 'leaky_relu':
-				mask = torch.ones_like(grad_output).masked_fill_(saved_output < 0, self.activation[1])
+			if self.nonlinearity and self.nonlinearity[0] == 'leaky_relu':
+				mask = torch.ones_like(grad_output).masked_fill_(saved_output < 0, self.nonlinearity[1])
 				grad_output *= mask
 				saved_output /= mask
 
@@ -224,6 +213,17 @@ class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 			grad_input = torch.batch_norm_backward_elemt(grad_output, saved_input, mean, invstd, weight, mean_dy, mean_dy_xmu)
 
 			return (grad_input, grad_weight, grad_bias, None, None, None, None, None, None) + tuple([grad_output] * len(residual))
+
+class SqueezeAndExcite(nn.Sequential):
+	def __init__(self, out_channels, ratio = 0.25):
+		se_channels = int(out_channels * ratio)
+		super().__init__(
+			nn.AdaptiveAvgPool1d(1),
+			nn.Conv1d(out_channels, se_channels, kernel_size = 1),
+			nn.ReLU(inplace = True),
+			nn.Conv1d(se_channels, out_channels, kernel_size = 1),
+			nn.Sigmoid()
+		)
 
 def relu_dropout(x, p = 0, inplace = False, training = False):
 	if not training or p == 0:
@@ -248,13 +248,6 @@ def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_
 	features = torch.log(torch.matmul(mel_basis, power_spectrum) + eps)
 	return normalize_features(features) if normalize else features 
 
-def normalize_signal(signal, dim = -1, eps = 1e-5):
-	signal = signal.to(torch.float32)
-	return signal / (signal.abs().max(dim = dim, keepdim = True).values + eps)
-
-def normalize_features(features, dim = -1, eps = 1e-20):
-	return (features - features.mean(dim = dim, keepdim = True)) / (features.std(dim = dim, keepdim = True) + eps)
-
 def temporal_mask(x, lengths = None, lengths_fraction = None):
 	lengths = lengths if lengths is not None else compute_output_lengths(x, lengths_fraction)
 	return (torch.arange(x.shape[-1], device = x.device, dtype = lengths.dtype).unsqueeze(0) < lengths.unsqueeze(1)).view(x.shape[:1] + (1, )*(len(x.shape) - 2) + x.shape[-1:])
@@ -273,4 +266,11 @@ def compute_output_lengths(x, lengths_fraction):
 	return (lengths_fraction * x.shape[-1]).ceil().int()
 
 def compute_capacity(model):
-	return sum(p.numel() for p in model.parameters())
+	return sum(map(torch.numel, model.parameters()))
+
+def normalize_signal(signal, dim = -1, eps = 1e-5):
+	signal = signal.to(torch.float32)
+	return signal / (signal.abs().max(dim = dim, keepdim = True).values + eps)
+
+def normalize_features(features, dim = -1, eps = 1e-20):
+	return (features - features.mean(dim = dim, keepdim = True)) / (features.std(dim = dim, keepdim = True) + eps)
