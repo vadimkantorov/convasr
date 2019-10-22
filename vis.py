@@ -73,13 +73,13 @@ def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer3
 	if experiment_id.endswith('.json'):
 		reftra = json.load(open(experiment_id))
 		for reftra_ in reftra:
-			hyp = labels.normalize_transcript(labels.normalize_text(reftra_['transcript']))
-			ref = labels.normalize_transcript(labels.normalize_text(reftra_['reference']))
+			hyp = labels.postprocess_transcript(labels.normalize_text(reftra_['transcript']))
+			ref = labels.postprocess_transcript(labels.normalize_text(reftra_['reference']))
 			reftra_['cer'] = metrics.cer(hyp, ref)
 			reftra_['wer'] = metrics.wer(hyp, ref)
 		cer_avg, wer_avg = [float(torch.tensor([r[k] for r in reftra]).mean()) for k in ['cer', 'wer']]
 		print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')
-		loss_ = torch.tensor([r['loss'] / len(r['reference']) for r in reftra])
+		loss_ = torch.tensor([r.get('loss', 0) / len(r['reference']) for r in reftra])
 		loss_ = loss_[~(torch.isnan(loss_) | torch.isinf(loss_))]
 		min, max, steps = 0.0, 2.0, 20
 		bins = torch.linspace(min, max, steps = steps)

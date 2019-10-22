@@ -25,13 +25,16 @@ python3 transcribe.py \
 
 # Tinkoff speech-to-text
 ```shell
-# readme at https://github.com/TinkoffCreditSystems/tinkoff-speech-api-examples
+# https://voicekit.tinkoff.ru/docs/recognition
+# https://voicekit.tinkoff.ru/docs/usingstt
+# https://github.com/TinkoffCreditSystems/tinkoff-speech-api-examples/blob/master/sh/recognize.sh
 git clone --recursive https://github.com/TinkoffCreditSystems/tinkoff-speech-api-examples.git
 pushd tinkoff-speech-api-examples
 pip install -r requirements.txt
 bash ./sh/generate_protobuf.sh
 popd
-bash scripts/stt_tinkoff.sh ../sample_ok/sample_ok.convasr.0.csv data/sample_ok.convasr.0.tinkoff
+bash scripts/stt_tinkoff.sh ../sample_ok/sample_ok.convasr.csv data/sample_ok.convasr.tinkoff
+python3 vis.py cer data/transcripts_tinkoff_sample_ok.convasr.tinkoff.json
 ```
 
 # BPE pretrained models for Russian
