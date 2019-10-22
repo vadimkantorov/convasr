@@ -69,7 +69,7 @@ def meanstd(logits):
 	plt.subplots_adjust(top = 0.99, bottom=0.01, hspace=0.8, wspace=0.4)
 	plt.savefig(logits + '.jpg', dpi = 150)
 
-def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer20, cer30, cer40, cer50, per):
+def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per):
 	if experiment_id.endswith('.json'):
 		reftra = json.load(open(experiment_id))
 		for reftra_ in reftra:
@@ -99,7 +99,9 @@ def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer20, cer30, cer4
 
 		if cer10 or cer20 or cer30 or cer40 or cer50:
 			val = (val < 0.1 * [False, cer10, cer20, cer30, cer40, cer50].index(True)).float()
-		
+		if cer15:
+			val = (val < 0.15).float()
+
 		res[iteration].append((val_dataset_name, float(val.mean()), checkpoint))
 	val_dataset_names = sorted(set(val_dataset_name for r in res.values() for val_dataset_name, cer, checkpoint in r))
 	print('iteration\t' + '\t'.join(val_dataset_names) + '\tcheckpoint')
@@ -231,6 +233,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--loss', action = 'store_true')
 	cmd.add_argument('--per', action = 'store_true')
 	cmd.add_argument('--cer10', action = 'store_true')
+	cmd.add_argument('--cer15', action = 'store_true')
 	cmd.add_argument('--cer20', action = 'store_true')
 	cmd.add_argument('--cer30', action = 'store_true')
 	cmd.add_argument('--cer40', action = 'store_true')

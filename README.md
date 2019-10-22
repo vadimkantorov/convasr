@@ -23,6 +23,17 @@ python3 transcribe.py \
   --data-path data_dir
 ```
 
+# Tinkoff speech-to-text
+```shell
+# readme at https://github.com/TinkoffCreditSystems/tinkoff-speech-api-examples
+git clone --recursive https://github.com/TinkoffCreditSystems/tinkoff-speech-api-examples.git
+pushd tinkoff-speech-api-examples
+pip install -r requirements.txt
+bash ./sh/generate_protobuf.sh
+popd
+bash scripts/stt_tinkoff.sh ../sample_ok/sample_ok.convasr.0.csv data/sample_ok.convasr.0.tinkoff
+```
+
 # BPE pretrained models for Russian
 ```shell
 # from https://nlp.h-its.org/bpemb/ru/

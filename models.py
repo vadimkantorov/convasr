@@ -13,7 +13,7 @@ class ConvSamePadding(nn.Sequential):
 		if separable:
 			assert dilation == 1
 			super().__init__(
-				nn.Conv1d(in_channels, out_channels, kernel_size = kernel_size, stride = stride, padding = padding, dgroups = in_channels, bias = bias),
+				nn.Conv1d(in_channels, out_channels, kernel_size = kernel_size, stride = stride, padding = padding, dilation = dilation, groups = groups, bias = bias),
 				nn.Conv1d(out_channels, out_channels, kernel_size = 1, bias = bias)
 			)
 		else:
@@ -26,8 +26,8 @@ class ConvBN(nn.Module):
 		super().__init__()
 		self.conv = nn.ModuleList(ConvSamePadding(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, separable = separable, bias = False, groups = groups) for i in range(repeat))
 		self.bn = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, nonlinearity = nonlinearity, inplace = inplace, dropout = dropout) for i in range(repeat))
-		self.conv_residual = nn.ModuleList(nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual)
-		self.bn_residual = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, nonlinearity = None, inplace = inplace) for in_channels in num_channels_residual)
+		self.conv_residual = nn.ModuleList(nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) if in_channels is not None else nn.Identity() for in_channels in num_channels_residual)
+		self.bn_residual = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, nonlinearity = None, inplace = inplace) if in_channels is not None else nn.Identity() for in_channels in num_channels_residual)
 		self.temporal_mask = temporal_mask
 
 	def forward(self, x, lengths_fraction = None, residual = []):
@@ -38,7 +38,7 @@ class ConvBN(nn.Module):
 		return y
 
 class JasperNet(nn.ModuleList):
-	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, dropout = 'ignored', dropout_small = 0.2, dropout_medium = 0.3, dropout_large = 0.4, separable = False):
+	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, groups = 128, dropout = 'ignored', dropout_small = 0.2, dropout_medium = 0.3, dropout_large = 0.4, separable = True):
 		dropout_small = dropout_small if dropout != 0 else 0
 		dropout_medium = dropout_medium if dropout != 0 else 0
 		dropout_large = dropout_large if dropout != 0 else 0
@@ -47,11 +47,11 @@ class JasperNet(nn.ModuleList):
 		
 		if num_subblocks == 1:
 			backbone = [
-				ConvBN(kernel_size = 11, num_channels = (256, 256), dropout = dropout_small,  repeat = repeat, separable = separable, num_channels_residual = [256]),
-				ConvBN(kernel_size = 13, num_channels = (256, 384), dropout = dropout_small,  repeat = repeat, separable = separable, num_channels_residual = [256, 256]),
-				ConvBN(kernel_size = 17, num_channels = (384, 512), dropout = dropout_small,  repeat = repeat, separable = separable, num_channels_residual = [256, 256, 384]),
-				ConvBN(kernel_size = 21, num_channels = (512, 640), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 384, 512]),
-				ConvBN(kernel_size = 25, num_channels = (640, 768), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 384, 512, 640])
+				ConvBN(kernel_size = 11, num_channels = (256, 256), dropout = dropout_small,  repeat = repeat, separable = separable, groups = groups, num_channels_residual = [256]),
+				ConvBN(kernel_size = 13, num_channels = (256, 384), dropout = dropout_small,  repeat = repeat, separable = separable, groups = groups, num_channels_residual = [256, 256]),
+				ConvBN(kernel_size = 17, num_channels = (384, 512), dropout = dropout_small,  repeat = repeat, separable = separable, groups = groups, num_channels_residual = [256, 256, 384]),
+				ConvBN(kernel_size = 21, num_channels = (512, 640), dropout = dropout_medium, repeat = repeat, separable = separable, groups = groups, num_channels_residual = [256, 256, 384, 512]),
+				ConvBN(kernel_size = 25, num_channels = (640, 768), dropout = dropout_medium, repeat = repeat, separable = separable, groups = groups, num_channels_residual = [256, 256, 384, 512, 640])
 			]
 		elif num_subblocks == 2:
 			backbone = [
