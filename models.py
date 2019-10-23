@@ -13,7 +13,8 @@ class ConvSamePadding(nn.Sequential):
 		if separable:
 			assert dilation == 1
 			super().__init__(
-				nn.Conv1d(in_channels, out_channels, kernel_size = kernel_size, stride = stride, padding = padding, dilation = dilation, groups = groups, bias = bias),
+				nn.Conv1d(in_channels, out_channels, kernel_size = kernel_size, stride = stride, padding = padding, dilation = dilation, groups = groups),
+				nn.ReLU(inplace = True),
 				nn.Conv1d(out_channels, out_channels, kernel_size = 1, bias = bias)
 			)
 		else:
@@ -43,38 +44,38 @@ class JasperNet(nn.ModuleList):
 		dropout_medium = dropout_medium if dropout != 0 else 0
 		dropout_large = dropout_large if dropout != 0 else 0
 
-		prologue = [ConvBN(kernel_size = 11, num_channels = (num_input_features, 256), dropout = dropout_small, stride = 2)]
+		prologue = [ConvBN(kernel_size = 11, num_channels = (num_input_features, 2 * 128), dropout = dropout_small, stride = 2)]
 		
 		if num_subblocks == 1:
 			backbone = [
-				ConvBN(kernel_size = 11, num_channels = (256, 256), dropout = dropout_small,  repeat = repeat, separable = separable, groups = groups, num_channels_residual = [256]),
-				ConvBN(kernel_size = 13, num_channels = (256, 384), dropout = dropout_small,  repeat = repeat, separable = separable, groups = groups, num_channels_residual = [256, 256]),
-				ConvBN(kernel_size = 17, num_channels = (384, 512), dropout = dropout_small,  repeat = repeat, separable = separable, groups = groups, num_channels_residual = [256, 256, 384]),
-				ConvBN(kernel_size = 21, num_channels = (512, 640), dropout = dropout_medium, repeat = repeat, separable = separable, groups = groups, num_channels_residual = [256, 256, 384, 512]),
-				ConvBN(kernel_size = 25, num_channels = (640, 768), dropout = dropout_medium, repeat = repeat, separable = separable, groups = groups, num_channels_residual = [256, 256, 384, 512, 640])
+				ConvBN(kernel_size = 11, num_channels = (2 * 128, 2 * 128), dropout = dropout_small,  repeat = repeat, separable = separable, groups = groups, num_channels_residual = [2 * 128]),
+				ConvBN(kernel_size = 13, num_channels = (2 * 128, 3 * 128), dropout = dropout_small,  repeat = repeat, separable = separable, groups = groups, num_channels_residual = [2 * 128, 2 * 128]),
+				ConvBN(kernel_size = 17, num_channels = (3 * 128, 4 * 128), dropout = dropout_small,  repeat = repeat, separable = separable, groups = groups, num_channels_residual = [2 * 128, 2 * 128, 3 * 128]),
+				ConvBN(kernel_size = 21, num_channels = (4 * 128, 5 * 128), dropout = dropout_medium, repeat = repeat, separable = separable, groups = groups, num_channels_residual = [2 * 128, 2 * 128, 3 * 128, 4 * 128]),
+				ConvBN(kernel_size = 25, num_channels = (5 * 128, 6 * 128), dropout = dropout_medium, repeat = repeat, separable = separable, groups = groups, num_channels_residual = [2 * 128, 2 * 128, 3 * 128, 4 * 128, 5 * 128])
 			]
 		elif num_subblocks == 2:
 			backbone = [
-				ConvBN(kernel_size = 11, num_channels = (256, 256), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256]),
-				ConvBN(kernel_size = 11, num_channels = (256, 256), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256, 256]),
+				ConvBN(kernel_size = 11, num_channels = (2 * 128, 2 * 128), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [2 * 128]),
+				ConvBN(kernel_size = 11, num_channels = (2 * 128, 2 * 128), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [2 * 128, 2 * 128]),
 				
-				ConvBN(kernel_size = 13, num_channels = (256, 384), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256]),
-				ConvBN(kernel_size = 13, num_channels = (384, 384), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256, 384]),
+				ConvBN(kernel_size = 13, num_channels = (2 * 128, 3 * 128), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [2 * 128, 2 * 128, 2 * 128]),
+				ConvBN(kernel_size = 13, num_channels = (3 * 128, 3 * 128), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [2 * 128, 2 * 128, 2 * 128, 3 * 128]),
 				
-				ConvBN(kernel_size = 17, num_channels = (384, 512), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256, 384, 384]),
-				ConvBN(kernel_size = 17, num_channels = (512, 512), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256, 384, 384, 512]),
+				ConvBN(kernel_size = 17, num_channels = (3 * 128, 4 * 512), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [2 * 128, 2 * 128, 2 * 128, 3 * 128, 3 * 128]),
+				ConvBN(kernel_size = 17, num_channels = (4 * 4 * 128, 4 * 4 * 128), dropout = dropout_small, repeat = repeat, separable = separable, num_channels_residual = [2 * 128, 2 * 128, 2 * 128, 3 * 128, 3 * 128, 4 * 128]),
 				
-				ConvBN(kernel_size = 21, num_channels = (512, 640), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256, 384, 384, 512, 512]),
-				ConvBN(kernel_size = 21, num_channels = (640, 640), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640]),
+				ConvBN(kernel_size = 21, num_channels = (4 * 4 * 128, 5 * 128), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [2 * 128, 2 * 128, 2 * 128, 3 * 128, 3 * 128, 4 * 128, 4 * 128]),
+				ConvBN(kernel_size = 21, num_channels = (5 * 128, 5 * 128), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [2 * 128, 2 * 128, 2 * 128, 3 * 128, 3 * 128, 4 * 128, 4 * 128, 5 * 128]),
 				
-				ConvBN(kernel_size = 25, num_channels = (640, 768), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640]),
-				ConvBN(kernel_size = 25, num_channels = (768, 768), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [256, 256, 256, 384, 384, 512, 512, 640, 640, 768])
+				ConvBN(kernel_size = 25, num_channels = (5 * 128, 6 * 128), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [2 * 128, 2 * 128, 2 * 128, 3 * 128, 3 * 128, 4 * 128, 4 * 128, 5 * 128, 5 * 128]),
+				ConvBN(kernel_size = 25, num_channels = (6 * 128, 6 * 128), dropout = dropout_medium, repeat = repeat, separable = separable, num_channels_residual = [2 * 128, 2 * 128, 2 * 128, 3 * 128, 3 * 128, 4 * 128, 4 * 128, 5 * 128, 5 * 128, 6 * 128])
 			]
 
 		epilogue = [
-			ConvBN(kernel_size = 29, num_channels = (768, 896), dropout = dropout_large, dilation = dilation),
-			ConvBN(kernel_size = 1, num_channels = (896, 1024), dropout = dropout_large),
-			nn.Conv1d(1024, num_classes, kernel_size = 1)
+			ConvBN(kernel_size = 29, num_channels = (6 * 128, 7 * 128), dropout = dropout_large, dilation = dilation),
+			ConvBN(kernel_size = 1, num_channels = (7 * 128, 8 * 128), dropout = dropout_large),
+			nn.Conv1d(8 * 128, num_classes, kernel_size = 1)
 		]
 		super().__init__(prologue + backbone + epilogue)
 

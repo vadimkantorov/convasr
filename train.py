@@ -185,7 +185,7 @@ def traineval(args):
 
 			ms = lambda sec: sec * 1000
 			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = ms(toc - tic), ms(toc_fwd - toc), ms(toc_bwd - toc_fwd), ms(time.time() - toc)	
-			time_ms_avg = moving_avg(time_ms_avg, time_ms_model, max = 10000)
+			time_ms_avg = moving_avg(time_ms_avg, time_ms_data + time_ms_model, max = 10000)
 			lr = scheduler.get_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
 			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}> loss: {float(loss_):.2f} <{loss_avg:.2f}> time: ({inputs.shape[0]}x{inputs.shape[1]}x{inputs.shape[2]}) {time_ms_data:.2f}+{time_ms_fwd:4.0f}+{time_ms_bwd:4.0f} <{time_ms_avg:.0f}> | lr: {lr:.5f}')
 			tic = time.time()
