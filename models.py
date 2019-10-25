@@ -39,80 +39,65 @@ class ConvBN(nn.Module):
 		return y
 
 class JasperNet(nn.ModuleList):
-	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, groups = 128, dropout = 'ignored', dropout_small = 0.2, dropout_large = 0.4, separable = True, kernel_sizes = [11, 13, 17, 21, 25], base_width = 128, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3], dense_residual = True):
+	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, groups = 1, dropout = 'ignored', dropout_small = 0.2, dropout_large = 0.4, separable = False, kernel_sizes = [11, 13, 17, 21, 25], base_width = 128, out_width_factors = [2, 3, 4, 5, 6], dropouts = [0.2, 0.2, 0.2, 0.3, 0.3], residual = 'dense', kernel_size_small = 11, kernel_size_large = 29, out_width_factors_large = [7, 8] ):
 		dropout_small = dropout_small if dropout != 0 else 0
 		dropout_large = dropout_large if dropout != 0 else 0
 		dropouts = dropouts if dropout != 0 else [0] * len(dropouts)
 
-		out_channels = 2 * base_width
-		prologue = [ConvBN(kernel_size = 11, num_channels = (num_input_features, out_channels), dropout = dropout_small, stride = 2)]
+		width_factor_ = 2
+		prologue = [ConvBN(kernel_size = kernel_size_small, num_channels = (num_input_features, width_factor_ * base_width), dropout = dropout_small, stride = 2)]
 		
 		backbone = []
 		num_channels_residual = []
-		for kernel_size, dropout, k in zip(kernel_sizes, dropouts, range(2, 2 + len(kernel_sizes))):
+		for kernel_size, dropout, width_factor in zip(kernel_sizes, dropouts, out_width_factors):
 			for s in range(num_subblocks):
-				num_channels = (out_channels, (k * base_width) if s == num_subblocks - 1 else out_channels)
+				num_channels = (wdith_factor_ * base_width, (width_factor * base_width) if s == num_subblocks - 1 else out_channels)
 				num_channels_residual.append(out_channels)
 				backbone.append(ConvBN(kernel_size = kernel_size, num_channels = num_channels, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual))
-			out_channels = num_channels[1]
+			width_factor_ = width_factor
 
-		k = 1 + len(kernel_sizes)
 		epilogue = [
-			ConvBN(kernel_size = 29, num_channels = (k * base_width, (k + 1) * base_width), dropout = dropout_large, dilation = dilation),
-			ConvBN(kernel_size = 1, num_channels = ((k + 1) * base_width, (k + 2) * base_width), dropout = dropout_large),
-			nn.Conv1d((k + 2) * base_width, num_classes, kernel_size = 1)
+			ConvBN(kernel_size = kernel_size_large, num_channels = (width_factor_ * base_width, out_width_factors_large[0] * base_width), dropout = dropout_large, dilation = dilation),
+			ConvBN(kernel_size = 1, num_channels = (out_width_factors[0] * base_width, out_width_factors[1] * base_width), dropout = dropout_large),
+			nn.Conv1d(out_width_factors[1] * base_width, num_classes, kernel_size = 1)
 		]
 		super().__init__(prologue + backbone + epilogue)
-		self.dense_residual = dense_residual
+		self.residual = residual
 
 	def forward(self, x, lengths_fraction):
 		residual = []
 		for i, subblock in enumerate(list(self)[:-1]):
 			x = subblock(x, residual = residual if i < len(self) - 3 else [], lengths_fraction = lengths_fraction)
-			if not self.dense_residual:
+			if self.residual != 'dense':
 				residual.clear()
-			residual.append(x)
+			if self.residual:
+				residual.append(x)
+
 		logits = self[-1](x)
 		return logits, compute_output_lengths(logits, lengths_fraction)
 
-class Wav2Letter(nn.Sequential):
-	def __init__(self, num_classes, num_input_features, dilation = 2, nonlinearity = ('hardtanh', 0, 20)):
-		super().__init__(
-			ConvBN(nonlinearity = nonlinearity, kernel_size = 11, num_channels = (num_input_features, 256), stride = 2, padding = 5),
-			ConvBN(nonlinearity = nonlinearity, kernel_size = 11, num_channels = (256, 256), repeat = 3, padding = 5),
-			ConvBN(nonlinearity = nonlinearity, kernel_size = 13, num_channels = (256, 384), repeat = 3, padding = 6),
-			ConvBN(nonlinearity = nonlinearity, kernel_size = 17, num_channels = (384, 512), repeat = 3, padding = 8),
-			ConvBN(nonlinearity = nonlinearity, kernel_size = 21, num_channels = (512, 640), repeat = 3, padding = 10),
-			ConvBN(nonlinearity = nonlinearity, kernel_size = 25, num_channels = (640, 768), repeat = 3, padding = 12),
-			ConvBN(nonlinearity = nonlinearity, kernel_size = 29, num_channels = (768, 896), repeat = 1, padding = 28, dilation = dilation),
-			ConvBN(nonlinearity = nonlinearity, kernel_size = 1, num_channels = (896, 1024), repeat = 1),
-			nn.Conv1d(1024, num_classes, kernel_size = 1)
+class JasperNetSeparable(JasperNet):
+	def __init__(*args, separable = True, groups = 128, **kwargs):
+		super().__init__(*args, separable = separable, groups = groups, **kwargs)
+
+class Wav2Letter(JasperNet):
+	def __init__(self, num_classes, num_input_features, dropout = 0.2, dilation = 2, nonlinearity = ('hardtanh', 0, 20), kernel_size_small = 11, kernel_size_large = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):
+		super().__init__(num_classes, num_input_features, base_width = base_width, 
+			dropout = dropout, dropout_small = dropout, dropout_large = dropout, dropouts = [dropout] * num_blocks, 
+			kernel_size_small = kernel_size_small, kernel_size_large = kernel_size_large, kernel_sizes = [kernel_size_small] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6] * , out_width_factors_large = [7, 8], 
+			residual = False, diletion = dilation, nonlinearity = nonlinearity
 		)
+		
 
-	def forward(self, x, lengths_fraction):
-		logits = super().forward(x)
-		return logits, compute_output_lengths(logits, lengths_fraction)
-
-class Wav2LetterFlat(nn.Sequential):
-	def __init__(self, num_classes, num_input_features, dropout = 0.2, base_width = 128, width_large = 2048, width_factor = 6, kernel_size_large = 29, kernel_size_small = 13):
-		super().__init__(
-			ConvBN(kernel_size = kernel_size_small, num_channels = (num_input_features, base_width * width_factor), dropout = dropout, stride = 2),
-			
-			ConvBN(kernel_size = kernel_size_small, num_channels = (base_width * width_factor, base_width * width_factor), dropout = dropout),
-			ConvBN(kernel_size = kernel_size_small, num_channels = (base_width * width_factor, base_width * width_factor), dropout = dropout),
-			ConvBN(kernel_size = kernel_size_small, num_channels = (base_width * width_factor, base_width * width_factor), dropout = dropout),
-			ConvBN(kernel_size = kernel_size_small, num_channels = (base_width * width_factor, base_width * width_factor), dropout = dropout),
-			ConvBN(kernel_size = kernel_size_small, num_channels = (base_width * width_factor, base_width * width_factor), dropout = dropout),
-			ConvBN(kernel_size = kernel_size_small, num_channels = (base_width * width_factor, base_width * width_factor), dropout = dropout),
-
-			ConvBN(kernel_size = kernel_size_large, num_channels = (base_width * width_factor, width_large), dropout = dropout),
-			ConvBN(kernel_size = 1,  num_channels = (width_large, width_large), dropout = dropout),
-			nn.Conv1d(width_large, num_classes, kernel_size = 1)
+class Wav2LetterFlat(JasperNet):
+	def __init__(self, num_classes, num_input_features, dropout = 0.2, base_width = 128, width_factor_large = 16, width_factor = 6, kernel_size_large = 29, kernel_size_small = 13, num_blocks = 6):
+		super().__init__(num_classes, num_input_features, base_width = base_width, 
+			dropout = dropout, dropout_small = dropout, dropout_large = dropout, dropouts = [dropout] * num_blocks, 
+			kernel_size_small = kernel_size_small, kernel_size_large = kernel_size_large, kernel_sizes = [kernel_size_small] * num_blocks,
+			out_width_factors = [width_factor] * num_blocks, out_width_factors_large = [width_factor_large, width_factor_large], 
+			residual = False
 		)
-
-	def forward(self, x, lengths_fraction):
-		logits = super().forward(x)
-		return logits, compute_output_lengths(logits, lengths_fraction)
 
 class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 	def __init__(self, *args, nonlinearity = None, inplace = False, dropout = 0, squeeze_and_excite = None, **kwargs):
