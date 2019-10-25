@@ -39,7 +39,12 @@ class ConvBN(nn.Module):
 		return y
 
 class JasperNet(nn.ModuleList):
-	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, groups = 1, dropout = 'ignored', dropout_small = 0.2, dropout_large = 0.4, separable = False, kernel_sizes = [11, 13, 17, 21, 25], base_width = 128, out_width_factors = [2, 3, 4, 5, 6], dropouts = [0.2, 0.2, 0.2, 0.3, 0.3], residual = 'dense', kernel_size_small = 11, kernel_size_large = 29, out_width_factors_large = [7, 8] ):
+	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, residual = 'dense',
+			kernel_sizes = [11, 13, 17, 21, 25], kernel_size_small = 11, kernel_size_large = 29, 
+			base_width = 128, out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
+			separable = True, groups = 128, 
+			dropout = None, dropout_small = 0.2, dropout_large = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3]
+		):
 		dropout_small = dropout_small if dropout != 0 else 0
 		dropout_large = dropout_large if dropout != 0 else 0
 		dropouts = dropouts if dropout != 0 else [0] * len(dropouts)
@@ -51,15 +56,15 @@ class JasperNet(nn.ModuleList):
 		num_channels_residual = []
 		for kernel_size, dropout, width_factor in zip(kernel_sizes, dropouts, out_width_factors):
 			for s in range(num_subblocks):
-				num_channels = (wdith_factor_ * base_width, (width_factor * base_width) if s == num_subblocks - 1 else out_channels)
-				num_channels_residual.append(out_channels)
+				num_channels = (width_factor_ * base_width, (width_factor * base_width) if s == num_subblocks - 1 else (width_factor_ * base_width))
+				num_channels_residual.append(width_factor_ * base_width)
 				backbone.append(ConvBN(kernel_size = kernel_size, num_channels = num_channels, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual))
 			width_factor_ = width_factor
 
 		epilogue = [
 			ConvBN(kernel_size = kernel_size_large, num_channels = (width_factor_ * base_width, out_width_factors_large[0] * base_width), dropout = dropout_large, dilation = dilation),
-			ConvBN(kernel_size = 1, num_channels = (out_width_factors[0] * base_width, out_width_factors[1] * base_width), dropout = dropout_large),
-			nn.Conv1d(out_width_factors[1] * base_width, num_classes, kernel_size = 1)
+			ConvBN(kernel_size = 1, num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), dropout = dropout_large),
+			nn.Conv1d(out_width_factors_large[1] * base_width, num_classes, kernel_size = 1)
 		]
 		super().__init__(prologue + backbone + epilogue)
 		self.residual = residual
@@ -76,16 +81,12 @@ class JasperNet(nn.ModuleList):
 		logits = self[-1](x)
 		return logits, compute_output_lengths(logits, lengths_fraction)
 
-class JasperNetSeparable(JasperNet):
-	def __init__(*args, separable = True, groups = 128, **kwargs):
-		super().__init__(*args, separable = separable, groups = groups, **kwargs)
-
 class Wav2Letter(JasperNet):
-	def __init__(self, num_classes, num_input_features, dropout = 0.2, dilation = 2, nonlinearity = ('hardtanh', 0, 20), kernel_size_small = 11, kernel_size_large = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):
+	def __init__(self, num_classes, num_input_features, dropout = 0.2, nonlinearity = ('hardtanh', 0, 20), kernel_size_small = 11, kernel_size_large = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):
 		super().__init__(num_classes, num_input_features, base_width = base_width, 
 			dropout = dropout, dropout_small = dropout, dropout_large = dropout, dropouts = [dropout] * num_blocks, 
 			kernel_size_small = kernel_size_small, kernel_size_large = kernel_size_large, kernel_sizes = [kernel_size_small] * num_blocks,
-			out_width_factors = [2, 3, 4, 5, 6] * , out_width_factors_large = [7, 8], 
+			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8], 
 			residual = False, diletion = dilation, nonlinearity = nonlinearity
 		)
 		
@@ -98,6 +99,10 @@ class Wav2LetterFlat(JasperNet):
 			out_width_factors = [width_factor] * num_blocks, out_width_factors_large = [width_factor_large, width_factor_large], 
 			residual = False
 		)
+
+class JasperNetSeparable(JasperNet):
+	def __init__(*args, separable = True, groups = 128, **kwargs):
+		super().__init__(*args, separable = separable, groups = groups, **kwargs)
 
 class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 	def __init__(self, *args, nonlinearity = None, inplace = False, dropout = 0, squeeze_and_excite = None, **kwargs):
