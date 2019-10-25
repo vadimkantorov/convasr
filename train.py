@@ -167,18 +167,20 @@ def traineval(args):
 				logits, output_lengths = model(inputs, input_lengths_fraction)
 				log_probs = F.log_softmax(logits, dim = 1)
 				loss_ = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths) / target_lengths
-				loss_, loss = loss_.mean(), (loss_ * target_lengths).mean()
+				loss_, loss = loss_.mean(), (loss_ * target_lengths).mean() / args.train_batch_accumulate_iterations
 				entropy = models.entropy(log_probs, output_lengths, dim = 1).mean()
 				if not (torch.isinf(loss) or torch.isnan(loss)):
 					toc_fwd = time.time()
-					optimizer.zero_grad()
 					if args.fp16:
 						with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
 							scaled_loss.backward()
 					else:
 						loss.backward()
-					torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
-					optimizer.step()
+
+					if iteration % args.train_batch_accumulate_iterations == 0:
+						torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
+						optimizer.step()
+						optimizer.zero_grad()
 					loss_avg = moving_avg(loss_avg, float(loss_), max = 1000)
 					entropy_avg = moving_avg(entropy_avg, float(entropy), max = 4)
 					toc_bwd = time.time()
@@ -267,6 +269,7 @@ if __name__ == '__main__':
 	parser.add_argument('--train-waveform-transform-prob', type = float, default = None)
 	parser.add_argument('--train-feature-transform', nargs = '*', default = [])
 	parser.add_argument('--train-feature-transform-prob', type = float, default = None)
+	parser.add_argument('--train-batch-accumulate-iterations', type = int, default = 1)
 	parser.add_argument('--val-iteration-interval', type = int, default = 2500)
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
 	parser.add_argument('--log-weight-distribution', action = 'store_true')

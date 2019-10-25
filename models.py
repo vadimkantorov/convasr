@@ -39,7 +39,7 @@ class ConvBN(nn.Module):
 		return y
 
 class JasperNet(nn.ModuleList):
-	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, groups = 128, dropout = 'ignored', dropout_small = 0.2, dropout_large = 0.4, separable = True, kernel_sizes = [11, 13, 17, 21, 25], base_width = 128, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3]):
+	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, groups = 128, dropout = 'ignored', dropout_small = 0.2, dropout_large = 0.4, separable = True, kernel_sizes = [11, 13, 17, 21, 25], base_width = 128, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3], dense_residual = True):
 		dropout_small = dropout_small if dropout != 0 else 0
 		dropout_large = dropout_large if dropout != 0 else 0
 		dropouts = dropouts if dropout != 0 else [0] * len(dropouts)
@@ -63,27 +63,29 @@ class JasperNet(nn.ModuleList):
 			nn.Conv1d((k + 2) * base_width, num_classes, kernel_size = 1)
 		]
 		super().__init__(prologue + backbone + epilogue)
+		self.dense_residual = dense_residual
 
 	def forward(self, x, lengths_fraction):
 		residual = []
 		for i, subblock in enumerate(list(self)[:-1]):
 			x = subblock(x, residual = residual if i < len(self) - 3 else [], lengths_fraction = lengths_fraction)
+			if not self.dense_residual:
+				residual.clear()
 			residual.append(x)
 		logits = self[-1](x)
 		return logits, compute_output_lengths(logits, lengths_fraction)
 
 class Wav2Letter(nn.Sequential):
-	# TODO: use hardtanh 20
-	def __init__(self, num_classes, num_input_features, dilation = 2):
+	def __init__(self, num_classes, num_input_features, dilation = 2, nonlinearity = ('hardtanh', 0, 20)):
 		super().__init__(
-			ConvBN(kernel_size = 11, num_channels = (num_input_features, 256), stride = 2, padding = 5),
-			ConvBN(kernel_size = 11, num_channels = (256, 256), repeat = 3, padding = 5),
-			ConvBN(kernel_size = 13, num_channels = (256, 384), repeat = 3, padding = 6),
-			ConvBN(kernel_size = 17, num_channels = (384, 512), repeat = 3, padding = 8),
-			ConvBN(kernel_size = 21, num_channels = (512, 640), repeat = 3, padding = 10),
-			ConvBN(kernel_size = 25, num_channels = (640, 768), repeat = 3, padding = 12),
-			ConvBN(kernel_size = 29, num_channels = (768, 896), repeat = 1, padding = 28, dilation = dilation),
-			ConvBN(kernel_size = 1, num_channels = (896, 1024), repeat = 1),
+			ConvBN(nonlinearity = nonlinearity, kernel_size = 11, num_channels = (num_input_features, 256), stride = 2, padding = 5),
+			ConvBN(nonlinearity = nonlinearity, kernel_size = 11, num_channels = (256, 256), repeat = 3, padding = 5),
+			ConvBN(nonlinearity = nonlinearity, kernel_size = 13, num_channels = (256, 384), repeat = 3, padding = 6),
+			ConvBN(nonlinearity = nonlinearity, kernel_size = 17, num_channels = (384, 512), repeat = 3, padding = 8),
+			ConvBN(nonlinearity = nonlinearity, kernel_size = 21, num_channels = (512, 640), repeat = 3, padding = 10),
+			ConvBN(nonlinearity = nonlinearity, kernel_size = 25, num_channels = (640, 768), repeat = 3, padding = 12),
+			ConvBN(nonlinearity = nonlinearity, kernel_size = 29, num_channels = (768, 896), repeat = 1, padding = 28, dilation = dilation),
+			ConvBN(nonlinearity = nonlinearity, kernel_size = 1, num_channels = (896, 1024), repeat = 1),
 			nn.Conv1d(1024, num_classes, kernel_size = 1)
 		)
 
@@ -91,43 +93,21 @@ class Wav2Letter(nn.Sequential):
 		logits = super().forward(x)
 		return logits, compute_output_lengths(logits, lengths_fraction)
 
-class Wav2LetterRu(nn.Sequential):
-	def __init__(self, num_classes, num_input_features, dropout = 0.2, width_large = 2048, kernel_size_large = 29):
+class Wav2LetterFlat(nn.Sequential):
+	def __init__(self, num_classes, num_input_features, dropout = 0.2, base_width = 128, width_large = 2048, width_factor = 6, kernel_size_large = 29, kernel_size_small = 13):
 		super().__init__(
-			ConvBN(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2, dropout = dropout),
+			ConvBN(kernel_size = kernel_size_small, num_channels = (num_input_features, base_width * width_factor), dropout = dropout, stride = 2),
 			
-			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
-			ConvBN(kernel_size = 13, num_channels = (768, 768), stride = 1, dropout = dropout),
+			ConvBN(kernel_size = kernel_size_small, num_channels = (base_width * width_factor, base_width * width_factor), dropout = dropout),
+			ConvBN(kernel_size = kernel_size_small, num_channels = (base_width * width_factor, base_width * width_factor), dropout = dropout),
+			ConvBN(kernel_size = kernel_size_small, num_channels = (base_width * width_factor, base_width * width_factor), dropout = dropout),
+			ConvBN(kernel_size = kernel_size_small, num_channels = (base_width * width_factor, base_width * width_factor), dropout = dropout),
+			ConvBN(kernel_size = kernel_size_small, num_channels = (base_width * width_factor, base_width * width_factor), dropout = dropout),
+			ConvBN(kernel_size = kernel_size_small, num_channels = (base_width * width_factor, base_width * width_factor), dropout = dropout),
 
-			ConvBN(kernel_size = kernel_size_large, num_channels = (768, width_large), stride = 1, dropout = dropout),
-			ConvBN(kernel_size = 1,  num_channels = (width_large, width_large),stride = 1, dropout = dropout),
-			nn.Conv1d(width_large, num_classes, kernel_size = 1, stride = 1)
-		)
-
-	def forward(self, x, lengths_fraction):
-		logits = super().forward(x)
-		return logits, compute_output_lengths(logits, lengths_fraction)
-
-class BabbleNet(nn.Sequential):
-	def __init__(self, num_classes, num_input_features, dropout = 0.2, repeat = 1, batch_norm_momentum = 0.1):
-		super().__init__(
-			ConvBN(kernel_size = 13, num_channels = (num_input_features, 768), stride = 2, dropout = dropout),
-
-			ConvBN(kernel_size = 13, num_channels = (768, 192), stride = 1, dropout = dropout),
-			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-			InvertedResidual(kernel_size = 13, num_channels = (192, 192), stride = 1, dropout = dropout, expansion = 4),
-			ConvBN(kernel_size = 13, num_channels = (192, 768), stride = 1, dropout = dropout),
-
-			ConvBN(kernel_size = 31, num_channels = (768, 2048), stride = 1, dropout = dropout),
-			ConvBN(kernel_size = 1,  num_channels = (2048, 2048), stride = 1, dropout = dropout),
-			nn.Conv1d(2048, num_classes, kernel_size = 1)
+			ConvBN(kernel_size = kernel_size_large, num_channels = (base_width * width_factor, width_large), dropout = dropout),
+			ConvBN(kernel_size = 1,  num_channels = (width_large, width_large), dropout = dropout),
+			nn.Conv1d(width_large, num_classes, kernel_size = 1)
 		)
 
 	def forward(self, x, lengths_fraction):
@@ -153,13 +133,12 @@ class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 			y = F.dropout(y, p = self.dropout, training = self.training)
 		else:
 			y = super().forward(input)
-			s = y * (self.squeeze_and_excite(y) if self.squeeze_and_excite is not None else 1)
-			y = y + sum(residual) #(functools.reduce(lambda acc, x: acc.add_(x), residual, torch.zeros_like(residual[0])) if len(residual) > 1 else sum(residual))
+			y = self.squeeze_and_excite(y) if self.squeeze_and_excite is not None else y
+			y = y + sum(residual)
 			if self.nonlinearity == 'relu':
 				y = relu_dropout(y, p = self.dropout, inplace = True, training = self.training)
-			elif self.nonlinearity and self.nonlinearity[0] == 'leaky_relu':
-				y = F.leaky_relu_(y, self.nonlinearity[1])
-				y = F.dropout(y, p = self.dropout, training = self.training)
+			elif self.nonlinearity and self.nonlinearity[0] in ['leaky_relu', 'hardtanh']:
+				y = F.dropout(getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = True), p = self.dropout, training = self.training)
 		return y
 
 	class Function(torch.autograd.function.Function):
@@ -210,6 +189,9 @@ class SqueezeAndExcite(nn.Sequential):
 			nn.Conv1d(se_channels, out_channels, kernel_size = 1),
 			nn.Sigmoid()
 		)
+
+	def forward(self, x):
+		return x * super().forward(x)
 
 def relu_dropout(x, p = 0, inplace = False, training = False):
 	if not training or p == 0:

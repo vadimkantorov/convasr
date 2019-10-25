@@ -1,8 +1,9 @@
 CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --verbose --lang ru \
   --model JasperNet \
-  --train-batch-size 80 --val-batch-size 64 \
-  --lr 1e-3 \
+  --train-batch-size 128 --val-batch-size 64 \
+  --scheduler MultiStepLR --decay-milestones 25000 \
+  --lr 1e-2 \
   --optimizer NovoGrad \
   --train-data-path data/mixed_train.csv \
   --val-data-path data/mixed_val.csv data/clean_val.csv ../sample_ok/sample_ok.convasr.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv data/tts_dataset/tts_dataset_val.csv \
@@ -11,7 +12,6 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --dropout 0 --weight-decay 0 \
   --checkpoint data/experiments/JasperNet_NovoGrad_lr1e-2_wd0e+00_bs80___separable/checkpoint_epoch01_iter0025000.pt
 
-#  --scheduler MultiStepLR --decay-milestones 25000 \
 
 #  --train-data-path data/tts_dataset/tts_dataset_train.csv \
 #  --train-data-path data/mixed_train.csv data/tts_dataset/tts_dataset_train.csv --train-data-mixing 0.5 0.5 \
