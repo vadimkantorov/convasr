@@ -8,6 +8,7 @@ import base64
 import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
+import seaborn
 import torch
 import torch.nn.functional as F
 import dataset
@@ -77,15 +78,44 @@ def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer3
 			ref = labels.postprocess_transcript(labels.normalize_text(reftra_['reference']))
 			reftra_['cer'] = metrics.cer(hyp, ref)
 			reftra_['wer'] = metrics.wer(hyp, ref)
-		cer_avg, wer_avg = [float(torch.tensor([r[k] for r in reftra]).mean()) for k in ['cer', 'wer']]
+
+		cer_, wer_ = [torch.tensor([r[k] for r in reftra])for k in ['cer', 'wer']]
+		cer_avg, wer_avg = float(cer_.mean()), float(wer_.mean())
 		print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')
-		loss_ = torch.tensor([r.get('loss', 0) / len(r['reference']) for r in reftra])
+		loss_ = torch.tensor([r.get('loss', 0) for r in reftra])
 		loss_ = loss_[~(torch.isnan(loss_) | torch.isinf(loss_))]
-		min, max, steps = 0.0, 2.0, 20
-		bins = torch.linspace(min, max, steps = steps)
-		hist = torch.histc(loss_, bins = steps, min = min, max = max)
-		for b, h in zip(bins.tolist(), hist.tolist()):
-			print(f'{b:.02f}\t{h:.0f}')
+		#min, max, steps = 0.0, 2.0, 20
+		#bins = torch.linspace(min, max, steps = steps)
+		#hist = torch.histc(loss_, bins = steps, min = min, max = max)
+		#for b, h in zip(bins.tolist(), hist.tolist()):
+		#	print(f'{b:.02f}\t{h:.0f}')
+
+		plt.figure(figsize = (8, 4))
+		plt.suptitle(os.path.basename(experiment_id))
+		plt.subplot(211)
+		plt.title('cer PDF')
+		#plt.hist(cer_, range = (0.0, 1.2), bins = 20, density = True)
+		seaborn.distplot(cer_, bins = 20, hist = True)
+		plt.xlim(0, 1)
+		plt.subplot(212)
+		plt.title('cer CDF')
+		plt.hist(cer_, bins = 20, density = True, cumulative = True)
+		plt.xlim(0, 1)
+		plt.xticks(torch.arange(0, 1.01, 0.1))
+		plt.grid(True)
+
+		#plt.subplot(223)
+		#plt.title('loss PDF')
+		#plt.hist(loss_, range = (0.0, 2.0), bins = 20, density = True)
+		#seaborn.distplot(loss_, bins = 20, hist = True)
+		#plt.xlim(0, 3)
+		#plt.subplot(224)
+		#plt.title('loss CDF')
+		#plt.hist(loss_, bins = 20, density = True, cumulative = True)
+		#plt.grid(True)
+		plt.subplots_adjust(hspace = 0.4)
+		plt.savefig(experiment_id + '.png', dpi = 150)
+		return
 
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
@@ -93,7 +123,7 @@ def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer3
 		eidx = f.find('epoch')
 		iteration = f[eidx:].replace('.json', '')
 		val_dataset_name = f[f.find('transcripts_') + len('transcripts_'):eidx]
-		checkpoint = os.path.join(experiment_id, 'checkpoint_' + f[eidx:].replace('.json', '.pt'))
+		checkpoint = os.path.join(experiment_dir, 'checkpoint_' + f[eidx:].replace('.json', '.pt'))
 		val = torch.tensor([j['entropy' if entropy else 'loss' if loss else 'per' if per else 'cer'] for j in json.load(open(f))] or [0.0])
 		val = val[~(torch.isnan(val) | torch.isinf(val))]
 

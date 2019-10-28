@@ -7,6 +7,27 @@ import torch.nn as nn
 import torch.nn.functional as F
 import librosa
 
+class Decoder(nn.Sequential):
+	def __init__(self, input_size, num_classes, type = None):
+		if type is None:
+			super().__init__(nn.Conv1d(input_size, num_classes, kernel_size = 1))
+		elif type == 'gru':
+			super().__init__(nn.Conv1d(input_size, num_classes, kernel_size = 1), nn.GRU(num_classes, num_classes, batch_first = True, bidirectional = False))
+		elif type == 'transformerencoder':
+			super().__init__(nn.Conv1d(input_size, num_classes, kernel_size = 1), nn.TransformerEncoderLayer(num_classes, nhead = 2, dim_feedforward = num_classes))
+		self.type = type
+
+	def forward(self, x):
+		if self.type is None:
+			y = self[0](x)
+		elif self.type == 'gru':
+			y = self[0](x)
+			#y = self[1](y.transpose(-1, -2))[0].transpose(-1, -2) # + y
+		elif self.type == 'transformerencoder':
+			y = self[0](x)
+			y = y + self[1](y.transpose(-1, -2)).transpose(-1, -2)
+		return y
+
 class ConvSamePadding(nn.Sequential):
 	def __init__(self, in_channels, out_channels, kernel_size, stride, dilation, bias, groups, separable):
 		padding = dilation * max(1, kernel_size // 2)
@@ -42,7 +63,7 @@ class JasperNet(nn.ModuleList):
 	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, residual = 'dense',
 			kernel_sizes = [11, 13, 17, 21, 25], kernel_size_small = 11, kernel_size_large = 29, 
 			base_width = 128, out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			separable = True, groups = 128, 
+			separable = False, groups = 1, 
 			dropout = None, dropout_small = 0.2, dropout_large = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3]
 		):
 		dropout_small = dropout_small if dropout != 0 else 0
@@ -58,15 +79,18 @@ class JasperNet(nn.ModuleList):
 			for s in range(num_subblocks):
 				num_channels = (width_factor_ * base_width, (width_factor * base_width) if s == num_subblocks - 1 else (width_factor_ * base_width))
 				num_channels_residual.append(width_factor_ * base_width)
+				# use None in num_channels_residual
 				backbone.append(ConvBN(kernel_size = kernel_size, num_channels = num_channels, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual))
 			width_factor_ = width_factor
 
 		epilogue = [
 			ConvBN(kernel_size = kernel_size_large, num_channels = (width_factor_ * base_width, out_width_factors_large[0] * base_width), dropout = dropout_large, dilation = dilation),
 			ConvBN(kernel_size = 1, num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), dropout = dropout_large),
-			nn.Conv1d(out_width_factors_large[1] * base_width, num_classes, kernel_size = 1)
 		]
-		super().__init__(prologue + backbone + epilogue)
+		decoder = [
+			Decoder(out_width_factors_large[1] * base_width, num_classes, type = 'gru')
+		]
+		super().__init__(prologue + backbone + epilogue + decoder)
 		self.residual = residual
 
 	def forward(self, x, lengths_fraction):
@@ -138,12 +162,11 @@ class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 			assert input.is_contiguous()
 			
 			mean, var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum) if training else (running_mean, running_var) 
-			invstd = (var + eps).sqrt_().reciprocal_()
-
+			invstd = (var + eps).rsqrt_()
 			output = torch.batch_norm_elemt(input, input, weight, bias, mean, invstd, 0)
+			
 			for r in residual:
 				output += r
-
 			if self.nonlinearity and self.nonlinearity[0] == 'leaky_relu':
 				F.leaky_relu_(output, self.nonlinearity[1])
 
@@ -159,11 +182,10 @@ class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 				mask = torch.ones_like(grad_output).masked_fill_(saved_output < 0, self.nonlinearity[1])
 				grad_output *= mask
 				saved_output /= mask
-
 			for r in residual:
 				saved_output -= r
 
-			saved_input = torch.batch_norm_elemt(saved_output, saved_output, 1. / invstd, mean, bias, 1. / weight, 0)
+			saved_input = torch.batch_norm_elemt(saved_output, saved_output, invstd.reciprocal(), mean, bias, weight.reciprocal(), 0)
 			mean_dy, mean_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(grad_output, saved_input, mean, invstd,	weight,	self.needs_input_grad[0], self.needs_input_grad[1],	self.needs_input_grad[2])
 			grad_input = torch.batch_norm_backward_elemt(grad_output, saved_input, mean, invstd, weight, mean_dy, mean_dy_xmu)
 

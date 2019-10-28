@@ -33,16 +33,16 @@ RUN curl -so /miniconda.sh https://repo.continuum.io/miniconda/Miniconda3-latest
  && rm /miniconda.sh
 ENV PATH=/miniconda/bin:$PATH
 
-RUN /miniconda/bin/conda install -y ipython matplotlib scipy scikit-learn numba
+RUN pip install ipython matplotlib seaborn
 
 # Prerequisites for building PyTorch from source (just in case)
-RUN /miniconda/bin/conda install -y numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
+RUN /miniconda/bin/conda install -y scipy scikit-learn numba numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
 RUN conda install -y -c pytorch magma-cuda100 
 
 RUN conda install -y pytorch cudatoolkit=10.0 -c pytorch
 RUN pip install torchaudio -f https://download.pytorch.org/whl/torch_stable.html
 
-RUN pip install future cython librosa python-levenshtein tqdm wget tensorboard
+RUN pip install future cython seaborn librosa tqdm wget tensorboard python-levenshtein 
 RUN pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex
 RUN pip install git+https://github.com/parlance/ctcdecode
 RUN pip install awscli

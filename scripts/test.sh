@@ -1,6 +1,8 @@
 python3 train.py $@ \
-  --checkpoint data/experiments/JasperNet_NovoGrad_lr1e-2_wd1e-3_bs80___mask128leakyreluinplace/checkpoint_epoch02_iter0060000.pt \
-  --val-data-multiref --val-data-path ../sample_ok/sample_ok.convasr.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv data/tts_dataset/tts_dataset_val.csv #\
+  --align \
+  --checkpoint data/experiments/JasperNet_NovoGrad_lr1e-2_wd1e-3_bs80___gru/checkpoint_epoch04_iter0115425.pt \
+  --val-data-path ../sample_ok/sample_ok.convasr.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv #data/tts_dataset/tts_dataset_val.csv #\
+
     #data/valset11102019/valset_2019-10-11_0.csv data/valset11102019/valset_2019-10-11_1.csv data/valset11102019/valset_2019-10-11.csv \
     #data/mixed_val.csv data/clean_val.csv
 
