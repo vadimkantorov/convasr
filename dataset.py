@@ -131,8 +131,9 @@ class Labels:
 		replacestar = lambda s: s.replace('*', '')
 		replacespace = lambda s: s.replace('<', ' ').replace('>', ' ')
 		replacephonetic = lambda s: s.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g.lower()})
+		replacepunkt = lambda s: s.replace(',', '').replace('.', '')
 
-		return functools.reduce(lambda text, func: func(text), [replacespace, replace2, replace22, replacestar, replacephonetic, str.strip], text)
+		return functools.reduce(lambda text, func: func(text), [replacepunkt, replacespace, replace2, replace22, replacestar, replacephonetic, str.strip], text)
 
 	def idx2str(self, idx, lengths = None, blank = None, repeat = None):
 		i2s_ = lambda i: '' if len(i) == 0 else ''.join(map(self.__getitem__, i)) if self.bpe is None else self.bpe.DecodeIds(i) if not blank else ''.join(blank if idx == self.blank_idx else self[idx] if k == 0 or idx == self.space_idx or idx != i[k - 1] else (repeat if repeat is not None else self[idx]) for k, idx in enumerate(i))

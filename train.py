@@ -58,7 +58,7 @@ def traineval(args):
 		training = epoch is not None and iteration is not None
 		model.eval()
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
-			features_, logits_, ref_tra_ = [], [], []
+			logits_, ref_tra_ = [], []
 			for batch_idx_, (inputs, targets, input_lengths_fraction, target_lengths, references, filenames, dataset_names) in enumerate(val_data_loader):
 				with torch.no_grad():
 					logits, output_lengths = model(inputs.to(args.device), input_lengths_fraction.to(args.device))
@@ -78,21 +78,22 @@ def traineval(args):
 						print(f'{val_dataset_name} REF: {reference_}')
 						print(f'{val_dataset_name} HYP: {transcript_}')
 						print(f'{val_dataset_name} WER: {wer:.02%} | CER: {cer:.02%}\n')
-					ref_tra_.append(dict(reference__ = reference__, transcript__ = transcript__, reference = reference_, transcript = transcript_, audio_path = audio_path, filename = os.path.basename(audio_path), cer = cer, wer = wer, per = per, loss = float(loss), entropy = float(entropy)))
-					if not training and args.logits:
-						logits_.extend(logits.cpu())
-						features_.extend(features.cpu())
+					ref_tra_.append(dict(reference_phonetic = reference__, transcript_phonetic = transcript__, reference = reference, transcript = transcript, reference_aligned = reference_, transcript_aligned = transcript_, audio_path = audio_path, filename = os.path.basename(audio_path), cer = cer, wer = wer, per = per, loss = float(loss), entropy = float(entropy)))
+				if not training and args.logits:
+					logits_.extend(l[..., :o] for l, o in zip(logits.cpu(), output_lengths))
 			cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([x[k] for x in ref_tra_ if not math.isinf(x[k]) and not math.isnan(x[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
 			transcripts_path = os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name)
 			print(f'{args.experiment_id} {val_dataset_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} | Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}\n')
 
 			with open(transcripts_path, 'w') as f:
-				json.dump(list(sorted(ref_tra_, key = lambda ref_tra: ref_tra['cer'], reverse = True)), f, ensure_ascii = False, indent = 2, sort_keys = True)
+				json.dump(list(sorted(ref_tra_, key = lambda r: r['cer'], reverse = True)), f, ensure_ascii = False, indent = 2, sort_keys = True)
 			if training:
 				tensorboard.add_scalars('datasets/' + val_dataset_name, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
 				tensorboard.flush()
 			elif args.logits:
-				torch.save(list(sorted([ref_tra.update(dict(logits = logits, features = features)) or ref_tra for features, logits, ref_tra in zip(features_, logits_, ref_tra_)], key = lambda j: j['cer'], reverse = True)), args.logits.format(val_dataset_name = val_dataset_name))
+				logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
+				print('Logits:', logits_file_path)
+				torch.save(list(sorted([(r.update(dict(logits = logits)) or r) for r, logits in zip(ref_tra_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
 		if training and not args.checkpoint_skip:
 			#TODO: amp.state_dict()
 			optimizer_state_dict = None # optimizer.state_dict()

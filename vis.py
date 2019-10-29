@@ -149,29 +149,29 @@ def words(train_data_path, val_data_path):
 			print(w, c1, c2)
 
 def vis(logits, MAX_ENTROPY = 1.0):
-	ticks = lambda labelsize = 3, length = 0: plt.gca().tick_params(axis='both', which='both', labelsize=labelsize, length=length) or [ax.set_linewidth(0) for ax in plt.gca().spines.values()]
-	html = open(output_path + '.html', 'w')
-	html.write('<html><body>') 
+	ticks = lambda labelsize = 2.5, length = 0: plt.gca().tick_params(axis='both', which='both', labelsize=labelsize, length=length) or [ax.set_linewidth(0) for ax in plt.gca().spines.values()]
+	html = open(logits + '.html', 'w')
+	html.write('<html><body>')
 	for segment in torch.load(logits):
-		audio_path, filename, features, logits = map(segment.get, ['audio_path', 'filename', 'features', 'logits'])
+		audio_path, filename, logits, cer, reference, transcript = map(segment.get, ['audio_path', 'filename', 'logits', 'cer', 'reference_aligned', 'transcript_aligned'])
 		log_probs = F.log_softmax(logits, dim = 0)
 		entropy = models.entropy(log_probs, dim = 0, sum = False)
 		margin = models.margin(log_probs, dim = 0)
-		energy = features.exp().sum(dim = 0)[::2]
+		#energy = features.exp().sum(dim = 0)[::2]
 
 		plt.figure(figsize = (5, 0.7))
 		plt.suptitle(filename, fontsize = 4)
-		plt.plot(energy / energy.max(), 'b', linewidth = 0.3)
+		#plt.plot(energy / energy.max(), 'b', linewidth = 0.3)
 		plt.plot(entropy, 'r', linewidth = 0.3)
 		plt.hlines(1.0, 0, entropy.shape[-1] - 1, linewidth = 0.5)
 		bad = entropy > MAX_ENTROPY
-		bad_ = torch.cat([bad[-1:], bad[:-1]])
-		for begin, end in zip((bad & ~bad_).nonzero().squeeze(1).tolist(), (~bad & bad_).nonzero().squeeze(1).tolist()):
+		bad_ = torch.cat([bad[1:], bad[:1]])
+		for begin, end in zip((~bad & bad_).nonzero().squeeze(1).tolist(), (bad & ~bad_).nonzero().squeeze(1).tolist()):
 			plt.axvspan(begin, end, color='red', alpha=0.5)
 
 		plt.ylim(0, 2)
 		plt.xlim(0, entropy.shape[-1] - 1)
-		plt.xticks(torch.arange(entropy.shape[-1]), labels.idx2str(log_probs.argmax(dim = 0), eps = '.', repeat = '_'))
+		plt.xticks(torch.arange(entropy.shape[-1]), labels.idx2str(log_probs.argmax(dim = 0)).replace(labels.blank, '.').replace(labels.space, '_'))
 		ticks()
 		plt.subplots_adjust(left=0, right=1, top=1, bottom=0.2)
 		buf = io.BytesIO()
@@ -179,6 +179,9 @@ def vis(logits, MAX_ENTROPY = 1.0):
 		plt.close()
 		
 		encoded = base64.b64encode(buf.getvalue()).decode('utf-8').replace('\n', '')
+		html.write(f'<h4>{filename} | cer: {cer:.02f}</h4>')
+		html.write(f'<pre>reference: {reference}</pre>')
+		html.write(f'<pre>transcript: {transcript}</pre>')
 		html.write(f'<img style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>')
 		encoded = base64.b64encode(open(audio_path, 'rb').read()).decode('utf-8').replace('\n', '')
 		html.write(f'<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio><hr/>')
@@ -190,6 +193,7 @@ def vis(logits, MAX_ENTROPY = 1.0):
 				const x = (evt.clientX - dim.left) / dim.width;
 				const audio = img.nextSibling;
 				audio.currentTime = x * audio.duration;
+				console.log(x, x * audio.duration);
 				audio.play();
 			};
 		});
