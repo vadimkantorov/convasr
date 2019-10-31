@@ -1,4 +1,4 @@
-LABELS = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ* "
+LABELS = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ* "#<>"
 
 PHONETIC_REPLACE_GROUPS = ['ОАЯ', 'ПБ', 'СЗЦ', 'ВФ', 'КГХ', 'ТД', 'ЧЖШЩ', 'ЕЫЭИЙ', 'ЛР', 'УЮ', 'ЬЪ', 'НМ']
 
@@ -26,7 +26,7 @@ XI XII XIII XIV XV XVI XVII XVIII XIX XX
 XXI XXII XXIII XXIV XXV XXVI XXVII XXVIII XXIX XXX
 XXXI XXXII XXXIII XXXIV XXXV XXXVI XXXVII XXXVIII XXXIX XXXX
 """.split()
-LATINS_2_NUM = {x: i for i, x in enumerate(LATINS, 2)}
+LATINS_2_NUM = {x: i for i, x in enumerate(LATINS, start = 2)}
 
 CARDINALS = {
     0: 'НОЛЬ',

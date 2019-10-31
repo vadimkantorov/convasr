@@ -88,7 +88,7 @@ class JasperNet(nn.ModuleList):
 			ConvBN(kernel_size = 1, num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), dropout = dropout_large),
 		]
 		decoder = [
-			Decoder(out_width_factors_large[1] * base_width, num_classes, type = 'gru')
+			Decoder(out_width_factors_large[1] * base_width, num_classes, type = None)
 		]
 		super().__init__(prologue + backbone + epilogue + decoder)
 		self.residual = residual
@@ -125,8 +125,12 @@ class Wav2LetterFlat(JasperNet):
 		)
 
 class JasperNetSeparable(JasperNet):
-	def __init__(*args, separable = True, groups = 128, **kwargs):
+	def __init__(self, *args, separable = True, groups = 128, **kwargs):
 		super().__init__(*args, separable = separable, groups = groups, **kwargs)
+
+class JasperNetBig(JasperNet):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, num_subblocks = 2, **kwargs)
 
 class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 	def __init__(self, *args, nonlinearity = None, inplace = False, dropout = 0, squeeze_and_excite = None, **kwargs):

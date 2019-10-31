@@ -117,7 +117,7 @@ class Labels:
 
 	def normalize_text(self, text):
 		return ';'.join(' '.join(self.find_words(part)).lower().strip() for part in text.split(';')) or '*' 
-		#return ''.join(f'<{w}>' for w in self.find_words(text)).upper().strip() or '*' 
+		#return ' '.join(f'<{w}>' for w in self.find_words(text)).lower().strip() or '*' 
 
 	def parse(self, text):
 		normalized = self.normalize_text(text)
@@ -125,18 +125,19 @@ class Labels:
 		chr2idx = {l: i for i, l in enumerate(self.alphabet + self.repeat + self.space + self.blank)}
 		return normalized, torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
-	def postprocess_transcript(self, text, phonetic_replace_groups = []):
+	def postprocess_transcript(self, text, phonetic_replace_groups = [], replacespace = False):
 		replace2 = lambda s: ''.join(c if i == 0 or c != '2' else s[i - 1] for i, c in enumerate(s))
 		replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
 		replacestar = lambda s: s.replace('*', '')
-		replacespace = lambda s: s.replace('<', ' ').replace('>', ' ')
+		replacespace = (lambda s: s.replace('<', ' ').replace('>', ' ')) if replacespace else (lambda s: s)
 		replacephonetic = lambda s: s.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g.lower()})
 		replacepunkt = lambda s: s.replace(',', '').replace('.', '')
 
 		return functools.reduce(lambda text, func: func(text), [replacepunkt, replacespace, replace2, replace22, replacestar, replacephonetic, str.strip], text)
 
-	def idx2str(self, idx, lengths = None, blank = None, repeat = None):
-		i2s_ = lambda i: '' if len(i) == 0 else ''.join(map(self.__getitem__, i)) if self.bpe is None else self.bpe.DecodeIds(i) if not blank else ''.join(blank if idx == self.blank_idx else self[idx] if k == 0 or idx == self.space_idx or idx != i[k - 1] else (repeat if repeat is not None else self[idx]) for k, idx in enumerate(i))
+	def idx2str(self, idx, lengths = None, blank = None, space = None):
+		#i2s_ = lambda i: ('' if len(i) == 0 else ''.join(map(self.__getitem__, i)) if self.bpe is None else self.bpe.DecodeIds(i)) if not blank else ''.join(blank if idx == self.blank_idx else self[idx] if k == 0 or idx == self.space_idx or idx != i[k - 1] else (repeat if repeat is not None else self[idx]) for k, idx in enumerate(i))
+		i2s_ = lambda i: self.bpe.DecodeIds(i) if self.bpe is not None else ''.join((blank or self[idx]) if idx == self.blank_idx else (space or self[idx]) if idx == self.space_idx else self[idx] for idx in i)
 		i2s = lambda i: i2s_(i) if len(i) == 0 or not isinstance(i[0], list) else list(map(i2s, i))
 		if torch.is_tensor(idx):
 			idx = idx.tolist()
