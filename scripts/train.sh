@@ -9,7 +9,8 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --val-data-path data/mixed_val.csv data/clean_val.csv ../sample_ok/sample_ok.convasr.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv data/tts_dataset/tts_dataset_val.csv \
   --val-iteration-interval 2500 \
   --epochs 5 \
-  --dropout 0
+  --dropout 0 #\
+#  --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs80/checkpoint_epoch03_iter0070000.pt
   
 #  --weight-decay 0 \
 #  --checkpoint data/experiments/JasperNet_NovoGrad_lr1e-2_wd0e+00_bs80___separable/checkpoint_epoch01_iter0025000.pt

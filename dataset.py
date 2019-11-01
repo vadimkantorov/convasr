@@ -5,6 +5,8 @@ import gzip
 import time
 import math
 import random
+import subprocess
+import numpy as np
 import functools
 import torch.utils.data
 import scipy.io.wavfile
@@ -172,13 +174,17 @@ def collate_fn(batch, pad_to = 128):
 		dataset_names.append(dataset_name)
 	return inputs, targets, torch.FloatTensor(input_percentages), torch.IntTensor(target_lengths), transcripts, audio_paths, dataset_names
 
-def read_wav(path, normalize = True, stereo = False, sample_rate = None, max_duration = None):
-	sample_rate_, signal = scipy.io.wavfile.read(path)
+def read_wav(audio_path, normalize = True, stereo = False, sample_rate = None, max_duration = None):
+	if audio_path.endswith('.wav'):
+		sample_rate_, signal = scipy.io.wavfile.read(audio_path)
+	else:
+		sample_rate_, signal = sample_rate, torch.from_numpy(np.frombuffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', 'little', '-r', str(sample_rate), '-c', '1', '-t', 'raw', '-']), dtype = np.int16))
+
 	signal = (signal if stereo else signal.squeeze(1) if signal.shape[1] == 1 else signal.mean(1)) if len(signal.shape) > 1 else (signal if not stereo else signal[..., None])
 	if max_duration is not None:
 		signal = signal[:int(max_duration * sample_rate_), ...]
 
-	signal = torch.from_numpy(signal).to(torch.float32)
+	signal = torch.as_tensor(signal).to(torch.float32)
 	if normalize:
 		signal = models.normalize_signal(signal, dim = 0)
 	if sample_rate is not None and sample_rate_ != sample_rate:

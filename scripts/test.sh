@@ -1,9 +1,9 @@
 python3 train.py $@ \
-  --checkpoint data/experiments/JasperNet_NovoGrad_lr1e-2_wd1e-3_bs80___sow/checkpoint_epoch02_iter0060000.pt \
+  --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs80/checkpoint_epoch02_iter0057500.pt \
   --val-data-path ../sample_ok/sample_ok.convasr.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv \
-  --align --logits
+  --align --logits \
+  --decoder BeamSearchDecoder --beam-width 5000 --lm  chats_05_prune.binary  #charlm/chats_06_noprune_char.binary # #--lm data/ru_wiyalen_no_punkt.arpa.binary 
 
-#  --decoder BeamSearchDecoder --beam-width 5000 --lm  chats_05_prune.binary  #charlm/chats_06_noprune_char.binary # #--lm data/ru_wiyalen_no_punkt.arpa.binary 
 #  --checkpoint data/experiments/JasperNet_NovoGrad_lr1e-2_wd1e-3_bs80___gru/checkpoint_epoch04_iter0115425.pt \
 
     #data/valset11102019/valset_2019-10-11_0.csv data/valset11102019/valset_2019-10-11_1.csv data/valset11102019/valset_2019-10-11.csv \

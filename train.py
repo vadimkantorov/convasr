@@ -65,7 +65,7 @@ def traineval(args):
 					log_probs = F.log_softmax(logits, dim = 1)
 					loss = criterion(log_probs.permute(2, 0, 1), targets.to(args.device), output_lengths, target_lengths.to(args.device)).cpu() / target_lengths
 				entropy = models.entropy(log_probs, output_lengths, dim = 1)
-				decoded = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths.tolist()))
+				decoded = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths))
 				for k, (audio_path, transcript, reference, entropy, loss) in enumerate(zip(filenames, decoded, references, entropy, loss)):
 					transcript, reference = min((metrics.cer(t, r), (t, r)) for r in reference.split(';') for t in (transcript if isinstance(transcript, list) else [transcript]))[1]
 					transcript, reference = map(labels.postprocess_transcript, [transcript, reference])
