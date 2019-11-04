@@ -54,33 +54,37 @@ def traineval(args):
 	criterion = nn.CTCLoss(blank = labels.blank_idx, reduction = 'none').to(args.device)
 	decoder = decoders.GreedyDecoder(labels) if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 
-	def evaluate_model(epoch = None, iteration = None):
+	def compute_losses(val_data_loader, decoder = None):
+		for inputs, targets, input_lengths_fraction, target_lengths, references, filenames, dataset_names in val_data_loader:
+			with torch.no_grad():
+				logits, output_lengths = model(inputs.to(args.device), input_lengths_fraction.to(args.device))
+				log_probs = F.log_softmax(logits, dim = 1)
+				loss = criterion(log_probs.permute(2, 0, 1), targets.to(args.device), output_lengths, target_lengths.to(args.device)).cpu() / target_lengths
+				entropy = models.entropy(log_probs, output_lengths, dim = 1).cpu()
+				decoded = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths)) if decoder is not None else [None] * len(logits)
+				yield filenames, references, loss, entropy, decoded, [l[..., :o] for l, o in zip(logits, output_lengths)]
+
+	def evaluate_model(val_data_loaders, epoch = None, iteration = None):
 		training = epoch is not None and iteration is not None
 		model.eval()
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
-			logits_, ref_tra_ = [], []
-			for batch_idx_, (inputs, targets, input_lengths_fraction, target_lengths, references, filenames, dataset_names) in enumerate(val_data_loader):
-				with torch.no_grad():
-					logits, output_lengths = model(inputs.to(args.device), input_lengths_fraction.to(args.device))
-					log_probs = F.log_softmax(logits, dim = 1)
-					loss = criterion(log_probs.permute(2, 0, 1), targets.to(args.device), output_lengths, target_lengths.to(args.device)).cpu() / target_lengths
-				entropy = models.entropy(log_probs, output_lengths, dim = 1)
-				decoded = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths))
-				for k, (audio_path, transcript, reference, entropy, loss) in enumerate(zip(filenames, decoded, references, entropy, loss)):
+			print(f'{val_dataset_name}@{iteration} computing losses')
+			ref_tra_, logits_ = [], []
+			for batch_idx, (filenames, references, loss, entropy, decoded, logits) in enumerate(compute_losses(val_data_loader, decoder)):
+				logits_.extend([l.cpu() for l in logits] if not training and args.logits else [None] * len(filenames))
+				for k, (audio_path, reference, entropy, loss, transcript) in enumerate(zip(filenames, references, entropy.tolist(), loss.tolist(), decoded)):
 					transcript, reference = min((metrics.cer(t, r), (t, r)) for r in reference.split(';') for t in (transcript if isinstance(transcript, list) else [transcript]))[1]
 					transcript, reference = map(labels.postprocess_transcript, [transcript, reference])
 					cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
-					transcript_, reference_ = metrics.align(transcript, reference, prepend_space_to_reference = True) if args.align else (transcript, reference)
-					transcript__, reference__ = [labels.postprocess_transcript(s, phonetic_replace_groups = labels.lang.PHONETIC_REPLACE_GROUPS) for s in [transcript, reference]]
-					per = metrics.cer(transcript__, reference__)
+					transcript_aligned, reference_aligned = metrics.align(transcript, reference, prepend_space_to_reference = True) if args.align else (transcript, reference)
+					transcript_phonetic, reference_phonetic = [labels.postprocess_transcript(s, phonetic_replace_groups = labels.lang.PHONETIC_REPLACE_GROUPS) for s in [transcript, reference]]
+					per = metrics.cer(transcript_phonetic, reference_phonetic)
 					if args.verbose:
-						print(iteration, ':', batch_idx_ * len(inputs) + k, '/', len(val_data_loader) * len(inputs))
-						print(f'{val_dataset_name} REF: {reference_}')
-						print(f'{val_dataset_name} HYP: {transcript_}')
-						print(f'{val_dataset_name} WER: {wer:.02%} | CER: {cer:.02%}\n')
-					ref_tra_.append(dict(reference_phonetic = reference__, transcript_phonetic = transcript__, reference = reference, transcript = transcript, reference_aligned = reference_, transcript_aligned = transcript_, audio_path = audio_path, filename = os.path.basename(audio_path), cer = cer, wer = wer, per = per, loss = float(loss), entropy = float(entropy)))
-				if not training and args.logits:
-					logits_.extend(l[..., :o] for l, o in zip(logits.cpu(), output_lengths))
+						print(f'{val_dataset_name}@{iteration}    :', batch_idx * len(filenames) + k, '/', len(val_data_loader) * len(filenames))
+						print(f'{val_dataset_name}@{iteration} REF: {reference_aligned}')
+						print(f'{val_dataset_name}@{iteration} HYP: {transcript_aligned}')
+						print(f'{val_dataset_name}@{iteration} WER: {wer:.02%} | CER: {cer:.02%}\n')
+					ref_tra_.append(dict(reference_phonetic = reference_phonetic, transcript_phonetic = transcript_phonetic, reference = reference, transcript = transcript, reference_aligned = reference_aligned, transcript_aligned = transcript_aligned, audio_path = audio_path, filename = os.path.basename(audio_path), cer = cer, wer = wer, per = per, loss = loss, entropy = entropy))
 			cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([x[k] for x in ref_tra_ if not math.isinf(x[k]) and not math.isnan(x[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
 			transcripts_path = os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name)
 			print(f'{args.experiment_id} {val_dataset_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} | Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}\n')
@@ -98,9 +102,8 @@ def traineval(args):
 			#TODO: amp.state_dict()
 			optimizer_state_dict = None # optimizer.state_dict()
 			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
-		if iteration and args.iterations and iteration >= args.iterations:
-			sys.exit(0)
 
+		model.train()
 		torch.cuda.empty_cache()
 
 	print(' Model capacity:', int(models.compute_capacity(model) / 1e6), 'million parameters\n')
@@ -144,6 +147,7 @@ def traineval(args):
 	if args.fp16:
 		model, optimizer = apex.amp.initialize(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 	model = torch.nn.DataParallel(model)
+	model.train()
 
 	os.makedirs(args.experiment_dir, exist_ok = True)
 	tensorboard_dir = os.path.join(args.experiment_dir, 'tensorboard')
@@ -159,7 +163,6 @@ def traineval(args):
 	loss_avg, entropy_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0, 0.0
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1. / K) * avg
 	for epoch in range(sampler.epoch, args.epochs):
-		model.train()
 		time_epoch_start = time.time()
 		for batch_idx, (inputs, targets, input_lengths_fraction, target_lengths, *_) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc = time.time()
@@ -196,8 +199,10 @@ def traineval(args):
 			iteration += 1
 
 			if args.val_iteration_interval is not None and iteration > 0 and iteration % args.val_iteration_interval == 0:
-				evaluate_model(epoch, iteration)
-				model.train()
+				evaluate_model(val_data_loaders, epoch, iteration)
+
+			if iteration and args.iterations and iteration >= args.iterations:
+				sys.exit(0)
 
 			if iteration % args.log_iteration_interval == 0:
 				tensorboard.add_scalars('datasets/' + train_dataset_name, dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
@@ -212,7 +217,7 @@ def traineval(args):
 
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
 		sampler.shuffle(epoch)
-		evaluate_model(epoch, iteration)
+		evaluate_model(val_data_loaders, epoch, iteration)
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
