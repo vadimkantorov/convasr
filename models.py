@@ -65,14 +65,14 @@ class JasperNet(nn.ModuleList):
 			base_width = 128, out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
 			separable = False, groups = 1, 
 			dropout = None, dropout_small = 0.2, dropout_large = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
-			temporal_mask = True
+			temporal_mask = True, nonlinearity = 'relu', inplace = False
 		):
 		dropout_small = dropout_small if dropout != 0 else 0
 		dropout_large = dropout_large if dropout != 0 else 0
 		dropouts = dropouts if dropout != 0 else [0] * len(dropouts)
 
 		width_factor_ = 2
-		prologue = [ConvBN(kernel_size = kernel_size_small, num_channels = (num_input_features, width_factor_ * base_width), dropout = dropout_small, stride = 2, temporal_mask = temporal_mask)]
+		prologue = [ConvBN(kernel_size = kernel_size_small, num_channels = (num_input_features, width_factor_ * base_width), dropout = dropout_small, stride = 2, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace)]
 		
 		backbone = []
 		num_channels_residual = []
@@ -81,12 +81,12 @@ class JasperNet(nn.ModuleList):
 				num_channels = (width_factor_ * base_width, (width_factor * base_width) if s == num_subblocks - 1 else (width_factor_ * base_width))
 				num_channels_residual.append(width_factor_ * base_width)
 				# use None in num_channels_residual
-				backbone.append(ConvBN(kernel_size = kernel_size, num_channels = num_channels, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask))
+				backbone.append(ConvBN(kernel_size = kernel_size, num_channels = num_channels, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace))
 			width_factor_ = width_factor
 
 		epilogue = [
-			ConvBN(kernel_size = kernel_size_large, num_channels = (width_factor_ * base_width, out_width_factors_large[0] * base_width), dropout = dropout_large, dilation = dilation, temporal_mask = temporal_mask),
-			ConvBN(kernel_size = 1, num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), dropout = dropout_large, temporal_mask = temporal_mask),
+			ConvBN(kernel_size = kernel_size_large, num_channels = (width_factor_ * base_width, out_width_factors_large[0] * base_width), dropout = dropout_large, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
+			ConvBN(kernel_size = 1, num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), dropout = dropout_large, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
 		]
 		decoder = [
 			Decoder(out_width_factors_large[1] * base_width, num_classes, type = None)
@@ -132,6 +132,10 @@ class JasperNetSeparable(JasperNet):
 class JasperNetBig(JasperNet):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, num_subblocks = 2, temporal_mask = False, **kwargs)
+
+class JasperNetBigInplace(JasperNet):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, num_subblocks = 2, temporal_mask = False, inplace = True, nonlinearity = ('leaky_relu', 0.01), **kwargs)
 
 class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 	def __init__(self, *args, nonlinearity = None, inplace = False, dropout = 0, squeeze_and_excite = None, **kwargs):

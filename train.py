@@ -25,7 +25,11 @@ def set_random_seed(seed):
 		set_random_seed(seed)
 
 def traineval(args):
-	checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoint else {}
+	checkpoints = [torch.load(checkpoint_path, map_location = 'cpu') for checkpoint_path in args.checkpoint]
+	checkpoint = (checkpoints + [{}])[0]
+	if len(checkpoints) > 1:
+		checkpoint['model_state_dict'] = {k : sum(c['model_state_dict'][k] for c in checkpoints) / len(checkpoints) for k in checkpoint['model_state_dict']}
+
 	args.experiment_id = args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, bpe = 'bpe' if args.bpe else '', train_waveform_transform = f'aug{args.train_waveform_transform[0]}{args.train_waveform_transform_prob or ""}' if args.train_waveform_transform else '', train_feature_transform = f'aug{args.train_feature_transform[0]}{args.train_feature_transform_prob or ""}' if args.train_feature_transform else '').replace('e-0', 'e-').rstrip('_')
 	if 'experiment_id' in checkpoint and not args.experiment_name:
 		args.experiment_id = checkpoint['experiment_id']
@@ -152,7 +156,7 @@ def traineval(args):
 	os.makedirs(args.experiment_dir, exist_ok = True)
 	tensorboard_dir = os.path.join(args.experiment_dir, 'tensorboard')
 	if checkpoint and args.experiment_name:
-		tensorboard_dir_checkpoint = os.path.join(os.path.dirname(args.checkpoint), 'tensorboard')
+		tensorboard_dir_checkpoint = os.path.join(os.path.dirname(args.checkpoint[0]), 'tensorboard')
 		if os.path.exists(tensorboard_dir_checkpoint) and not os.path.exists(tensorboard_dir):
 			shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
 	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
@@ -252,7 +256,7 @@ if __name__ == '__main__':
 	parser.add_argument('--train-batch-size', type = int, default = 64)
 	parser.add_argument('--val-batch-size', type = int, default = 64)
 	parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
-	parser.add_argument('--checkpoint')
+	parser.add_argument('--checkpoint', nargs = '*', default = [])
 	parser.add_argument('--checkpoint-skip', action = 'store_true')
 	parser.add_argument('--experiments-dir', default = 'data/experiments')
 	parser.add_argument('--experiment-dir', default = '{experiments_dir}/{experiment_id}')
