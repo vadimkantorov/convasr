@@ -19,6 +19,7 @@ import decoders
 import metrics
 import models
 import optimizers
+import vis
 
 def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
@@ -46,7 +47,8 @@ def traineval(args):
 	if args.cudnn == 'benchmark':
 		torch.backends.cudnn.benchmark = True
 
-	labels = dataset.Labels(importlib.import_module(args.lang), bpe = args.bpe)
+	lang = importlib.import_module(args.lang)
+	labels = [dataset.Labels(lang)] + ([dataset.Labels(lang, bpe = args.bpe)] if args.bpe else [])
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
 	val_waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob)
 	val_feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob)
@@ -62,17 +64,24 @@ def traineval(args):
 		for inputs, targets, input_lengths_fraction, target_lengths, references, filenames, dataset_names in val_data_loader:
 			with torch.no_grad():
 				logits, output_lengths = model(inputs.to(args.device), input_lengths_fraction.to(args.device))
-				log_probs = F.log_softmax(logits, dim = 1)
+				log_probs = F.softmax(logits, dim = 1)
+				top2 = log_probs.topk(2, dim = 1).indices[:, -1, :]
+				#log_probs[:, labels.word_start_idx] += log_probs[:, labels.blank_idx] # * (top2 == labels.word_start_idx)
+				#log_probs[:, labels.word_end_idx]   += log_probs[:, labels.blank_idx] # * (top2 == labels.word_end_idx)
+				#log_probs[:, labels.space_idx] += log_probs[:, labels.blank_idx] * (top2 == labels.space_idx)
+				log_probs = log_probs.log()
+
 				loss = criterion(log_probs.permute(2, 0, 1), targets.to(args.device), output_lengths, target_lengths.to(args.device)).cpu() / target_lengths
 				entropy = models.entropy(log_probs, output_lengths, dim = 1).cpu()
-				decoded = labels.idx2str(decoder.decode(F.log_softmax(logits, dim = 1), output_lengths)) if decoder is not None else [None] * len(logits)
-				yield filenames, references, loss, entropy, decoded, [l[..., :o] for l, o in zip(logits, output_lengths)]
+				decoded = labels.idx2str(decoder.decode(log_probs, output_lengths)) if decoder is not None else [None] * len(logits)
+				yield filenames, references, loss, entropy, decoded, [l[..., :o] for l, o in zip(log_probs, output_lengths)]
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None):
 		training = epoch is not None and iteration is not None
 		model.eval()
+		columns = {}
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
-			print(f'{val_dataset_name}@{iteration} computing losses')
+			print(f'\n{val_dataset_name}@{iteration} computing losses')
 			ref_tra_, logits_ = [], []
 			for batch_idx, (filenames, references, loss, entropy, decoded, logits) in enumerate(compute_losses(val_data_loader, decoder)):
 				logits_.extend([l.cpu() for l in logits] if not training and args.logits else [None] * len(filenames))
@@ -92,6 +101,7 @@ def traineval(args):
 			cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([x[k] for x in ref_tra_ if not math.isinf(x[k]) and not math.isnan(x[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
 			transcripts_path = os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name)
 			print(f'{args.experiment_id} {val_dataset_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} | Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}\n')
+			columns[val_dataset_name] =  dict(cer = cer_avg, wer = wer_avg, loss = loss_avg, entropy = entropy_avg)
 
 			with open(transcripts_path, 'w') as f:
 				json.dump(list(sorted(ref_tra_, key = lambda r: r['cer'], reverse = True)), f, ensure_ascii = False, indent = 2, sort_keys = True)
@@ -101,7 +111,11 @@ def traineval(args):
 			elif args.logits:
 				logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
 				print('Logits:', logits_file_path)
-				torch.save(list(sorted([(r.update(dict(logits = logits)) or r) for r, logits in zip(ref_tra_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
+				torch.save(list(sorted([(r.update(dict(log_probs = logits)) or r) for r, logits in zip(ref_tra_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
+		
+		vis.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns)
+		vis.exphtml(args.exphtml)
+		
 		if training and not args.checkpoint_skip:
 			#TODO: amp.state_dict()
 			optimizer_state_dict = None # optimizer.state_dict()
@@ -120,7 +134,7 @@ def traineval(args):
 		if args.fp16:
 			model = apex.amp.initialize(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 		model = torch.nn.DataParallel(model)
-		return evaluate_model()
+		return evaluate_model(val_data_loaders)
 
 	train_waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob)
 	train_feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob)
@@ -170,6 +184,8 @@ def traineval(args):
 		time_epoch_start = time.time()
 		for batch_idx, (inputs, targets, input_lengths_fraction, target_lengths, *_) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc = time.time()
+			lr = scheduler.get_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
+			
 			inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
 			with torch.enable_grad():
 				logits, output_lengths = model(inputs, input_lengths_fraction)
@@ -189,6 +205,7 @@ def traineval(args):
 						torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
 						optimizer.step()
 						optimizer.zero_grad()
+						scheduler.step()
 					loss_avg = moving_avg(loss_avg, float(loss_), max = 1000)
 					entropy_avg = moving_avg(entropy_avg, float(entropy), max = 4)
 					toc_bwd = time.time()
@@ -196,10 +213,8 @@ def traineval(args):
 			ms = lambda sec: sec * 1000
 			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = ms(toc - tic), ms(toc_fwd - toc), ms(toc_bwd - toc_fwd), ms(time.time() - toc)	
 			time_ms_avg = moving_avg(time_ms_avg, time_ms_data + time_ms_model, max = 10000)
-			lr = scheduler.get_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
 			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}> loss: {float(loss_):.2f} <{loss_avg:.2f}> time: ({inputs.shape[0]}x{inputs.shape[1]}x{inputs.shape[2]}) {time_ms_data:.2f}+{time_ms_fwd:4.0f}+{time_ms_bwd:4.0f} <{time_ms_avg:.0f}> | lr: {lr:.5f}')
 			tic = time.time()
-			scheduler.step()
 			iteration += 1
 
 			if args.val_iteration_interval is not None and iteration > 0 and iteration % args.val_iteration_interval == 0:
@@ -294,5 +309,6 @@ if __name__ == '__main__':
 	parser.add_argument('--bpe')
 	parser.add_argument('--timeout', type = float, default = 0)
 	parser.add_argument('--max-duration', type = float, default = 10)
+	parser.add_argument('--exphtml', default = '../stt.results')
 
 	traineval(parser.parse_args())

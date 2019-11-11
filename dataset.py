@@ -50,8 +50,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		if self.feature_transform is not None:
 			features, sample_rate = self.feature_transform(features, self.sample_rate, dataset_name = dataset_name)
 
-		reference_normalized, targets = self.labels.parse(reference)
-		return features, targets, reference_normalized, audio_path, dataset_name
+		reference_normalized = self.labels[0].parse(reference)
+		targets = [labels.parse(reference)[1] for labels in self.labels]
+		return dataset_name, audio_path, reference_normalized, features, targets
 
 	def __len__(self):
 		return sum(map(len, self.ids))
@@ -94,9 +95,9 @@ class BucketingSampler(torch.utils.data.Sampler):
 class Labels:
 	blank = '|'
 	space = ' '
+	repeat = '2'
 	word_start = '<'
 	word_end = '>'
-	repeat = '2'
 
 	def __init__(self, lang, bpe = None):
 		self.lang = lang
@@ -106,10 +107,12 @@ class Labels:
 		if bpe:
 			self.bpe = sentencepiece.SentencePieceProcessor()
 			self.bpe.Load(bpe)
-		self.alphabet = self.lang.LABELS.lower()
+		self.alphabet = self.lang.LABELS.lower()# + self.lang.LABELS[:-1].upper()
 		self.blank_idx = len(self) - 1
 		self.space_idx = self.blank_idx - 1
 		self.repeat_idx = self.blank_idx - 2
+		self.word_start_idx = self.alphabet.index(self.word_start) if self.word_start in self.alphabet else -1
+		self.word_end_idx = self.alphabet.index(self.word_end) if self.word_end in self.alphabet else -1
 
 	def find_words(self, text):
 		text = re.sub(r'([^\W\d]+)2', r'\1', text)
@@ -119,32 +122,31 @@ class Labels:
 
 	def normalize_text(self, text):
 		return ';'.join(' '.join(self.find_words(part)).lower().strip() for part in text.split(';')) or '*' 
-		#return ' '.join(f'<{w}>' for w in self.find_words(text)).lower().strip() or '*' 
+		#return ' '.join(f'{w[:-1]}{w[-1].upper()}' for w in self.find_words(text.lower())) or '*' 
 
 	def parse(self, text):
 		normalized = self.normalize_text(text)
 		chars = normalized.split(';')[0]
-		chr2idx = {l: i for i, l in enumerate(self.alphabet + self.repeat + self.space + self.blank)}
+		chr2idx = {l: i for i, l in enumerate(str(self))}
 		return normalized, torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
-	def postprocess_transcript(self, text, phonetic_replace_groups = [], replacespace = False):
+	def postprocess_transcript(self, text, phonetic_replace_groups = [], replacespace = True):
+		replaceblank = lambda s: s.replace(self.blank * 10, ' ').replace(self.blank, '')
 		replace2 = lambda s: ''.join(c if i == 0 or c != '2' else s[i - 1] for i, c in enumerate(s))
 		replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
 		replacestar = lambda s: s.replace('*', '')
+		#replacespace = lambda s: s.replace('>><<', ' ').replace('<>', '').replace('> <', ' ').replace('<', '').replace('>', '')
 		replacespace = (lambda s: s.replace('<', ' ').replace('>', ' ')) if replacespace else (lambda s: s)
+		#replacespace = lambda s: s.replace('<', '').replace('>', '')
+		replacecap = lambda s: ''.join(c + ' ' if c.isupper() else c for c in s)
 		replacephonetic = lambda s: s.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g.lower()})
 		replacepunkt = lambda s: s.replace(',', '').replace('.', '')
 
-		return functools.reduce(lambda text, func: func(text), [replacepunkt, replacespace, replace2, replace22, replacestar, replacephonetic, str.strip], text)
+		return functools.reduce(lambda text, func: func(text), [replacepunkt, replacespace, replacecap, replaceblank, replace2, replace22, replacestar, replacephonetic, str.strip], text)
 
-	def idx2str(self, idx, lengths = None, blank = None, space = None):
-		#i2s_ = lambda i: ('' if len(i) == 0 else ''.join(map(self.__getitem__, i)) if self.bpe is None else self.bpe.DecodeIds(i)) if not blank else ''.join(blank if idx == self.blank_idx else self[idx] if k == 0 or idx == self.space_idx or idx != i[k - 1] else (repeat if repeat is not None else self[idx]) for k, idx in enumerate(i))
-		i2s_ = lambda i: self.bpe.DecodeIds(i) if self.bpe is not None else ''.join((blank or self[idx]) if idx == self.blank_idx else (space or self[idx]) if idx == self.space_idx else self[idx] for idx in i)
-		i2s = lambda i: i2s_(i) if len(i) == 0 or not isinstance(i[0], list) else list(map(i2s, i))
-		if torch.is_tensor(idx):
-			idx = idx.tolist()
-		idx = idx if lengths is None else [i[:l] for i, l in zip(idx, lengths)]
-		return i2s(idx)
+	def idx2str(self, idx, blank = None, space = None):
+		i2s = lambda i: self.bpe.DecodeIds(i) if self.bpe is not None else ''.join((blank or self[idx]) if idx == self.blank_idx else (space or self[idx]) if idx == self.space_idx else self[idx] for idx in torch.as_tensor(i).tolist())
+		return list(map(i2s, idx))
 
 	def __getitem__(self, idx):
 		return {self.blank_idx : self.blank, self.repeat_idx : self.repeat, self.space_idx : self.space}.get(idx) or (self.alphabet[idx] if self.bpe is None else self.bpe.IdToPiece(idx))
@@ -159,20 +161,19 @@ class Labels:
 		return chr.lower() in self.alphabet
 
 def collate_fn(batch, pad_to = 128):
-	sample_inputs, sample_targets, *_ = batch[0]
-	inputs_max_len, targets_max_len = [(1 + max( (b[k].shape[-1] if torch.is_tensor(b[k]) else len(b[k]))  for b in batch) // pad_to) * pad_to for k in [0, 1]]
-	inputs = sample_inputs.new_zeros(len(batch), *(sample_inputs.shape[:-1] + (inputs_max_len,)))
-	targets = sample_targets.new_zeros(len(batch), *(sample_targets.shape[:-1] + (targets_max_len,))) if torch.is_tensor(sample_targets) else []
-	input_percentages, target_lengths, transcripts, audio_paths, dataset_names = [], [], [], [], []
-	for k, (input, target, transcript, audio_path, dataset_name) in enumerate(batch):
-		inputs[k, ..., :input.shape[-1]] = input
-		targets[k, ..., :target.shape[-1]] = target
-		input_percentages.append(input.shape[-1] / float(inputs.shape[-1]))
-		target_lengths.append(len(target))
-		transcripts.append(transcript)
-		audio_paths.append(audio_path)
-		dataset_names.append(dataset_name)
-	return inputs, targets, torch.FloatTensor(input_percentages), torch.IntTensor(target_lengths), transcripts, audio_paths, dataset_names
+	dataset_name, audio_path, reference_normalized, sample_inputs, *sample_targets = batch[0]
+	inputs_max_len, *targets_max_len = [(1 + max((b[k].shape[-1] if torch.is_tensor(b[k]) else len(b[k])) for b in batch) // pad_to) * pad_to for k in range(3, 4 + len(sample_Targets))]
+	input_ = sample_inputs.new_zeros(len(batch), *(sample_inputs.shape[:-1] + (inputs_max_len,)))
+	targets_ = [sample_targets.new_zeros(len(batch), *(sample_targets.shape[:-1] + (max_len,))) for max_len in targets_max_len]
+	input_lengths_faction_, target_length_ = torch.FloatTensor(len(batch)), torch.IntTensor(len(batch), len(sample_targets))	
+	for k, (dataset_name, audio_path, reference_normalized, input, *targets) in enumerate(batch):
+		input_percentage_[k] = input.shape[-1] / input_.shape[-1]
+		input_[k, ..., :input.shape[-1]] = input
+		for j, t in enumerate(targets):
+			targets_[j][k, ..., :t.shape[-1]] = t
+			target_length_[k, j] = len(t)
+	dataset_name_, audio_path_, reference_normalized_, *_ = zip(*batch)
+	return [dataset_name_, audio_path_, reference_normalized_, input_percentage_, input_, target_length_] + targets
 
 def read_wav(audio_path, normalize = True, stereo = False, sample_rate = None, max_duration = None):
 	if audio_path.endswith('.wav'):

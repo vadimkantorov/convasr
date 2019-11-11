@@ -3,8 +3,13 @@ import collections
 import glob
 import json
 import io
+import sys
+import time
+import random
+import itertools
 import argparse
 import base64
+import subprocess
 import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
@@ -70,7 +75,7 @@ def meanstd(logits):
 	plt.subplots_adjust(top = 0.99, bottom=0.01, hspace=0.8, wspace=0.4)
 	plt.savefig(logits + '.jpg', dpi = 150)
 
-def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per):
+def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, json_):
 	if experiment_id.endswith('.json'):
 		reftra = json.load(open(experiment_id))
 		for reftra_ in reftra:
@@ -123,7 +128,7 @@ def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer3
 		eidx = f.find('epoch')
 		iteration = f[eidx:].replace('.json', '')
 		val_dataset_name = f[f.find('transcripts_') + len('transcripts_'):eidx]
-		checkpoint = os.path.join(experiment_dir, 'checkpoint_' + f[eidx:].replace('.json', '.pt'))
+		checkpoint = os.path.join(experiment_dir, 'checkpoint_' + f[eidx:].replace('.json', '.pt')) if not json_ else f
 		val = torch.tensor([j['entropy' if entropy else 'loss' if loss else 'per' if per else 'cer'] for j in json.load(open(f))] or [0.0])
 		val = val[~(torch.isnan(val) | torch.isinf(val))]
 
@@ -150,29 +155,30 @@ def words(train_data_path, val_data_path):
 
 def vis(logits, MAX_ENTROPY = 1.0):
 	ticks = lambda labelsize = 2.5, length = 0: plt.gca().tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length) or [ax.set_linewidth(0) for ax in plt.gca().spines.values()]
-	html = open(logits + '.html', 'w')
+	logits_path = logits + '.html'
+	html = open(logits_path, 'w')
 	html.write('<html><body>')
 	for segment in torch.load(logits):
-		audio_path, filename, logits, cer, reference, transcript = map(segment.get, ['audio_path', 'filename', 'logits', 'cer', 'reference_aligned', 'transcript_aligned'])
-		log_probs = F.log_softmax(logits, dim = 0)
+		audio_path, filename, logits, log_probs, cer, reference_aligned, transcript_aligned = map(segment.get, ['audio_path', 'filename', 'logits', 'log_probs', 'cer', 'reference_aligned', 'transcript_aligned'])
 		entropy = models.entropy(log_probs, dim = 0, sum = False)
 		margin = models.margin(log_probs, dim = 0)
 		#energy = features.exp().sum(dim = 0)[::2]
 
 		plt.figure(figsize = (6, 0.7))
 		plt.suptitle(filename, fontsize = 4)
-		#plt.plot(energy / energy.max(), 'b', linewidth = 0.3)
+		top1, top2 = log_probs.exp().topk(2, dim = 0).values
+		plt.hlines(1.0, 0, entropy.shape[-1] - 1, linewidth = 0.2)
+		plt.plot(top1, 'b', linewidth = 0.3)
+		plt.plot(top2, 'g', linewidth = 0.3)
 		plt.plot(entropy, 'r', linewidth = 0.3)
-		plt.hlines(1.0, 0, entropy.shape[-1] - 1, linewidth = 0.5)
 		bad = entropy > MAX_ENTROPY
 		bad_ = torch.cat([bad[1:], bad[:1]])
 		for begin, end in zip((~bad & bad_).nonzero().squeeze(1).tolist(), (bad & ~bad_).nonzero().squeeze(1).tolist()):
-			plt.axvspan(begin, end, color='red', alpha=0.5)
+			plt.axvspan(begin, end, color='red', alpha=0.2)
 
 		plt.ylim(0, 2)
 		plt.xlim(0, entropy.shape[-1] - 1)
 		xlabels = list(map('\n'.join, zip(*labels.idx2str(log_probs.topk(5, dim = 0).indices, blank = '.', space = '_'))))
-		#import IPython; IPython.embed()
 		#xlabels = labels.idx2str(log_probs.argmax(dim = 0)).replace(labels.blank, '.').replace(labels.space, '_')
 		plt.xticks(torch.arange(entropy.shape[-1]), xlabels, fontfamily = 'monospace')
 		ticks()
@@ -183,8 +189,8 @@ def vis(logits, MAX_ENTROPY = 1.0):
 		plt.close()
 		
 		html.write(f'<h4>{filename} | cer: {cer:.02f}</h4>')
-		html.write(f'<pre>reference: {reference}</pre>')
-		html.write(f'<pre>transcript: {transcript}</pre>')
+		html.write(f'<pre>reference: {reference_aligned}</pre>')
+		html.write(f'<pre>transcript: {transcript_aligned}</pre>')
 		html.write('<img style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(encoded = base64.b64encode(buf.getvalue()).decode('utf-8').replace('\n', '')))	
 		html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio><hr/>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode('utf-8').replace('\n', '')))
 	html.write('''<script>
@@ -201,6 +207,7 @@ def vis(logits, MAX_ENTROPY = 1.0):
 		});
 	</script>''')
 	html.write('</body></html>')
+	print('\n', logits_path)
 
 def checksegments(audio_path):
 	encode_audio = lambda audio_path: base64.b64encode(open(audio_path, 'rb').read()).decode('utf-8').replace('\n', '')
@@ -250,6 +257,76 @@ def parseslicing(slicing):
 	for audio_name, segments in by_audio_name.items():
 		json.dump(segments, open(os.path.join(os.path.dirname(slicing), 'source', audio_name + '.json'), 'w'), indent = 2, sort_keys = True)
 
+def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S'):
+	#TODO: group by experiment_id, group by iteration, columns x columns
+	json_dir = os.path.join(root_dir, 'json')
+	html_dir = os.path.join(root_dir, html_dir)
+	os.makedirs(html_dir, exist_ok = True)
+	html_path = os.path.join(html_dir, 'index.html')
+
+	jsons = [json.load(open(os.path.join(json_dir, json_file))) for json_file in os.listdir(json_dir)]
+	
+	by_experiment_key = lambda j: j['experiment_id']
+	by_time_key = lambda j: j['time']
+	by_iteration = lambda j: (j['iteration'], j['time'])
+	by_time_last_key = lambda experiment: by_time_key(experiment[0][-1])
+	fields_or_default = lambda j: dict(default = j) if not isinstance(j, dict) else j
+
+	experiments = [(list(g), k) for k, g in itertools.groupby(sorted(jsons, key = by_experiment_key), key = by_experiment_key)]
+	experiments = list(sorted(( (list(sorted(g, key = by_iteration)), k) for g, k in experiments), key = by_time_last_key, reverse = True))
+
+	columns = list(sorted(set(c for g, *_ in experiments for j in g for c in j['columns'])))
+	fields = list(sorted(set(f for g, *_ in experiments for j in g for c in j['columns'].values() for f in fields_or_default(c))))
+	field = fields[0]
+	
+	generated_time = time.strftime(strftime, time.gmtime())
+	fmt = lambda o: '{:.04f}'.format(o) if isinstance(o, float) else str(o)
+
+	with open(html_path, 'w') as html:
+		html.write(f'<html><head><title>Resutls</title></head><body>\n')
+		html.write('<script>var toggle = className => Array.from(document.querySelectorAll(`.${className}`)).map(e => {e.hidden = !e.hidden});</script>')
+		html.write('<table cellpadding="2px" cellspacing="0">')
+		html.write(f'<h1>Generated at {generated_time}</h1>')
+		html.write('<div>fields:' + ''.join(f'<input type="checkbox" name="{f}" value="field{hash(f)}" {"checked" if f == field else ""} onchange="toggle(event.target.value)""><label for="{f}">{f}</label>' for f in fields) + '</div>\n')
+		html.write('<div>columns:' + ''.join(f'<input type="checkbox" name="{c}" value="col{hash(c)}" checked onchange="toggle(event.target.value)"><label for="{c}">{c}</label>' for c in columns) + '</div>\n')
+		html.write('<hr />')
+		for jsons, experiment_id in experiments:
+			idx = set([0, len(jsons) - 1] + [i for i, j in enumerate(jsons) if 'iter' not in j['iteration']])
+
+			generated_time = time.strftime(strftime, time.localtime(jsons[-1]['time']))
+			html.write(f'''<tr><td title="{generated_time}" onclick="toggle('{experiment_id}.hidden')"><strong>{experiment_id}</strong></td>''' + ''.join(f'<td class="col{hash(c)}"><strong>{c}</strong></td>' for c in columns) + '</tr>')
+			for i, j in enumerate(jsons):
+				generated_time = time.strftime(strftime, time.localtime(j['time']))
+				hidden = 'hidden' if i not in idx else ''
+				meta_key = f'meta{hash(experiment_id + str(j["iteration"]))}'
+				meta = json.dumps(j['meta'], sort_keys = True, indent = 2, ensure_ascii = False) if j.get('meta') else None
+				html.write(f'<tr class="{hidden} {experiment_id}" {hidden}>')
+				html.write(f'''<td onclick="toggle('{meta_key}')" title="{generated_time}" style="border-right: 1px solid black">{j["iteration"]}</td>''')
+				html.write(''.join(f'<td class="col{hash(c)}">' + ''.join(f'<span style="margin-right:3px" {"hidden" if f != field else ""} class="field{hash(f)}">{fmt(j["columns"].get(c, {}).get(f, ""))}</span>' for f in fields) + '</td>' for c in columns))
+				html.write('</tr>\n')
+				html.write(f'<tr hidden class="{meta_key}" style="background-color:lightgray"><td colspan="100"><pre>{meta}</pre></td></tr>\n' if meta else '')
+
+			html.write('<tr><td>&nbsp;</td></tr>')
+		html.write('</table></body></html>')
+
+	try:
+		print('Committing updated vis at ', html_path)
+		subprocess.check_call(['git', 'pull'], cwd = root_dir)
+		subprocess.check_call(['git', 'add', '-A'], cwd = root_dir)
+		subprocess.check_call(['git', 'commit', '-a', '--allow-empty-message', '-m', ''], cwd = root_dir)
+		subprocess.check_call(['git', 'push'], cwd = root_dir)
+	except:
+		print(sys.exc_info())
+
+def expjson(root_dir, experiment_id, epoch = None, iteration = None, columns = {}, meta = {}, name = None):
+	obj = dict(experiment_id = experiment_id, iteration = f'epoch{epoch:02d}_iter{iteration:07d}' if epoch is not None and iteration is not None else 'test', columns = columns, time = int(time.time()), meta = meta)
+	
+	json_dir = os.path.join(root_dir, 'json')
+	os.makedirs(json_dir, exist_ok = True)
+	name = f'{int(time.time())}.{random.randint(10, 99)}.json' if name is None else name
+	json_path = os.path.join(json_dir, name)
+	json.dump(obj, open(json_path, 'w'), sort_keys = True, indent = 2, ensure_ascii = False)
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -274,6 +351,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--cer30', action = 'store_true')
 	cmd.add_argument('--cer40', action = 'store_true')
 	cmd.add_argument('--cer50', action = 'store_true')
+	cmd.add_argument('--json', dest = "json_", action = 'store_true')
 	cmd.set_defaults(func = cer)
 
 	cmd = subparsers.add_parser('errors')
@@ -296,6 +374,9 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('parseslicing')
 	cmd.add_argument('slicing')
 	cmd.set_defaults(func = parseslicing)
+
+	cmd = subparsers.add_parser('exphtml')
+	cmd.set_defaults(func = exphtml)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')

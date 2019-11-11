@@ -2,7 +2,7 @@ import Levenshtein
 
 def cer(transcript, reference):
 	cer_ref_len = len(reference.replace(' ', '')) or 1
-	return Levenshtein.distance(transcript.replace(' ', ''), reference.replace(' ', '')) / cer_ref_len if transcript != reference else 0
+	return Levenshtein.distance(transcript.replace(' ', '').lower(), reference.replace(' ', '').lower()) / cer_ref_len if transcript != reference else 0
 
 def wer(transcript, reference):
 	# build mapping of words to integers, Levenshtein package only accepts strings

@@ -1,6 +1,6 @@
 CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --verbose --lang ru \
-  --model JasperNetBigInplace \
+  --model JasperNetBigInplaceLargeStride \
   --train-batch-size 80 --val-batch-size 64 \
   --scheduler MultiStepLR --decay-milestones 25000 \
   --lr 1e-2 \
