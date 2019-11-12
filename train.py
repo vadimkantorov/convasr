@@ -48,33 +48,24 @@ def traineval(args):
 		torch.backends.cudnn.benchmark = True
 
 	lang = importlib.import_module(args.lang)
-	labels = [dataset.Labels(lang)] + ([dataset.Labels(lang, bpe = args.bpe)] if args.bpe else [])
+	labels = dataset.Labels(lang) #+ ([dataset.Labels(lang, bpe = args.bpe)] if args.bpe else [])
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
 	val_waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob)
 	val_feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob)
 	if args.val_waveform_transform_debug_dir:
 		args.val_waveform_transform_debug_dir = os.path.join(args.val_waveform_transform_debug_dir, str(val_waveform_transform) if isinstance(val_waveform_transform, transforms.RandomCompose) else val_waveform_transform.__class__.__name__)
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
-	model = getattr(models, args.model)(num_classes = len(labels), num_input_features = args.num_input_features, dropout = args.dropout)
-	criterion = nn.CTCLoss(blank = labels.blank_idx, reduction = 'none').to(args.device)
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = [labels], num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
+	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = len(labels), dropout = args.dropout)
 	decoder = decoders.GreedyDecoder(labels) if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 
 	def compute_losses(val_data_loader, decoder = None):
-		for inputs, targets, input_lengths_fraction, target_lengths, references, filenames, dataset_names in val_data_loader:
+		for dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ in val_data_loader:
 			with torch.no_grad():
-				logits, output_lengths = model(inputs.to(args.device), input_lengths_fraction.to(args.device))
-				log_probs = F.softmax(logits, dim = 1)
-				top2 = log_probs.topk(2, dim = 1).indices[:, -1, :]
-				#log_probs[:, labels.word_start_idx] += log_probs[:, labels.blank_idx] # * (top2 == labels.word_start_idx)
-				#log_probs[:, labels.word_end_idx]   += log_probs[:, labels.blank_idx] # * (top2 == labels.word_end_idx)
-				#log_probs[:, labels.space_idx] += log_probs[:, labels.blank_idx] * (top2 == labels.space_idx)
-				log_probs = log_probs.log()
-
-				loss = criterion(log_probs.permute(2, 0, 1), targets.to(args.device), output_lengths, target_lengths.to(args.device)).cpu() / target_lengths
-				entropy = models.entropy(log_probs, output_lengths, dim = 1).cpu()
+				log_probs, output_lengths, loss = model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device), blank_idx = labels.blank_idx)
+				entropy = models.entropy(log_probs, output_lengths, dim = 1)
 				decoded = labels.idx2str(decoder.decode(log_probs, output_lengths)) if decoder is not None else [None] * len(logits)
-				yield filenames, references, loss, entropy, decoded, [l[..., :o] for l, o in zip(log_probs, output_lengths)]
+				yield audio_path_, reference_, loss.cpu(), entropy.cpu(), decoded, [l[..., :o] for l, o in zip(log_probs, output_lengths)]
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None):
 		training = epoch is not None and iteration is not None
@@ -138,7 +129,7 @@ def traineval(args):
 
 	train_waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob)
 	train_feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob)
-	train_dataset = dataset.AudioTextDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = train_waveform_transform, feature_transform = train_feature_transform, max_duration = args.max_duration)
+	train_dataset = dataset.AudioTextDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = [labels], num_input_features = args.num_input_features, waveform_transform = train_waveform_transform, feature_transform = train_feature_transform, max_duration = args.max_duration)
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
 	sampler = dataset.BucketingSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing)
 	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = sampler, worker_init_fn = set_random_seed, timeout = args.timeout)
@@ -283,6 +274,7 @@ if __name__ == '__main__':
 	parser.add_argument('--cudnn', default = 'benchmark')
 	parser.add_argument('--experiment-id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{train_waveform_transform}_{train_feature_transform}_{experiment_name}_{bpe}')
 	parser.add_argument('--experiment-name', '--name', default = '')
+	parser.add_argument('--comment', default = '')
 	parser.add_argument('--dry', action = 'store_true')
 	parser.add_argument('--lang', default = 'ru')
 	parser.add_argument('--val-waveform-transform-debug-dir')

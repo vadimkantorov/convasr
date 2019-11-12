@@ -50,9 +50,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		if self.feature_transform is not None:
 			features, sample_rate = self.feature_transform(features, self.sample_rate, dataset_name = dataset_name)
 
-		reference_normalized = self.labels[0].parse(reference)
+		reference_normalized = self.labels[0].parse(reference)[0]
 		targets = [labels.parse(reference)[1] for labels in self.labels]
-		return dataset_name, audio_path, reference_normalized, features, targets
+		return [dataset_name, audio_path, reference_normalized, features] + targets
 
 	def __len__(self):
 		return sum(map(len, self.ids))
@@ -162,18 +162,19 @@ class Labels:
 
 def collate_fn(batch, pad_to = 128):
 	dataset_name, audio_path, reference_normalized, sample_inputs, *sample_targets = batch[0]
-	inputs_max_len, *targets_max_len = [(1 + max((b[k].shape[-1] if torch.is_tensor(b[k]) else len(b[k])) for b in batch) // pad_to) * pad_to for k in range(3, 4 + len(sample_Targets))]
+	inputs_max_len, *targets_max_len = [(1 + max((b[k].shape[-1] if torch.is_tensor(b[k]) else len(b[k])) for b in batch) // pad_to) * pad_to for k in range(3, 4 + len(sample_targets))]
+	targets_max_len = max(targets_max_len)
 	input_ = sample_inputs.new_zeros(len(batch), *(sample_inputs.shape[:-1] + (inputs_max_len,)))
-	targets_ = [sample_targets.new_zeros(len(batch), *(sample_targets.shape[:-1] + (max_len,))) for max_len in targets_max_len]
-	input_lengths_faction_, target_length_ = torch.FloatTensor(len(batch)), torch.IntTensor(len(batch), len(sample_targets))	
+	targets_ = sample_targets[0].new_zeros(len(batch), len(sample_targets), targets_max_len)
+	input_lengths_fraction_, target_length_ = torch.FloatTensor(len(batch)), torch.IntTensor(len(batch), len(sample_targets))	
 	for k, (dataset_name, audio_path, reference_normalized, input, *targets) in enumerate(batch):
-		input_percentage_[k] = input.shape[-1] / input_.shape[-1]
+		input_lengths_fraction_[k] = input.shape[-1] / input_.shape[-1]
 		input_[k, ..., :input.shape[-1]] = input
 		for j, t in enumerate(targets):
-			targets_[j][k, ..., :t.shape[-1]] = t
+			targets_[k, j, :t.shape[-1]] = t
 			target_length_[k, j] = len(t)
 	dataset_name_, audio_path_, reference_normalized_, *_ = zip(*batch)
-	return [dataset_name_, audio_path_, reference_normalized_, input_percentage_, input_, target_length_] + targets
+	return dataset_name_, audio_path_, reference_normalized_, input_, input_lengths_fraction_, targets_, target_length_
 
 def read_wav(audio_path, normalize = True, stereo = False, sample_rate = None, max_duration = None):
 	if audio_path.endswith('.wav'):

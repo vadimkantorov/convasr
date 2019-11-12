@@ -95,17 +95,22 @@ class JasperNet(nn.ModuleList):
 		super().__init__(prologue + backbone + epilogue + decoder)
 		self.residual = residual
 
-	def forward(self, x, lengths_fraction):
+	def forward(self, x, xlen, y = None, ylen = None, blank_idx = -1):
 		residual = []
 		for i, subblock in enumerate(list(self)[:-1]):
-			x = subblock(x, residual = residual if i < len(self) - 3 else [], lengths_fraction = lengths_fraction)
+			x = subblock(x, residual = residual if i < len(self) - 3 else [], lengths_fraction = xlen)
 			if self.residual != 'dense':
 				residual.clear()
 			if self.residual:
 				residual.append(x)
 
 		logits = self[-1](x)
-		return logits, compute_output_lengths(logits, lengths_fraction)
+		log_probs = F.log_softmax(logits, dim = 1)
+		output_lengths = compute_output_lengths(log_probs, xlen)	
+		
+		loss = (F.ctc_loss(log_probs.permute(2, 0, 1), y.squeeze(1), output_lengths, ylen.squeeze(1), blank = blank_idx, reduction = 'none') / ylen.squeeze(1), ) if y is not None else ()
+	
+		return (log_probs, output_lengths) + loss
 
 class Wav2Letter(JasperNet):
 	def __init__(self, num_classes, num_input_features, dropout = 0.2, nonlinearity = ('hardtanh', 0, 20), kernel_size_small = 11, kernel_size_large = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):
