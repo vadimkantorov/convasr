@@ -15,18 +15,22 @@ class Decoder(nn.Sequential):
 			super().__init__(nn.Conv1d(input_size, num_classes, kernel_size = 1), nn.GRU(num_classes, num_classes, batch_first = True, bidirectional = False))
 		elif type == 'transformerencoder':
 			super().__init__(nn.Conv1d(input_size, num_classes, kernel_size = 1), nn.TransformerEncoderLayer(num_classes, nhead = 2, dim_feedforward = num_classes))
+		elif type == 'bpe':
+			super().__init__(nn.Conv1d(input_size, num_classes[0], kernel_size = 1), nn.Conv1d(input_size, num_classes[1], kernel_size = 1))
 		self.type = type
 
 	def forward(self, x):
 		if self.type is None:
-			y = self[0](x)
+			y = F.log_softmax(self[0](x), dim = 1)
 		elif self.type == 'gru':
 			y = self[0](x)
 			#y = self[1](y.transpose(-1, -2))[0].transpose(-1, -2) # + y
 		elif self.type == 'transformerencoder':
 			y = self[0](x)
 			y = y + self[1](y.transpose(-1, -2)).transpose(-1, -2)
-		return y
+		elif self.type == 'bpe':
+			y = F.log_softmax(self[0](x), dim = 1), F.log_softmax(self[1](x), dim = 1)
+ 		return y
 
 class ConvSamePadding(nn.Sequential):
 	def __init__(self, in_channels, out_channels, kernel_size, stride, dilation, bias, groups, separable):
@@ -60,7 +64,7 @@ class ConvBN(nn.Module):
 		return y
 
 class JasperNet(nn.ModuleList):
-	def __init__(self, num_classes, num_input_features, repeat = 3, num_subblocks = 1, dilation = 1, residual = 'dense',
+	def __init__(self, num_input_features, num_classes, repeat = 3, num_subblocks = 1, dilation = 1, residual = 'dense',
 			kernel_sizes = [11, 13, 17, 21, 25], kernel_size_small = 11, kernel_size_large = 29, 
 			base_width = 128, out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
 			separable = False, groups = 1, 
@@ -90,12 +94,12 @@ class JasperNet(nn.ModuleList):
 			ConvBN(kernel_size = 1, num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), dropout = dropout_large, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
 		]
 		decoder = [
-			Decoder(out_width_factors_large[1] * base_width, num_classes, type = None)
+			Decoder(out_width_factors_large[1] * base_width, num_classes)
 		]
 		super().__init__(prologue + backbone + epilogue + decoder)
 		self.residual = residual
 
-	def forward(self, x, xlen, y = None, ylen = None, blank_idx = -1):
+	def forward(self, x, xlen, y = None, ylen = None):
 		residual = []
 		for i, subblock in enumerate(list(self)[:-1]):
 			x = subblock(x, residual = residual if i < len(self) - 3 else [], lengths_fraction = xlen)
@@ -104,17 +108,19 @@ class JasperNet(nn.ModuleList):
 			if self.residual:
 				residual.append(x)
 
-		logits = self[-1](x)
-		log_probs = F.log_softmax(logits, dim = 1)
-		output_lengths = compute_output_lengths(log_probs, xlen)	
+		log_probs_char, log_probs_bpe = self[-1](x)
+		output_lengths = compute_output_lengths(x, xlen)
 		
-		loss = (F.ctc_loss(log_probs.permute(2, 0, 1), y.squeeze(1), output_lengths, ylen.squeeze(1), blank = blank_idx, reduction = 'none') / ylen.squeeze(1), ) if y is not None else ()
-	
-		return (log_probs, output_lengths) + loss
+		loss_char = (F.ctc_loss(log_probs_char.permute(2, 0, 1), y[:, 0], output_lengths, ylen[:, 0], blank_idx = log_probs_char.shape[1] - 1, reduction = 'none') / ylen[:, 0], ) if y is not None else ()
+		loss_bpe = (F.ctc_loss(log_probs_bpe.permute(2, 0, 1),   y[:, 1], output_lengths, ylen[:, 1], blank_idx = log_probs_bpe.shape[1] - 1, reduction = 'none') / ylen[:, 1], ) if y is not None else ()
+
+		loss = loss_char + loss_bpe
+
+		return dict(log_probs = log_probs, loss = loss, loss_char = loss_char, loss_bpe = loss_bpe)
 
 class Wav2Letter(JasperNet):
-	def __init__(self, num_classes, num_input_features, dropout = 0.2, nonlinearity = ('hardtanh', 0, 20), kernel_size_small = 11, kernel_size_large = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):
-		super().__init__(num_classes, num_input_features, base_width = base_width, 
+	def __init__(self, num_input_features, num_classes, dropout = 0.2, nonlinearity = ('hardtanh', 0, 20), kernel_size_small = 11, kernel_size_large = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):
+		super().__init__(num_input_features, num_classes, base_width = base_width, 
 			dropout = dropout, dropout_small = dropout, dropout_large = dropout, dropouts = [dropout] * num_blocks, 
 			kernel_size_small = kernel_size_small, kernel_size_large = kernel_size_large, kernel_sizes = [kernel_size_small] * num_blocks,
 			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8], 
@@ -122,8 +128,8 @@ class Wav2Letter(JasperNet):
 		)
 		
 class Wav2LetterFlat(JasperNet):
-	def __init__(self, num_classes, num_input_features, dropout = 0.2, base_width = 128, width_factor_large = 16, width_factor = 6, kernel_size_large = 29, kernel_size_small = 13, num_blocks = 6):
-		super().__init__(num_classes, num_input_features, base_width = base_width, 
+	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, width_factor_large = 16, width_factor = 6, kernel_size_large = 29, kernel_size_small = 13, num_blocks = 6):
+		super().__init__(num_input_features, num_classes, base_width = base_width, 
 			dropout = dropout, dropout_small = dropout, dropout_large = dropout, dropouts = [dropout] * num_blocks, 
 			kernel_size_small = kernel_size_small, kernel_size_large = kernel_size_large, kernel_sizes = [kernel_size_small] * num_blocks,
 			out_width_factors = [width_factor] * num_blocks, out_width_factors_large = [width_factor_large, width_factor_large], 

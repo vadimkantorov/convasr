@@ -39,6 +39,10 @@ python3 vis.py cer data/transcripts_tinkoff_sample_ok.convasr.tinkoff.json
 
 # BPE pretrained models for Russian
 ```shell
+python dataset.py bpetrain -i data/tts_dataset/tts_dataset.txt -o data/tts_dataset_bpe_1000 --vocab-size 1000
+python dataset.py bpetrain -i data/tts_dataset/tts_dataset.txt -o data/tts_dataset_bpe_5000 --vocab-size 5000
+python dataset.py bpetrain -i data/tts_dataset/tts_dataset.txt -o data/tts_dataset_bpe_10000 --vocab-size 10000
+
 # from https://nlp.h-its.org/bpemb/ru/
 wget https://nlp.h-its.org/bpemb/ru/ru.wiki.bpe.vs5000.vocab -P data
 wget https://nlp.h-its.org/bpemb/ru/ru.wiki.bpe.vs5000.model -P data
@@ -105,10 +109,10 @@ ls mydir/*.wav | xargs soxi -D | awk '{sum += $1} END {print sum / 60; print "mi
 # Docker commands
 ```shell
 # build scripts/Dockerfile
-sudo nvidia-docker build -t convasr scripts
+sudo docker build --runtime nvidia -t convasr scripts
 
 # run docker
-sudo nvidia-docker run -v $PWD/deepspeech.pytorch:/deepspeech.pytorch -it --ipc=host convasr 
+sudo docker run --runtime nvidia --cap-add=SYS_PTRACE -v $PWD/deepspeech.pytorch:/deepspeech.pytorch -it --ipc=host convasr 
 ```
 
 # KenLM

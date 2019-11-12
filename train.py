@@ -48,23 +48,27 @@ def traineval(args):
 		torch.backends.cudnn.benchmark = True
 
 	lang = importlib.import_module(args.lang)
-	labels = dataset.Labels(lang) #+ ([dataset.Labels(lang, bpe = args.bpe)] if args.bpe else [])
+	labels = dataset.Labels(lang)
+	labels_ = [labels] + ([dataset.Labels(lang, bpe = args.bpe)] if args.bpe else [])
+	
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
 	val_waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob)
 	val_feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob)
 	if args.val_waveform_transform_debug_dir:
 		args.val_waveform_transform_debug_dir = os.path.join(args.val_waveform_transform_debug_dir, str(val_waveform_transform) if isinstance(val_waveform_transform, transforms.RandomCompose) else val_waveform_transform.__class__.__name__)
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = [labels], num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
-	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = len(labels), dropout = args.dropout)
+	
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels_, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
+	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout)
+	
 	decoder = decoders.GreedyDecoder(labels) if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 
 	def compute_losses(val_data_loader, decoder = None):
 		for dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ in val_data_loader:
 			with torch.no_grad():
-				log_probs, output_lengths, loss = model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device), blank_idx = labels.blank_idx)
+				log_probs, output_lengths, loss = model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device))
 				entropy = models.entropy(log_probs, output_lengths, dim = 1)
-				decoded = labels.idx2str(decoder.decode(log_probs, output_lengths)) if decoder is not None else [None] * len(logits)
+				decoded = labels.idx2str(decoder.decode(log_probs, output_lengths)) if decoder is not None else [None] * len(log_probs)
 				yield audio_path_, reference_, loss.cpu(), entropy.cpu(), decoded, [l[..., :o] for l, o in zip(log_probs, output_lengths)]
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None):
@@ -129,7 +133,7 @@ def traineval(args):
 
 	train_waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob)
 	train_feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob)
-	train_dataset = dataset.AudioTextDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = [labels], num_input_features = args.num_input_features, waveform_transform = train_waveform_transform, feature_transform = train_feature_transform, max_duration = args.max_duration)
+	train_dataset = dataset.AudioTextDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels_, num_input_features = args.num_input_features, waveform_transform = train_waveform_transform, feature_transform = train_feature_transform, max_duration = args.max_duration)
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
 	sampler = dataset.BucketingSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing)
 	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = sampler, worker_init_fn = set_random_seed, timeout = args.timeout)
@@ -173,16 +177,13 @@ def traineval(args):
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1. / K) * avg
 	for epoch in range(sampler.epoch, args.epochs):
 		time_epoch_start = time.time()
-		for batch_idx, (inputs, targets, input_lengths_fraction, target_lengths, *_) in enumerate(train_data_loader, start = sampler.batch_idx):
+		for batch_idx, (dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc = time.time()
 			lr = scheduler.get_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
 			
-			inputs, targets, input_lengths_fraction, target_lengths = inputs.to(args.device), targets.to(args.device), input_lengths_fraction.to(args.device), target_lengths.to(args.device)
 			with torch.enable_grad():
-				logits, output_lengths = model(inputs, input_lengths_fraction)
-				log_probs = F.log_softmax(logits, dim = 1)
-				loss_ = criterion(log_probs.permute(2, 0, 1), targets, output_lengths, target_lengths) / target_lengths
-				loss_, loss = loss_.mean(), (loss_ * target_lengths).mean() / args.train_batch_accumulate_iterations
+				log_probs, output_lengths, loss = model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device))
+				loss, loss_avg_ = (loss * target_length_.select(1, 0).to(args.device)).mean() / args.train_batch_accumulate_iterations, loss.mean() 
 				entropy = models.entropy(log_probs, output_lengths, dim = 1).mean()
 				if not (torch.isinf(loss) or torch.isnan(loss)):
 					toc_fwd = time.time()
@@ -197,14 +198,14 @@ def traineval(args):
 						optimizer.step()
 						optimizer.zero_grad()
 						scheduler.step()
-					loss_avg = moving_avg(loss_avg, float(loss_), max = 1000)
+					loss_avg = moving_avg(loss_avg, float(loss_avg_), max = 1000)
 					entropy_avg = moving_avg(entropy_avg, float(entropy), max = 4)
 					toc_bwd = time.time()
 
 			ms = lambda sec: sec * 1000
 			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = ms(toc - tic), ms(toc_fwd - toc), ms(toc_bwd - toc_fwd), ms(time.time() - toc)	
 			time_ms_avg = moving_avg(time_ms_avg, time_ms_data + time_ms_model, max = 10000)
-			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}> loss: {float(loss_):.2f} <{loss_avg:.2f}> time: ({inputs.shape[0]}x{inputs.shape[1]}x{inputs.shape[2]}) {time_ms_data:.2f}+{time_ms_fwd:4.0f}+{time_ms_bwd:4.0f} <{time_ms_avg:.0f}> | lr: {lr:.5f}')
+			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}> loss: {float(loss_avg_):.2f} <{loss_avg:.2f}> time: ({"x".join(map(str, input_.shape))}) {time_ms_data:.2f}+{time_ms_fwd:4.0f}+{time_ms_bwd:4.0f} <{time_ms_avg:.0f}> | lr: {lr:.5f}')
 			tic = time.time()
 			iteration += 1
 

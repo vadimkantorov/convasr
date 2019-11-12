@@ -33,7 +33,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	def __getitem__(self, index):
 		for ids in self.ids:
 			if index < len(ids):
-				dataset_name, audio_path,reference, duration = ids[index]
+				dataset_name, audio_path, reference, duration = ids[index]
 				break
 			else:
 				index -= len(ids)
@@ -45,7 +45,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		if self.waveform_transform_debug_dir:
 			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path)), self.sample_rate, signal.numpy())
 
-		#features = signal
 		features = models.logfbank(signal, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, normalize = self.normalize_features)
 		if self.feature_transform is not None:
 			features, sample_rate = self.feature_transform(features, self.sample_rate, dataset_name = dataset_name)
@@ -161,20 +160,20 @@ class Labels:
 		return chr.lower() in self.alphabet
 
 def collate_fn(batch, pad_to = 128):
-	dataset_name, audio_path, reference_normalized, sample_inputs, *sample_targets = batch[0]
+	dataset_name, audio_path, reference, sample_inputs, *sample_targets = batch[0]
 	inputs_max_len, *targets_max_len = [(1 + max((b[k].shape[-1] if torch.is_tensor(b[k]) else len(b[k])) for b in batch) // pad_to) * pad_to for k in range(3, 4 + len(sample_targets))]
 	targets_max_len = max(targets_max_len)
 	input_ = sample_inputs.new_zeros(len(batch), *(sample_inputs.shape[:-1] + (inputs_max_len,)))
 	targets_ = sample_targets[0].new_zeros(len(batch), len(sample_targets), targets_max_len)
 	input_lengths_fraction_, target_length_ = torch.FloatTensor(len(batch)), torch.IntTensor(len(batch), len(sample_targets))	
-	for k, (dataset_name, audio_path, reference_normalized, input, *targets) in enumerate(batch):
+	for k, (dataset_name, audio_path, reference, input, *targets) in enumerate(batch):
 		input_lengths_fraction_[k] = input.shape[-1] / input_.shape[-1]
 		input_[k, ..., :input.shape[-1]] = input
 		for j, t in enumerate(targets):
 			targets_[k, j, :t.shape[-1]] = t
 			target_length_[k, j] = len(t)
-	dataset_name_, audio_path_, reference_normalized_, *_ = zip(*batch)
-	return dataset_name_, audio_path_, reference_normalized_, input_, input_lengths_fraction_, targets_, target_length_
+	dataset_name_, audio_path_, reference_, *_ = zip(*batch)
+	return dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_
 
 def read_wav(audio_path, normalize = True, stereo = False, sample_rate = None, max_duration = None):
 	if audio_path.endswith('.wav'):
@@ -196,3 +195,20 @@ def read_wav(audio_path, normalize = True, stereo = False, sample_rate = None, m
 
 def resample(signal, sample_rate_, sample_rate):
 	return sample_rate, torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate))
+
+def bpetrain(input_path, output_prefix, vocab_size):
+	sentencepiece.SentencePieceTrainer.Train(f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size}')
+
+if __name__ == '__main__':
+	import argparse
+	parser = argparse.ArgumentParser()
+	subparsers = parser.add_subparsers()
+	cmd = subparsers.add_parser('bpetrain')
+	cmd.add_argument('--input-path', '-i', required = True)
+	cmd.add_argument('--output-prefix', '-o', required = True)
+	cmd.add_argument('--vocab-size', default = 5000, type = int)
+	cmd.set_defaults(func = bpetrain)
+	
+	args = vars(parser.parse_args())
+	func = args.pop('func')
+	func(**args)
