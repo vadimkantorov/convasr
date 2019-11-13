@@ -96,6 +96,8 @@ def traineval(args):
 					ref_tra = dict(loss = loss, entropy = entropy, audio_path = audio_path, filename = os.path.basename(audio_path))
 					transcript_char.update(ref_tra)
 					transcript_bpe.update(ref_tra)
+					transcript_char['labels'] = 'char'
+					transcript_bpe['labels'] = 'bpe'
 					ref_tra_['char'].append(transcript_char)
 					ref_tra_['bpe'].append(transcript_bpe)
 					
@@ -105,19 +107,19 @@ def traineval(args):
 						print(f'{val_dataset_name}@{iteration} HYP: {transcript_char["transcript_aligned"]}')
 						print(f'{val_dataset_name}@{iteration} WER: {transcript_char["wer"]:.02%} | CER: {transcript_char["cer"]:.02%}\n')
 
+			transcripts_path = os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name)
 			for k, ref_tra_ in ref_tra_.items():
 				cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([x[k] for x in ref_tra_ if not math.isinf(x[k]) and not math.isnan(x[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
-				transcripts_path = os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json.{k}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name)
 				print(f'{args.experiment_id} {val_dataset_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} | Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}\n')
 				columns[val_dataset_name + '_' + k] =  dict(cer = cer_avg, wer = wer_avg, loss = loss_avg, entropy = entropy_avg)
+				if training:
+					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + k, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
+					tensorboard.flush()
 
-				with open(transcripts_path, 'w') as f:
-					json.dump(list(sorted(ref_tra_, key = lambda r: r['cer'], reverse = True)), f, ensure_ascii = False, indent = 2, sort_keys = True)
+			with open(transcripts_path, 'w') as f:
+				json.dump([r for t in sorted(zip(ref_tra_['char'], ref_tra_['bpe']), key = lambda t: t[0]['cer'], reverse = True) for r in t], f, ensure_ascii = False, indent = 2, sort_keys = True)
 			
-			#if training:
-			#	tensorboard.add_scalars('datasets/' + val_dataset_name, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
-			#	tensorboard.flush()
-			#elif args.logits:
+			#if args.logits:
 			#	logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
 			#	print('Logits:', logits_file_path)
 			#	torch.save(list(sorted([(r.update(dict(log_probs = l)) or r) for r, l in zip(ref_tra_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)

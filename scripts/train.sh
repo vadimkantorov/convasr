@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python3 train.py $@ \
   --verbose --lang ru \
   --model JasperNetBigInplace \
   --train-batch-size 80 --val-batch-size 64 \
@@ -6,13 +6,13 @@ CUDA_VISIBLE_DEVICES=0,1 python3 train.py $@ \
   --lr 1e-3 \
   --optimizer NovoGrad \
   --train-data-path data/mixed_train.csv \
-  --val-data-path data/mixed_val.csv data/clean_val.csv ../sample_ok/sample_ok.convasr.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv \
+  --val-data-path data/mixed_val.csv data/clean_val.csv kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv \
   --val-iteration-interval 2500 \
   --epochs 5 \
   --dropout 0 \
-  --bpe data/tts_dataset_bpe_1000.model
-#  --checkpoint data/experiments/JasperNetBigInplace_NovoGrad_lr1e-2_wd1e-3_bs80/checkpoint_epoch02_iter0065000.pt \
-#  --finetune
+  --bpe data/tts_dataset_tri_1000.model \
+  --checkpoint data/checkpoint_epoch02_iter0065000.pt \
+  --finetune
 
 #  --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs80___no_temporal_mask/checkpoint_epoch01_iter0030000.pt
 #  --weight-decay 0 \
