@@ -8,29 +8,21 @@ import torch.nn.functional as F
 import librosa
 
 class Decoder(nn.Sequential):
-	def __init__(self, input_size, num_classes, type = None):
+	def __init__(self, input_size, num_classes, type = None, finetune = False):
 		if type is None:
-			super().__init__(nn.Conv1d(input_size, num_classes, kernel_size = 1))
-		elif type == 'gru':
-			super().__init__(nn.Conv1d(input_size, num_classes, kernel_size = 1), nn.GRU(num_classes, num_classes, batch_first = True, bidirectional = False))
-		elif type == 'transformerencoder':
-			super().__init__(nn.Conv1d(input_size, num_classes, kernel_size = 1), nn.TransformerEncoderLayer(num_classes, nhead = 2, dim_feedforward = num_classes))
+			super().__init__(nn.Conv1d(input_size, num_classes[0], kernel_size = 1))
 		elif type == 'bpe':
-			super().__init__(nn.Conv1d(input_size, num_classes[0], kernel_size = 1), nn.Conv1d(input_size, num_classes[1], kernel_size = 1))
+			super().__init__(nn.Conv1d(input_size, num_classes[0], kernel_size = 1), nn.Conv1d(num_classes[0], num_classes[1], kernel_size = 15, padding = 7))
 		self.type = type
+		self.finetune = finetune
 
 	def forward(self, x):
 		if self.type is None:
-			y = F.log_softmax(self[0](x), dim = 1)
-		elif self.type == 'gru':
-			y = self[0](x)
-			#y = self[1](y.transpose(-1, -2))[0].transpose(-1, -2) # + y
-		elif self.type == 'transformerencoder':
-			y = self[0](x)
-			y = y + self[1](y.transpose(-1, -2)).transpose(-1, -2)
+			return F.log_softmax(self[0](x), dim = 1)
 		elif self.type == 'bpe':
-			y = F.log_softmax(self[0](x), dim = 1), F.log_softmax(self[1](x), dim = 1)
- 		return y
+			y1 = self[0](x if not self.finetune else x.detach())
+			y2 = self[1](F.relu(y1 if not self.finetune else y1.detach()))
+			return F.log_softmax(y1, dim = 1), F.log_softmax(y2, dim = 1)
 
 class ConvSamePadding(nn.Sequential):
 	def __init__(self, in_channels, out_channels, kernel_size, stride, dilation, bias, groups, separable):
@@ -70,7 +62,7 @@ class JasperNet(nn.ModuleList):
 			separable = False, groups = 1, 
 			dropout = None, dropout_small = 0.2, dropout_large = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
 			temporal_mask = True, nonlinearity = 'relu', inplace = False,
-			stride1 = 2, stride2 = 1
+			stride1 = 2, stride2 = 1, finetune = False
 		):
 		dropout_small = dropout_small if dropout != 0 else 0
 		dropout_large = dropout_large if dropout != 0 else 0
@@ -94,7 +86,7 @@ class JasperNet(nn.ModuleList):
 			ConvBN(kernel_size = 1, num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), dropout = dropout_large, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
 		]
 		decoder = [
-			Decoder(out_width_factors_large[1] * base_width, num_classes)
+			Decoder(out_width_factors_large[1] * base_width, num_classes, type = 'bpe', finetune = finetune)
 		]
 		super().__init__(prologue + backbone + epilogue + decoder)
 		self.residual = residual
@@ -108,15 +100,15 @@ class JasperNet(nn.ModuleList):
 			if self.residual:
 				residual.append(x)
 
-		log_probs_char, log_probs_bpe = self[-1](x)
 		output_lengths = compute_output_lengths(x, xlen)
-		
-		loss_char = (F.ctc_loss(log_probs_char.permute(2, 0, 1), y[:, 0], output_lengths, ylen[:, 0], blank_idx = log_probs_char.shape[1] - 1, reduction = 'none') / ylen[:, 0], ) if y is not None else ()
-		loss_bpe = (F.ctc_loss(log_probs_bpe.permute(2, 0, 1),   y[:, 1], output_lengths, ylen[:, 1], blank_idx = log_probs_bpe.shape[1] - 1, reduction = 'none') / ylen[:, 1], ) if y is not None else ()
+		log_probs_char, log_probs_bpe = self[-1](x)
 
+		loss_char = F.ctc_loss(log_probs_char.permute(2, 0, 1), y[:, 0], output_lengths, ylen[:, 0], blank = log_probs_char.shape[1] - 1, reduction = 'none') / ylen[:, 0]
+		loss_bpe =  F.ctc_loss(log_probs_bpe.permute(2, 0, 1) , y[:, 1], output_lengths, ylen[:, 1], blank = log_probs_bpe.shape[ 1] - 1, reduction = 'none') / ylen[:, 1]
+		print('loss_char:', float(loss_char.mean()), 'loss_bpe:', float(loss_bpe.mean()))
 		loss = loss_char + loss_bpe
 
-		return dict(log_probs = log_probs, loss = loss, loss_char = loss_char, loss_bpe = loss_bpe)
+		return dict(log_probs_char = log_probs_char, log_probs_bpe = log_probs_bpe, output_lengths = output_lengths, loss = loss, loss_char = loss_char, loss_bpe = loss_bpe)
 
 class Wav2Letter(JasperNet):
 	def __init__(self, num_input_features, num_classes, dropout = 0.2, nonlinearity = ('hardtanh', 0, 20), kernel_size_small = 11, kernel_size_large = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):
@@ -187,8 +179,8 @@ class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 			
 			mean, var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum) if training else (running_mean, running_var) 
 			invstd = (var + eps).rsqrt_()
-			output = torch.batch_norm_elemt(input, input, weight, bias, mean, invstd, 0)
-			
+			output = torch.batch_norm_elemt(input, weight, bias, mean, invstd, 0, out = input)
+		
 			for r in residual:
 				output += r
 			if self.nonlinearity and self.nonlinearity[0] == 'leaky_relu':
@@ -209,7 +201,7 @@ class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 			for r in residual:
 				saved_output -= r
 
-			saved_input = torch.batch_norm_elemt(saved_output, saved_output, invstd.reciprocal(), mean, bias, weight.reciprocal(), 0)
+			saved_input = torch.batch_norm_elemt(saved_output, invstd.reciprocal(), mean, bias, weight.reciprocal(), 0, out = saved_output)
 			mean_dy, mean_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(grad_output, saved_input, mean, invstd,	weight,	self.needs_input_grad[0], self.needs_input_grad[1],	self.needs_input_grad[2])
 			grad_input = torch.batch_norm_backward_elemt(grad_output, saved_input, mean, invstd, weight, mean_dy, mean_dy_xmu)
 

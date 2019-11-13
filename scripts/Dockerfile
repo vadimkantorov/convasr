@@ -40,7 +40,10 @@ RUN /miniconda/bin/conda install -y scipy scikit-learn numba numpy ninja pyyaml 
 RUN conda install -y -c pytorch magma-cuda100 
 
 RUN conda install -y pytorch cudatoolkit=10.0 -c pytorch
-RUN pip install torchaudio -f https://download.pytorch.org/whl/torch_stable.html
+# RUN conda install -y pytorch cudatoolkit=10.0 -c pytorch-nightly
+
+RUN pip install torchaudio -f https://download.pytorch.org/whl/torch_stable.html --no-dependencies
+# RUN pip install git+https://github.com/pytorch/audio
 
 RUN pip install future cython seaborn librosa tqdm wget tensorboard python-levenshtein 
 RUN pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex

@@ -38,7 +38,7 @@ def traineval(args):
 	args.lang, args.model, args.num_input_features = checkpoint.get('lang', args.lang), checkpoint.get('model', args.model), checkpoint.get('num_input_features', args.num_input_features)
 	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, experiment_id = args.experiment_id)
 	if not args.train_data_path and checkpoint and 'args' in checkpoint:
-		args.sample_rate, args.window, args.window_size, args.window_stride = list(map(checkpoint['args'].get, ['sample_rate', 'window', 'window_size', 'window_stride']))
+		args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['sample_rate', 'window', 'window_size', 'window_stride'])
 	print('\n', 'Arguments:', args)
 	print('\n', 'Experiment id:', args.experiment_id, '\n')
 	if args.dry:
@@ -48,8 +48,9 @@ def traineval(args):
 		torch.backends.cudnn.benchmark = True
 
 	lang = importlib.import_module(args.lang)
-	labels = dataset.Labels(lang)
-	labels_ = [labels] + ([dataset.Labels(lang, bpe = args.bpe)] if args.bpe else [])
+	labels_char = dataset.Labels(lang)
+	labels_bpe = dataset.Labels(lang, bpe = args.bpe)
+	labels = [labels_char, labels_bpe]
 	
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
 	val_waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob)
@@ -58,18 +59,27 @@ def traineval(args):
 		args.val_waveform_transform_debug_dir = os.path.join(args.val_waveform_transform_debug_dir, str(val_waveform_transform) if isinstance(val_waveform_transform, transforms.RandomCompose) else val_waveform_transform.__class__.__name__)
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
 	
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels_, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
-	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout)
-	
-	decoder = decoders.GreedyDecoder(labels) if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
+	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, finetune = args.finetune)
+
+	decoder = decoders.GreedyDecoder() #if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels_char, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 
 	def compute_losses(val_data_loader, decoder = None):
 		for dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ in val_data_loader:
 			with torch.no_grad():
-				log_probs, output_lengths, loss = model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device))
-				entropy = models.entropy(log_probs, output_lengths, dim = 1)
-				decoded = labels.idx2str(decoder.decode(log_probs, output_lengths)) if decoder is not None else [None] * len(log_probs)
-				yield audio_path_, reference_, loss.cpu(), entropy.cpu(), decoded, [l[..., :o] for l, o in zip(log_probs, output_lengths)]
+				log_probs_char, log_probs_bpe, output_lengths, loss = map(model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device)).get, ['log_probs_char', 'log_probs_bpe', 'output_lengths', 'loss'])
+				entropy = models.entropy(log_probs_char, output_lengths, dim = 1)
+				decoded = list(zip(labels_char.idx2str(decoder.decode(log_probs_char, output_lengths)), labels_bpe.idx2str(decoder.decode(log_probs_char, output_lengths))))
+				yield audio_path_, reference_, loss.cpu(), entropy.cpu(), decoded, None #, [l[..., :o] for l, o in zip(log_probs_char, output_lengths)]
+
+	def evaluate_transcript(labels, reference, transcript):
+		transcript, reference = min((metrics.cer(t, r), (t, r)) for r in reference.split(';') for t in (transcript if isinstance(transcript, list) else [transcript]))[1]
+		transcript, reference = map(labels_char.postprocess_transcript, [transcript, reference])
+		cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
+		transcript_aligned, reference_aligned = metrics.align(transcript, reference, prepend_space_to_reference = True) if args.align else (transcript, reference)
+		transcript_phonetic, reference_phonetic = [labels_char.postprocess_transcript(s, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS) for s in [transcript, reference]]
+		per = metrics.cer(transcript_phonetic, reference_phonetic)
+		return dict(reference_phonetic = reference_phonetic, transcript_phonetic = transcript_phonetic, reference = reference, transcript = transcript, reference_aligned = reference_aligned, transcript_aligned = transcript_aligned, cer = cer, wer = wer, per = per)
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None):
 		training = epoch is not None and iteration is not None
@@ -77,44 +87,48 @@ def traineval(args):
 		columns = {}
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
 			print(f'\n{val_dataset_name}@{iteration} computing losses')
-			ref_tra_, logits_ = [], []
+			logits_ = []
+			ref_tra_ = dict(char = [], bpe = [])
 			for batch_idx, (filenames, references, loss, entropy, decoded, logits) in enumerate(compute_losses(val_data_loader, decoder)):
 				logits_.extend([l.cpu() for l in logits] if not training and args.logits else [None] * len(filenames))
 				for k, (audio_path, reference, entropy, loss, transcript) in enumerate(zip(filenames, references, entropy.tolist(), loss.tolist(), decoded)):
-					transcript, reference = min((metrics.cer(t, r), (t, r)) for r in reference.split(';') for t in (transcript if isinstance(transcript, list) else [transcript]))[1]
-					transcript, reference = map(labels.postprocess_transcript, [transcript, reference])
-					cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
-					transcript_aligned, reference_aligned = metrics.align(transcript, reference, prepend_space_to_reference = True) if args.align else (transcript, reference)
-					transcript_phonetic, reference_phonetic = [labels.postprocess_transcript(s, phonetic_replace_groups = labels.lang.PHONETIC_REPLACE_GROUPS) for s in [transcript, reference]]
-					per = metrics.cer(transcript_phonetic, reference_phonetic)
+					transcript_char, transcript_bpe = [evaluate_transcript(l, reference, t) for t, l in zip(transcript, labels)]
+					ref_tra = dict(loss = loss, entropy = entropy, audio_path = audio_path, filename = os.path.basename(audio_path))
+					transcript_char.update(ref_tra)
+					transcript_bpe.update(ref_tra)
+					ref_tra_['char'].append(transcript_char)
+					ref_tra_['bpe'].append(transcript_bpe)
+					
 					if args.verbose:
 						print(f'{val_dataset_name}@{iteration}    :', batch_idx * len(filenames) + k, '/', len(val_data_loader) * len(filenames))
-						print(f'{val_dataset_name}@{iteration} REF: {reference_aligned}')
-						print(f'{val_dataset_name}@{iteration} HYP: {transcript_aligned}')
-						print(f'{val_dataset_name}@{iteration} WER: {wer:.02%} | CER: {cer:.02%}\n')
-					ref_tra_.append(dict(reference_phonetic = reference_phonetic, transcript_phonetic = transcript_phonetic, reference = reference, transcript = transcript, reference_aligned = reference_aligned, transcript_aligned = transcript_aligned, audio_path = audio_path, filename = os.path.basename(audio_path), cer = cer, wer = wer, per = per, loss = loss, entropy = entropy))
-			cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([x[k] for x in ref_tra_ if not math.isinf(x[k]) and not math.isnan(x[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
-			transcripts_path = os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name)
-			print(f'{args.experiment_id} {val_dataset_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} | Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}\n')
-			columns[val_dataset_name] =  dict(cer = cer_avg, wer = wer_avg, loss = loss_avg, entropy = entropy_avg)
+						print(f'{val_dataset_name}@{iteration} REF: {transcript_char["reference_aligned"]}')
+						print(f'{val_dataset_name}@{iteration} HYP: {transcript_char["transcript_aligned"]}')
+						print(f'{val_dataset_name}@{iteration} WER: {transcript_char["wer"]:.02%} | CER: {transcript_char["cer"]:.02%}\n')
 
-			with open(transcripts_path, 'w') as f:
-				json.dump(list(sorted(ref_tra_, key = lambda r: r['cer'], reverse = True)), f, ensure_ascii = False, indent = 2, sort_keys = True)
-			if training:
-				tensorboard.add_scalars('datasets/' + val_dataset_name, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
-				tensorboard.flush()
-			elif args.logits:
-				logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
-				print('Logits:', logits_file_path)
-				torch.save(list(sorted([(r.update(dict(log_probs = logits)) or r) for r, logits in zip(ref_tra_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
+			for k, ref_tra_ in ref_tra_.items():
+				cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([x[k] for x in ref_tra_ if not math.isinf(x[k]) and not math.isnan(x[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
+				transcripts_path = os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json.{k}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name)
+				print(f'{args.experiment_id} {val_dataset_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} | Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}\n')
+				columns[val_dataset_name + '_' + k] =  dict(cer = cer_avg, wer = wer_avg, loss = loss_avg, entropy = entropy_avg)
+
+				with open(transcripts_path, 'w') as f:
+					json.dump(list(sorted(ref_tra_, key = lambda r: r['cer'], reverse = True)), f, ensure_ascii = False, indent = 2, sort_keys = True)
+			
+			#if training:
+			#	tensorboard.add_scalars('datasets/' + val_dataset_name, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
+			#	tensorboard.flush()
+			#elif args.logits:
+			#	logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
+			#	print('Logits:', logits_file_path)
+			#	torch.save(list(sorted([(r.update(dict(log_probs = l)) or r) for r, l in zip(ref_tra_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
 		
-		vis.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns)
-		vis.exphtml(args.exphtml)
+		#vis.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns)
+		#vis.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
-			#TODO: amp.state_dict()
+			amp_state_dict = None # amp.state_dict()
 			optimizer_state_dict = None # optimizer.state_dict()
-			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
+			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, amp_state_dict = amp_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
 
 		model.train()
 		torch.cuda.empty_cache()
@@ -122,7 +136,7 @@ def traineval(args):
 	print(' Model capacity:', int(models.compute_capacity(model) / 1e6), 'million parameters\n')
 
 	if checkpoint:
-		model.load_state_dict(checkpoint['model_state_dict'])
+		model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 	model.to(args.device)
 
 	if not args.train_data_path:
@@ -133,7 +147,7 @@ def traineval(args):
 
 	train_waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob)
 	train_feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob)
-	train_dataset = dataset.AudioTextDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels_, num_input_features = args.num_input_features, waveform_transform = train_waveform_transform, feature_transform = train_feature_transform, max_duration = args.max_duration)
+	train_dataset = dataset.AudioTextDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = train_waveform_transform, feature_transform = train_feature_transform, max_duration = args.max_duration)
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
 	sampler = dataset.BucketingSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing)
 	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = sampler, worker_init_fn = set_random_seed, timeout = args.timeout)
@@ -146,7 +160,6 @@ def traineval(args):
 		if args.train_data_path == checkpoint['args']['train_data_path']:
 			sampler.load_state_dict(checkpoint['sampler_state_dict'])
 			scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-
 			if sampler.batch_idx + 1 == len(sampler):
 				sampler.shuffle(epoch = sampler.epoch + 1, batch_idx = 0)
 			else:
@@ -182,11 +195,13 @@ def traineval(args):
 			lr = scheduler.get_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
 			
 			with torch.enable_grad():
-				log_probs, output_lengths, loss = model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device))
-				loss, loss_avg_ = (loss * target_length_.select(1, 0).to(args.device)).mean() / args.train_batch_accumulate_iterations, loss.mean() 
-				entropy = models.entropy(log_probs, output_lengths, dim = 1).mean()
+				input_, input_lengths_, targets_, target_length_ = input_.to(args.device), input_lengths_fraction_.to(args.device), targets_.to(args.device), target_length_.to(args.device)
+				log_probs_char, log_probs_bpe, output_lengths, loss = map(model(input_, input_lengths_, targets_, target_length_).get, ['log_probs_char', 'log_probs_bpe', 'output_lengths', 'loss'])
+				example_weights = target_length_[:, 0]
+				loss, loss_avg_ = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, loss.mean()
+				entropy = models.entropy(log_probs_char, output_lengths, dim = 1).mean()
+				toc_fwd = time.time()
 				if not (torch.isinf(loss) or torch.isnan(loss)):
-					toc_fwd = time.time()
 					if args.fp16:
 						with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
 							scaled_loss.backward()
@@ -218,6 +233,8 @@ def traineval(args):
 			if iteration % args.log_iteration_interval == 0:
 				tensorboard.add_scalars('datasets/' + train_dataset_name, dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
 				for param_name, param in model.module.named_parameters():
+					if param.grad is None:
+						continue
 					tag = 'params/' + param_name.replace('.', '/')
 					norm, grad_norm = param.norm(), param.grad.norm()
 					ratio = grad_norm / (1e-9 + norm)
@@ -303,5 +320,6 @@ if __name__ == '__main__':
 	parser.add_argument('--timeout', type = float, default = 0)
 	parser.add_argument('--max-duration', type = float, default = 10)
 	parser.add_argument('--exphtml', default = '../stt.results')
+	parser.add_argument('--finetune', action = 'store_true')
 
 	traineval(parser.parse_args())

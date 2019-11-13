@@ -144,14 +144,14 @@ class Labels:
 		return functools.reduce(lambda text, func: func(text), [replacepunkt, replacespace, replacecap, replaceblank, replace2, replace22, replacestar, replacephonetic, str.strip], text)
 
 	def idx2str(self, idx, blank = None, space = None):
-		i2s = lambda i: self.bpe.DecodeIds(i) if self.bpe is not None else ''.join((blank or self[idx]) if idx == self.blank_idx else (space or self[idx]) if idx == self.space_idx else self[idx] for idx in torch.as_tensor(i).tolist())
+		i2s = lambda i: ''.join(self[idx] for idx in torch.as_tensor(i).tolist()).replace(self.blank, blank or self.blank).replace(self.space, space or self.space)
 		return list(map(i2s, idx))
 
 	def __getitem__(self, idx):
 		return {self.blank_idx : self.blank, self.repeat_idx : self.repeat, self.space_idx : self.space}.get(idx) or (self.alphabet[idx] if self.bpe is None else self.bpe.IdToPiece(idx))
 
 	def __len__(self):
-		return (len(self.alphabet) if self.bpe is None else len(self.bpe)) + len([self.repeat, self.space, self.blank])
+		return len(self.alphabet if self.bpe is None else self.bpe) + len([self.repeat, self.space, self.blank])
 
 	def __str__(self):
 		return self.alphabet + ''.join([self.repeat, self.space, self.blank])
@@ -196,8 +196,8 @@ def read_wav(audio_path, normalize = True, stereo = False, sample_rate = None, m
 def resample(signal, sample_rate_, sample_rate):
 	return sample_rate, torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate))
 
-def bpetrain(input_path, output_prefix, vocab_size):
-	sentencepiece.SentencePieceTrainer.Train(f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size}')
+def bpetrain(input_path, output_prefix, vocab_size, model_type, max_sentencepiece_length):
+	sentencepiece.SentencePieceTrainer.Train(f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size} --model_type={model_type}' + (f' --max_sentencepiece_length={max_sentencepiece_length}' if max_sentencepiece_length else ''))
 
 if __name__ == '__main__':
 	import argparse
@@ -207,6 +207,8 @@ if __name__ == '__main__':
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-prefix', '-o', required = True)
 	cmd.add_argument('--vocab-size', default = 5000, type = int)
+	cmd.add_argument('--model-type', default = 'unigram', choices = ['unigram', 'bpe', 'char', 'word'])
+	cmd.add_argument('--max-sentencepiece-length', type = int, default = None)
 	cmd.set_defaults(func = bpetrain)
 	
 	args = vars(parser.parse_args())
