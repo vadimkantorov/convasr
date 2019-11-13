@@ -114,7 +114,9 @@ sudo docker build -t convasr scripts
 # run docker
 sudo docker run --runtime nvidia --cap-add=SYS_PTRACE -v $PWD/deepspeech.pytorch:/deepspeech.pytorch -it --ipc=host convasr 
 
-sudo docker run --runtime=nvidia --cap-add=SYS_PTRACE -v/home/vadimkantorov/ru_open_stt_wav:/ru_open_stt_wav -v/home/vadimkantorov/kontur_calls_micro:/kontur_calls_micro -v /home/vadimkantorov/convasr:/convasr -it --ipc=host convasr
+sudo docker run --runtime=nvidia --cap-add=SYS_PTRACE -v ~/.ssh:/root/.ssh -v/home/vadimkantorov/ru_open_stt_wav:/ru_open_stt_wav -v/home/vadimkantorov/kontur_calls_micro:/kontur_calls_micro -v /home/vadimkantorov/convasr:/convasr -it --ipc=host convasr
+
+sudo docker image rm -f convasr
 ```
 
 # KenLM
