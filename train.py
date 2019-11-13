@@ -319,7 +319,7 @@ if __name__ == '__main__':
 	parser.add_argument('--bpe')
 	parser.add_argument('--timeout', type = float, default = 0)
 	parser.add_argument('--max-duration', type = float, default = 10)
-	parser.add_argument('--exphtml', default = '../stt.results')
+	parser.add_argument('--exphtml', default = '../stt_results')
 	parser.add_argument('--finetune', action = 'store_true')
 
 	traineval(parser.parse_args())
