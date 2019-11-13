@@ -109,10 +109,12 @@ ls mydir/*.wav | xargs soxi -D | awk '{sum += $1} END {print sum / 60; print "mi
 # Docker commands
 ```shell
 # build scripts/Dockerfile
-sudo docker build --runtime nvidia -t convasr scripts
+sudo docker build -t convasr scripts
 
 # run docker
 sudo docker run --runtime nvidia --cap-add=SYS_PTRACE -v $PWD/deepspeech.pytorch:/deepspeech.pytorch -it --ipc=host convasr 
+
+sudo docker run --runtime=nvidia --cap-add=SYS_PTRACE -v/home/vadimkantorov/ru_open_stt_wav:/ru_open_stt_wav -v/home/vadimkantorov/kontur_calls_micro:/kontur_calls_micro -v /home/vadimkantorov/convasr:/convasr -it --ipc=host convasr
 ```
 
 # KenLM

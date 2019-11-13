@@ -1,4 +1,4 @@
-FROM nvidia/cuda:10.0-cudnn7-devel-ubuntu18.04
+FROM nvidia/cuda:10.1-cudnn7-devel-ubuntu18.04
 
 RUN apt-get update -y && apt-get install -y --no-install-recommends \
   build-essential \
@@ -16,6 +16,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   libsm6 \
   libxext6 \
   libxrender-dev \
+  openssh-client \
   cmake \
   sox \
   libsox-dev \
@@ -37,13 +38,13 @@ RUN pip install ipython matplotlib seaborn
 
 # Prerequisites for building PyTorch from source (just in case)
 RUN /miniconda/bin/conda install -y scipy scikit-learn numba numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
-RUN conda install -y -c pytorch magma-cuda100 
+RUN conda install -y -c pytorch magma-cuda101 
 
-RUN conda install -y pytorch cudatoolkit=10.0 -c pytorch
-# RUN conda install -y pytorch cudatoolkit=10.0 -c pytorch-nightly
+# RUN conda install -y pytorch cudatoolkit=10.1 -c pytorch
+RUN conda install -y pytorch cudatoolkit=10.1 -c pytorch-nightly
 
-#RUN pip install torchaudio -f https://download.pytorch.org/whl/torch_stable.html --no-dependencies
- RUN pip install git+https://github.com/pytorch/audio
+# RUN pip install torchaudio -f https://download.pytorch.org/whl/torch_stable.html --no-dependencies
+RUN pip install git+https://github.com/pytorch/audio
 
 RUN pip install future cython seaborn librosa tqdm wget tensorboard python-levenshtein 
 RUN pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex
