@@ -5,6 +5,7 @@ import math
 import time
 import shutil
 import random
+import itertools
 import argparse
 import importlib
 import torch
@@ -70,16 +71,14 @@ def traineval(args):
 				decoded = [l.idx2str(decoder.decode(lp, output_lengths)) for l, lp in zip(labels, log_probs)]
 				yield audio_path_, reference_, loss.cpu(), entropy.cpu(), decoded, None #, [l[..., :o] for l, o in zip(log_probs_char, output_lengths)]
 
-	def evaluate_transcript(labels, reference, transcript, **common):
+	def evaluate_transcript(labels, transcript, reference, loss, entropy, audio_path):
 		transcript, reference = min((metrics.cer(t, r), (t, r)) for r in reference.split(';') for t in (transcript if isinstance(transcript, list) else [transcript]))[1]
 		transcript, reference = map(labels.postprocess_transcript, [transcript, reference])
 		cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
 		transcript_aligned, reference_aligned = metrics.align(transcript, reference, prepend_space_to_reference = True) if args.align else (transcript, reference)
 		transcript_phonetic, reference_phonetic = [labels.postprocess_transcript(s, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS) for s in [transcript, reference]]
 		per = metrics.cer(transcript_phonetic, reference_phonetic)
-		res = dict(reference_phonetic = reference_phonetic, transcript_phonetic = transcript_phonetic, reference = reference, transcript = transcript, reference_aligned = reference_aligned, transcript_aligned = transcript_aligned, cer = cer, wer = wer, per = per, labels = labels.name)
-		res.update(common)
-		return res
+		return dict(reference_phonetic = reference_phonetic, transcript_phonetic = transcript_phonetic, reference = reference, transcript = transcript, reference_aligned = reference_aligned, transcript_aligned = transcript_aligned, cer = cer, wer = wer, per = per, labels = labels.name, audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss)
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None):
 		training = epoch is not None and iteration is not None
@@ -90,13 +89,13 @@ def traineval(args):
 			ref_tra_, logits_ = [], []
 			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits) in enumerate(apply_model(val_data_loader, decoder)):
 				#logits_.extend([l.cpu() for l in logits] if not training and args.logits else [None] * len(decoded))
-				for k, (audio_path, reference, entropy, loss, transcript) in enumerate(zip(audio_paths, references, entropy.tolist(), loss.tolist(), zip(*decoded))):
-					ref_tra_.append([evaluate_transcript(l, reference, t, loss = loss, entropy = entropy, audio_path = audio_path, audio_file_name = os.path.basename(audio_path)) for t, l in zip(transcript, labels)])
-					for r in (ref_tra_[-1] if args.verbose else []):
-						print(f'{val_dataset_name}@{iteration}:', batch_idx * len(decoded) + k, '/', len(val_data_loader) * len(decoded))
-						print('REF: {labels}  "{reference_aligned}"'.format(**r))
-						print('HYP: {labels} "{transcript_aligned}"'.format(**r))
-						print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
+				stats = [[evaluate_transcript(l, t, *zipped[:4]) for l, t in zip(labels, zipped[4:])] for zipped in zip(references, loss.tolist(), entropy.tolist(), audio_paths, *decoded)]
+				for r in itertools.chain(*stats) if args.verbose else []:
+					print(f'{val_dataset_name}@{iteration}:', batch_idx , '/', len(val_data_loader))
+					print('REF: {labels}  "{reference_aligned}"'.format(**r))
+					print('HYP: {labels} "{transcript_aligned}"'.format(**r))
+					print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
+				ref_tra_ += stats
 
 			transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)) if training else args.transcripts.format(val_dataset_name = val_dataset_name)
 			for r_ in zip(*ref_tra_):
@@ -117,8 +116,9 @@ def traineval(args):
 			#	print('Logits:', logits_file_path)
 			#	torch.save(list(sorted([(r.update(dict(log_probs = l)) or r) for r, l in zip(ref_tra_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
 		
-		vis.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns)
-		vis.exphtml(args.exphtml)
+		if args.exphtml:
+			vis.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns)
+			vis.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
 			amp_state_dict = None # amp.state_dict()
