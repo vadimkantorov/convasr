@@ -7,7 +7,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python3 train.py $@ \
   --optimizer NovoGrad \
   --train-data-path data/mixed_train.csv \
   --val-data-path data/mixed_val.csv data/clean_val.csv kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv \
-  --val-iteration-interval 2500 \
+  --val-iteration-interval 500 \
   --epochs 5 \
   --dropout 0 \
   --bpe data/tts_dataset_tri_1000.model \

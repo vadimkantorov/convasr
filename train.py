@@ -88,18 +88,17 @@ def traineval(args):
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
 			print(f'\n{val_dataset_name}@{iteration} computing losses')
 			ref_tra_, logits_ = [], []
-			for batch_idx, (filenames, references, loss, entropy, decoded, logits) in enumerate(compute_losses(val_data_loader, decoder)):
-				logits_.extend([l.cpu() for l in logits] if not training and args.logits else [None] * len(filenames))
-				for k, (audio_path, reference, entropy, loss, transcript) in enumerate(zip(filenames, references, entropy.tolist(), loss.tolist(), decoded)):
-					ref_tra_.append([evaluate_transcript(l, reference, t, loss = loss, entropy = entropy, audio_path = audio_path, filename = os.path.basename(audio_path)) for t, l in zip(transcript, labels)])
-					
-					#if args.verbose:
-					#	print(f'{val_dataset_name}@{iteration}    :', batch_idx * len(filenames) + k, '/', len(val_data_loader) * len(filenames))
-					#	print(f'{val_dataset_name}@{iteration} REF: {transcript_char["reference_aligned"]}')
-					#	print(f'{val_dataset_name}@{iteration} HYP: {transcript_char["transcript_aligned"]}')
-					#	print(f'{val_dataset_name}@{iteration} WER: {transcript_char["wer"]:.02%} | CER: {transcript_char["cer"]:.02%}\n')
+			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits) in enumerate(compute_losses(val_data_loader, decoder)):
+				logits_.extend([l.cpu() for l in logits] if not training and args.logits else [None] * len(decoded))
+				for k, (audio_path, reference, entropy, loss, transcript) in enumerate(zip(audio_paths, references, entropy.tolist(), loss.tolist(), decoded)):
+					ref_tra_.append([evaluate_transcript(l, reference, t, loss = loss, entropy = entropy, audio_path = audio_path, audio_file_name = os.path.basename(audio_path)) for t, l in zip(transcript, labels)])
+					for r in (ref_tra_[-1] if args.verbose else []):
+						print(f'{val_dataset_name}@{iteration}:', batch_idx * len(decoded) + k, '/', len(val_data_loader) * len(decoded))
+						print('REF: {labels}  "{reference_aligned}"'.format(**r))
+						print('HYP: {labels} "{transcript_aligned}"'.format(**r))
+						print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
 
-			transcripts_path = os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name)
+			transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration) if training else args.transcripts.format(val_dataset_name = val_dataset_name)
 			for r_ in zip(*ref_tra_):
 				cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([r[k] for r in r_ if not math.isinf(r[k]) and not math.isnan(r[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
 				labels_name = r_[0]['labels']
@@ -124,7 +123,7 @@ def traineval(args):
 		if training and not args.checkpoint_skip:
 			amp_state_dict = None # amp.state_dict()
 			optimizer_state_dict = None # optimizer.state_dict()
-			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, amp_state_dict = amp_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), os.path.join(args.experiment_dir, f'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt'))
+			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, amp_state_dict = amp_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), os.path.join(args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)))
 
 		model.train()
 		torch.cuda.empty_cache()
@@ -275,6 +274,8 @@ if __name__ == '__main__':
 	parser.add_argument('--experiments-dir', default = 'data/experiments')
 	parser.add_argument('--experiment-dir', default = '{experiments_dir}/{experiment_id}')
 	parser.add_argument('--transcripts', default = 'data/transcripts_{val_dataset_name}.json', help = 'save transcripts at validation')
+	parser.add_argument('--checkpoint-format', default = 'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')
+	parser.add_argument('--train-transcripts-format', default = 'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json')
 	parser.add_argument('--logits', nargs = '?', const = 'data/logits_{val_dataset_name}.pt', help = 'save logits at validation')
 	parser.add_argument('--args', default = 'args.json', help = 'save experiment arguments to the experiment dir')
 	parser.add_argument('--model', default = 'JasperNetBig')
