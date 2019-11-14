@@ -35,8 +35,8 @@ def traineval(args):
 	if 'experiment_id' in checkpoint and not args.experiment_name:
 		args.experiment_id = checkpoint['experiment_id']
 
-	args.lang, args.model, args.num_input_features = checkpoint.get('lang', args.lang), checkpoint.get('model', args.model), checkpoint.get('num_input_features', args.num_input_features)
 	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, experiment_id = args.experiment_id)
+	args.lang, args.model, args.num_input_features = checkpoint.get('lang', args.lang), checkpoint.get('model', args.model), checkpoint.get('num_input_features', args.num_input_features)
 	if not args.train_data_path and checkpoint and 'args' in checkpoint:
 		args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['sample_rate', 'window', 'window_size', 'window_stride'])
 	print('\n', 'Arguments:', args)
@@ -62,8 +62,8 @@ def traineval(args):
 
 	decoder = decoders.GreedyDecoder() #if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels_char, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 
-	def compute_losses(val_data_loader, decoder = None):
-		for dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ in val_data_loader:
+	def apply_model(data_loader, decoder = None):
+		for dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ in data_loader:
 			with torch.no_grad():
 				log_probs, output_lengths, loss = map(model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device)).get, ['log_probs', 'output_lengths', 'loss'])
 				entropy = models.entropy(log_probs[0], output_lengths, dim = 1)
@@ -86,10 +86,10 @@ def traineval(args):
 		model.eval()
 		columns = {}
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
-			print(f'\n{val_dataset_name}@{iteration} computing losses')
+			print(f'\n{val_dataset_name}@{iteration}')
 			ref_tra_, logits_ = [], []
-			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits) in enumerate(compute_losses(val_data_loader, decoder)):
-				logits_.extend([l.cpu() for l in logits] if not training and args.logits else [None] * len(decoded))
+			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits) in enumerate(apply_model(val_data_loader, decoder)):
+				#logits_.extend([l.cpu() for l in logits] if not training and args.logits else [None] * len(decoded))
 				for k, (audio_path, reference, entropy, loss, transcript) in enumerate(zip(audio_paths, references, entropy.tolist(), loss.tolist(), decoded)):
 					ref_tra_.append([evaluate_transcript(l, reference, t, loss = loss, entropy = entropy, audio_path = audio_path, audio_file_name = os.path.basename(audio_path)) for t, l in zip(transcript, labels)])
 					for r in (ref_tra_[-1] if args.verbose else []):
@@ -104,7 +104,7 @@ def traineval(args):
 				labels_name = r_[0]['labels']
 				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} | Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}\n')
 				
-				columns[val_dataset_name + '_' + labels_name] =  dict(cer = cer_avg, wer = wer_avg, loss = loss_avg, entropy = entropy_avg)
+				columns[val_dataset_name + '_' + labels_name] = dict(cer_avg = cer_avg, wer_avg = wer_avg, loss_avg = loss_avg, entropy_avg = entropy_avg)
 				if training:
 					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + labels_name, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
 					tensorboard.flush()
@@ -117,8 +117,8 @@ def traineval(args):
 			#	print('Logits:', logits_file_path)
 			#	torch.save(list(sorted([(r.update(dict(log_probs = l)) or r) for r, l in zip(ref_tra_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
 		
-		#vis.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns)
-		#vis.exphtml(args.exphtml)
+		vis.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns)
+		vis.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
 			amp_state_dict = None # amp.state_dict()
@@ -148,7 +148,7 @@ def traineval(args):
 	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = sampler, worker_init_fn = set_random_seed, timeout = args.timeout)
 	optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else apex.optimizers.FusedNovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'FusedNovoGrad' else None
 	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else optimizers.NoopLR(optimizer) 
-	epoch, iteration = 0, 0
+	iteration = 0
 	if checkpoint:
 		#optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 		iteration = 1 + checkpoint['iteration']
@@ -185,48 +185,47 @@ def traineval(args):
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1. / K) * avg
 	for epoch in range(sampler.epoch, args.epochs):
 		time_epoch_start = time.time()
-		for batch_idx, (dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_) in enumerate(train_data_loader, start = sampler.batch_idx):
-			toc = time.time()
+		for dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ in train_data_loader:
+			toc_data = time.time()
 			lr = scheduler.get_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
 			
-			with torch.enable_grad():
-				input_, input_lengths_, targets_, target_length_ = input_.to(args.device), input_lengths_fraction_.to(args.device), targets_.to(args.device), target_length_.to(args.device)
-				log_probs, output_lengths, loss = map(model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device)).get, ['log_probs', 'output_lengths', 'loss'])
-				example_weights = target_length_[:, 0]
-				loss, loss_avg_ = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, loss.mean()
-				entropy = models.entropy(log_probs[0], output_lengths, dim = 1).mean()
-				toc_fwd = time.time()
-				if not (torch.isinf(loss) or torch.isnan(loss)):
-					if args.fp16:
-						with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
-							scaled_loss.backward()
-					else:
-						loss.backward()
+			# TODO: use non_blocking = True
+			input_, input_lengths_, targets_, target_length_ = input_.to(args.device), input_lengths_fraction_.to(args.device), targets_.to(args.device), target_length_.to(args.device)
+			log_probs, output_lengths, loss = map(model(input_, input_lengths_fraction_, y = targets_, ylen = target_length_).get, ['log_probs', 'output_lengths', 'loss'])
+			example_weights = target_length_[:, 0]
+			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, float(loss.mean())
+			entropy = float(models.entropy(log_probs[0], output_lengths, dim = 1).mean()) 
+			toc_fwd = time.time()
+			if not (torch.isinf(loss) or torch.isnan(loss)):
+				if args.fp16:
+					with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
+						scaled_loss.backward()
+				else:
+					loss.backward()
 
-					if iteration % args.train_batch_accumulate_iterations == 0:
-						torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
-						optimizer.step()
-						optimizer.zero_grad()
-						scheduler.step()
-					loss_avg = moving_avg(loss_avg, float(loss_avg_), max = 1000)
-					entropy_avg = moving_avg(entropy_avg, float(entropy), max = 4)
-					toc_bwd = time.time()
+				if iteration % args.train_batch_accumulate_iterations == 0:
+					torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
+					optimizer.step()
+					optimizer.zero_grad()
+					scheduler.step()
+				loss_avg = moving_avg(loss_avg, loss_cur, max = 1000)
+				entropy_avg = moving_avg(entropy_avg, entropy, max = 4)
+			toc_bwd = time.time()
 
 			ms = lambda sec: sec * 1000
-			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = ms(toc - tic), ms(toc_fwd - toc), ms(toc_bwd - toc_fwd), ms(time.time() - toc)	
-			time_ms_avg = moving_avg(time_ms_avg, time_ms_data + time_ms_model, max = 10000)
-			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}> loss: {float(loss_avg_):.2f} <{loss_avg:.2f}> time: ({"x".join(map(str, input_.shape))}) {time_ms_data:.2f}+{time_ms_fwd:4.0f}+{time_ms_bwd:4.0f} <{time_ms_avg:.0f}> | lr: {lr:.5f}')
-			tic = time.time()
+			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = ms(toc_data - tic), ms(toc_fwd - toc_data), ms(toc_bwd - toc_fwd), ms(toc_bwd - toc_data)	
+			time_ms_avg = moving_avg(time_ms_avg, time_ms_data + time_ms_model, max = 10_000)
+			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{sampler.batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}> loss: {loss_cur:.2f} <{loss_avg:.2f}> time: ({"x".join(map(str, input_.shape))}) {time_ms_data:.2f}+{time_ms_fwd:4.0f}+{time_ms_bwd:4.0f} <{time_ms_avg:.0f}> | lr: {lr:.5f}')
 			iteration += 1
 
-			if args.val_iteration_interval is not None and iteration > 0 and iteration % args.val_iteration_interval == 0:
+			if iteration > 0 and iteration % args.val_iteration_interval == 0:
 				evaluate_model(val_data_loaders, epoch, iteration)
 
 			if iteration and args.iterations and iteration >= args.iterations:
 				sys.exit(0)
 
 			if iteration % args.log_iteration_interval == 0:
-				tensorboard.add_scalars('datasets/' + train_dataset_name, dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
+				tensorboard.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
 				for param_name, param in model.module.named_parameters():
 					if param.grad is None:
 						continue
@@ -238,8 +237,10 @@ def traineval(args):
 						tensorboard.add_histogram(tag, param, iteration)
 						tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
 
+			tic = time.time()
+
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
-		sampler.shuffle(epoch)
+		sampler.shuffle(epoch) # TODO: move to beginning of epoch
 		evaluate_model(val_data_loaders, epoch, iteration)
 
 if __name__ == '__main__':
