@@ -98,7 +98,7 @@ def traineval(args):
 						print('HYP: {labels} "{transcript_aligned}"'.format(**r))
 						print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
 
-			transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration) if training else args.transcripts.format(val_dataset_name = val_dataset_name)
+			transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)) if training else args.transcripts.format(val_dataset_name = val_dataset_name)
 			for r_ in zip(*ref_tra_):
 				cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([r[k] for r in r_ if not math.isinf(r[k]) and not math.isnan(r[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
 				labels_name = r_[0]['labels']
