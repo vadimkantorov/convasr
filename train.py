@@ -90,7 +90,7 @@ def traineval(args):
 			ref_tra_, logits_ = [], []
 			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits) in enumerate(apply_model(val_data_loader, decoder)):
 				#logits_.extend([l.cpu() for l in logits] if not training and args.logits else [None] * len(decoded))
-				for k, (audio_path, reference, entropy, loss, transcript) in enumerate(zip(audio_paths, references, entropy.tolist(), loss.tolist(), decoded)):
+				for k, (audio_path, reference, entropy, loss, transcript) in enumerate(zip(audio_paths, references, entropy.tolist(), loss.tolist(), zip(*decoded))):
 					ref_tra_.append([evaluate_transcript(l, reference, t, loss = loss, entropy = entropy, audio_path = audio_path, audio_file_name = os.path.basename(audio_path)) for t, l in zip(transcript, labels)])
 					for r in (ref_tra_[-1] if args.verbose else []):
 						print(f'{val_dataset_name}@{iteration}:', batch_idx * len(decoded) + k, '/', len(val_data_loader) * len(decoded))

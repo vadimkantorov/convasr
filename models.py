@@ -105,7 +105,7 @@ class JasperNet(nn.ModuleList):
 
 		loss_char = F.ctc_loss(log_probs_char.permute(2, 0, 1), y[:, 0], output_lengths, ylen[:, 0], blank = log_probs_char.shape[1] - 1, reduction = 'none') / ylen[:, 0]
 		loss_bpe =  F.ctc_loss(log_probs_bpe.permute(2, 0, 1) , y[:, 1], output_lengths, ylen[:, 1], blank = log_probs_bpe.shape[ 1] - 1, reduction = 'none') / ylen[:, 1]
-		print('loss_char:', float(loss_char.mean()), 'loss_bpe:', float(loss_bpe.mean()))
+		#print('loss_char:', float(loss_char.mean()), 'loss_bpe:', float(loss_bpe.mean()))
 		loss = loss_char + loss_bpe
 
 		return dict(log_probs = [log_probs_char, log_probs_bpe], output_lengths = output_lengths, loss = loss)
