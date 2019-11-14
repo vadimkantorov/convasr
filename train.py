@@ -48,9 +48,7 @@ def traineval(args):
 		torch.backends.cudnn.benchmark = True
 
 	lang = importlib.import_module(args.lang)
-	labels_char = dataset.Labels(lang)
-	labels_bpe = dataset.Labels(lang, bpe = args.bpe)
-	labels = [labels_char, labels_bpe]
+	labels = [dataset.Labels(lang, name = 'char')] + ([dataset.Labels(lang, bpe = args.bpe, name = 'bpe')] if args.bpe else [])
 	
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
 	val_waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob)
@@ -67,19 +65,21 @@ def traineval(args):
 	def compute_losses(val_data_loader, decoder = None):
 		for dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ in val_data_loader:
 			with torch.no_grad():
-				log_probs_char, log_probs_bpe, output_lengths, loss = map(model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device)).get, ['log_probs_char', 'log_probs_bpe', 'output_lengths', 'loss'])
-				entropy = models.entropy(log_probs_char, output_lengths, dim = 1)
-				decoded = list(zip(labels_char.idx2str(decoder.decode(log_probs_char, output_lengths)), labels_bpe.idx2str(decoder.decode(log_probs_char, output_lengths))))
+				log_probs, output_lengths, loss = map(model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device)).get, ['log_probs', 'output_lengths', 'loss'])
+				entropy = models.entropy(log_probs[0], output_lengths, dim = 1)
+				decoded = [l.idx2str(decoder.decode(lp, output_lengths)) for l, lp in zip(labels, log_probs)]
 				yield audio_path_, reference_, loss.cpu(), entropy.cpu(), decoded, None #, [l[..., :o] for l, o in zip(log_probs_char, output_lengths)]
 
-	def evaluate_transcript(labels, reference, transcript):
+	def evaluate_transcript(labels, reference, transcript, **common):
 		transcript, reference = min((metrics.cer(t, r), (t, r)) for r in reference.split(';') for t in (transcript if isinstance(transcript, list) else [transcript]))[1]
-		transcript, reference = map(labels_char.postprocess_transcript, [transcript, reference])
+		transcript, reference = map(labels.postprocess_transcript, [transcript, reference])
 		cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
 		transcript_aligned, reference_aligned = metrics.align(transcript, reference, prepend_space_to_reference = True) if args.align else (transcript, reference)
-		transcript_phonetic, reference_phonetic = [labels_char.postprocess_transcript(s, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS) for s in [transcript, reference]]
+		transcript_phonetic, reference_phonetic = [labels.postprocess_transcript(s, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS) for s in [transcript, reference]]
 		per = metrics.cer(transcript_phonetic, reference_phonetic)
-		return dict(reference_phonetic = reference_phonetic, transcript_phonetic = transcript_phonetic, reference = reference, transcript = transcript, reference_aligned = reference_aligned, transcript_aligned = transcript_aligned, cer = cer, wer = wer, per = per)
+		res = dict(reference_phonetic = reference_phonetic, transcript_phonetic = transcript_phonetic, reference = reference, transcript = transcript, reference_aligned = reference_aligned, transcript_aligned = transcript_aligned, cer = cer, wer = wer, per = per, labels = labels.name)
+		res.update(common)
+		return res
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None):
 		training = epoch is not None and iteration is not None
@@ -87,37 +87,31 @@ def traineval(args):
 		columns = {}
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
 			print(f'\n{val_dataset_name}@{iteration} computing losses')
-			logits_ = []
-			ref_tra_ = dict(char = [], bpe = [])
+			ref_tra_, logits_ = [], []
 			for batch_idx, (filenames, references, loss, entropy, decoded, logits) in enumerate(compute_losses(val_data_loader, decoder)):
 				logits_.extend([l.cpu() for l in logits] if not training and args.logits else [None] * len(filenames))
 				for k, (audio_path, reference, entropy, loss, transcript) in enumerate(zip(filenames, references, entropy.tolist(), loss.tolist(), decoded)):
-					transcript_char, transcript_bpe = [evaluate_transcript(l, reference, t) for t, l in zip(transcript, labels)]
-					ref_tra = dict(loss = loss, entropy = entropy, audio_path = audio_path, filename = os.path.basename(audio_path))
-					transcript_char.update(ref_tra)
-					transcript_bpe.update(ref_tra)
-					transcript_char['labels'] = 'char'
-					transcript_bpe['labels'] = 'bpe'
-					ref_tra_['char'].append(transcript_char)
-					ref_tra_['bpe'].append(transcript_bpe)
+					ref_tra_.append([evaluate_transcript(l, reference, t, loss = loss, entropy = entropy, audio_path = audio_path, filename = os.path.basename(audio_path)) for t, l in zip(transcript, labels)])
 					
-					if args.verbose:
-						print(f'{val_dataset_name}@{iteration}    :', batch_idx * len(filenames) + k, '/', len(val_data_loader) * len(filenames))
-						print(f'{val_dataset_name}@{iteration} REF: {transcript_char["reference_aligned"]}')
-						print(f'{val_dataset_name}@{iteration} HYP: {transcript_char["transcript_aligned"]}')
-						print(f'{val_dataset_name}@{iteration} WER: {transcript_char["wer"]:.02%} | CER: {transcript_char["cer"]:.02%}\n')
+					#if args.verbose:
+					#	print(f'{val_dataset_name}@{iteration}    :', batch_idx * len(filenames) + k, '/', len(val_data_loader) * len(filenames))
+					#	print(f'{val_dataset_name}@{iteration} REF: {transcript_char["reference_aligned"]}')
+					#	print(f'{val_dataset_name}@{iteration} HYP: {transcript_char["transcript_aligned"]}')
+					#	print(f'{val_dataset_name}@{iteration} WER: {transcript_char["wer"]:.02%} | CER: {transcript_char["cer"]:.02%}\n')
 
 			transcripts_path = os.path.join(args.experiment_dir, f'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json') if training else args.transcripts.format(val_dataset_name = val_dataset_name)
-			for k, ref_tra_ in ref_tra_.items():
-				cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([x[k] for x in ref_tra_ if not math.isinf(x[k]) and not math.isnan(x[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
-				print(f'{args.experiment_id} {val_dataset_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} | Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}\n')
-				columns[val_dataset_name + '_' + k] =  dict(cer = cer_avg, wer = wer_avg, loss = loss_avg, entropy = entropy_avg)
+			for r_ in zip(*ref_tra_):
+				cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([r[k] for r in r_ if not math.isinf(r[k]) and not math.isnan(r[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
+				labels_name = r_[0]['labels']
+				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} | Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}\n')
+				
+				columns[val_dataset_name + '_' + labels_name] =  dict(cer = cer_avg, wer = wer_avg, loss = loss_avg, entropy = entropy_avg)
 				if training:
-					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + k, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
+					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + labels_name, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
 					tensorboard.flush()
 
 			with open(transcripts_path, 'w') as f:
-				json.dump([r for t in sorted(zip(ref_tra_['char'], ref_tra_['bpe']), key = lambda t: t[0]['cer'], reverse = True) for r in t], f, ensure_ascii = False, indent = 2, sort_keys = True)
+				json.dump([r for t in sorted(ref_tra_, key = lambda t: t[0]['cer'], reverse = True) for r in t], f, ensure_ascii = False, indent = 2, sort_keys = True)
 			
 			#if args.logits:
 			#	logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
@@ -198,10 +192,10 @@ def traineval(args):
 			
 			with torch.enable_grad():
 				input_, input_lengths_, targets_, target_length_ = input_.to(args.device), input_lengths_fraction_.to(args.device), targets_.to(args.device), target_length_.to(args.device)
-				log_probs_char, log_probs_bpe, output_lengths, loss = map(model(input_, input_lengths_, targets_, target_length_).get, ['log_probs_char', 'log_probs_bpe', 'output_lengths', 'loss'])
+				log_probs, output_lengths, loss = map(model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device)).get, ['log_probs', 'output_lengths', 'loss'])
 				example_weights = target_length_[:, 0]
 				loss, loss_avg_ = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, loss.mean()
-				entropy = models.entropy(log_probs_char, output_lengths, dim = 1).mean()
+				entropy = models.entropy(log_probs[0], output_lengths, dim = 1).mean()
 				toc_fwd = time.time()
 				if not (torch.isinf(loss) or torch.isnan(loss)):
 					if args.fp16:
@@ -253,75 +247,75 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--optimizer', choices = ['SGD', 'AdamW', 'NovoGrad', 'FusedNovoGrad'], default = 'SGD')
 	parser.add_argument('--max-norm', type = float, default = 100)
-	parser.add_argument('--lr', type = float, default = 5e-3)
+	parser.add_argument('--lr', type = float, default = 1e-2)
 	parser.add_argument('--weight-decay', type = float, default = 1e-3)
 	parser.add_argument('--momentum', type = float, default = 0.9)
 	parser.add_argument('--nesterov', action = 'store_true')
 	parser.add_argument('--betas', nargs = '*', type = float, default = (0.9, 0.999))
 	parser.add_argument('--scheduler', choices = ['MultiStepLR', 'PolynomialDecayLR', 'StepLR'], default = None)
 	parser.add_argument('--decay-gamma', type = float, default = 0.1)
-	parser.add_argument('--decay-milestones', nargs = '*', type = int, default = [25_000, 50_000])
-	parser.add_argument('--decay-power', type = float, default = 2.0)
-	parser.add_argument('--decay-lr', type = float, default = 1e-5)
-	parser.add_argument('--decay-epochs', type = int, default = 5)
-	parser.add_argument('--decay-step-size', type = int, default = 10_000)
+	parser.add_argument('--decay-milestones', nargs = '*', type = int, default = [25_000, 50_000], help = 'for MultiStepLR')
+	parser.add_argument('--decay-power', type = float, default = 2.0, help = 'for PolynomialDecayLR')
+	parser.add_argument('--decay-lr', type = float, default = 1e-5, help = 'for PolynomialDecayLR')
+	parser.add_argument('--decay-epochs', type = int, default = 5, help = 'for PolynomialDecayLR')
+	parser.add_argument('--decay-step-size', type = int, default = 10_000, help = 'for PolynomialDecayLR')
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
 	parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
-	parser.add_argument('--epochs', type = int, default = 10)
+	parser.add_argument('--epochs', type = int, default = 5)
 	parser.add_argument('--iterations', type = int, default = None)
-	parser.add_argument('--num-input-features', default = 64)
-	parser.add_argument('--dropout', type = float, default = 0.2)
 	parser.add_argument('--train-data-path', nargs = '*', default = [])
 	parser.add_argument('--train-data-mixing', type = float, nargs = '*')
 	parser.add_argument('--val-data-path', nargs = '+')
-	parser.add_argument('--sample-rate', type = int, default = 8_000)
-	parser.add_argument('--window-size', type = float, default = 0.02)
-	parser.add_argument('--window-stride', type = float, default = 0.01)
-	parser.add_argument('--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'])
 	parser.add_argument('--num-workers', type = int, default = 32)
 	parser.add_argument('--train-batch-size', type = int, default = 64)
 	parser.add_argument('--val-batch-size', type = int, default = 64)
 	parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
-	parser.add_argument('--checkpoint', nargs = '*', default = [])
+	parser.add_argument('--checkpoint', nargs = '*', default = [], help = 'simple checkpoint weight averaging, for advanced weight averaging see Stochastic Weight Averaging')
 	parser.add_argument('--checkpoint-skip', action = 'store_true')
 	parser.add_argument('--experiments-dir', default = 'data/experiments')
 	parser.add_argument('--experiment-dir', default = '{experiments_dir}/{experiment_id}')
-	parser.add_argument('--transcripts', default = 'data/transcripts_{val_dataset_name}.json')
-	parser.add_argument('--logits', nargs = '?', const = 'data/logits_{val_dataset_name}.pt')
-	parser.add_argument('--args', default = 'args.json')
-	parser.add_argument('--model', default = 'Wav2LetterRu')
-	parser.add_argument('--seed', type = int, default = 1)
-	parser.add_argument('--cudnn', default = 'benchmark')
+	parser.add_argument('--transcripts', default = 'data/transcripts_{val_dataset_name}.json', help = 'save transcripts at validation')
+	parser.add_argument('--logits', nargs = '?', const = 'data/logits_{val_dataset_name}.pt', help = 'save logits at validation')
+	parser.add_argument('--args', default = 'args.json', help = 'save experiment arguments to the experiment dir')
+	parser.add_argument('--model', default = 'JasperNetBig')
+	parser.add_argument('--seed', type = int, default = 1, help = 'reset to this random seed value in the main thread and data loader threads')
+	parser.add_argument('--cudnn', default = 'benchmark', help = 'enables cudnn benchmark mode')
 	parser.add_argument('--experiment-id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{train_waveform_transform}_{train_feature_transform}_{experiment_name}_{bpe}')
 	parser.add_argument('--experiment-name', '--name', default = '')
 	parser.add_argument('--comment', default = '')
 	parser.add_argument('--dry', action = 'store_true')
 	parser.add_argument('--lang', default = 'ru')
-	parser.add_argument('--val-waveform-transform-debug-dir')
-	parser.add_argument('--val-waveform-transform', nargs = '*', default = [])
-	parser.add_argument('--val-waveform-transform-prob', type = float, default = None)
-	parser.add_argument('--val-feature-transform', nargs = '*', default = [])
+	parser.add_argument('--val-waveform-transform-debug-dir', help = 'debug dir for augmented audio at validation')
+	parser.add_argument('--val-waveform-transform', nargs = '*', default = [], help = 'waveform transforms are applied before frontend to raw audio waveform')
+	parser.add_argument('--val-waveform-transform-prob', type = float, default = None, help = 'apply transform with given probability')
+	parser.add_argument('--val-feature-transform', nargs = '*', default = [], help = 'feature aug transforms are applied after frontend')
 	parser.add_argument('--val-feature-transform-prob', type = float, default = None)
 	parser.add_argument('--train-waveform-transform', nargs = '*', default = [])
 	parser.add_argument('--train-waveform-transform-prob', type = float, default = None)
 	parser.add_argument('--train-feature-transform', nargs = '*', default = [])
 	parser.add_argument('--train-feature-transform-prob', type = float, default = None)
-	parser.add_argument('--train-batch-accumulate-iterations', type = int, default = 1)
+	parser.add_argument('--train-batch-accumulate-iterations', type = int, default = 1, help = 'number of gradient accumulation steps')
 	parser.add_argument('--val-iteration-interval', type = int, default = 2500)
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
 	parser.add_argument('--log-weight-distribution', action = 'store_true')
-	parser.add_argument('--verbose', action = 'store_true')
+	parser.add_argument('--verbose', action = 'store_true', help = 'print all transcripts to console, at validation')
 	parser.add_argument('--align', action = 'store_true')
 	parser.add_argument('--decoder', default = 'GreedyDecoder', choices = ['GreedyDecoder', 'BeamSearchDecoder'])
-	parser.add_argument('--decoder-topk', type = int, default = 1)
+	parser.add_argument('--decoder-topk', type = int, default = 1, help = 'compute CER for many decoding hypothesis (oracle)')
 	parser.add_argument('--beam-width', type = int, default = 5000)
-	parser.add_argument('--beam-alpha', type = float, default = 0.3)
-	parser.add_argument('--beam-beta', type = float, default = 1.0)
-	parser.add_argument('--lm')
-	parser.add_argument('--bpe')
-	parser.add_argument('--timeout', type = float, default = 0)
-	parser.add_argument('--max-duration', type = float, default = 10)
+	parser.add_argument('--beam-alpha', type = float, default = 0.3, help = 'weight for language model (prob? log-prob?, TODO: check in ctcdecode)')
+	parser.add_argument('--beam-beta', type = float, default = 1.0, help = 'weight for decoded transcript length (TODO: check in ctcdecode)')
+	parser.add_argument('--lm', help = 'path to KenLM language model for ctcdecode')
+	parser.add_argument('--bpe', help = 'path to SentencePiece subword model')
+	parser.add_argument('--timeout', type = float, default = 0, help = 'crash after specified timeout spent in DataLoader')
+	parser.add_argument('--max-duration', type = float, default = 10, help = 'in seconds; drop in DataLoader all utterances longer than this value')
 	parser.add_argument('--exphtml', default = '../stt_results')
-	parser.add_argument('--finetune', action = 'store_true')
+	parser.add_argument('--finetune', action = 'store_true', help = 'freeze earlier layers')
+	parser.add_argument('--num-input-features', default = 64, help = 'num of mel-scale features produced by logfbank frontend')
+	parser.add_argument('--sample-rate', type = int, default = 8_000, help = 'for frontend')
+	parser.add_argument('--window-size', type = float, default = 0.02, help = 'for frontend, in seconds')
+	parser.add_argument('--window-stride', type = float, default = 0.01, help = 'for frontend, in seconds')
+	parser.add_argument('--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'], help = 'for frontend')
+	parser.add_argument('--dropout', type = float, default = 0.2)
 
 	traineval(parser.parse_args())

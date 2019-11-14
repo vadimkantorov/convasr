@@ -108,7 +108,7 @@ class JasperNet(nn.ModuleList):
 		print('loss_char:', float(loss_char.mean()), 'loss_bpe:', float(loss_bpe.mean()))
 		loss = loss_char + loss_bpe
 
-		return dict(log_probs_char = log_probs_char, log_probs_bpe = log_probs_bpe, output_lengths = output_lengths, loss = loss, loss_char = loss_char, loss_bpe = loss_bpe)
+		return dict(log_probs = [log_probs_char, log_probs_bpe], output_lengths = output_lengths, loss = loss)
 
 class Wav2Letter(JasperNet):
 	def __init__(self, num_input_features, num_classes, dropout = 0.2, nonlinearity = ('hardtanh', 0, 20), kernel_size_small = 11, kernel_size_large = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):

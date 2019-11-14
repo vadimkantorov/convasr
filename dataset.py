@@ -98,8 +98,9 @@ class Labels:
 	word_start = '<'
 	word_end = '>'
 
-	def __init__(self, lang, bpe = None):
+	def __init__(self, lang, bpe = None, name = ''):
 		self.lang = lang
+		self.name = name
 		self.preprocess_text = lang.preprocess_text
 		self.preprocess_word = lang.preprocess_word
 		self.bpe = None
