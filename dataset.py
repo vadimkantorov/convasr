@@ -130,14 +130,12 @@ class Labels:
 		chr2idx = {l: i for i, l in enumerate(str(self))}
 		return normalized, torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
-	def postprocess_transcript(self, text, phonetic_replace_groups = [], replacespace = True):
+	def postprocess_transcript(self, text, phonetic_replace_groups = []):
 		replaceblank = lambda s: s.replace(self.blank * 10, ' ').replace(self.blank, '')
-		replace2 = lambda s: ''.join(c if i == 0 or c != '2' else s[i - 1] for i, c in enumerate(s))
+		replace2 = lambda s: ''.join(c if i == 0 or c != self.repeat else s[i - 1] for i, c in enumerate(s))
 		replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
 		replacestar = lambda s: s.replace('*', '')
-		#replacespace = lambda s: s.replace('>><<', ' ').replace('<>', '').replace('> <', ' ').replace('<', '').replace('>', '')
-		replacespace = (lambda s: s.replace('<', ' ').replace('>', ' ')) if replacespace else (lambda s: s)
-		#replacespace = lambda s: s.replace('<', '').replace('>', '')
+		replacespace = lambda s, sentencepiece_space = '\u2581': s.replace(sentencepiece_space, ' ')
 		replacecap = lambda s: ''.join(c + ' ' if c.isupper() else c for c in s)
 		replacephonetic = lambda s: s.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g.lower()})
 		replacepunkt = lambda s: s.replace(',', '').replace('.', '')
@@ -174,6 +172,7 @@ def collate_fn(batch, pad_to = 128):
 			targets_[k, j, :t.shape[-1]] = t
 			target_length_[k, j] = len(t)
 	dataset_name_, audio_path_, reference_, *_ = zip(*batch)
+	#input_: NCT, targets_: NLt, target_length_: NL, input_lengths_fraction_: N
 	return dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_
 
 def read_wav(audio_path, normalize = True, stereo = False, sample_rate = None, max_duration = None):

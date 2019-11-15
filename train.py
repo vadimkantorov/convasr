@@ -60,7 +60,6 @@ def traineval(args):
 	
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
 	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, finetune = args.finetune)
-
 	decoder = decoders.GreedyDecoder() #if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels_char, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 
 	def apply_model(data_loader, decoder = None):
@@ -71,14 +70,14 @@ def traineval(args):
 				decoded = [l.idx2str(decoder.decode(lp, output_lengths)) for l, lp in zip(labels, log_probs)]
 				yield audio_path_, reference_, loss.cpu(), entropy.cpu(), decoded, None #, [l[..., :o] for l, o in zip(log_probs_char, output_lengths)]
 
-	def evaluate_transcript(labels, transcript, reference, loss, entropy, audio_path):
+	def evaluate_transcript(align, labels, transcript, reference, loss, entropy, audio_path):
 		transcript, reference = min((metrics.cer(t, r), (t, r)) for r in reference.split(';') for t in (transcript if isinstance(transcript, list) else [transcript]))[1]
 		transcript, reference = map(labels.postprocess_transcript, [transcript, reference])
 		cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
-		transcript_aligned, reference_aligned = metrics.align(transcript, reference, prepend_space_to_reference = True) if args.align else (transcript, reference)
 		transcript_phonetic, reference_phonetic = [labels.postprocess_transcript(s, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS) for s in [transcript, reference]]
 		per = metrics.cer(transcript_phonetic, reference_phonetic)
-		return dict(reference_phonetic = reference_phonetic, transcript_phonetic = transcript_phonetic, reference = reference, transcript = transcript, reference_aligned = reference_aligned, transcript_aligned = transcript_aligned, cer = cer, wer = wer, per = per, labels = labels.name, audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss)
+		aligned = dict(zip(['transcript_aligned', 'reference_aligned'], metrics.align(transcript, reference, prepend_space_to_reference = True))) if align else {}
+		return dict(reference_phonetic = reference_phonetic, transcript_phonetic = transcript_phonetic, reference = reference, transcript = transcript, cer = cer, wer = wer, per = per, labels = labels.name, audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss, **aligned)
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None):
 		training = epoch is not None and iteration is not None
@@ -87,13 +86,14 @@ def traineval(args):
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
 			print(f'\n{val_dataset_name}@{iteration}')
 			ref_tra_, logits_ = [], []
+			align = args.align is None or val_dataset_name in args.align
 			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits) in enumerate(apply_model(val_data_loader, decoder)):
 				#logits_.extend([l.cpu() for l in logits] if not training and args.logits else [None] * len(decoded))
-				stats = [[evaluate_transcript(l, t, *zipped[:4]) for l, t in zip(labels, zipped[4:])] for zipped in zip(references, loss.tolist(), entropy.tolist(), audio_paths, *decoded)]
+				stats = [[evaluate_transcript(align, l, t, *zipped[:4]) for l, t in zip(labels, zipped[4:])] for zipped in zip(references, loss.tolist(), entropy.tolist(), audio_paths, *decoded)]
 				for r in itertools.chain(*stats) if args.verbose else []:
 					print(f'{val_dataset_name}@{iteration}:', batch_idx , '/', len(val_data_loader))
-					print('REF: {labels}  "{reference_aligned}"'.format(**r))
-					print('HYP: {labels} "{transcript_aligned}"'.format(**r))
+					print('REF: {labels} "{reference_aligned}"'.format(**r, **(dict(reference_aligned = r['reference']) if not align else {})))
+					print('HYP: {labels} "{transcript_aligned}"'.format(**r, **(dict(transcript_aligned = r['transcript']) if not align else {})))
 					print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
 				ref_tra_ += stats
 
@@ -282,7 +282,7 @@ if __name__ == '__main__':
 	parser.add_argument('--model', default = 'JasperNetBig')
 	parser.add_argument('--seed', type = int, default = 1, help = 'reset to this random seed value in the main thread and data loader threads')
 	parser.add_argument('--cudnn', default = 'benchmark', help = 'enables cudnn benchmark mode')
-	parser.add_argument('--experiment-id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{train_waveform_transform}_{train_feature_transform}_{experiment_name}_{bpe}')
+	parser.add_argument('--experiment-id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{train_waveform_transform}_{train_feature_transform}_{bpe}_{experiment_name}')
 	parser.add_argument('--experiment-name', '--name', default = '')
 	parser.add_argument('--comment', default = '')
 	parser.add_argument('--dry', action = 'store_true')
@@ -301,7 +301,7 @@ if __name__ == '__main__':
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
 	parser.add_argument('--log-weight-distribution', action = 'store_true')
 	parser.add_argument('--verbose', action = 'store_true', help = 'print all transcripts to console, at validation')
-	parser.add_argument('--align', action = 'store_true')
+	parser.add_argument('--align', nargs = '*', default = None)
 	parser.add_argument('--decoder', default = 'GreedyDecoder', choices = ['GreedyDecoder', 'BeamSearchDecoder'])
 	parser.add_argument('--decoder-topk', type = int, default = 1, help = 'compute CER for many decoding hypothesis (oracle)')
 	parser.add_argument('--beam-width', type = int, default = 5000)

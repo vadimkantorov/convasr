@@ -20,8 +20,8 @@ class Decoder(nn.Sequential):
 		if self.type is None:
 			return F.log_softmax(self[0](x), dim = 1)
 		elif self.type == 'bpe':
-			y1 = self[0](x if not self.finetune else x.detach())
-			y2 = self[1](F.relu(y1 if not self.finetune else y1.detach()))
+			y1 = self[0](x if not self.finetune else x.detach()).detach()
+			y2 = self[1](y1 if not self.finetune else y1.detach())
 			return F.log_softmax(y1, dim = 1), F.log_softmax(y2, dim = 1)
 
 class ConvSamePadding(nn.Sequential):
@@ -49,47 +49,58 @@ class ConvBN(nn.Module):
 		self.temporal_mask = temporal_mask
 
 	def forward(self, x, lengths_fraction = None, residual = []):
-		y = x
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
-			y = bn(conv(y), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)] if i == len(self.conv) - 1 else [])
-			y = y * temporal_mask(y, lengths_fraction = lengths_fraction) if (self.temporal_mask and lengths_fraction is not None) else y
-		return y
+			x = bn(conv(x), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)] if i == len(self.conv) - 1 else [])
+			x = x * temporal_mask(x, lengths_fraction = lengths_fraction) if (self.temporal_mask and lengths_fraction is not None) else x
+		return x
 
+# Jasper 5x3: 5 blocks, each has 1 sub-blocks, each sub-block has 3 ConvBnRelu
+# Jasper 10x5: 5 blocks, each has 2 sub-blocks, each sub-block has 5 ConvBnRelu
+# residual = 'dense' | True | False
 class JasperNet(nn.ModuleList):
 	def __init__(self, num_input_features, num_classes, repeat = 3, num_subblocks = 1, dilation = 1, residual = 'dense',
-			kernel_sizes = [11, 13, 17, 21, 25], kernel_size_small = 11, kernel_size_large = 29, 
+			kernel_sizes = [11, 13, 17, 21, 25], kernel_size_prologue = 11, kernel_size_epilogue = 29, 
 			base_width = 128, out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
 			separable = False, groups = 1, 
-			dropout = None, dropout_small = 0.2, dropout_large = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
+			dropout = None, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
 			temporal_mask = True, nonlinearity = 'relu', inplace = False,
 			stride1 = 2, stride2 = 1, finetune = False
 		):
-		dropout_small = dropout_small if dropout != 0 else 0
-		dropout_large = dropout_large if dropout != 0 else 0
+		dropout_prologue = dropout_prologue if dropout != 0 else 0
+		dropout_epilogue = dropout_epilogue if dropout != 0 else 0
 		dropouts = dropouts if dropout != 0 else [0] * len(dropouts)
 
-		width_factor_ = 2
-		prologue = [ConvBN(kernel_size = kernel_size_small, num_channels = (num_input_features, width_factor_ * base_width), dropout = dropout_small, stride = stride1, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace)]
+		in_width_factor = 2
+		prologue = [ConvBN(kernel_size = kernel_size_prologue, num_channels = (num_input_features, in_width_factor * base_width), dropout = dropout_prologue, stride = stride1, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace)]
 		
 		backbone = []
 		num_channels_residual = []
-		for kernel_size, dropout, width_factor in zip(kernel_sizes, dropouts, out_width_factors):
+		for kernel_size, dropout, out_width_factor in zip(kernel_sizes, dropouts, out_width_factors):
 			for s in range(num_subblocks):
-				num_channels = (width_factor_ * base_width, (width_factor * base_width) if s == num_subblocks - 1 else (width_factor_ * base_width))
-				num_channels_residual.append(width_factor_ * base_width)
+				num_channels = (in_width_factor * base_width, (out_width_factor * base_width) if s == num_subblocks - 1 else (in_width_factor * base_width))
+				#num_channels = (in_width_factor * base_wdith, out_width_factor * base_width) # seems they do this in https://github.com/NVIDIA/DeepLearningExamples/blob/21120850478d875e9f2286d13143f33f35cd0c74/PyTorch/SpeechRecognition/Jasper/configs/jasper10x5dr_nomask.toml
+				num_channels_residual.append(in_width_factor * base_width)
 				# use None in num_channels_residual
 				backbone.append(ConvBN(kernel_size = kernel_size, num_channels = num_channels, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace,))
-			width_factor_ = width_factor
+			in_width_factor = out_width_factor
 
 		epilogue = [
-			ConvBN(kernel_size = kernel_size_large, num_channels = (width_factor_ * base_width, out_width_factors_large[0] * base_width), dropout = dropout_large, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
-			ConvBN(kernel_size = 1, num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), dropout = dropout_large, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
+			ConvBN(kernel_size = kernel_size_epilogue, num_channels = (in_width_factor * base_width, out_width_factors_large[0] * base_width), dropout = dropout_epilogue, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
+			ConvBN(kernel_size = 1, num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
 		]
 		decoder = [
 			Decoder(out_width_factors_large[1] * base_width, num_classes, type = 'bpe', finetune = finetune)
 		]
 		super().__init__(prologue + backbone + epilogue + decoder)
 		self.residual = residual
+		
+		for m in [m for m in nn.ModuleList(list(self)[:-1] if finetune else []).modules() if isinstance(m, nn.modules.batchnorm._BatchNorm)]:
+			m.eval()
+			m.train = lambda _: None
+
+		for m in (list(self)[:-1] if finetune else []):
+			for p in m.parameters():
+				p.requires_grad = False
 
 	def forward(self, x, xlen, y = None, ylen = None):
 		residual = []
@@ -108,22 +119,22 @@ class JasperNet(nn.ModuleList):
 		#print('loss_char:', float(loss_char.mean()), 'loss_bpe:', float(loss_bpe.mean()))
 		loss = loss_char + loss_bpe
 
-		return dict(log_probs = [log_probs_char, log_probs_bpe], output_lengths = output_lengths, loss = loss)
+		return dict(log_probs = [log_probs_char, log_probs_bpe], output_lengths = output_lengths, loss = loss, loss_ = dict(char = loss_char, bpe = loss_bpe))
 
 class Wav2Letter(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, nonlinearity = ('hardtanh', 0, 20), kernel_size_small = 11, kernel_size_large = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):
+	def __init__(self, num_input_features, num_classes, dropout = 0.2, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):
 		super().__init__(num_input_features, num_classes, base_width = base_width, 
-			dropout = dropout, dropout_small = dropout, dropout_large = dropout, dropouts = [dropout] * num_blocks, 
-			kernel_size_small = kernel_size_small, kernel_size_large = kernel_size_large, kernel_sizes = [kernel_size_small] * num_blocks,
+			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks, 
+			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
 			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8], 
 			residual = False, diletion = dilation, nonlinearity = nonlinearity
 		)
 		
 class Wav2LetterFlat(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, width_factor_large = 16, width_factor = 6, kernel_size_large = 29, kernel_size_small = 13, num_blocks = 6):
+	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, width_factor_large = 16, width_factor = 6, kernel_size_epilogue = 29, kernel_size_prologue = 13, num_blocks = 6):
 		super().__init__(num_input_features, num_classes, base_width = base_width, 
-			dropout = dropout, dropout_small = dropout, dropout_large = dropout, dropouts = [dropout] * num_blocks, 
-			kernel_size_small = kernel_size_small, kernel_size_large = kernel_size_large, kernel_sizes = [kernel_size_small] * num_blocks,
+			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks, 
+			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
 			out_width_factors = [width_factor] * num_blocks, out_width_factors_large = [width_factor_large, width_factor_large], 
 			residual = False
 		)
@@ -167,6 +178,7 @@ class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
 			y = y + sum(residual)
 			if self.nonlinearity == 'relu':
 				y = relu_dropout(y, p = self.dropout, inplace = True, training = self.training)
+				#y = F.dropout(F.relu(y, inplace = True), p = self.dropout, training = self.training)
 			elif self.nonlinearity and self.nonlinearity[0] in ['leaky_relu', 'hardtanh']:
 				y = F.dropout(getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = True), p = self.dropout, training = self.training)
 		return y
