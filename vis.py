@@ -139,7 +139,7 @@ def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer3
 
 		res[iteration].append((val_dataset_name, float(val.mean()), checkpoint))
 	val_dataset_names = sorted(set(val_dataset_name for r in res.values() for val_dataset_name, cer, checkpoint in r))
-	print('iteration\t' + '\t'.join(val_dataset_names) + '\tcheckpoint')
+	print('iteration\t' + '\t'.join(val_dataset_names))
 	for iteration, r in res.items():
 		cers = {val_dataset_name : f'{cer:.04f}' for val_dataset_name, cer, checkpoint in r}
 		print(f'{iteration}\t' + '\t'.join(cers.get(val_dataset_name, '') for val_dataset_name in val_dataset_names) + f'\t{r[-1][-1]}')

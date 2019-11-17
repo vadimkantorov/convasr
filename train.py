@@ -59,7 +59,7 @@ def traineval(args):
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
 	
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
-	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, finetune = args.finetune)
+	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout)
 	decoder = decoders.GreedyDecoder() #if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels_char, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 
 	def apply_model(data_loader, decoder = None):
@@ -97,7 +97,7 @@ def traineval(args):
 					print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
 				ref_tra_ += stats
 
-			transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)) if training else args.transcripts.format(val_dataset_name = val_dataset_name)
+			transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)) if training else args.val_transcripts_format.format(val_dataset_name = val_dataset_name)
 			for r_ in zip(*ref_tra_):
 				cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([r[k] for r in r_ if not math.isinf(r[k]) and not math.isnan(r[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
 				labels_name = r_[0]['labels']
@@ -132,6 +132,8 @@ def traineval(args):
 
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'], strict = False)
+	
+	model.freeze(backbone = True, decoder0 = True)
 	model.to(args.device)
 
 	if not args.train_data_path:
@@ -274,8 +276,8 @@ if __name__ == '__main__':
 	parser.add_argument('--checkpoint-skip', action = 'store_true')
 	parser.add_argument('--experiments-dir', default = 'data/experiments')
 	parser.add_argument('--experiment-dir', default = '{experiments_dir}/{experiment_id}')
-	parser.add_argument('--transcripts', default = 'data/transcripts_{val_dataset_name}.json', help = 'save transcripts at validation')
 	parser.add_argument('--checkpoint-format', default = 'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')
+	parser.add_argument('--val-transcripts-format', default = 'data/transcripts_{val_dataset_name}.json', help = 'save transcripts at validation')
 	parser.add_argument('--train-transcripts-format', default = 'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json')
 	parser.add_argument('--logits', nargs = '?', const = 'data/logits_{val_dataset_name}.pt', help = 'save logits at validation')
 	parser.add_argument('--args', default = 'args.json', help = 'save experiment arguments to the experiment dir')

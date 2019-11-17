@@ -8,20 +8,26 @@ import torch.nn.functional as F
 import librosa
 
 class Decoder(nn.Sequential):
-	def __init__(self, input_size, num_classes, type = None, finetune = False):
+	def __init__(self, input_size, num_classes, type = None):
 		if type is None:
 			super().__init__(nn.Conv1d(input_size, num_classes[0], kernel_size = 1))
 		elif type == 'bpe':
-			super().__init__(nn.Conv1d(input_size, num_classes[0], kernel_size = 1), nn.Conv1d(num_classes[0], num_classes[1], kernel_size = 15, padding = 7))
+			super().__init__(
+				nn.Conv1d(input_size, num_classes[0], kernel_size = 1), 
+				nn.Sequential(
+					ConvBN(num_channels = (input_size, input_size), kernel_size = 15), 
+					#nn.Conv1d(input_size, num_classes[1], kernel_size = 15, padding = 7)
+					ConvBN(num_channels = (input_size, num_classes[1]), kernel_size = 15)
+				)
+			)
 		self.type = type
-		self.finetune = finetune
 
 	def forward(self, x):
 		if self.type is None:
 			return F.log_softmax(self[0](x), dim = 1)
 		elif self.type == 'bpe':
-			y1 = self[0](x if not self.finetune else x.detach()).detach()
-			y2 = self[1](y1 if not self.finetune else y1.detach())
+			y1 = self[0](x)
+			y2 = self[1](x)
 			return F.log_softmax(y1, dim = 1), F.log_softmax(y2, dim = 1)
 
 class ConvSamePadding(nn.Sequential):
@@ -49,6 +55,7 @@ class ConvBN(nn.Module):
 		self.temporal_mask = temporal_mask
 
 	def forward(self, x, lengths_fraction = None, residual = []):
+		residual = residual or [x]
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
 			x = bn(conv(x), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)] if i == len(self.conv) - 1 else [])
 			x = x * temporal_mask(x, lengths_fraction = lengths_fraction) if (self.temporal_mask and lengths_fraction is not None) else x
@@ -64,7 +71,7 @@ class JasperNet(nn.ModuleList):
 			separable = False, groups = 1, 
 			dropout = None, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
 			temporal_mask = True, nonlinearity = 'relu', inplace = False,
-			stride1 = 2, stride2 = 1, finetune = False
+			stride1 = 2, stride2 = 1
 		):
 		dropout_prologue = dropout_prologue if dropout != 0 else 0
 		dropout_epilogue = dropout_epilogue if dropout != 0 else 0
@@ -89,18 +96,10 @@ class JasperNet(nn.ModuleList):
 			ConvBN(kernel_size = 1, num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
 		]
 		decoder = [
-			Decoder(out_width_factors_large[1] * base_width, num_classes, type = 'bpe', finetune = finetune)
+			Decoder(out_width_factors_large[1] * base_width, num_classes, type = 'bpe')
 		]
 		super().__init__(prologue + backbone + epilogue + decoder)
 		self.residual = residual
-		
-		for m in [m for m in nn.ModuleList(list(self)[:-1] if finetune else []).modules() if isinstance(m, nn.modules.batchnorm._BatchNorm)]:
-			m.eval()
-			m.train = lambda _: None
-
-		for m in (list(self)[:-1] if finetune else []):
-			for p in m.parameters():
-				p.requires_grad = False
 
 	def forward(self, x, xlen, y = None, ylen = None):
 		residual = []
@@ -120,6 +119,15 @@ class JasperNet(nn.ModuleList):
 		loss = loss_char + loss_bpe
 
 		return dict(log_probs = [log_probs_char, log_probs_bpe], output_lengths = output_lengths, loss = loss, loss_ = dict(char = loss_char, bpe = loss_bpe))
+
+	def freeze(self, backbone = True, decoder0 = True):
+		for m in (list(self)[:-1] if backbone else []) + (list(self[-1])[:1] if decoder0 else []):
+			for module in filter(lambda module: isinstance(module, nn.modules.batchnorm._BatchNorm), m.modules()):
+				module.eval()
+				module.train = lambda training: None
+
+			for p in m.parameters():
+				p.requires_grad = False
 
 class Wav2Letter(JasperNet):
 	def __init__(self, num_input_features, num_classes, dropout = 0.2, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):
