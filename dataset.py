@@ -49,8 +49,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		if self.feature_transform is not None:
 			features, sample_rate = self.feature_transform(features, self.sample_rate, dataset_name = dataset_name)
 
-		reference_normalized = self.labels[0].parse(reference)[0]
-		targets = [labels.parse(reference)[1] for labels in self.labels]
+		reference_normalized = self.labels[0].encode(reference)[0]
+		targets = [labels.encode(reference)[1] for labels in self.labels]
 		return [dataset_name, audio_path, reference_normalized, features] + targets
 
 	def __len__(self):
@@ -124,11 +124,15 @@ class Labels:
 		return ';'.join(' '.join(self.find_words(part)).lower().strip() for part in text.split(';')) or '*' 
 		#return ' '.join(f'{w[:-1]}{w[-1].upper()}' for w in self.find_words(text.lower())) or '*' 
 
-	def parse(self, text):
+	def encode(self, text):
 		normalized = self.normalize_text(text)
 		chars = normalized.split(';')[0]
 		chr2idx = {l: i for i, l in enumerate(str(self))}
 		return normalized, torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
+
+	def decode(self, idx, blank = None, space = None, replace2 = True):
+		i2s = lambda i: ''.join(self[int(idx)] if not replace2 or k == 0 or self[int(idx)] != self[int(i[k - 1])] else '' for k, idx in enumerate(i)).replace(self.blank, blank or self.blank).replace(self.space, space or self.space)
+		return list(map(i2s, idx))
 
 	def postprocess_transcript(self, text, phonetic_replace_groups = []):
 		replaceblank = lambda s: s.replace(self.blank * 10, ' ').replace(self.blank, '')
@@ -141,10 +145,6 @@ class Labels:
 		replacepunkt = lambda s: s.replace(',', '').replace('.', '')
 
 		return functools.reduce(lambda text, func: func(text), [replacepunkt, replacespace, replacecap, replaceblank, replace2, replace22, replacestar, replacephonetic, str.strip], text)
-
-	def idx2str(self, idx, blank = None, space = None):
-		i2s = lambda i: ''.join(self[idx] for idx in torch.as_tensor(i).tolist()).replace(self.blank, blank or self.blank).replace(self.space, space or self.space)
-		return list(map(i2s, idx))
 
 	def __getitem__(self, idx):
 		return {self.blank_idx : self.blank, self.repeat_idx : self.repeat, self.space_idx : self.space}.get(idx) or (self.alphabet[idx] if self.bpe is None else self.bpe.IdToPiece(idx))

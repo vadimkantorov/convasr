@@ -15,8 +15,8 @@ class Decoder(nn.Sequential):
 			super().__init__(
 				nn.Conv1d(input_size, num_classes[0], kernel_size = 1), 
 				nn.Sequential(
+					#nn.Conv1d(input_size, num_classes[1], kernel_size = 1)#, padding = 7)
 					ConvBN(num_channels = (input_size, input_size), kernel_size = 15), 
-					#nn.Conv1d(input_size, num_classes[1], kernel_size = 15, padding = 7)
 					ConvBN(num_channels = (input_size, num_classes[1]), kernel_size = 15)
 				)
 			)
@@ -46,8 +46,9 @@ class ConvSamePadding(nn.Sequential):
 			)
 
 class ConvBN(nn.Module):
-	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual = [], repeat = 1, dilation = 1, separable = False, temporal_mask = True, inplace = False, nonlinearity = 'relu'):
+	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual = [], repeat = 1, dilation = 1, separable = False, temporal_mask = True, inplace = False, nonlinearity = 'relu', residual = False):
 		super().__init__()
+		num_channels_residual = num_channels_residual or ([None] if residual else [])
 		self.conv = nn.ModuleList(ConvSamePadding(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, separable = separable, bias = False, groups = groups) for i in range(repeat))
 		self.bn = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, nonlinearity = nonlinearity, inplace = inplace, dropout = dropout) for i in range(repeat))
 		self.conv_residual = nn.ModuleList(nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) if in_channels is not None else nn.Identity() for in_channels in num_channels_residual)
@@ -110,15 +111,15 @@ class JasperNet(nn.ModuleList):
 			if self.residual:
 				residual.append(x)
 
-		output_lengths = compute_output_lengths(x, xlen)
 		log_probs_char, log_probs_bpe = self[-1](x)
 
-		loss_char = F.ctc_loss(log_probs_char.permute(2, 0, 1), y[:, 0], output_lengths, ylen[:, 0], blank = log_probs_char.shape[1] - 1, reduction = 'none') / ylen[:, 0]
-		loss_bpe =  F.ctc_loss(log_probs_bpe.permute(2, 0, 1) , y[:, 1], output_lengths, ylen[:, 1], blank = log_probs_bpe.shape[ 1] - 1, reduction = 'none') / ylen[:, 1]
+		output_lengths_char, output_lengths_bpe = compute_output_lengths(log_probs_char, xlen), compute_output_lengths(log_probs_bpe, xlen)
+		loss_char = F.ctc_loss(log_probs_char.permute(2, 0, 1), y[:, 0], output_lengths_char, ylen[:, 0], blank = log_probs_char.shape[1] - 1, reduction = 'none') / ylen[:, 0]
+		loss_bpe =  F.ctc_loss(log_probs_bpe.permute(2, 0, 1) , y[:, 1], output_lengths_bpe, ylen[:, 1], blank = log_probs_bpe.shape[ 1] - 1, reduction = 'none') / ylen[:, 1]
 		#print('loss_char:', float(loss_char.mean()), 'loss_bpe:', float(loss_bpe.mean()))
 		loss = loss_char + loss_bpe
 
-		return dict(log_probs = [log_probs_char, log_probs_bpe], output_lengths = output_lengths, loss = loss, loss_ = dict(char = loss_char, bpe = loss_bpe))
+		return dict(log_probs = [log_probs_char, log_probs_bpe], output_lengths = output_lengths_char, loss = loss, loss_ = dict(char = loss_char, bpe = loss_bpe))
 
 	def freeze(self, backbone = True, decoder0 = True):
 		for m in (list(self)[:-1] if backbone else []) + (list(self[-1])[:1] if decoder0 else []):

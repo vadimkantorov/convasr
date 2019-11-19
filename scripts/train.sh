@@ -11,9 +11,11 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python3 train.py $@ \
   --val-iteration-interval 1000 \
   --epochs 5 \
   --dropout 0 \
-  --bpe data/tts_dataset_tri_1000.model \
+  --bpe data/tts_dataset_bpe_5000.model \
   --checkpoint data/checkpoint_epoch02_iter0065000.pt \
   --finetune --checkpoint-skip
+
+#  --bpe data/tts_dataset_tri_1000.model \
 
 #  --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs80___no_temporal_mask/checkpoint_epoch01_iter0030000.pt
 #  --weight-decay 0 \

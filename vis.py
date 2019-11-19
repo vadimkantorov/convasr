@@ -79,8 +79,8 @@ def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer3
 	if experiment_id.endswith('.json'):
 		reftra = json.load(open(experiment_id))
 		for reftra_ in reftra:
-			hyp = labels.postprocess_transcript(labels.normalize_text(reftra_['transcript']))
-			ref = labels.postprocess_transcript(labels.normalize_text(reftra_['reference']))
+			hyp = labels.postprocess_transcript(labels.normalize_text(reftra_.get('hyp', ref_tra_.get('transcript'))     ))
+			ref = labels.postprocess_transcript(labels.normalize_text(reftra_.get('ref', ref_tra_.get('reference'))      ))
 			reftra_['cer'] = metrics.cer(hyp, ref)
 			reftra_['wer'] = metrics.wer(hyp, ref)
 
