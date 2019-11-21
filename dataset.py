@@ -139,7 +139,7 @@ class Labels:
 		replace2 = lambda s: ''.join(c if i == 0 or c != self.repeat else s[i - 1] for i, c in enumerate(s))
 		replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
 		replacestar = lambda s: s.replace('*', '')
-		replacespace = lambda s, sentencepiece_space = '\u2581': s.replace(sentencepiece_space, ' ')
+		replacespace = lambda s, sentencepiece_space = '\u2581', sentencepiece_unk = '<unk>': s.replace(sentencepiece_space, ' ')
 		replacecap = lambda s: ''.join(c + ' ' if c.isupper() else c for c in s)
 		replacephonetic = lambda s: s.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g.lower()})
 		replacepunkt = lambda s: s.replace(',', '').replace('.', '')
@@ -160,11 +160,11 @@ class Labels:
 
 def collate_fn(batch, pad_to = 128):
 	dataset_name, audio_path, reference, sample_inputs, *sample_targets = batch[0]
-	inputs_max_len, *targets_max_len = [(1 + max((b[k].shape[-1] if torch.is_tensor(b[k]) else len(b[k])) for b in batch) // pad_to) * pad_to for k in range(3, 4 + len(sample_targets))]
+	inputs_max_len, *targets_max_len = [(max(b[k].shape[-1] for b in batch) // pad_to + 1) * pad_to for k in range(3, len(batch[0]))]
 	targets_max_len = max(targets_max_len)
-	input_ = sample_inputs.new_zeros(len(batch), *(sample_inputs.shape[:-1] + (inputs_max_len,)))
-	targets_ = sample_targets[0].new_zeros(len(batch), len(sample_targets), targets_max_len)
-	input_lengths_fraction_, target_length_ = torch.FloatTensor(len(batch)), torch.IntTensor(len(batch), len(sample_targets))	
+	input_ = torch.zeros(len(batch), len(sample_inputs), inputs_max_len, dtype = torch.float32)
+	targets_ = torch.zeros(len(batch), len(sample_targets), targets_max_len, dtype = torch.int32)
+	input_lengths_fraction_, target_length_ = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_targets), dtype = torch.int32)
 	for k, (dataset_name, audio_path, reference, input, *targets) in enumerate(batch):
 		input_lengths_fraction_[k] = input.shape[-1] / input_.shape[-1]
 		input_[k, ..., :input.shape[-1]] = input

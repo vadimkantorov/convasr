@@ -1,4 +1,5 @@
 CUDA_VISIBLE_DEVICES=0,1,2,3 python3 train.py $@ \
+  --githttp https://github.com/vadimkantorov/convasr/commit/%h \
   --verbose --lang ru \
   --model JasperNetBigInplace \
   --train-batch-size 80 --val-batch-size 64 \
@@ -11,7 +12,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python3 train.py $@ \
   --val-iteration-interval 1000 \
   --epochs 5 \
   --dropout 0 \
-  --bpe data/tts_dataset_bpe_5000.model \
+  --bpe data/tts_dataset_bpe_5000_word.model \
   --checkpoint data/checkpoint_epoch02_iter0065000.pt \
   --finetune --checkpoint-skip
 

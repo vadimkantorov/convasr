@@ -36,7 +36,7 @@ def tra(transcripts):
 	vis.write(f'<html><meta charset="utf-8"><body><h1>{args.transcripts}</h1><table style="border-collapse:collapse"><thead><tr><th>cer</th><th>filename</th><th>audio</th><th><div>reference</div><div>transcript</div></th></tr></thead><tbody>')
 
 	for i, (reference, transcript, filename, cer) in enumerate(list(map(j.get, ['reference', 'transcript', 'filename', 'cer'])) for j in ref_tra):
-		encoded = base64.b64encode(open(filename, 'rb').read()).decode('utf-8').replace('\n', '')
+		encoded = base64.b64encode(open(filename, 'rb').read()).decode()
 		vis.write(f'<tr><td style="border-right: 2px black solexperiment_id">{cer:.02%}</td> <td style="font-size:xx-small">{os.path.basename(filename)}</td> <td><audio controls src="data:audio/wav;base64,{encoded}"/></td><td><div><b>{reference}</b></div><div>{transcript}</div></td></tr>\n')
 
 	vis.write('</tbody></table></body></html>')
@@ -188,11 +188,11 @@ def vis(logits, MAX_ENTROPY = 1.0):
 		plt.savefig(buf, format = 'jpg', dpi = 600)
 		plt.close()
 		
-		html.write(f'<h4>{filename} | cer: {cer:.02f}</h4>')
-		html.write(f'<pre>reference: {reference_aligned}</pre>')
-		html.write(f'<pre>transcript: {transcript_aligned}</pre>')
-		html.write('<img style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(encoded = base64.b64encode(buf.getvalue()).decode('utf-8').replace('\n', '')))	
-		html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio><hr/>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode('utf-8').replace('\n', '')))
+		html.write(f'<h4>{audio_name} | cer: {cer:.02f}</h4>')
+		html.write(f'<pre>ref: {ref_aligned}</pre>')
+		html.write(f'<pre>hyp: {hyp_aligned}</pre>')
+		html.write('<img style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(encoded = base64.b64encode(buf.getvalue()).decode()))	
+		html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio><hr/>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode()))
 	html.write('''<script>
 		Array.from(document.querySelectorAll('img')).map(img => {
 			img.onclick = (evt) => {
@@ -201,7 +201,6 @@ def vis(logits, MAX_ENTROPY = 1.0):
 				const x = (evt.clientX - dim.left) / dim.width;
 				const audio = img.nextSibling;
 				audio.currentTime = x * audio.duration;
-				console.log(x, x * audio.duration);
 				audio.play();
 			};
 		});
@@ -210,7 +209,7 @@ def vis(logits, MAX_ENTROPY = 1.0):
 	print('\n', logits_path)
 
 def checksegments(audio_path):
-	encode_audio = lambda audio_path: base64.b64encode(open(audio_path, 'rb').read()).decode('utf-8').replace('\n', '')
+	encode_audio = lambda audio_path: base64.b64encode(open(audio_path, 'rb').read()).decode()
 	segments = list(sorted([j['begin'], j['end'], j['channel'], j['segment_path']] for j in json.load(open(audio_path + '.json'))))
 	html = open(audio_path + '.html', 'w')
 	html.write('<html><head><meta charset="UTF-8"><style>.channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .on{background-color:green} .off{background-color:red}</style></head><body>')
@@ -264,8 +263,14 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S'):
 	os.makedirs(html_dir, exist_ok = True)
 	html_path = os.path.join(html_dir, 'index.html')
 
-	jsons = [json.load(open(os.path.join(json_dir, json_file))) for json_file in os.listdir(json_dir)]
-	
+	def json_load(path):
+		try:
+			return json.load(open(path))
+		except:
+			return {}
+
+	jsons = list(filter(None, (json_load(os.path.join(json_dir, json_file)) for json_file in os.listdir(json_dir))))
+
 	by_experiment_key = lambda j: j['experiment_id']
 	by_time_key = lambda j: j['time']
 	by_iteration = lambda j: (j['iteration'], j['time'])
@@ -296,6 +301,9 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S'):
 			generated_time = time.strftime(strftime, time.localtime(jsons[-1]['time']))
 			html.write(f'''<tr><td title="{generated_time}" onclick="toggle('{experiment_id}.hidden')"><strong>{experiment_id}</strong></td>''' + ''.join(f'<td class="col{hash(c)}"><strong>{c}</strong></td>' for c in columns) + '</tr>')
 			for i, j in enumerate(jsons):
+				j['git_http'] = j.get('git_http', '')
+				j['git_revision'] = j.get('git_revision', '')
+				j['git_comment'] = j.get('git_comment', '')
 				generated_time = time.strftime(strftime, time.localtime(j['time']))
 				hidden = 'hidden' if i not in idx else ''
 				meta_key = f'meta{hash(experiment_id + str(j["iteration"]))}'
@@ -304,6 +312,7 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S'):
 				html.write(f'''<td onclick="toggle('{meta_key}')" title="{generated_time}" style="border-right: 1px solid black">{j["iteration"]}</td>''')
 				html.write(''.join(f'<td class="col{hash(c)}">' + ''.join(f'<span style="margin-right:3px" {"hidden" if f != field else ""} class="field{hash(f)}">{fmt(j["columns"].get(c, {}).get(f, ""))}</span>' for f in fields) + '</td>' for c in columns))
 				html.write('</tr>\n')
+				html.write('<tr hidden class="{meta_key}" style="background-color:lightgray"><td><a href="{git_http}">@{git_revision}</a></td><td colspan="100">{git_comment}</td></tr>\n'.format(meta_key = meta_key, **j))
 				html.write(f'<tr hidden class="{meta_key}" style="background-color:lightgray"><td colspan="100"><pre>{meta}</pre></td></tr>\n' if meta else '')
 
 			html.write('<tr><td>&nbsp;</td></tr>')
@@ -318,8 +327,16 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S'):
 	except:
 		print(sys.exc_info())
 
-def expjson(root_dir, experiment_id, epoch = None, iteration = None, columns = {}, meta = {}, name = None):
-	obj = dict(experiment_id = experiment_id, iteration = f'epoch{epoch:02d}_iter{iteration:07d}' if epoch is not None and iteration is not None else 'test', columns = columns, time = int(time.time()), meta = meta)
+def expjson(root_dir, experiment_id, epoch = None, iteration = None, columns = {}, meta = {}, name = None, git_revision = True, git_http = None):
+	if git_revision is True:
+		try:
+			git_revision, git_comment = map(lambda b: b.decode('utf-8'), subprocess.check_output(['git', 'log', '--format=%h%x00%s', '--no-decorate', '-1']).split(b'\x00'))
+		except:
+			git_revision, git_comment = 'error', 'error'
+	else:
+		git_revision, git_comment = ''
+
+	obj = dict(experiment_id = experiment_id, iteration = f'epoch{epoch:02d}_iter{iteration:07d}' if epoch is not None and iteration is not None else 'test', columns = columns, time = int(time.time()), meta = meta, git_revision = git_revision, git_comment = git_comment, git_http = git_http.replace('%h', git_revision) if git_http else None)
 	
 	json_dir = os.path.join(root_dir, 'json')
 	os.makedirs(json_dir, exist_ok = True)

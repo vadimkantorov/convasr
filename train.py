@@ -60,15 +60,16 @@ def traineval(args):
 	
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
 	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout)
-	decoder = decoders.GreedyDecoder() #if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels_char, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
+	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk), decoders.GreedyDecoder()]
 
-	def apply_model(data_loader, decoder = None):
+	def apply_model(data_loader):
 		for dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ in data_loader:
 			with torch.no_grad():
 				log_probs, output_lengths, loss = map(model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device)).get, ['log_probs', 'output_lengths', 'loss'])
-				entropy = models.entropy(log_probs[0], output_lengths, dim = 1)
-				decoded = [l.decode(decoder.decode(lp, output_lengths)) for l, lp in zip(labels, log_probs)]
-				yield audio_path_, reference_, loss.cpu(), entropy.cpu(), decoded, None #, [l[..., :o] for l, o in zip(log_probs_char, output_lengths)]
+			entropy_char, entropy_bpe = list(map(models.entropy, log_probs, output_lengths))
+			decoded = [l.decode(d.decode(lp, o)) for l, d, lp, o in zip(labels, decoder, log_probs, output_lengths)]
+			log_probs = list(map(models.unpad, log_probs, output_lengths))
+			yield audio_path_, reference_, loss.cpu(), entropy_char.cpu(), decoded, log_probs
 
 	def evaluate_transcript(align, labels, transcript, reference, loss, entropy, audio_path):
 		transcript, reference = min((metrics.cer(t, r), (t, r)) for r in reference.split(';') for t in (transcript if isinstance(transcript, list) else [transcript]))[1]
@@ -87,8 +88,8 @@ def traineval(args):
 			print(f'\n{val_dataset_name}@{iteration}')
 			ref_tra_, logits_ = [], []
 			align = args.align is None or val_dataset_name in args.align
-			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits) in enumerate(apply_model(val_data_loader, decoder)):
-				#logits_.extend([l.cpu() for l in logits] if not training and args.logits else [None] * len(decoded))
+			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits) in enumerate(apply_model(val_data_loader)):
+				logits_.append(logits if not training and args.logits else None)
 				stats = [[evaluate_transcript(align, l, t, *zipped[:4]) for l, t in zip(labels, zipped[4:])] for zipped in zip(references, loss.tolist(), entropy.tolist(), audio_paths, *decoded)]
 				for r in itertools.chain(*stats) if args.verbose else []:
 					print(f'{val_dataset_name}@{iteration}:', batch_idx , '/', len(val_data_loader), '|', args.experiment_id)
@@ -97,7 +98,7 @@ def traineval(args):
 					print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
 				ref_tra_.extend(stats)
 
-			transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)) if training else args.val_transcripts_format.format(val_dataset_name = val_dataset_name)
+			transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)) if training else args.val_transcripts_format.format(val_dataset_name = val_dataset_name, decoder = args.decoder)
 			for r_ in zip(*ref_tra_):
 				cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([r[k] for r in r_ if not math.isinf(r[k]) and not math.isnan(r[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
 				labels_name = r_[0]['labels']
@@ -117,7 +118,7 @@ def traineval(args):
 			#	torch.save(list(sorted([(r.update(dict(log_probs = l)) or r) for r, l in zip(ref_tra_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
 		
 		if args.exphtml:
-			vis.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns)
+			vis.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, git_http = args.githttp)
 			vis.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
@@ -277,7 +278,7 @@ if __name__ == '__main__':
 	parser.add_argument('--experiments-dir', default = 'data/experiments')
 	parser.add_argument('--experiment-dir', default = '{experiments_dir}/{experiment_id}')
 	parser.add_argument('--checkpoint-format', default = 'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')
-	parser.add_argument('--val-transcripts-format', default = 'data/transcripts_{val_dataset_name}.json', help = 'save transcripts at validation')
+	parser.add_argument('--val-transcripts-format', default = 'data/transcripts_{val_dataset_name}_{decoder}.json', help = 'save transcripts at validation')
 	parser.add_argument('--train-transcripts-format', default = 'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json')
 	parser.add_argument('--logits', nargs = '?', const = 'data/logits_{val_dataset_name}.pt', help = 'save logits at validation')
 	parser.add_argument('--args', default = 'args.json', help = 'save experiment arguments to the experiment dir')
@@ -321,5 +322,6 @@ if __name__ == '__main__':
 	parser.add_argument('--window-stride', type = float, default = 0.01, help = 'for frontend, in seconds')
 	parser.add_argument('--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'], help = 'for frontend')
 	parser.add_argument('--dropout', type = float, default = 0.2)
+	parser.add_argument('--githttp')
 
 	traineval(parser.parse_args())

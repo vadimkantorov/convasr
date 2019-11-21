@@ -62,6 +62,20 @@ class ConvBN(nn.Module):
 			x = x * temporal_mask(x, lengths_fraction = lengths_fraction) if (self.temporal_mask and lengths_fraction is not None) else x
 		return x
 
+	def fuse_conv_bn_eval(self):
+		for i in range(len(self.conv_residual)):
+			# TODO: check for existing Identity
+			conv, bn = self.conv_residual[i], self.bn_residual[i]
+			self.conv_residual[i] = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
+			self.bn_residual[i] = nn.Identity()
+			self.conv_residual[i].original, self.bn_residual[i].original = conv, bn
+
+		for i in range(len(self.conv)):
+			conv, bn = self.conv[i][-1], self.bn[i]
+			self.conv[i][-1] = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
+			self.bn[i] = nn.Identity()
+			self.conv[i][-1].original, self.bn[i].original = conv, bn
+
 # Jasper 5x3: 5 blocks, each has 1 sub-blocks, each sub-block has 3 ConvBnRelu
 # Jasper 10x5: 5 blocks, each has 2 sub-blocks, each sub-block has 5 ConvBnRelu
 # residual = 'dense' | True | False
@@ -119,7 +133,7 @@ class JasperNet(nn.ModuleList):
 		#print('loss_char:', float(loss_char.mean()), 'loss_bpe:', float(loss_bpe.mean()))
 		loss = loss_char + loss_bpe
 
-		return dict(log_probs = [log_probs_char, log_probs_bpe], output_lengths = output_lengths_char, loss = loss, loss_ = dict(char = loss_char, bpe = loss_bpe))
+		return dict(log_probs = [log_probs_char, log_probs_bpe], output_lengths = [output_lengths_char, output_lengths_bpe], loss = loss, loss_ = dict(char = loss_char, bpe = loss_bpe))
 
 	def freeze(self, backbone = True, decoder0 = True):
 		for m in (list(self)[:-1] if backbone else []) + (list(self[-1])[:1] if decoder0 else []):
@@ -291,3 +305,6 @@ def normalize_signal(signal, dim = -1, eps = 1e-5):
 
 def normalize_features(features, dim = -1, eps = 1e-20):
 	return (features - features.mean(dim = dim, keepdim = True)) / (features.std(dim = dim, keepdim = True) + eps)
+
+def unpad(x, lens, device = 'cpu'):
+	return [e[..., :l].to(device) for e, l in zip(x, lens)]
