@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=0,1,2,3 python3 train.py $@ \
+python3 train.py $@ \
   --githttp https://github.com/vadimkantorov/convasr/commit/%h \
   --verbose --lang ru \
   --model JasperNetBigInplace \

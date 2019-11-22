@@ -24,11 +24,11 @@ class Decoder(nn.Sequential):
 
 	def forward(self, x):
 		if self.type is None:
-			return F.log_softmax(self[0](x), dim = 1)
+			return self[0](x)
 		elif self.type == 'bpe':
 			y1 = self[0](x)
 			y2 = self[1](x)
-			return F.log_softmax(y1, dim = 1), F.log_softmax(y2, dim = 1)
+			return y1, y2
 
 class ConvSamePadding(nn.Sequential):
 	def __init__(self, in_channels, out_channels, kernel_size, stride, dilation, bias, groups, separable):
@@ -125,13 +125,18 @@ class JasperNet(nn.ModuleList):
 			if self.residual:
 				residual.append(x)
 
-		log_probs_char, log_probs_bpe = self[-1](x)
+		logits_char, logits_bpe = self[-1](x)
 
+		log_probs_char, log_probs_bpe = F.log_softmax(logits_char, dim = 1), F.log_softmax(logits_bpe, dim = 1)
 		output_lengths_char, output_lengths_bpe = compute_output_lengths(log_probs_char, xlen), compute_output_lengths(log_probs_bpe, xlen)
-		loss_char = F.ctc_loss(log_probs_char.permute(2, 0, 1), y[:, 0], output_lengths_char, ylen[:, 0], blank = log_probs_char.shape[1] - 1, reduction = 'none') / ylen[:, 0]
-		loss_bpe =  F.ctc_loss(log_probs_bpe.permute(2, 0, 1) , y[:, 1], output_lengths_bpe, ylen[:, 1], blank = log_probs_bpe.shape[ 1] - 1, reduction = 'none') / ylen[:, 1]
-		#print('loss_char:', float(loss_char.mean()), 'loss_bpe:', float(loss_bpe.mean()))
+
+		loss_char = F.ctc_loss(log_probs_char.permute(2, 0, 1), y[:, 0], output_lengths_char, ylen[:, 0], blank = log_probs_char.shape[1] - 1, reduction = 'none')# / ylen[:, 0]
+		loss_bpe =  F.ctc_loss(log_probs_bpe.permute(2, 0, 1) , y[:, 1], output_lengths_bpe, ylen[:, 1], blank = log_probs_bpe.shape[ 1] - 1, reduction = 'none')# / ylen[:, 1]
+		
 		loss = loss_char + loss_bpe
+		
+		log_probs, ctc_loss, alignment_targets = ctc_alignment_targets(logits_char, y[:, 0], output_lengths_char, ylen[:, 0], log_probs_char.shape[1] - 1)
+		ctc_loss_via_mle = -(alignment_targets * log_probs).sum()
 
 		return dict(log_probs = [log_probs_char, log_probs_bpe], output_lengths = [output_lengths_char, output_lengths_bpe], loss = loss, loss_ = dict(char = loss_char, bpe = loss_bpe))
 

@@ -53,9 +53,7 @@ for audio_path in audio_paths:
 		features = models.logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features)
 		logits, output_lengths = model(features.unsqueeze(0).to(args.device), torch.tensor([1.0]).to(args.device))
 		log_probs = F.log_softmax(logits, dim = 1)
-		#zero = (models.entropy(log_probs, dim = 1, sum = False, keepdim = True) > 1.0).float()
-		#log_probs = (1 - zero) * log_probs + zero * F.one_hot(torch.LongTensor([labels.blank_idx]), len(labels)).unsqueeze(-1).type_as(zero)
-		transcript = labels.idx2str(decoder.decode(log_probs, output_lengths)[0])
+		transcript = labels.decode(decoder.decode(log_probs, output_lengths)[0])
 		transcript = labels.postprocess_transcript(transcript)
 		log_probs_.extend(log_probs.cpu())
 
