@@ -49,7 +49,7 @@ def traineval(args):
 		torch.backends.cudnn.benchmark = True
 
 	lang = importlib.import_module(args.lang)
-	labels = [dataset.Labels(lang, name = 'char')] + ([dataset.Labels(lang, bpe = args.bpe, name = 'bpe')] if args.bpe else [])
+	labels = [dataset.Labels(lang, name = 'char')]# + ([dataset.Labels(lang, bpe = args.bpe, name = 'bpe')] if args.bpe else [])
 	
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
 	val_waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob)
@@ -134,14 +134,17 @@ def traineval(args):
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 	
-	model.freeze(backbone = True, decoder0 = True)
 	model.to(args.device)
 
 	if not args.train_data_path:
 		if args.fp16:
 			model = apex.amp.initialize(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+		model.eval()
+		model.fuse_conv_bn_eval()
 		model = torch.nn.DataParallel(model)
 		return evaluate_model(val_data_loaders)
+
+	#model.freeze(backbone = True, decoder0 = True)
 
 	train_waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob)
 	train_feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob)
@@ -192,12 +195,11 @@ def traineval(args):
 			toc_data = time.time()
 			lr = scheduler.get_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
 			
-			# TODO: use non_blocking = True
-			input_, input_lengths_, targets_, target_length_ = input_.to(args.device), input_lengths_fraction_.to(args.device), targets_.to(args.device), target_length_.to(args.device)
+			input_, input_lengths_, targets_, target_length_ = input_.to(args.device, non_blocking = True), input_lengths_fraction_.to(args.device, non_blocking = True), targets_.to(args.device, non_blocking = True), target_length_.to(args.device, non_blocking = True)
 			log_probs, output_lengths, loss = map(model(input_, input_lengths_fraction_, y = targets_, ylen = target_length_).get, ['log_probs', 'output_lengths', 'loss'])
 			example_weights = target_length_[:, 0]
 			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, float(loss.mean())
-			entropy = float(models.entropy(log_probs[0], output_lengths, dim = 1).mean()) 
+			entropy = float(models.entropy(log_probs[0], output_lengths[0], dim = 1).mean()) 
 			toc_fwd = time.time()
 			if not (torch.isinf(loss) or torch.isnan(loss)):
 				if args.fp16:

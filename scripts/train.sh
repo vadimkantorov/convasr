@@ -11,7 +11,6 @@ python3 train.py $@ \
   --align kontur_calls_micro.csv \
   --val-iteration-interval 1000 \
   --epochs 5 \
-  --dropout 0 \
   --bpe data/tts_dataset_bpe_5000_word.model \
   --checkpoint data/checkpoint_epoch02_iter0065000.pt \
   --finetune --checkpoint-skip

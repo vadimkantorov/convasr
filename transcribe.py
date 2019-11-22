@@ -31,13 +31,16 @@ args.output_path = args.output_path or args.data_path
 checkpoint = torch.load(args.checkpoint, map_location = 'cpu')
 sample_rate, window_size, window_stride, window, num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
 
-labels = dataset.Labels(importlib.import_module(checkpoint['lang']))
-model = getattr(models, checkpoint['model'])(num_classes = len(labels), num_input_features = num_input_features)
+labels = dataset.Labels(importlib.import_module(checkpoint['lang']), name = 'char')
+model = getattr(models, checkpoint['model'])(num_input_features = num_input_features, num_classes = [len(labels)])
 MODEL_STRIDE = 2
 model.load_state_dict(checkpoint['model_state_dict'])
 model = model.to(args.device)
 model.eval()
-decoder = decoders.GreedyDecoder(labels) if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
+model.fuse_conv_bn_eval()
+#model = torch.nn.DataParallel(model)
+
+decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 torch.set_grad_enabled(False)
 
 os.makedirs(args.output_path, exist_ok = True)
@@ -47,15 +50,15 @@ for audio_path in audio_paths:
 	reference_path = audio_path + '.json'
 	signal_, sample_rate = dataset.read_wav(audio_path, sample_rate = sample_rate, stereo = True)
 	reference = json.load(open(reference_path)) if os.path.exists(reference_path) else None
-	log_probs_ = []
+	segments = []
 
 	for channel, signal in enumerate(signal_.t()):
 		features = models.logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features)
-		logits, output_lengths = model(features.unsqueeze(0).to(args.device), torch.tensor([1.0]).to(args.device))
-		log_probs = F.log_softmax(logits, dim = 1)
-		transcript = labels.decode(decoder.decode(log_probs, output_lengths)[0])
-		transcript = labels.postprocess_transcript(transcript)
-		log_probs_.extend(log_probs.cpu())
+		
+		log_probs, output_lengths = map(model(features.unsqueeze(0).to(args.device), torch.tensor([1.0]).to(args.device)).get, ['log_probs', 'output_lengths'])
+		log_probs, output_lengths = log_probs[0], output_lengths[0]
+		
+		transcript = labels.postprocess_transcript(labels.decode(decoder.decode(log_probs, output_lengths))[0])
 
 		print(args.checkpoint)
 		print(os.path.basename(audio_path), 'channel#', channel)
@@ -71,12 +74,10 @@ for audio_path in audio_paths:
 		#	print(f'CER: {cer:.02%}')
 		#print()
 
-	replaceblankrepeat = lambda r: r.replace(labels.blank, '').replace('_', '')
-	segments = []
-	for channel, log_probs in enumerate(log_probs_):
-		transcript = labels.idx2str(log_probs.argmax(dim = 0))
+		replaceblankrepeat = lambda r: r.replace(labels.blank, '').replace(labels.repeat, '')
+		transcript = labels.decode(decoder.decode(log_probs, output_lengths), replace2 = False)[0]
 		if reference is None:
-			begin, end = zip(*[(i*window_stride * MODEL_STRIDE, i*window_stride * MODEL_STRIDE + window_size) for i in range(log_probs.shape[-1])])
+			begin, end = zip(*[(i*window_stride * MODEL_STRIDE, i * window_stride * MODEL_STRIDE + window_size) for i in range(log_probs.shape[-1])])
 			k = 0
 			for i in range(len(transcript) + 1):
 				if(i > 0 and (i == len(transcript) or transcript[i] == ' ') and (i == len(transcript) or end[i - 1] - begin[k] > args.max_segment_seconds)):
@@ -91,8 +92,7 @@ for audio_path in audio_paths:
 	html = open(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), 'w')
 	html.write('<html><head><meta charset="UTF-8"><style>.channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
 	html.write(f'<h4>{os.path.basename(audio_path)}</h4>')
-	encoded = base64.b64encode(open(audio_path, 'rb').read()).decode('utf-8').replace('\n', '')
-	html.write(f'<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>')
+	html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode()))
 	html.write(f'<h3 class="channel0 channel">transcript #0:<span></span></h3><h3 class="channel1 channel">transcript #1:<span></span></h3><h3 class="channel0 reference channel">reference #0:<span></span></h3><h3 class="channel1 reference channel">reference #1:<span></span></h3> <hr/>')
 	html.write('<table><thead><th>begin</th><th>end</th><th>transcript</th></tr></thead><tbody>')
 	html.write(''.join(f'<tr class="channel{c}"><td>{b:.02f}</td><td>{e:.02f}</td><td><a onclick="play({b:.02f}); return false;" href="#" target="_blank">{t}</a></td>' + (f'<td>{r}</td></tr><tr class="channel{c} reference"><td></td><td></td><td>{r}</td></tr>' if r else '') for b, e, t, r, c in sorted(segments)))
@@ -114,10 +114,8 @@ for audio_path in audio_paths:
 			const [begin0, end0, transcript0, reference0, channel0] = segments.find(([begin, end, transcript, reference, channel]) => channel == 0 && begin <= time && time <= end) || [null, null, '', '', 0];
 			const [begin1, end1, transcript1, reference1, channel1] = segments.find(([begin, end, transcript, reference, channel]) => channel == 1 && begin <= time && time <= end) || [null, null, '', '', 1];
 
-			spanhyp0.innerText = transcript0;
-			spanhyp1.innerText = transcript1;
-			spanref0.innerText = reference0;
-			spanref1.innerText = reference1;
+			[spanhyp0.innerText, spanhyp1.innerText] = [transcript0, transcript1];
+			[spanref0.innerText, spanref1.innerText] = [reference0, reference1];
 		};
 	</script>'''.replace('SEGMENTS', repr(segments)))
 	html.write('</body></html>')

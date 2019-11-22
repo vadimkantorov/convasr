@@ -50,31 +50,30 @@ class ConvBN(nn.Module):
 		super().__init__()
 		num_channels_residual = num_channels_residual or ([None] if residual else [])
 		self.conv = nn.ModuleList(ConvSamePadding(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, separable = separable, bias = False, groups = groups) for i in range(repeat))
-		self.bn = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, nonlinearity = nonlinearity, inplace = inplace, dropout = dropout) for i in range(repeat))
-		self.conv_residual = nn.ModuleList(nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) if in_channels is not None else nn.Identity() for in_channels in num_channels_residual)
-		self.bn_residual = nn.ModuleList(ActivatedBatchNorm(num_channels[1], momentum = batch_norm_momentum, nonlinearity = None, inplace = inplace) if in_channels is not None else nn.Identity() for in_channels in num_channels_residual)
+		self.bn = nn.ModuleList(BatchNorm1dInplace(num_channels[1], momentum = batch_norm_momentum) if inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat))
+		self.conv_residual = nn.ModuleList(nn.Identity() if in_channels is None else nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual)
+		self.bn_residual = nn.ModuleList(nn.Identity() if in_channels is None else BatchNorm1dInplace(num_channels[1], momentum = batch_norm_momentum) if inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual)
+		self.activation = ResidualActivation(nonlinearity, dropout, inplace = inplace)
 		self.temporal_mask = temporal_mask
 
 	def forward(self, x, lengths_fraction = None, residual = []):
 		residual = residual or [x]
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
-			x = bn(conv(x), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)] if i == len(self.conv) - 1 else [])
+			x = self.activation(bn(conv(x)), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)] if i == len(self.conv) - 1 else [])
 			x = x * temporal_mask(x, lengths_fraction = lengths_fraction) if (self.temporal_mask and lengths_fraction is not None) else x
 		return x
 
 	def fuse_conv_bn_eval(self):
 		for i in range(len(self.conv_residual)):
-			# TODO: check for existing Identity
 			conv, bn = self.conv_residual[i], self.bn_residual[i]
-			self.conv_residual[i] = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
-			self.bn_residual[i] = nn.Identity()
-			self.conv_residual[i].original, self.bn_residual[i].original = conv, bn
+			if type(conv) != nn.Identity and type(bn) != nn.Identity:
+				self.conv_residual[i] = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
+				self.bn_residual[i] = nn.Identity()
 
 		for i in range(len(self.conv)):
 			conv, bn = self.conv[i][-1], self.bn[i]
 			self.conv[i][-1] = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
 			self.bn[i] = nn.Identity()
-			self.conv[i][-1].original, self.bn[i].original = conv, bn
 
 # Jasper 5x3: 5 blocks, each has 1 sub-blocks, each sub-block has 3 ConvBnRelu
 # Jasper 10x5: 5 blocks, each has 2 sub-blocks, each sub-block has 5 ConvBnRelu
@@ -84,9 +83,9 @@ class JasperNet(nn.ModuleList):
 			kernel_sizes = [11, 13, 17, 21, 25], kernel_size_prologue = 11, kernel_size_epilogue = 29, 
 			base_width = 128, out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
 			separable = False, groups = 1, 
-			dropout = None, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
+			dropout = 0, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
 			temporal_mask = True, nonlinearity = 'relu', inplace = False,
-			stride1 = 2, stride2 = 1
+			stride1 = 2, stride2 = 1, decoder_type = None
 		):
 		dropout_prologue = dropout_prologue if dropout != 0 else 0
 		dropout_epilogue = dropout_epilogue if dropout != 0 else 0
@@ -111,7 +110,7 @@ class JasperNet(nn.ModuleList):
 			ConvBN(kernel_size = 1, num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
 		]
 		decoder = [
-			Decoder(out_width_factors_large[1] * base_width, num_classes, type = 'bpe')
+			Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
 		]
 		super().__init__(prologue + backbone + epilogue + decoder)
 		self.residual = residual
@@ -125,20 +124,26 @@ class JasperNet(nn.ModuleList):
 			if self.residual:
 				residual.append(x)
 
-		logits_char, logits_bpe = self[-1](x)
+		#logits_char, logits_bpe = self[-1](x)
 
-		log_probs_char, log_probs_bpe = F.log_softmax(logits_char, dim = 1), F.log_softmax(logits_bpe, dim = 1)
-		output_lengths_char, output_lengths_bpe = compute_output_lengths(log_probs_char, xlen), compute_output_lengths(log_probs_bpe, xlen)
-
-		loss_char = F.ctc_loss(log_probs_char.permute(2, 0, 1), y[:, 0], output_lengths_char, ylen[:, 0], blank = log_probs_char.shape[1] - 1, reduction = 'none')# / ylen[:, 0]
-		loss_bpe =  F.ctc_loss(log_probs_bpe.permute(2, 0, 1) , y[:, 1], output_lengths_bpe, ylen[:, 1], blank = log_probs_bpe.shape[ 1] - 1, reduction = 'none')# / ylen[:, 1]
+		logits_char = self[-1](x)
+		log_probs_char = F.log_softmax(logits_char, dim = 1)
+		output_lengths_char = compute_output_lengths(log_probs_char, xlen)
 		
-		loss = loss_char + loss_bpe
-		
-		log_probs, ctc_loss, alignment_targets = ctc_alignment_targets(logits_char, y[:, 0], output_lengths_char, ylen[:, 0], log_probs_char.shape[1] - 1)
-		ctc_loss_via_mle = -(alignment_targets * log_probs).sum()
+		if y is not None and ylen is not None:
+			loss_char = F.ctc_loss(log_probs_char.permute(2, 0, 1), y[:, 0], output_lengths_char, ylen[:, 0], blank = log_probs_char.shape[1] - 1, reduction = 'none') / ylen[:, 0]
+			loss = loss_char
+			#loss_bpe =  F.ctc_loss(log_probs_bpe.permute(2, 0, 1) , y[:, 1], output_lengths_bpe,  ylen[:, 1], blank = log_probs_bpe.shape[ 1] - 1, reduction = 'none') / ylen[:, 1]
+			#output_lengths_bpe = compute_output_lengths(log_probs_bpe, xlen)
+			#log_probs_bpe = F.log_softmax(logits_bpe, dim = 1)
+			
+			#loss = loss_char + loss_bpe
+		else:
+			loss = torch.tensor(0.)
 
-		return dict(log_probs = [log_probs_char, log_probs_bpe], output_lengths = [output_lengths_char, output_lengths_bpe], loss = loss, loss_ = dict(char = loss_char, bpe = loss_bpe))
+		#return dict(log_probs = [log_probs_char, log_probs_bpe], output_lengths = [output_lengths_char, output_lengths_bpe], loss = loss, loss_ = dict(char = loss_char, bpe = loss_bpe))
+		
+		return dict(log_probs = [log_probs_char], output_lengths = [output_lengths_char], loss = loss)
 
 	def freeze(self, backbone = True, decoder0 = True):
 		for m in (list(self)[:-1] if backbone else []) + (list(self[-1])[:1] if decoder0 else []):
@@ -148,6 +153,10 @@ class JasperNet(nn.ModuleList):
 
 			for p in m.parameters():
 				p.requires_grad = False
+
+	def fuse_conv_bn_eval(self):
+		for block in list(self)[:-1]:
+			block.fuse_conv_bn_eval()
 
 class Wav2Letter(JasperNet):
 	def __init__(self, num_input_features, num_classes, dropout = 0.2, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):
@@ -183,69 +192,71 @@ class JasperNetBigInplaceLargeStride(JasperNet):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, num_subblocks = 2, temporal_mask = False, inplace = True, nonlinearity = ('leaky_relu', 0.01), dilation = 2, **kwargs)
 
-class ActivatedBatchNorm(nn.modules.batchnorm._BatchNorm):
-	def __init__(self, *args, nonlinearity = None, inplace = False, dropout = 0, squeeze_and_excite = None, **kwargs):
-		super().__init__(*args, **kwargs)
+class ResidualActivation(nn.Module):
+	def __init__(self, nonlinearity, dropout = 0, inplace = False):
+		super().__init__()
 		self.nonlinearity = nonlinearity
 		self.inplace = inplace
 		self.dropout = dropout
-		self.squeeze_and_excite = squeeze_and_excite
 
-	def _check_input_dim(self, input):
-		return True
-
-	def forward(self, input, residual = []):
+	def forward(self, y, residual = []):
 		assert not (self.inplace and self.nonlinearity == 'relu')
 
 		if self.inplace:
-			y = ActivatedBatchNorm.Function.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training, self.nonlinearity, *residual)
+			y = ResidualActivation.Function.apply(self.nonlinearity, y, *residual)
 			y = F.dropout(y, p = self.dropout, training = self.training)
 		else:
-			y = super().forward(input)
-			y = self.squeeze_and_excite(y) if self.squeeze_and_excite is not None else y
 			y = y + sum(residual)
 			if self.nonlinearity == 'relu':
-				y = relu_dropout(y, p = self.dropout, inplace = True, training = self.training)
-				#y = F.dropout(F.relu(y, inplace = True), p = self.dropout, training = self.training)
+				y = relu_dropout(y, p = self.dropout, inplace = True, training = self.training) # F.dropout(F.relu(y, inplace = True), p = self.dropout, training = self.training)
 			elif self.nonlinearity and self.nonlinearity[0] in ['leaky_relu', 'hardtanh']:
 				y = F.dropout(getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = True), p = self.dropout, training = self.training)
 		return y
 
 	class Function(torch.autograd.function.Function):
 		@staticmethod
-		def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, training, nonlinearity, *residual):
+		def forward(self, nonlinearity, x, *residual):
 			self.nonlinearity = nonlinearity
-			assert input.is_contiguous()
-			
+			x_ = x.data
+			for r in residual:
+				x_ += r
+			if self.nonlinearity and self.nonlinearity[0] == 'leaky_relu':
+				F.leaky_relu_(x_, self.nonlinearity[1])
+			self.save_for_backward(x, *residual)
+			return x
+
+		@staticmethod
+		def backward(self, grad_output):
+			x, *residual = self.saved_tensors
+			x_ = x.data
+			if self.nonlinearity and self.nonlinearity[0] == 'leaky_relu':
+				mask = torch.ones_like(grad_output).masked_fill_(x < 0, self.nonlinearity[1])
+				grad_output *= mask
+				x_ /= mask
+			for r in residual:
+				x_ -= r
+			return (None, ) + (grad_output,) * (1 + len(residual))
+
+class BatchNorm1dInplace(nn.BatchNorm1d):
+	def forward(self, input):
+		return BatchNorm1dInplace.Function.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training) 
+
+	class Function(torch.autograd.function.Function):
+		@staticmethod
+		def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, training):
 			mean, var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum) if training else (running_mean, running_var) 
 			invstd = (var + eps).rsqrt_()
 			output = torch.batch_norm_elemt(input, weight, bias, mean, invstd, 0, out = input)
-		
-			for r in residual:
-				output += r
-			if self.nonlinearity and self.nonlinearity[0] == 'leaky_relu':
-				F.leaky_relu_(output, self.nonlinearity[1])
-
-			self.save_for_backward(output, weight, bias, mean, invstd, *residual)
+			self.save_for_backward(output, weight, bias, mean, invstd)
 			return output
 
 		@staticmethod
 		def backward(self, grad_output):
-			saved_output, weight, bias, mean, invstd, *residual = self.saved_tensors
-			assert grad_output.is_contiguous() and saved_output.is_contiguous()
-
-			if self.nonlinearity and self.nonlinearity[0] == 'leaky_relu':
-				mask = torch.ones_like(grad_output).masked_fill_(saved_output < 0, self.nonlinearity[1])
-				grad_output *= mask
-				saved_output /= mask
-			for r in residual:
-				saved_output -= r
-
+			saved_output, weight, bias, mean, invstd = self.saved_tensors
 			saved_input = torch.batch_norm_elemt(saved_output, invstd.reciprocal(), mean, bias, weight.reciprocal(), 0, out = saved_output)
-			mean_dy, mean_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(grad_output, saved_input, mean, invstd,	weight,	self.needs_input_grad[0], self.needs_input_grad[1],	self.needs_input_grad[2])
+			mean_dy, mean_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(grad_output, saved_input, mean, invstd,	weight,	*self.needs_input_grad[:3])
 			grad_input = torch.batch_norm_backward_elemt(grad_output, saved_input, mean, invstd, weight, mean_dy, mean_dy_xmu)
-
-			return (grad_input, grad_weight, grad_bias, None, None, None, None, None, None) + tuple([grad_output] * len(residual))
+			return grad_input, grad_weight, grad_bias, None, None, None, None, None
 
 class SqueezeAndExcite(nn.Sequential):
 	def __init__(self, out_channels, ratio = 0.25):
