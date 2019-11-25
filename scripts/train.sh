@@ -17,14 +17,9 @@ python3 train.py $@ \
 
 #  --bpe data/tts_dataset_tri_1000.model \
 
-#  --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs80___no_temporal_mask/checkpoint_epoch01_iter0030000.pt
-#  --weight-decay 0 \
-#  --checkpoint data/experiments/JasperNet_NovoGrad_lr1e-2_wd0e+00_bs80___separable/checkpoint_epoch01_iter0025000.pt
-
-
 #  --train-data-path data/tts_dataset/tts_dataset_train.csv \
 #  --train-data-path data/mixed_train.csv data/tts_dataset/tts_dataset_train.csv --train-data-mixing 0.5 0.5 \
-# --train-data-path data/mixed_train.csv \
+#  --train-data-path data/mixed_train.csv \
 
 #  --bpe ../data/spm_train_v05_cleaned_asr_10s_phoneme.model
 #  --bpe data/ru.wiki.bpe.vs5000.model

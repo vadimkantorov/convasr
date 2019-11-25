@@ -1,6 +1,7 @@
 set -e
 
 python3 train.py $@ \
+  --githttp https://github.com/vadimkantorov/convasr/commit/%h \
   --align \
   --val-data-path kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv \
   --decoder BeamSearchDecoder --beam-width 5000 --lm  data/lm/chats_05_prune.binary --beam-alpha 0.3 \
@@ -14,14 +15,10 @@ python3 train.py $@ \
 
 #python3 vis.py vis data/logits_sample_ok.convasr.csv.pt
 
-#  --checkpoint data/experiments/JasperNetBigInplace_NovoGrad_lr1e-2_wd1e-3_bs80___sow/checkpoint_epoch02_iter0060000.pt \
-
 #  --val-data-path ../sample_ok/sample_ok.convasr.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv \
 
     #data/valset11102019/valset_2019-10-11_0.csv data/valset11102019/valset_2019-10-11_1.csv data/valset11102019/valset_2019-10-11.csv \
     #data/mixed_val.csv data/clean_val.csv
-
-#  --checkpoint data/experiments/JasperNetBigInplace_NovoGrad_lr1e-2_wd1e-3_bs80/checkpoint_epoch02_iter0062500.pt \
 
 #  --val-waveform-transform SpecLowPass 3500
 
@@ -33,5 +30,4 @@ python3 train.py $@ \
 
 #  data/adapted.csv 
 #  --val-batch-size 40 --val-data-path  ../open_stt_splits/splits/clean_val.csv ../open_stt_splits/splits/mixed_val.csv ../sample_ok/sample_ok.convasr.csv \
-#  --checkpoint model_checkpoint_0027_epoch_02.model.pt \
 #  --noise-data-path data/ru_open_stt_noise_small.csv --noise-level 0.5 \

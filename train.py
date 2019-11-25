@@ -71,7 +71,7 @@ def traineval(args):
 		ort_session = onnxruntime.InferenceSession(args.onnx)
 		ort_inputs = dict(x = input_.cpu().numpy(), xlen = input_lengths_fraction_.cpu().numpy())
 		logits_, output_lengths_ = ort_session.run(None, ort_inputs)
-		assert torch.allclose(logits[0].cpu(), torch.from_numpy(logits_), rtol=1e-03, atol=1e-05)
+		assert torch.allclose(logits[0].cpu(), torch.from_numpy(logits_), rtol = 1e-03, atol = 1e-05)
 		assert torch.allclose(output_lengths[0].cpu(), torch.from_numpy(output_lengths_))
 		return
 
