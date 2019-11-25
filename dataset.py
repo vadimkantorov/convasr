@@ -130,9 +130,8 @@ class Labels:
 		chr2idx = {l: i for i, l in enumerate(str(self))}
 		return normalized, torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
-	def decode(self, idx, blank = None, space = None, replace2 = True):
-		i2s = lambda i: ''.join(self[int(idx)] if not replace2 or k == 0 or self[int(idx)] != self[int(i[k - 1])] else '' for k, idx in enumerate(i)).replace(self.blank, blank or self.blank).replace(self.space, space or self.space)
-		return list(map(i2s, idx))
+	def decode(self, i, blank = None, space = None, replace2 = True):
+		return ''.join(self[int(idx)] if not replace2 or k == 0 or self[int(idx)] != self[int(i[k - 1])] else '' for k, idx in enumerate(i)).replace(self.blank, blank or self.blank).replace(self.space, space or self.space)
 
 	def postprocess_transcript(self, text, phonetic_replace_groups = []):
 		replaceblank = lambda s: s.replace(self.blank * 10, ' ').replace(self.blank, '')
@@ -175,26 +174,34 @@ def collate_fn(batch, pad_to = 128):
 	#input_: NCT, targets_: NLt, target_length_: NL, input_lengths_fraction_: N
 	return dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_
 
-def read_wav(audio_path, normalize = True, stereo = False, sample_rate = None, max_duration = None):
-	if audio_path.endswith('.wav'):
-		sample_rate_, signal = scipy.io.wavfile.read(audio_path)
-	else:
-		sample_rate_, signal = sample_rate, torch.from_numpy(np.frombuffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', 'little', '-r', str(sample_rate), '-c', '1', '-t', 'raw', '-']), dtype = np.int16))
+def read_wav(audio_path, sample_rate, normalize = True, stereo = False, max_duration = None, dtype = torch.float32, byte_order = 'little'):
+	sample_rate_, signal = scipy.io.wavfile.read(audio_path) if audio_path.endswith('.wav') else (sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', '1', '-t', 'raw', '-']), byte_order = byte_order))) 
 
 	signal = (signal if stereo else signal.squeeze(1) if signal.shape[1] == 1 else signal.mean(1)) if len(signal.shape) > 1 else (signal if not stereo else signal[..., None])
 	if max_duration is not None:
 		signal = signal[:int(max_duration * sample_rate_), ...]
 
-	signal = torch.as_tensor(signal).to(torch.float32)
+	signal = torch.as_tensor(signal).to(dtype)
 	if normalize:
 		signal = models.normalize_signal(signal, dim = 0)
-	if sample_rate is not None and sample_rate_ != sample_rate:
-		sample_rate_, signal = resample(signal, sample_rate_, sample_rate)
+	if dtype is torch.float32 and sample_rate_ != sample_rate:
+		signal, sample_rate_ = resample(signal, sample_rate_, sample_rate)
 
+	assert sample_rate_ == sample_rate, 'Cannot resample non-float tensors because of librosa constraints'
 	return signal, sample_rate_
 
 def resample(signal, sample_rate_, sample_rate):
-	return sample_rate, torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate))
+	return torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate)), sample_rate
+
+def remove_silence(vad, signal, sample_rate, window_size):
+	frame_len = int(window_size * sample_rate)
+	voice = [False]
+	voice.extend(vad.is_speech(signal[sample_idx : sample_idx + frame_len].numpy().tobytes(), sample_rate) if sample_idx + frame_len <= len(signal) else False for sample_idx in range(0, len(signal), frame_len))
+	voice.append(False)
+	voice = torch.tensor(voice)
+	voice, _voice = voice[1:], voice[:-1]
+	begin_end = list(zip((~_voice & voice).nonzero().squeeze(1).tolist(), (~voice & _voice).nonzero().squeeze(1).tolist()))
+	return (frame_len * torch.IntTensor(begin_end)).tolist()
 
 def bpetrain(input_path, output_prefix, vocab_size, model_type, max_sentencepiece_length):
 	sentencepiece.SentencePieceTrainer.Train(f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size} --model_type={model_type}' + (f' --max_sentencepiece_length={max_sentencepiece_length}' if max_sentencepiece_length else ''))

@@ -52,5 +52,6 @@ RUN pip install git+https://github.com/parlance/ctcdecode
 RUN pip install awscli
 
 RUN pip install sentencepiece
+RUN pip install webrtcvad
 
 RUN  echo "    IdentityFile /root/.ssh/id_rsa" >> /etc/ssh/ssh_config

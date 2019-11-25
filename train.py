@@ -67,7 +67,7 @@ def traineval(args):
 			with torch.no_grad():
 				log_probs, output_lengths, loss = map(model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device)).get, ['log_probs', 'output_lengths', 'loss'])
 			entropy_char, entropy_bpe = list(map(models.entropy, log_probs, output_lengths))
-			decoded = [l.decode(d.decode(lp, o)) for l, d, lp, o in zip(labels, decoder, log_probs, output_lengths)]
+			decoded = [list(map(l.decode, d.decode(lp, o))) for l, d, lp, o in zip(labels, decoder, log_probs, output_lengths)]
 			log_probs = list(map(models.unpad, log_probs, output_lengths))
 			yield audio_path_, reference_, loss.cpu(), entropy_char.cpu(), decoded, log_probs
 

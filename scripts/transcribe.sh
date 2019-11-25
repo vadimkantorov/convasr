@@ -1,4 +1,4 @@
-python3 transcribe.py \
+python3 transcribe.py $@ \
   --data-path data/2019.10.19_calls \
   --output-path data/2019.10.19_calls_decoded \
   --checkpoint data/checkpoint_epoch02_iter0065000.pt 
