@@ -52,7 +52,7 @@ def traineval(args):
 
 	lang = importlib.import_module(args.lang)
 	labels = [dataset.Labels(lang, name = 'char')] + [dataset.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
-	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, **(dict(inplace = False, dict = lambda logits, output_lengths: (logits, output_lengths)) if args.onnx else {}))
+	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, **(dict(inplace = False, dict = lambda logits, output_lengths: (logits, output_lengths)) if args.onnx else {}))
 
 	if args.onnx:
 		torch.set_grad_enabled(False)
