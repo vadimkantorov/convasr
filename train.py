@@ -53,7 +53,7 @@ def traineval(args):
 
 	lang = importlib.import_module(args.lang)
 	labels = [dataset.Labels(lang, name = 'char')] + [dataset.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
-	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, **(dict(inplace = False) if args.onnx else {}))
+	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, **(dict(inplace = False, dict = lambda logits, output_lengths: (logits, output_lengths)) if args.onnx else {}))
 
 	if args.onnx:
 		torch.set_grad_enabled(False)
@@ -63,17 +63,16 @@ def traineval(args):
 		model.eval()
 		model.fuse_conv_bn_eval()
 		#model = torch.nn.DataParallel(model)
-		input_ = torch.rand(16, args.num_input_features, 128, device = args.device)
-		input_lengths_fraction_ = torch.ones(len(input_), device = args.device)
-		log_probs, output_lengths = map(model(input_, input_lengths_fraction_).get, ['log_probs', 'output_lengths'])
+		sample_batch_size, sample_time = 16, 128
+		input_, input_lengths_fraction_ = torch.rand(sample_batch_size, args.num_input_features, sample_time, device = args.device), torch.ones(sample_batch_size, device = args.device)
+		logits, output_lengths = model(input_, input_lengths_fraction_)
 
-		# TODO: figure out dict output: https://discuss.pytorch.org/t/torch-onnx-export-of-a-model-returning-dict/62109
-		torch.onnx.export(model, (input_, input_lengths_fraction_), args.onnx, opset_version = 11, do_constant_folding = True, input_names = ['x', 'xlen'], output_names = ['log_probs', 'output_lengths'], dynamic_axes = dict(x = {0 : 'B'}, xlen = {0 : 'B'}, log_probs = {0 : 'B'}, output_lengths = {0 : 'B'}))
+		torch.onnx.export(model, (input_, input_lengths_fraction_), args.onnx, opset_version = 11, do_constant_folding = True, input_names = ['x', 'xlen'], output_names = ['logits', 'output_lengths'], dynamic_axes = dict(x = {0 : 'B'}, xlen = {0 : 'B'}, logits = {0 : 'B'}, output_lengths = {0 : 'B'}))
 
 		ort_session = onnxruntime.InferenceSession(args.onnx)
 		ort_inputs = dict(x = input_.cpu().numpy(), xlen = input_lengths_fraction_.cpu().numpy())
-		log_probs_, output_lengths_ = ort_session.run(None, ort_inputs)
-		assert torch.allclose(log_probs[0].cpu(), torch.from_numpy(log_probs_), rtol=1e-03, atol=1e-05)
+		logits_, output_lengths_ = ort_session.run(None, ort_inputs)
+		assert torch.allclose(logits[0].cpu(), torch.from_numpy(logits_), rtol=1e-03, atol=1e-05)
 		assert torch.allclose(output_lengths[0].cpu(), torch.from_numpy(output_lengths_))
 		return
 
@@ -85,7 +84,7 @@ def traineval(args):
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
 	
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
-	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk), decoders.GreedyDecoder()]
+	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
 	def apply_model(data_loader):
 		for dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ in data_loader:
@@ -272,7 +271,7 @@ def traineval(args):
 			tic = time.time()
 
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
-		sampler.shuffle(epoch) # TODO: move to beginning of epoch
+		sampler.shuffle(epoch) # TODO: redo bucketed sampling, move to beginning of epoch
 		evaluate_model(val_data_loaders, epoch, iteration)
 
 if __name__ == '__main__':

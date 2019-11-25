@@ -24,7 +24,7 @@ class Decoder(nn.Sequential):
 
 	def forward(self, x):
 		if self.type is None:
-			return self[0](x)
+			return (self[0](x), )
 		elif self.type == 'bpe':
 			y1 = self[0](x)
 			y2 = self[1](x)
@@ -75,6 +75,7 @@ class ConvBN(nn.Module):
 			self.conv[i][-1] = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
 			self.bn[i] = nn.Identity()
 
+#TODO: figure out perfect same padding
 # Jasper 5x3: 5 blocks, each has 1 sub-blocks, each sub-block has 3 ConvBnRelu
 # Jasper 10x5: 5 blocks, each has 2 sub-blocks, each sub-block has 5 ConvBnRelu
 # residual = 'dense' | True | False
@@ -85,7 +86,7 @@ class JasperNet(nn.ModuleList):
 			separable = False, groups = 1, 
 			dropout = 0, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
 			temporal_mask = True, nonlinearity = 'relu', inplace = False,
-			stride1 = 2, stride2 = 1, decoder_type = None
+			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict
 		):
 		dropout_prologue = dropout_prologue if dropout != 0 else 0
 		dropout_epilogue = dropout_epilogue if dropout != 0 else 0
@@ -114,6 +115,7 @@ class JasperNet(nn.ModuleList):
 		]
 		super().__init__(prologue + backbone + epilogue + decoder)
 		self.residual = residual
+		self.dict = dict
 
 	def forward(self, x, xlen, y = None, ylen = None):
 		residual = []
@@ -124,27 +126,16 @@ class JasperNet(nn.ModuleList):
 			if self.residual:
 				residual.append(x)
 
-		#logits_char, logits_bpe = self[-1](x)
+		logits = self[-1](x)
+		output_lengths = [compute_output_lengths(l, xlen) for l in logits]
+		aux = {}
 
-		logits_char = self[-1](x)
-		log_probs_char = logits_char
-		#log_probs_char = F.log_softmax(logits_char, dim = 1)
-		output_lengths_char = compute_output_lengths(log_probs_char, xlen)
-		
 		if y is not None and ylen is not None:
-			loss_char = F.ctc_loss(log_probs_char.permute(2, 0, 1), y[:, 0], output_lengths_char, ylen[:, 0], blank = log_probs_char.shape[1] - 1, reduction = 'none') / ylen[:, 0]
-			loss = loss_char
-			#loss_bpe =  F.ctc_loss(log_probs_bpe.permute(2, 0, 1) , y[:, 1], output_lengths_bpe,  ylen[:, 1], blank = log_probs_bpe.shape[ 1] - 1, reduction = 'none') / ylen[:, 1]
-			#output_lengths_bpe = compute_output_lengths(log_probs_bpe, xlen)
-			#log_probs_bpe = F.log_softmax(logits_bpe, dim = 1)
-			
-			loss = dict(loss = loss_char + loss_bpe, loss_char = loss_char, loss_bpe = loss_bpe)
-		else:
-			loss = {}
+			log_probs = [F.log_softmax(l, dim = 1) for l in logits]
+			loss = [F.ctc_loss(l.permute(2, 0, 1), y[:, i], output_lengths[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') / ylen[:, 0] for i, l in enumerate(log_probs)]
+			aux = dict(loss = sum(loss), log_probs = log_probs)
 
-		#return dict(log_probs = [log_probs_char, log_probs_bpe], output_lengths = [output_lengths_char, output_lengths_bpe], loss = loss, loss_ = dict(char = loss_char, bpe = loss_bpe))
-		
-		return dict(log_probs = [log_probs_char], output_lengths = [output_lengths_char], **loss)
+		return self.dict(logits = logits, output_lengths = output_lengths, **aux)
 
 	def freeze(self, backbone = True, decoder0 = True):
 		for m in (list(self)[:-1] if backbone else []) + (list(self[-1])[:1] if decoder0 else []):
@@ -202,17 +193,15 @@ class ResidualActivation(nn.Module):
 		self.dropout = dropout
 
 	def forward(self, y, residual = []):
-		assert not (self.inplace and self.nonlinearity == 'relu')
-
-		if self.inplace:
+		if self.inplace is True:
 			y = ResidualActivation.Function.apply(self.nonlinearity, y, *residual)
 			y = F.dropout(y, p = self.dropout, training = self.training)
 		else:
 			y = y + sum(residual)
 			if self.nonlinearity == 'relu':
-				y = relu_dropout(y, p = self.dropout, inplace = True, training = self.training) # F.dropout(F.relu(y, inplace = True), p = self.dropout, training = self.training)
+				y = relu_dropout(y, p = self.dropout, inplace = not (self.inplace is False), training = self.training) # F.dropout(F.relu(y, inplace = True), p = self.dropout, training = self.training)
 			elif self.nonlinearity and self.nonlinearity[0] in ['leaky_relu', 'hardtanh']:
-				y = F.dropout(getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = True), p = self.dropout, training = self.training)
+				y = F.dropout(getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = not (self.inplace is False)), p = self.dropout, training = self.training)
 		return y
 
 	class Function(torch.autograd.function.Function):
