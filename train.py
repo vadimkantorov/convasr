@@ -41,7 +41,6 @@ def traineval(args):
 	args.lang, args.model, args.num_input_features = checkpoint.get('lang', args.lang), checkpoint.get('model', args.model), checkpoint.get('num_input_features', args.num_input_features)
 	if not args.train_data_path and checkpoint and 'args' in checkpoint:
 		args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['sample_rate', 'window', 'window_size', 'window_stride'])
-	args.onnx = args.onnx if not args.train_data_path and not args.val_data_path else None
 
 	print('\n', 'Arguments:', args)
 	print('\n', 'Experiment id:', args.experiment_id, '\n')
@@ -349,7 +348,7 @@ if __name__ == '__main__':
 	parser.add_argument('--window-size', type = float, default = 0.02, help = 'for frontend, in seconds')
 	parser.add_argument('--window-stride', type = float, default = 0.01, help = 'for frontend, in seconds')
 	parser.add_argument('--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'], help = 'for frontend')
-	parser.add_argument('--onnx', default = 'data/model.onnx')
+	parser.add_argument('--onnx')
 	parser.add_argument('--dropout', type = float, default = 0.2)
 	parser.add_argument('--githttp')
 
