@@ -67,8 +67,8 @@ def traineval(args):
 		input_lengths_fraction_ = torch.ones(len(input_), device = args.device)
 		log_probs, output_lengths = map(model(input_, input_lengths_fraction_).get, ['log_probs', 'output_lengths'])
 
-		# TODO: figure out dict output and specify output names
-		torch.onnx.export(model, (input_, input_lengths_fraction_), args.onnx, opset_version = 11, do_constant_folding = True, input_names = ['x', 'xlen'])#, output_names = ['y'], dynamic_axes={'input' : {0 : 'batch_size'}, 'output' : {0 : 'batch_size'}})
+		# TODO: figure out dict output: https://discuss.pytorch.org/t/torch-onnx-export-of-a-model-returning-dict/62109
+		torch.onnx.export(model, (input_, input_lengths_fraction_), args.onnx, opset_version = 11, do_constant_folding = True, input_names = ['x', 'xlen'], output_names = ['log_probs', 'output_lengths'], dynamic_axes = dict(x = {0 : 'B'}, xlen = {0 : 'B'}, log_probs = {0 : 'B'}, output_lengths = {0 : 'B'}))
 
 		ort_session = onnxruntime.InferenceSession(args.onnx)
 		ort_inputs = dict(x = input_.cpu().numpy(), xlen = input_lengths_fraction_.cpu().numpy())
