@@ -53,5 +53,6 @@ RUN pip install awscli
 
 RUN pip install sentencepiece
 RUN pip install webrtcvad
+RUN pip install onnxruntime
 
 RUN  echo "    IdentityFile /root/.ssh/id_rsa" >> /etc/ssh/ssh_config

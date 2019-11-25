@@ -127,7 +127,8 @@ class JasperNet(nn.ModuleList):
 		#logits_char, logits_bpe = self[-1](x)
 
 		logits_char = self[-1](x)
-		log_probs_char = F.log_softmax(logits_char, dim = 1)
+		log_probs_char = logits_char
+		#log_probs_char = F.log_softmax(logits_char, dim = 1)
 		output_lengths_char = compute_output_lengths(log_probs_char, xlen)
 		
 		if y is not None and ylen is not None:
@@ -137,13 +138,13 @@ class JasperNet(nn.ModuleList):
 			#output_lengths_bpe = compute_output_lengths(log_probs_bpe, xlen)
 			#log_probs_bpe = F.log_softmax(logits_bpe, dim = 1)
 			
-			#loss = loss_char + loss_bpe
+			loss = dict(loss = loss_char + loss_bpe, loss_char = loss_char, loss_bpe = loss_bpe)
 		else:
-			loss = torch.tensor(0.)
+			loss = {}
 
 		#return dict(log_probs = [log_probs_char, log_probs_bpe], output_lengths = [output_lengths_char, output_lengths_bpe], loss = loss, loss_ = dict(char = loss_char, bpe = loss_bpe))
 		
-		return dict(log_probs = [log_probs_char], output_lengths = [output_lengths_char], loss = loss)
+		return dict(log_probs = [log_probs_char], output_lengths = [output_lengths_char], **loss)
 
 	def freeze(self, backbone = True, decoder0 = True):
 		for m in (list(self)[:-1] if backbone else []) + (list(self[-1])[:1] if decoder0 else []):
@@ -186,7 +187,8 @@ class JasperNetBig(JasperNet):
 
 class JasperNetBigInplace(JasperNet):
 	def __init__(self, *args, **kwargs):
-		super().__init__(*args, num_subblocks = 2, temporal_mask = False, inplace = True, nonlinearity = ('leaky_relu', 0.01), **kwargs)
+		inplace = kwargs.pop('inplace', True)
+		super().__init__(*args, num_subblocks = 2, temporal_mask = False, inplace = inplace, nonlinearity = ('leaky_relu', 0.01), **kwargs)
 
 class JasperNetBigInplaceLargeStride(JasperNet):
 	def __init__(self, *args, **kwargs):

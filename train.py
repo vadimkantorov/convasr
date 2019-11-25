@@ -14,6 +14,7 @@ import torch.utils.tensorboard
 import torch.nn as nn
 import torch.nn.functional as F
 import apex
+import onnxruntime
 import dataset
 import transforms
 import decoders
@@ -40,6 +41,8 @@ def traineval(args):
 	args.lang, args.model, args.num_input_features = checkpoint.get('lang', args.lang), checkpoint.get('model', args.model), checkpoint.get('num_input_features', args.num_input_features)
 	if not args.train_data_path and checkpoint and 'args' in checkpoint:
 		args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['sample_rate', 'window', 'window_size', 'window_stride'])
+	args.onnx = args.onnx if not args.train_data_path and not args.val_data_path else None
+
 	print('\n', 'Arguments:', args)
 	print('\n', 'Experiment id:', args.experiment_id, '\n')
 	if args.dry:
@@ -49,8 +52,31 @@ def traineval(args):
 		torch.backends.cudnn.benchmark = True
 
 	lang = importlib.import_module(args.lang)
-	labels = [dataset.Labels(lang, name = 'char')]# + ([dataset.Labels(lang, bpe = args.bpe, name = 'bpe')] if args.bpe else [])
-	
+	labels = [dataset.Labels(lang, name = 'char')] + [dataset.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
+	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, **(dict(inplace = False) if args.onnx else {}))
+
+	if args.onnx:
+		torch.set_grad_enabled(False)
+		model.to(args.device)
+		if args.fp16:
+			model = apex.amp.initialize(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+		model.eval()
+		model.fuse_conv_bn_eval()
+		#model = torch.nn.DataParallel(model)
+		input_ = torch.rand(16, args.num_input_features, 128, device = args.device)
+		input_lengths_fraction_ = torch.ones(len(input_), device = args.device)
+		log_probs, output_lengths = map(model(input_, input_lengths_fraction_).get, ['log_probs', 'output_lengths'])
+
+		# TODO: figure out dict output and specify output names
+		torch.onnx.export(model, (input_, input_lengths_fraction_), args.onnx, opset_version = 11, do_constant_folding = True, input_names = ['x', 'xlen'])#, output_names = ['y'], dynamic_axes={'input' : {0 : 'batch_size'}, 'output' : {0 : 'batch_size'}})
+
+		ort_session = onnxruntime.InferenceSession(args.onnx)
+		ort_inputs = dict(x = input_.cpu().numpy(), xlen = input_lengths_fraction_.cpu().numpy())
+		log_probs_, output_lengths_ = ort_session.run(None, ort_inputs)
+		assert torch.allclose(log_probs[0].cpu(), torch.from_numpy(log_probs_), rtol=1e-03, atol=1e-05)
+		assert torch.allclose(output_lengths[0].cpu(), torch.from_numpy(output_lengths_))
+		return
+
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
 	val_waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob)
 	val_feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob)
@@ -59,14 +85,13 @@ def traineval(args):
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
 	
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
-	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout)
 	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk), decoders.GreedyDecoder()]
 
 	def apply_model(data_loader):
 		for dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ in data_loader:
 			with torch.no_grad():
 				log_probs, output_lengths, loss = map(model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device)).get, ['log_probs', 'output_lengths', 'loss'])
-			entropy_char, entropy_bpe = list(map(models.entropy, log_probs, output_lengths))
+			entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, output_lengths))
 			decoded = [list(map(l.decode, d.decode(lp, o))) for l, d, lp, o in zip(labels, decoder, log_probs, output_lengths)]
 			log_probs = list(map(models.unpad, log_probs, output_lengths))
 			yield audio_path_, reference_, loss.cpu(), entropy_char.cpu(), decoded, log_probs
@@ -142,9 +167,11 @@ def traineval(args):
 		model.eval()
 		model.fuse_conv_bn_eval()
 		model = torch.nn.DataParallel(model)
-		return evaluate_model(val_data_loaders)
+		evaluate_model(val_data_loaders)
+		return
 
-	#model.freeze(backbone = True, decoder0 = True)
+	if args.freeze:
+		model.freeze(backbone = True, decoder0 = True)
 
 	train_waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob)
 	train_feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob)
@@ -313,16 +340,17 @@ if __name__ == '__main__':
 	parser.add_argument('--beam-alpha', type = float, default = 0.3, help = 'weight for language model (prob? log-prob?, TODO: check in ctcdecode)')
 	parser.add_argument('--beam-beta', type = float, default = 1.0, help = 'weight for decoded transcript length (TODO: check in ctcdecode)')
 	parser.add_argument('--lm', help = 'path to KenLM language model for ctcdecode')
-	parser.add_argument('--bpe', help = 'path to SentencePiece subword model')
+	parser.add_argument('--bpe', nargs = '*', help = 'path to SentencePiece subword model', default = [])
 	parser.add_argument('--timeout', type = float, default = 0, help = 'crash after specified timeout spent in DataLoader')
 	parser.add_argument('--max-duration', type = float, default = 10, help = 'in seconds; drop in DataLoader all utterances longer than this value')
 	parser.add_argument('--exphtml', default = '../stt_results')
-	parser.add_argument('--finetune', action = 'store_true', help = 'freeze earlier layers')
+	parser.add_argument('--freeze', action = 'store_true', help = 'freeze earlier layers')
 	parser.add_argument('--num-input-features', default = 64, help = 'num of mel-scale features produced by logfbank frontend')
 	parser.add_argument('--sample-rate', type = int, default = 8_000, help = 'for frontend')
 	parser.add_argument('--window-size', type = float, default = 0.02, help = 'for frontend, in seconds')
 	parser.add_argument('--window-stride', type = float, default = 0.01, help = 'for frontend, in seconds')
 	parser.add_argument('--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'], help = 'for frontend')
+	parser.add_argument('--onnx', default = 'data/model.onnx')
 	parser.add_argument('--dropout', type = float, default = 0.2)
 	parser.add_argument('--githttp')
 
