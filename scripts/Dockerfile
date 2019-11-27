@@ -1,3 +1,6 @@
+ARG CUDAVERSION
+ARG CUDAVERSIONPOINT
+
 FROM nvidia/cuda:10.1-cudnn7-devel-ubuntu18.04
 
 RUN apt-get update -y && apt-get install -y --no-install-recommends \
