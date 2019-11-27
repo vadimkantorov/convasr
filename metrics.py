@@ -369,8 +369,6 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 			errors = list(sorted(set(r_.replace('|', '') for r_, h_ in words() if h_.count('|') > len(h_) // 4)))
 		),
 		alignment = dict(ref = r, hyp = h),
-		input = dict(ref = ref0, hyp = hyp0),
-		cer = cer(hyp0, ref0)
 	)
 	return a
 

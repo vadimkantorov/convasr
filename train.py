@@ -94,14 +94,14 @@ def traineval(args):
 			log_probs = list(map(models.unpad, log_probs, output_lengths))
 			yield audio_path_, reference_, loss.cpu(), entropy_char.cpu(), decoded, log_probs
 
-	def evaluate_transcript(align, labels, transcript, reference, loss, entropy, audio_path):
+	def evaluate_transcript(analyze, labels, transcript, reference, loss, entropy, audio_path):
 		transcript, reference = min((metrics.cer(t, r), (t, r)) for r in reference.split(';') for t in (transcript if isinstance(transcript, list) else [transcript]))[1]
 		transcript, reference = map(labels.postprocess_transcript, [transcript, reference])
 		cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
 		transcript_phonetic, reference_phonetic = [labels.postprocess_transcript(s, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS) for s in [transcript, reference]]
 		per = metrics.cer(transcript_phonetic, reference_phonetic)
-		aligned = dict(zip(['_hyp_aligned', '_ref_aligned'], metrics.align(transcript, reference))) if align else {}
-		return dict(ref_phonetic = reference_phonetic, hyp_phonetic = transcript_phonetic, ref = reference, hyp = transcript, cer = cer, wer = wer, per = per, labels = labels.name, audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss, **aligned)
+		analyzed = metrics.analyze(reference, transcript, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS) if analyze else {}
+		return dict(ref_phonetic = reference_phonetic, hyp_phonetic = transcript_phonetic, ref = reference, hyp = transcript, cer = cer, wer = wer, per = per, labels = labels.name, audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss, **analyzed)
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None):
 		training = epoch is not None and iteration is not None
@@ -110,14 +110,14 @@ def traineval(args):
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
 			print(f'\n{val_dataset_name}@{iteration}')
 			ref_tra_, logits_ = [], []
-			align = args.align is None or val_dataset_name in args.align
+			analyze = args.analyze is not None or val_dataset_name in args.analyze
 			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits) in enumerate(apply_model(val_data_loader)):
 				logits_.append(logits if not training and args.logits else None)
-				stats = [[evaluate_transcript(align, l, t, *zipped[:4]) for l, t in zip(labels, zipped[4:])] for zipped in zip(references, loss.tolist(), entropy.tolist(), audio_paths, *decoded)]
+				stats = [[evaluate_transcript(analyze, l, t, *zipped[:4]) for l, t in zip(labels, zipped[4:])] for zipped in zip(references, loss.tolist(), entropy.tolist(), audio_paths, *decoded)]
 				for r in itertools.chain(*stats) if args.verbose else []:
 					print(f'{val_dataset_name}@{iteration}:', batch_idx , '/', len(val_data_loader), '|', args.experiment_id)
-					print('REF: {labels} "{_ref_aligned}"'.format(**r, **(dict(_ref_aligned = r['ref']) if not align else {})))
-					print('HYP: {labels} "{_hyp_aligned}"'.format(**r, **(dict(_hyp_aligned = r['hyp']) if not align else {})))
+					print('REF: {labels} "{ref_}"'.format(ref_ = r['alignment']['ref'] if anlyze else r['ref'], **r))
+					print('HYP: {labels} "{hyp_}"'.format(hyp_ = r['alignment']['hyp'] if anlyze else r['hyp'], **r))
 					print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
 				ref_tra_.extend(stats)
 
@@ -131,7 +131,7 @@ def traineval(args):
 				if training:
 					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + labels_name, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
 					tensorboard.flush()
-
+			
 			with open(transcripts_path, 'w') as f:
 				json.dump([r for t in sorted(ref_tra_, key = lambda t: t[0]['cer'], reverse = True) for r in t], f, ensure_ascii = False, indent = 2, sort_keys = True)
 			
@@ -331,7 +331,7 @@ if __name__ == '__main__':
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
 	parser.add_argument('--log-weight-distribution', action = 'store_true')
 	parser.add_argument('--verbose', action = 'store_true', help = 'print all transcripts to console, at validation')
-	parser.add_argument('--align', nargs = '*', default = None)
+	parser.add_argument('--analyze', nargs = '*', default = None)
 	parser.add_argument('--decoder', default = 'GreedyDecoder', choices = ['GreedyDecoder', 'BeamSearchDecoder'])
 	parser.add_argument('--decoder-topk', type = int, default = 1, help = 'compute CER for many decoding hypothesis (oracle)')
 	parser.add_argument('--beam-width', type = int, default = 5000)

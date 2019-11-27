@@ -100,21 +100,24 @@ for audio_path in audio_paths:
 	html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode()))
 	html.write(f'<h3 class="channel0 channel">hyp #0:<span></span></h3><h3 class="channel0 reference channel">ref #0:<span></span></h3><h3 class="channel1 channel">hyp #1:<span></span></h3><h3 class="channel1 reference channel">ref #1:<span></span></h3><hr/>')
 	html.write('<table style="width:100%"><thead><th>begin</th><th>end</th><th>transcript</th></tr></thead><tbody>')
-	html.write(''.join(f'<tr class="channel{c}"><td>{b:.02f}</td><td>{e:.02f}</td><td><a onclick="play({b:.02f}); return false;" href="#" target="_blank">{t}</a></td>' + (f'<td>{r}</td></tr><tr class="channel{c} reference"><td></td><td></td><td>{r}</td></tr>' if r else '') for b, e, t, r, c in sorted(segments)))
+	html.write(''.join(f'<tr class="channel{c}"><td>{b:.02f}</td><td>{e:.02f}</td><td><a onclick="play({b:.02f}, {e:.02f}); return false;" href="#" target="_blank">{t}</a></td>' + (f'<td>{r}</td></tr><tr class="channel{c} reference"><td></td><td></td><td>{r}</td></tr>' if r else '') for b, e, t, r, c in sorted(segments)))
 	html.write('</tbody></table>')
 	html.write('''<script>
 		const segments = SEGMENTS;
 
-		function play(time)
+		function play(begin, end)
 		{
 			const audio = document.querySelector('audio');
-			audio.currentTime = time;
+			audio.currentTime = begin;
+			audio.dataset.endTime = end;
 			audio.play();
 		};
 
 		document.querySelector('audio').ontimeupdate = (evt) =>
 		{
 			const time = evt.target.currentTime;
+			const endtime = evt.target.dataset.endTime;
+
 			const [spanhyp0, spanref0, spanhyp1, spanref1] = document.querySelectorAll('span');
 			const [begin0, end0, transcript0, reference0, channel0] = segments.find(([begin, end, transcript, reference, channel]) => channel == 0 && begin <= time && time <= end) || [null, null, '', '', 0];
 			const [begin1, end1, transcript1, reference1, channel1] = segments.find(([begin, end, transcript, reference, channel]) => channel == 1 && begin <= time && time <= end) || [null, null, '', '', 1];

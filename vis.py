@@ -23,13 +23,6 @@ import models
 
 labels = dataset.Labels(ru)
 
-def errors(transcripts):
-	ref_tra = list(sorted(json.load(open(transcripts)), key = lambda j: j['cer']))
-	utterances = list(map(lambda j: metrics.analyze(j['reference'], j['transcript'], phonetic_replace_groups = ru.PHONETIC_REPLACE_GROUPS), ref_tra))
-	full_form = {w.rstrip(ru.VOWELS) : w for utt in utterances for w in utt['words']['errors']}
-	words = collections.Counter(w.rstrip(ru.VOWELS) for utt in utterances for w in utt['words']['errors'])
-	json.dump(dict(utterances = utterances, words = {full_form[w] : cnt for w, cnt in words.items()}), open(transcripts + '.errors.json', 'w'), indent = 2, sort_keys = True, ensure_ascii = False)
-
 def tra(transcripts):
 	ref_tra = list(sorted(json.load(open(transcripts)), key = lambda j: j['cer']))
 	vis = open(transcripts + '.html' , 'w')
@@ -124,7 +117,7 @@ def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer3
 
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
-	for f in filter(lambda f: not f.endswith('.errors.json'), sorted(glob.glob(os.path.join(experiment_dir, f'transcripts_*.json')))):
+	for f in sorted(glob.glob(os.path.join(experiment_dir, f'transcripts_*.json'))):
 		eidx = f.find('epoch')
 		iteration = f[eidx:].replace('.json', '')
 		val_dataset_name = f[f.find('transcripts_') + len('transcripts_'):eidx]
@@ -371,10 +364,6 @@ if __name__ == '__main__':
 	cmd.add_argument('--json', dest = "json_", action = 'store_true')
 	cmd.add_argument('--bpe', action = 'store_true')
 	cmd.set_defaults(func = cer)
-
-	cmd = subparsers.add_parser('errors')
-	cmd.add_argument('transcripts', default = 'data/transcripts.json')
-	cmd.set_defaults(func = errors)
 
 	cmd = subparsers.add_parser('words')
 	cmd.add_argument('train_data_path')
