@@ -281,8 +281,24 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S'):
 	fmt = lambda o: '{:.04f}'.format(o) if isinstance(o, float) else str(o)
 
 	with open(html_path, 'w') as html:
-		html.write(f'<html><head><title>Resutls</title></head><body>\n')
-		html.write('<script>var toggle = className => Array.from(document.querySelectorAll(`.${className}`)).map(e => {e.hidden = !e.hidden});</script>')
+		html.write(f'<html><head><title>Resutls</title></head><body onload="onload()">\n')
+		html.write('''
+		<script>
+			var toggle = className => Array.from(document.querySelectorAll(`.${className}`)).map(e => {e.hidden = !e.hidden});
+
+			function onload()
+			{
+				const hash = window.location.hash.replace('#', '');
+				const parts = hash.length > 0 ? hash.split(';') : [];
+				
+				for(let i = 0; i < parts.length; i++)
+				{
+					const [prefix, selector] = parts[i].split('=');
+					console.log(prefix, selector);
+					//document.querySelectorAll('input[name*="char"]').map(el => {el.checked = true});
+				}
+			}
+		</script>''')
 		html.write('<table cellpadding="2px" cellspacing="0">')
 		html.write(f'<h1>Generated at {generated_time}</h1>')
 		html.write('<div>fields:' + ''.join(f'<input type="checkbox" name="{f}" value="field{hash(f)}" {"checked" if f == field else ""} onchange="toggle(event.target.value)""><label for="{f}">{f}</label>' for f in fields) + '</div>\n')
@@ -383,6 +399,7 @@ if __name__ == '__main__':
 	cmd.set_defaults(func = parseslicing)
 
 	cmd = subparsers.add_parser('exphtml')
+	cmd.add_argument('--root-dir', default = '../stt_results')
 	cmd.set_defaults(func = exphtml)
 
 	args = vars(parser.parse_args())

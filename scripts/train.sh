@@ -8,7 +8,7 @@ python3 train.py $@ \
   --optimizer NovoGrad \
   --train-data-path data/mixed_train.csv \
   --val-data-path data/mixed_val.csv data/clean_val.csv kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv \
-  --align kontur_calls_micro.csv \
+  --analyze kontur_calls_micro.csv \
   --val-iteration-interval 2500 \
   --epochs 5 #\
 

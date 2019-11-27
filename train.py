@@ -94,14 +94,14 @@ def traineval(args):
 			log_probs = list(map(models.unpad, log_probs, output_lengths))
 			yield audio_path_, reference_, loss.cpu(), entropy_char.cpu(), decoded, log_probs
 
-	def evaluate_transcript(analyze, labels, transcript, reference, loss, entropy, audio_path):
-		transcript, reference = min((metrics.cer(t, r), (t, r)) for r in reference.split(';') for t in (transcript if isinstance(transcript, list) else [transcript]))[1]
-		transcript, reference = map(labels.postprocess_transcript, [transcript, reference])
-		cer, wer = metrics.cer(transcript, reference), metrics.wer(transcript, reference) 
-		transcript_phonetic, reference_phonetic = [labels.postprocess_transcript(s, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS) for s in [transcript, reference]]
-		per = metrics.cer(transcript_phonetic, reference_phonetic)
-		analyzed = metrics.analyze(reference, transcript, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS) if analyze else {}
-		return dict(ref_phonetic = reference_phonetic, hyp_phonetic = transcript_phonetic, ref = reference, hyp = transcript, cer = cer, wer = wer, per = per, labels = labels.name, audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss, **analyzed)
+	def evaluate_transcript(analyze, labels, hyp, ref, loss, entropy, audio_path):
+		hyp, ref = min((metrics.cer(h, r), (h, r)) for r in ref.split(';') for h in (hyp if isinstance(hyp, list) else [hyp]))[1]
+		hyp, ref = map(labels.postprocess_transcript, [hyp, ref])
+		cer, wer = metrics.cer(hyp, ref), metrics.wer(hyp, ref) 
+		hyp_phonetic, ref_phonetic = [labels.postprocess_transcript(s, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS) for s in [hyp, ref]]
+		per = metrics.cer(hyp_phonetic, ref_phonetic)
+		analyzed = metrics.analyze(ref, hyp, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS) if analyze else {}
+		return dict(ref = ref, hyp = hyp, cer = cer, wer = wer, per = per, labels = labels.name, phonetic = dict(ref = ref_phonetic, hyp = hyp_phonetic), audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss, **analyzed)
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None):
 		training = epoch is not None and iteration is not None
