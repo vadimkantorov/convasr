@@ -116,8 +116,8 @@ def traineval(args):
 				stats = [[evaluate_transcript(analyze, l, t, *zipped[:4]) for l, t in zip(labels, zipped[4:])] for zipped in zip(references, loss.tolist(), entropy.tolist(), audio_paths, *decoded)]
 				for r in itertools.chain(*stats) if args.verbose else []:
 					print(f'{val_dataset_name}@{iteration}:', batch_idx , '/', len(val_data_loader), '|', args.experiment_id)
-					print('REF: {labels} "{ref_}"'.format(ref_ = r['alignment']['ref'] if anlyze else r['ref'], **r))
-					print('HYP: {labels} "{hyp_}"'.format(hyp_ = r['alignment']['hyp'] if anlyze else r['hyp'], **r))
+					print('REF: {labels} "{ref_}"'.format(ref_ = r['alignment']['ref'] if analyze else r['ref'], **r))
+					print('HYP: {labels} "{hyp_}"'.format(hyp_ = r['alignment']['hyp'] if analyze else r['hyp'], **r))
 					print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
 				ref_tra_.extend(stats)
 
