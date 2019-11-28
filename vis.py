@@ -291,19 +291,18 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S'):
 				const hash = window.location.hash.replace('#', '');
 				const parts = hash.length > 0 ? hash.split(';') : [];
 				
-				for(let i = 0; i < parts.length; i++)
-				{
-					const [prefix, selector] = parts[i].split('=');
-					console.log(prefix, selector);
-					//document.querySelectorAll('input[name*="char"]').map(el => {el.checked = true});
-				}
+				parts
+					.map(p => p.split('='))
+					.map(([prefix, selector]) => Array.from(document.querySelectorAll(`input[value^=${prefix}]:not([name*=${selector}])`)).map(checkbox => checkbox.click()));
 			}
 		</script>''')
-		html.write('<table cellpadding="2px" cellspacing="0">')
 		html.write(f'<h1>Generated at {generated_time}</h1>')
-		html.write('<div>fields:' + ''.join(f'<input type="checkbox" name="{f}" value="field{hash(f)}" {"checked" if f == field else ""} onchange="toggle(event.target.value)""><label for="{f}">{f}</label>' for f in fields) + '</div>\n')
-		html.write('<div>columns:' + ''.join(f'<input type="checkbox" name="{c}" value="col{hash(c)}" checked onchange="toggle(event.target.value)"><label for="{c}">{c}</label>' for c in columns) + '</div>\n')
-		html.write('<hr />')
+		html.write('<table width="100%">')
+		html.write('<tr><th style="text-align:left">fields</th><td><div id="searchbox"><form action="." style="margin:0px"><label><input id="filter_area" type="text" name="search" placeholder="Filter" onkeyup="return click_filter(event)"></label></form></div></td><td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{f}" value="field{hash(f)}" {"checked" if f == field else ""} onchange="toggle(event.target.value)" />{f}</label>' for f in fields) + '</td></tr>\n')
+		html.write('<tr><th style="text-align:left">columns</th><td><div id="searchbox"><form action="." style="margin:0px"><label><input id="filter_area" type="text" name="search" placeholder="Filter" onkeyup="return click_filter(event)"></label></form></div></td><td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{c}" value="col{hash(c)}" checked onchange="toggle(event.target.value)" />{c}</label>' for c in columns) + '</td></tr>\n')
+		html.write('<tr><th style="text-align:left">experiments</th><td><div id="searchbox"><form action="." style="margin:0px"><label><input id="filter_area" type="text" name="search" placeholder="Filter" onkeyup="return click_filter(event)"></label></form></div></td><!--<td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{c}" value="exp{hash(c)}" checked onchange="toggle(event.target.value)" />{c}</label>' for jsons, c in experiments) + '</td>--></tr>\n')
+		html.write('</table><hr/>')
+		html.write('<table cellpadding="2px" cellspacing="0">')
 		for jsons, experiment_id in experiments:
 			idx = set([0, len(jsons) - 1] + [i for i, j in enumerate(jsons) if 'iter' not in j['iteration']])
 
