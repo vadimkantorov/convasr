@@ -275,6 +275,32 @@ def relu_dropout(x, p = 0, inplace = False, training = False):
 	mask.logical_not_()
 	return x.masked_fill_(mask, 0).div_(p1m) if inplace else (x.masked_fill(mask, 0) / p1m)
 
+class LogFilterBank(nn.Module):
+	def __init__(self, out_channels, sample_rate, window_size, window_stride, window, dither = 1e-5, preemph = 0.97, eps = 1e-20, normalize_signal = True, normalize_features = True):
+		super().__init__()
+		self.dither = dither
+		self.preemph = preemph
+		self.eps = eps
+		self.normalize_features = normalize_features
+		self.normalize_signal = normalize_signal
+
+		self.win_length = int(window_size * sample_rate)
+		self.hop_length = int(window_stride * sample_rate)
+		self.nfft = 2 ** math.ceil(math.log2(self.win_length))
+		
+		self.register_buffer('window', getattr(torch, window)(self.win_length).float())
+		self.register_buffer('mel_basis', torch.from_numpy(librosa.filters.mel(sample_rate, nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2))).float())
+
+	def forward(self, signal):
+		signal = normalize_signal(signal) if self.normalize_signal else signal
+		signal = torch.cat([signal[..., :1], signal[..., 1:] - preemph * signal[..., :-1]], dim = -1) if self.preemph > 0 else signal
+		signal = signal + self.dither * torch.randn_like(signal) if self.dither > 0 else signal
+
+		power_spectrum = torch.stft(signal, self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window).pow(2).sum(dim = -1)
+
+		features = (self.mel_basis @ power_spectrum + self.eps).log()
+		return normalize_features(features) if self.normalize_features else features 
+
 def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, dither = 1e-5, preemph = 0.97, normalize = True, eps = 1e-20):
 	signal = normalize_signal(signal)
 	signal = torch.cat([signal[..., :1], signal[..., 1:] - preemph * signal[..., :-1]], dim = -1)
