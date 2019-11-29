@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import base64
 import argparse
@@ -67,16 +68,19 @@ for audio_path in audio_paths:
 			cutpoints.extend((b / sample_rate, e / sample_rate, channel) for b, e in chunks)
 			batch.extend((os.path.basename(os.path.dirname(audio_path)), audio_path, '', signal_[None, b:e], torch.IntTensor()) for b, e in chunks)
 
+	tic = time.time()
 	dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ = dataset.collate_fn(batch)
 	features = models.logfbank(input_.squeeze(1), sample_rate, window_size, window_stride, window, num_input_features)
-	log_probs, output_lengths = model(features.to(args.device, non_blocking = True), input_lengths_fraction_.to(args.device, non_blocking = True)
-	
+	log_probs, output_lengths = model(features.to(args.device, non_blocking = True), input_lengths_fraction_.to(args.device, non_blocking = True))
+	log_probs, output_lengths = log_probs[0], output_lengths[0]
 	decoded = decoder.decode(log_probs, output_lengths)
+	toc = time.time()
 
 	transcript = labels.postprocess_transcript(' '.join(map(labels.decode, decoded)))
-	print(args.checkpoint, os.path.basename(audio_path))
-	print('HYP:', transcript, '\n')
 	open(os.path.join(args.output_path, os.path.basename(audio_path) + '.txt'), 'w').write(transcript)
+	print(args.checkpoint, os.path.basename(audio_path))
+	print('HYP:', transcript)
+	print('Time: audio {audio:.02f} sec | voice {voice:.02f} sec | processing {processing:.02f} sec\n'.format(audio = signal.numel() / sample_rate, voice = sum(e - b for b, e, c in cutpoints), processing = toc - tic))
 	
 	def segment_transcript(b, e, idx, labels):
 		sec = lambda k: k / len(idx) * (e - b)

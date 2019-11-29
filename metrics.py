@@ -331,7 +331,7 @@ def align(hyp, ref):
 
 def analyze(ref, hyp, phonetic_replace_groups = []):
 	ref0, hyp0 = ref, hyp
-	ref, hyp = Needleman().align(list(ref), list(hyp))
+	#ref, hyp = Needleman().align(list(ref), list(hyp))
 	h, r = align(hyp, ref)
 
 	def words():
@@ -346,6 +346,12 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 	assert len(r) == len(h)
 	phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
 	a = dict(
+		spaces = dict(
+			delete = sum(1 if r[i] == ' ' and h[i] != ' ' else 0 for i in range(len(r))),
+			insert = sum(1 if h[i] == ' ' and r[i] != ' ' else 0 for i in range(len(r))),
+			total = sum(1 if r[i] == ' ' else 0 for i in range(len(r)))
+		),
+		alignment = dict(ref = r, hyp = h),
 		chars = dict(
 			ok = sum(1 if r[i] == h[i] else 0 for i in range(len(r))), 
 			replace = sum(1 if r[i] != '|' and r[i] != h[i] and h[i] != '|' else 0 for i in range(len(r))),
@@ -353,11 +359,6 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 			delete = sum(1 if r[i] != '|' and r[i] != h[i] and h[i] == '|' else 0 for i in range(len(r))),
 			insert = sum(1 if r[i] == '|' and h[i] != '|' else 0 for i in range(len(r))),
 			total = len(r)
-		),
-		spaces = dict(
-			delete = sum(1 if r[i] == ' ' and h[i] != ' ' else 0 for i in range(len(r))),
-			insert = sum(1 if h[i] == ' ' and r[i] != ' ' else 0 for i in range(len(r))),
-			total = sum(1 if r[i] == ' ' else 0 for i in range(len(r)))
 		),
 		words = dict(
 			missing_prefix = sum(1 if h_[0] in ' |' else 0 for r_, h_ in words()),
@@ -368,7 +369,6 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 			total = sum(1 if c == ' ' else 0 for c in ref) + 1,
 			errors = list(sorted(set(r_.replace('|', '') for r_, h_ in words() if h_.count('|') > len(h_) // 4)))
 		),
-		alignment = dict(ref = r, hyp = h),
 	)
 	return a
 

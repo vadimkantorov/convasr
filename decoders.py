@@ -1,10 +1,27 @@
 import torch
 
-class GreedyDecoder(object):
+class GreedyDecoder:
 	def decode(self, log_probs, output_lengths, K = 1):
-		return [l[:o] for l, o in zip(log_probs.argmax(dim = 1).cpu().tolist(), torch.as_tensor(output_lengths).tolist())]
+		return [l[:o] for o, l in zip(torch.as_tensor(output_lengths).tolist(), log_probs.argmax(dim = 1).tolist())]
 
-class BeamSearchDecoder(object):
+class GreedyNoBlankDecoder:
+	def decode(self, log_probs, output_lengths, K = 1):
+		def decode_(argmax_eps, argmax_eps_):
+			space_idx = log_probs.shape[1] - 2
+			space = True
+			res = []
+			for i, i_ in zip(argmax_eps, argmax_eps_):
+				j = i if space or i_ == space_idx else i_
+				res.append(j)
+				if j == space_idx:
+					space = True
+				elif j < space_idx:
+					space = False
+			return res
+
+		return [decode_(l[:o], l_[:o]) for o, l, l_ in zip(torch.as_tensor(output_lengths).tolist(), log_probs.argmax(dim = 1).tolist(), log_probs[:, :-1, :].argmax(dim = 1).tolist())]
+
+class BeamSearchDecoder:
 	def __init__(self, labels, lm_path, beam_width, beam_alpha = 0, beam_beta = 0, cutoff_top_n = 40, cutoff_prob = 1.0, num_workers = 1, topk = 1):
 		import ctcdecode
 		self.topk = topk

@@ -1,7 +1,8 @@
 python3 transcribe.py $@ \
-  --data-path data/2019.10.19_calls \
-  --output-path data/2019.10.19_calls_decoded \
+  --data-path data/kontur_fullrecs --output-path data/kontur_fullrecs_ \
   --checkpoint data/checkpoint_epoch02_iter0065000.pt 
+
+#  --data-path data/2019.10.19_calls --output-path data/2019.10.19_calls_ \
 
 #  --decoder BeamSearchDecoder --beam-width 5000 --lm chats_05_prune.binary  #charlm/chats_06_noprune_char.binary # #--lm data/ru_wiyalen_no_punkt.arpa.binary 
 #python3 transcribe.py \

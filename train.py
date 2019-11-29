@@ -83,7 +83,7 @@ def traineval(args):
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
 	
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
-	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
+	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.GreedyNoBlankDecoder() if args.decoder == 'GreedyNoBlankDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
 	def apply_model(data_loader):
 		for dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ in data_loader:
@@ -135,10 +135,10 @@ def traineval(args):
 			with open(transcripts_path, 'w') as f:
 				json.dump([r for t in sorted(ref_tra_, key = lambda t: t[0]['cer'], reverse = True) for r in t], f, ensure_ascii = False, indent = 2, sort_keys = True)
 			
-			#if args.logits:
-			#	logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
-			#	print('Logits:', logits_file_path)
-			#	torch.save(list(sorted([(r.update(dict(log_probs = l)) or r) for r, l in zip(ref_tra_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
+			if args.logits:
+				logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
+				print('Logits:', logits_file_path)
+				torch.save(list(sorted([(r.update(dict(log_probs = l[0])) or r) for r, l in zip(ref_tra_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
 		
 		if args.exphtml:
 			vis.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, git_http = args.githttp)
@@ -332,7 +332,7 @@ if __name__ == '__main__':
 	parser.add_argument('--log-weight-distribution', action = 'store_true')
 	parser.add_argument('--verbose', action = 'store_true', help = 'print all transcripts to console, at validation')
 	parser.add_argument('--analyze', nargs = '*', default = None)
-	parser.add_argument('--decoder', default = 'GreedyDecoder', choices = ['GreedyDecoder', 'BeamSearchDecoder'])
+	parser.add_argument('--decoder', default = 'GreedyDecoder', choices = ['GreedyDecoder', 'GreedyNoBlankDecoder', 'BeamSearchDecoder'])
 	parser.add_argument('--decoder-topk', type = int, default = 1, help = 'compute CER for many decoding hypothesis (oracle)')
 	parser.add_argument('--beam-width', type = int, default = 5000)
 	parser.add_argument('--beam-alpha', type = float, default = 0.3, help = 'weight for language model (prob? log-prob?, TODO: check in ctcdecode)')
