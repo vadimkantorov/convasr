@@ -1,15 +1,15 @@
 import Levenshtein
 
-def cer(transcript, reference):
-	cer_ref_len = len(reference.replace(' ', '')) or 1
-	return Levenshtein.distance(transcript.replace(' ', '').lower(), reference.replace(' ', '').lower()) / cer_ref_len if transcript != reference else 0
+def cer(hyp, ref):
+	cer_ref_len = len(ref.replace(' ', '')) or 1
+	return Levenshtein.distance(hyp.replace(' ', '').lower(), ref.replace(' ', '').lower()) / cer_ref_len if hyp != ref else 0
 
-def wer(transcript, reference):
+def wer(hyp, ref):
 	# build mapping of words to integers, Levenshtein package only accepts strings
-	b = set(transcript.split() + reference.split())
+	b = set(hyp.split() + ref.split())
 	word2char = dict(zip(b, range(len(b))))
-	wer_ref_len = len(reference.split()) or 1
-	return Levenshtein.distance(''.join([chr(word2char[w]) for w in transcript.split()]), ''.join([chr(word2char[w]) for w in reference.split()])) / wer_ref_len if transcript != reference else 0
+	wer_ref_len = len(ref.split()) or 1
+	return Levenshtein.distance(''.join([chr(word2char[w]) for w in hyp.split()]), ''.join([chr(word2char[w]) for w in ref.split()])) / wer_ref_len if hyp != ref else 0
 
 def unused_levenshtein(a, b):
 	"""Calculates the Levenshtein distance between a and b.
@@ -17,7 +17,7 @@ def unused_levenshtein(a, b):
 	"""
 	n, m = len(a), len(b)
 	if n > m:
-	# Make sure n <= m, to use O(min(n,m)) space
+		# Make sure n <= m, to use O(min(n,m)) space
 		a, b = b, a
 		n, m = m, n
 
@@ -367,7 +367,9 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 			delete = sum(1 if h_.count('|') > len(r_) // 2 else 0 for r_, h_ in words()),
 			replace = sum(1 if sum(1 if h_[i] not in ' |' and h_[i] != r_[i] else 0 for i in range(len(r_))) > len(r_) // 2 else 0 for r_, h_ in words()),
 			total = sum(1 if c == ' ' else 0 for c in ref) + 1,
-			errors = list(sorted(set(r_.replace('|', '') for r_, h_ in words() if h_.count('|') > len(h_) // 4)))
+			errors = list(sorted(set(r_.replace('|', '') for r_, h_ in words() if h_.count('|') > len(h_) // 4))),
+			cers = [cer(h_, r_) for r_, h_ in words()],
+			all = [dict(hyp = h_, ref = r_) for r_, h_ in words()]
 		),
 	)
 	return a

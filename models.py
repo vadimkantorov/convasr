@@ -119,7 +119,7 @@ class JasperNet(nn.ModuleList):
 		self.residual = residual
 		self.dict = dict
 
-	def forward(self, x, xlen, y = None, ylen = None):
+	def forward(self, x, xlen = None, y = None, ylen = None):
 		residual = []
 		for i, subblock in enumerate(list(self)[:-1]):
 			x = subblock(x, residual = residual if i < len(self) - 3 else [], lengths_fraction = xlen)
@@ -331,7 +331,7 @@ def margin(log_probs, dim = 1):
 	return torch.sub(*probs.topk(2, dim = dim).values)
 
 def compute_output_lengths(x, lengths_fraction):
-	return (lengths_fraction * x.shape[-1]).ceil().int()
+	return (lengths_fraction * x.shape[-1]).ceil().int() if lengths_fraction is not None else torch.full(x.shape[:1], x.shape[-1], dtype = torch.int)
 
 def compute_capacity(model):
 	return sum(map(torch.numel, model.parameters()))

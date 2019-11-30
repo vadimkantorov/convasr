@@ -28,15 +28,15 @@ parser.add_argument('--beam-beta', type = float, default = 1.0)
 parser.add_argument('--lm')
 parser.add_argument('--vad', type = int, choices = [0, 1, 2, 3], default = False, nargs = '?')
 args = parser.parse_args()
-
 args.output_path = args.output_path or args.data_path
 
 vad = webrtcvad.Vad()
 vad.set_mode(args.vad if isinstance(args.vad, int) else 3)
 
+torch.set_grad_enabled(False)
+
 checkpoint = torch.load(args.checkpoint, map_location = 'cpu')
 sample_rate, window_size, window_stride, window, num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
-
 labels = dataset.Labels(importlib.import_module(checkpoint['lang']), name = 'char')
 model = getattr(models, checkpoint['model'])(num_input_features = num_input_features, num_classes = [len(labels)], dict = lambda logits, output_lengths: (logits, output_lengths))
 model.load_state_dict(checkpoint['model_state_dict'])
@@ -46,7 +46,6 @@ model.fuse_conv_bn_eval()
 #model = torch.nn.DataParallel(model)
 
 decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
-torch.set_grad_enabled(False)
 
 os.makedirs(args.output_path, exist_ok = True)
 

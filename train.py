@@ -56,11 +56,9 @@ def traineval(args):
 
 	if args.onnx:
 		torch.set_grad_enabled(False)
-		model.to(args.device)
-		if args.fp16:
-			model = apex.amp.initialize(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 		model.eval()
 		model.fuse_conv_bn_eval()
+		model.to(args.device)
 		#model = torch.nn.DataParallel(model)
 		sample_batch_size, sample_time = 16, 128
 		input_, input_lengths_fraction_ = torch.rand(sample_batch_size, args.num_input_features, sample_time, device = args.device), torch.ones(sample_batch_size, device = args.device)
@@ -160,10 +158,10 @@ def traineval(args):
 	model.to(args.device)
 
 	if not args.train_data_path:
-		if args.fp16:
-			model = apex.amp.initialize(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 		model.eval()
 		model.fuse_conv_bn_eval()
+		if args.fp16:
+			model = apex.amp.initialize(model, opt_level = args.fp16)
 		model = torch.nn.DataParallel(model)
 		evaluate_model(val_data_loaders)
 		return
