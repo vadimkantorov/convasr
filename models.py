@@ -86,13 +86,11 @@ class JasperNet(nn.ModuleList):
 			separable = False, groups = 1, 
 			dropout = 0, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
 			temporal_mask = True, nonlinearity = 'relu', inplace = False,
-			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None
+			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict
 		):
 		dropout_prologue = dropout_prologue if dropout != 0 else 0
 		dropout_epilogue = dropout_epilogue if dropout != 0 else 0
 		dropouts = dropouts if dropout != 0 else [0] * len(dropouts)
-
-		frontend = [frontend] if frontend is not None else []
 
 		in_width_factor = 2
 		prologue = [ConvBN(kernel_size = kernel_size_prologue, num_channels = (num_input_features, in_width_factor * base_width), dropout = dropout_prologue, stride = stride1, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace)]
@@ -115,7 +113,7 @@ class JasperNet(nn.ModuleList):
 		decoder = [
 			Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
 		]
-		super().__init__(frontend + prologue + backbone + epilogue + decoder)
+		super().__init__(prologue + backbone + epilogue + decoder)
 		self.residual = residual
 		self.dict = dict
 
@@ -290,7 +288,7 @@ class LogFilterBank(nn.Module):
 		self.nfft = 2 ** math.ceil(math.log2(self.win_length))
 		
 		self.register_buffer('window', getattr(torch, window)(self.win_length).float())
-		self.register_buffer('mel_basis', torch.from_numpy(librosa.filters.mel(sample_rate, nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2))).float())
+		self.register_buffer('mel_basis', torch.from_numpy(librosa.filters.mel(sample_rate, self.nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2))).float())
 
 	def forward(self, signal):
 		signal = normalize_signal(signal) if self.normalize_signal else signal

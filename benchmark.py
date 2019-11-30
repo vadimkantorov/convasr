@@ -18,16 +18,16 @@ args = parser.parse_args()
 torch.set_grad_enabled(False)
 
 checkpoint = torch.load(args.checkpoint, map_location = 'cpu')
-window_stride, num_input_features = map(checkpoint['args'].get, ['window_stride', 'num_input_features'])
+sample_rate, window_size, window_stride, window, num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
 labels = dataset.Labels(importlib.import_module(checkpoint['lang']))
 model = getattr(models, checkpoint['model'])(num_input_features, [len(labels)])
 model.load_state_dict(checkpoint['model_state_dict'])
 model = model.to(args.device)
 model.eval()
 model.fuse_conv_bn_eval()
-
 if args.fp16:
 	model = apex.amp.initialize(model, opt_level = args.fp16)
+frontend = models.LogFilterBank(num_input_features, sample_rate, window_size, window_stride, window).to(args.device)
 
 tictoc = lambda: (torch.cuda.synchronize() if torch.cuda.is_available else False) or time.time()
 
