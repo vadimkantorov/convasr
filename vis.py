@@ -249,7 +249,7 @@ def parseslicing(slicing):
 	for audio_name, segments in by_audio_name.items():
 		json.dump(segments, open(os.path.join(os.path.dirname(slicing), 'source', audio_name + '.json'), 'w'), indent = 2, sort_keys = True)
 
-def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S'):
+def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repeat = 5, timeout = 5):
 	#TODO: group by experiment_id, group by iteration, columns x columns
 	json_dir = os.path.join(root_dir, 'json')
 	html_dir = os.path.join(root_dir, html_dir)
@@ -331,14 +331,19 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S'):
 			html.write('<tr><td>&nbsp;</td></tr>')
 		html.write('</table></body></html>')
 
-	try:
-		print('Committing updated vis at ', html_path)
-		subprocess.check_call(['git', 'pull'], cwd = root_dir)
-		subprocess.check_call(['git', 'add', '-A'], cwd = root_dir)
-		subprocess.check_call(['git', 'commit', '-a', '--allow-empty-message', '-m', ''], cwd = root_dir)
-		subprocess.check_call(['git', 'push'], cwd = root_dir)
-	except:
-		print(sys.exc_info())
+		try:
+			subprocess.check_call(['git', 'add', '-A'], cwd = root_dir)
+			subprocess.check_call(['git', 'commit', '-a', '--allow-empty-message', '-m', ''], cwd = root_dir)
+			for i in range(repeat):
+				try:
+					subprocess.check_call(['git', 'pull'], cwd = root_dir)
+					subprocess.check_call(['git', 'push'], cwd = root_dir)
+					break
+				except:
+					print(sys.exc_info())
+					time.sleep(timeout)
+		except:
+			print(sys.exc_info())
 
 def expjson(root_dir, experiment_id, epoch = None, iteration = None, columns = {}, meta = {}, name = None, git_revision = True, git_http = None):
 	if git_revision is True:
