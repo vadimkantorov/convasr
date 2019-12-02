@@ -9,7 +9,7 @@ import apex
 parser = argparse.ArgumentParser()
 parser.add_argument('--checkpoint')
 parser.add_argument('--device', default = 'cuda')
-parser.add_argument('--iterations', type = int, default = 16)
+parser.add_argument('--iterations', type = int, default = 128)
 parser.add_argument('--iterations-warmup', type = int, default = 16)
 parser.add_argument('--frontend', action = 'store_true')
 parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
@@ -41,7 +41,7 @@ model.fuse_conv_bn_eval()
 if args.fp16:
 	model = apex.amp.initialize(model, opt_level = args.fp16)
 
-tictoc = lambda: (torch.cuda.synchronize() if torch.cuda.is_available else False) or time.time()
+tictoc = lambda: (torch.cuda.is_available and torch.cuda.synchronize()) or time.time()
 
 batch = torch.rand(args.B, args.T * args.sample_rate, device = args.device) if args.frontend else torch.rand(args.B, args.num_input_features, int(args.T / args.window_stride), device = args.device) 
 
