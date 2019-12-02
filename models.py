@@ -79,23 +79,22 @@ class ConvBN(nn.Module):
 # Jasper 5x3: 5 blocks, each has 1 sub-blocks, each sub-block has 3 ConvBnRelu
 # Jasper 10x5: 5 blocks, each has 2 sub-blocks, each sub-block has 5 ConvBnRelu
 # residual = 'dense' | True | False
-class JasperNet(nn.ModuleList):
+class JasperNet(nn.Module):
 	def __init__(self, num_input_features, num_classes, repeat = 3, num_subblocks = 1, dilation = 1, residual = 'dense',
 			kernel_sizes = [11, 13, 17, 21, 25], kernel_size_prologue = 11, kernel_size_epilogue = 29, 
 			base_width = 128, out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
 			separable = False, groups = 1, 
 			dropout = 0, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
 			temporal_mask = True, nonlinearity = 'relu', inplace = False,
-			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict
+			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None
 		):
+		super().__init__()
 		dropout_prologue = dropout_prologue if dropout != 0 else 0
 		dropout_epilogue = dropout_epilogue if dropout != 0 else 0
 		dropouts = dropouts if dropout != 0 else [0] * len(dropouts)
 
 		in_width_factor = 2
-		prologue = [ConvBN(kernel_size = kernel_size_prologue, num_channels = (num_input_features, in_width_factor * base_width), dropout = dropout_prologue, stride = stride1, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace)]
-		
-		backbone = []
+		backbone = nn.ModuleList([ConvBN(kernel_size = kernel_size_prologue, num_channels = (num_input_features, in_width_factor * base_width), dropout = dropout_prologue, stride = stride1, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = False)])
 		num_channels_residual = []
 		for kernel_size, dropout, out_width_factor in zip(kernel_sizes, dropouts, out_width_factors):
 			for s in range(num_subblocks):
@@ -103,30 +102,30 @@ class JasperNet(nn.ModuleList):
 				#num_channels = (in_width_factor * base_wdith, out_width_factor * base_width) # seems they do this in https://github.com/NVIDIA/DeepLearningExamples/blob/21120850478d875e9f2286d13143f33f35cd0c74/PyTorch/SpeechRecognition/Jasper/configs/jasper10x5dr_nomask.toml
 				num_channels_residual.append(in_width_factor * base_width)
 				# use None in num_channels_residual
-				backbone.append(ConvBN(kernel_size = kernel_size, num_channels = num_channels, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace,))
+				backbone.append(ConvBN(kernel_size = kernel_size, num_channels = num_channels, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = True))
 			in_width_factor = out_width_factor
 
-		epilogue = [
-			ConvBN(kernel_size = kernel_size_epilogue, num_channels = (in_width_factor * base_width, out_width_factors_large[0] * base_width), dropout = dropout_epilogue, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
-			ConvBN(kernel_size = 1, num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
-		]
-		decoder = [
-			Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
-		]
-		super().__init__(prologue + backbone + epilogue + decoder)
+		backbone.extend([
+			ConvBN(kernel_size = kernel_size_epilogue, num_channels = (in_width_factor * base_width, out_width_factors_large[0] * base_width), dropout = dropout_epilogue, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = False),
+			ConvBN(kernel_size = 1, num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = False),
+		])
+		self.frontend = frontend if frontend is not None else nn.Identity()
+		self.backbone = backbone
+		self.decoder = Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
 		self.residual = residual
 		self.dict = dict
 
 	def forward(self, x, xlen = None, y = None, ylen = None):
+		x = self.frontend(x)
 		residual = []
-		for i, subblock in enumerate(list(self)[:-1]):
-			x = subblock(x, residual = residual if i < len(self) - 3 else [], lengths_fraction = xlen)
+		for i, subblock in enumerate(self.backbone):
+			x = subblock(x, residual = residual, lengths_fraction = xlen)
 			if self.residual != 'dense':
 				residual.clear()
 			if self.residual:
 				residual.append(x)
 
-		logits = self[-1](x)
+		logits = self.decoder(x)
 		output_lengths = [compute_output_lengths(l, xlen) for l in logits]
 		aux = {}
 
@@ -138,7 +137,7 @@ class JasperNet(nn.ModuleList):
 		return self.dict(logits = logits, output_lengths = output_lengths, **aux)
 
 	def freeze(self, backbone = True, decoder0 = True):
-		for m in (list(self)[:-1] if backbone else []) + (list(self[-1])[:1] if decoder0 else []):
+		for m in (list(self.backbone) if backbone else []) + (list(self.decoder)[:1] if decoder0 else []):
 			for module in filter(lambda module: isinstance(module, nn.modules.batchnorm._BatchNorm), m.modules()):
 				module.eval()
 				module.train = lambda training: None
@@ -146,9 +145,9 @@ class JasperNet(nn.ModuleList):
 			for p in m.parameters():
 				p.requires_grad = False
 
-	def fuse_conv_bn_eval(self):
-		for block in list(self)[:-1]:
-			block.fuse_conv_bn_eval()
+	def fuse_conv_bn_eval(self, K = -1):
+		for subblock in self.backbone[:K]:
+			subblock.fuse_conv_bn_eval()
 
 class Wav2Letter(JasperNet):
 	def __init__(self, num_input_features, num_classes, dropout = 0.2, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):
@@ -292,7 +291,7 @@ class LogFilterBank(nn.Module):
 
 	def forward(self, signal):
 		signal = normalize_signal(signal) if self.normalize_signal else signal
-		signal = torch.cat([signal[..., :1], signal[..., 1:] - preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
+		signal = torch.cat([signal[..., :1], signal[..., 1:] - self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
 		signal = signal + self.dither * torch.randn_like(signal) if self.dither > 0 else signal
 
 		assert self.stft_mode is None

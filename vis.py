@@ -300,12 +300,17 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 			{
 				console.log(event.target);
 			}
+
+			function filter_(event)
+			{
+				console.log(event);
+			}
 		</script>''')
 		html.write(f'<h1>Generated at {generated_time}</h1>')
 		html.write('<table width="100%">')
-		html.write('<tr><th style="text-align:left">fields</th><td><div id="searchbox"><form action="." style="margin:0px"><label style="white-space:nowrap"><input id="filter_area" type="text" name="search" placeholder="Filter" onkeyup="return filter(event)"><button>Filter</button></label></form></div></td><td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{f}" value="field{hash(f)}" {"checked" if f == field else ""} onchange="toggle(event.target.value)" />{f}</label>' for f in fields) + '</td></tr>\n')
-		html.write('<tr><th style="text-align:left">columns</th><td><div id="searchbox"><form action="." style="margin:0px"><label style="white-space:nowrap"><input id="filter_area" type="text" name="search" placeholder="Filter" onkeyup="return filter(event)"><button>Filter</button></label></form></div></td><td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{c}" value="col{hash(c)}" checked onchange="toggle(event.target.value)" />{c}</label>' for c in columns) + '</td></tr>\n')
-		html.write('<tr><th style="text-align:left">experiments</th><td><div id="searchbox"><form action="." style="margin:0px"><label style="white-space:nowrap"><input id="filter_area" type="text" name="search" placeholder="Filter" onkeyup="return filter(event)"><button>Filter</button></label></form></div></td><!--<td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{c}" value="exp{hash(c)}" checked onchange="toggle(event.target.value)" />{c}</label>' for jsons, c in experiments) + '</td>--></tr>\n')
+		html.write('<tr><th style="text-align:left">fields</th><td><div id="searchbox"><form action="." style="margin:0px"><label style="white-space:nowrap"><input id="filter_area" type="text" name="search" placeholder="Filter" onkeyup="return filter(event)"><button onclick="filter_(event)">Filter</button></label></form></div></td><td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{f}" value="field{hash(f)}" {"checked" if f == field else ""} onchange="toggle(event.target.value)" />{f}</label>' for f in fields) + '</td></tr>\n')
+		html.write('<tr><th style="text-align:left">columns</th><td><div id="searchbox"><form action="." style="margin:0px"><label style="white-space:nowrap"><input id="filter_area" type="text" name="search" placeholder="Filter" onkeyup="return filter(event)"><button onclick="filter_(event)">Filter</button></label></form></div></td><td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{c}" value="col{hash(c)}" checked onchange="toggle(event.target.value)" />{c}</label>' for c in columns) + '</td></tr>\n')
+		html.write('<tr><th style="text-align:left">experiments</th><td><div id="searchbox"><form action="." style="margin:0px"><label style="white-space:nowrap"><input id="filter_area" type="text" name="search" placeholder="Filter" onkeyup="return filter(event)"><button onclick="filter_(event)">Filter</button></label></form></div></td><!--<td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{c}" value="exp{hash(c)}" checked onchange="toggle(event.target.value)" />{c}</label>' for jsons, c in experiments) + '</td>--></tr>\n')
 		html.write('</table><hr/>')
 		html.write('<table cellpadding="2px" cellspacing="0">')
 		for jsons, experiment_id in experiments:
