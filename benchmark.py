@@ -5,6 +5,7 @@ import torch
 import models
 import dataset
 import apex
+import onnxruntime
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--checkpoint')
@@ -20,6 +21,7 @@ parser.add_argument('--window-stride', type = float, default = 0.01, help = 'for
 parser.add_argument('--lang', default = 'ru')
 parser.add_argument('--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'], help = 'for frontend')
 parser.add_argument('--model', default = 'JasperNetBigInplace')
+parser.add_argument('--onnx')
 parser.add_argument('-B', type = int, default = 128)
 parser.add_argument('-T', type = int, default = 10)
 args = parser.parse_args()
@@ -31,28 +33,36 @@ if checkpoint:
 	args.model, args.lang, args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['model', 'lang', 'sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
 
 labels = dataset.Labels(importlib.import_module(args.lang))
-frontend = models.LogFilterBank(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window)
-model = getattr(models, args.model)(args.num_input_features, [len(labels)], frontend = frontend if args.frontend else None)
-if checkpoint:
-	model.load_state_dict(checkpoint['model_state_dict'])
-model = model.to(args.device)
-model.eval()
-model.fuse_conv_bn_eval()
-if args.fp16:
-	model = apex.amp.initialize(model, opt_level = args.fp16)
+
+if args.onnx:
+	onnxrt_session = onnxruntime.InferenceSession(args.onnx)
+	model = lambda x: onnxrt_session.run(None, dict(x = x))
+	load_batch = lambda x: x.numpy()
+else:
+	frontend = models.LogFilterBank(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window)
+	model = getattr(models, args.model)(args.num_input_features, [len(labels)], frontend = frontend if args.frontend else None)
+	if checkpoint:
+		model.load_state_dict(checkpoint['model_state_dict'])
+	model = model.to(args.device)
+	model.eval()
+	model.fuse_conv_bn_eval()
+	if args.fp16:
+		model = apex.amp.initialize(model, opt_level = args.fp16)
+	load_batch = lambda x: x.to(args.device, non_blocking = True)
 
 tictoc = lambda: (torch.cuda.is_available and torch.cuda.synchronize()) or time.time()
 
-batch = torch.rand(args.B, args.T * args.sample_rate, device = args.device) if args.frontend else torch.rand(args.B, args.num_input_features, int(args.T / args.window_stride), device = args.device) 
+batch = torch.rand(args.B, args.T * args.sample_rate) if args.frontend else torch.rand(args.B, args.num_input_features, int(args.T / args.window_stride)) 
+batch = batch.pin_memory()
 
 for i in range(args.iterations_warmup):
-	model(batch)
+	model(load_batch(batch))
 
 times = torch.FloatTensor(args.iterations)
 for i in range(args.iterations):
 	tic = tictoc()
-	model(batch)
+	model(load_batch(batch))
 	times[i] = tictoc() - tic
 
 print(args)
-print('batch {} | stride {:.02f} sec | audio {:.02f} sec | mean time {:.02f} msec'.format('x'.join(map(str, batch.shape)), args.window_stride, args.B * args.T, float(times.mean()) * 1000))
+print('batch {} | stride {:.02f} sec | audio {:.02f} sec | load+proc {:.02f} msec'.format('x'.join(map(str, batch.shape)), args.window_stride, args.B * args.T, float(times.mean()) * 1000))

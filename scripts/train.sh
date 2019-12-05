@@ -1,7 +1,7 @@
 python3 train.py $@ \
   --githttp https://github.com/vadimkantorov/convasr/commit/%h \
   --verbose --lang ru \
-  --model JasperNetBigInplace \
+  --model JasperNetBig \
   --train-batch-size 80 --val-batch-size 64 \
   --scheduler MultiStepLR --decay-milestones 25000 75000 \
   --lr 1e-2 \

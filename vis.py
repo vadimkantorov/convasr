@@ -281,7 +281,16 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 	fmt = lambda o: '{:.04f}'.format(o) if isinstance(o, float) else str(o)
 
 	with open(html_path, 'w') as html:
-		html.write(f'<html><head><title>Resutls</title></head><body onload="onload()">\n')
+		html.write('<html>')
+		html.write('''
+			<head>
+				<title>Results @ {generated_time}</title>
+				<script src="https://cdn.jsdelivr.net/npm/vega@5.8.1"></script>
+				<script src="https://cdn.jsdelivr.net/npm/vega-lite@4.0.0-beta.12"></script>
+				<script src="https://cdn.jsdelivr.net/npm/vega-embed@6.1.0"></script>
+			</head>
+		''')
+		html.write('<body onload="onload()">')
 		html.write('''
 		<script>
 			var toggle = className => Array.from(document.querySelectorAll(`.${className}`)).map(e => {e.hidden = !e.hidden});
@@ -293,24 +302,41 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 				
 				parts
 					.map(p => p.split('='))
-					.map(([prefix, selector]) => Array.from(document.querySelectorAll(`input[value^=${prefix}]:not([name*=${selector}])`)).map(checkbox => checkbox.click()));
+					.map(([prefix, selector]) =>
+					{
+						if(selector)
+						{
+							Array.from(document.querySelectorAll(`input[value^=${prefix}]:not([name*=${selector}])`)).map(checkbox => checkbox.click());
+							document.getElementById(`filter_${prefix}`).value = selector;
+						}
+					});
 			}
 
 			function filter(event)
 			{
-				console.log(event.target);
+				if (event.keyCode === 13)
+				{
+					event.preventDefault();
+					event.target.nextSibling.click();
+				}
 			}
 
 			function filter_(event)
 			{
-				console.log(event);
+				const filter_field = document.getElementById('filter_field').value, filter_col = document.getElementById('filter_col').value, filter_exp = document.getElementById('filter_exp').value;
+				window.location.hash = `field=${filter_field};col=${filter_col};exp=${filter_exp} `.replace('field=;', '').replace('col=;', '').replace('exp= ', '').trimEnd();
+				
+				window.location.reload();
+				event.preventDefault();
+				return false;
 			}
 		</script>''')
 		html.write(f'<h1>Generated at {generated_time}</h1>')
 		html.write('<table width="100%">')
-		html.write('<tr><th style="text-align:left">fields</th><td><div id="searchbox"><form action="." style="margin:0px"><label style="white-space:nowrap"><input id="filter_area" type="text" name="search" placeholder="Filter" onkeyup="return filter(event)"><button onclick="filter_(event)">Filter</button></label></form></div></td><td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{f}" value="field{hash(f)}" {"checked" if f == field else ""} onchange="toggle(event.target.value)" />{f}</label>' for f in fields) + '</td></tr>\n')
-		html.write('<tr><th style="text-align:left">columns</th><td><div id="searchbox"><form action="." style="margin:0px"><label style="white-space:nowrap"><input id="filter_area" type="text" name="search" placeholder="Filter" onkeyup="return filter(event)"><button onclick="filter_(event)">Filter</button></label></form></div></td><td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{c}" value="col{hash(c)}" checked onchange="toggle(event.target.value)" />{c}</label>' for c in columns) + '</td></tr>\n')
-		html.write('<tr><th style="text-align:left">experiments</th><td><div id="searchbox"><form action="." style="margin:0px"><label style="white-space:nowrap"><input id="filter_area" type="text" name="search" placeholder="Filter" onkeyup="return filter(event)"><button onclick="filter_(event)">Filter</button></label></form></div></td><!--<td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{c}" value="exp{hash(c)}" checked onchange="toggle(event.target.value)" />{c}</label>' for jsons, c in experiments) + '</td>--></tr>\n')
+		html.write('<tr><th style="text-align:left">fields</th><td><div id="searchbox"><form action="." style="margin:0px"><label style="white-space:nowrap"><input id="filter_field" type="text" name="search" placeholder="Filter" onkeyup="return filter(event)"><button onclick="return filter_(event)">Filter</button></label></form></div></td><td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{f}" value="field{hash(f)}" {"checked" if f == field else ""} onchange="toggle(event.target.value)" />{f}</label>' for f in fields) + '</td></tr>\n')
+		html.write('<tr><th style="text-align:left">columns</th><td><div id="searchbox"><form action="." style="margin:0px"><label style="white-space:nowrap"><input id="filter_col" type="text" name="search" placeholder="Filter" onkeyup="return filter(event)"><button onclick="return filter_(event)">Filter</button></label></form></div></td><td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{c}" value="col{hash(c)}" checked onchange="toggle(event.target.value)" />{c}</label>' for c in columns) + '</td></tr>\n')
+		html.write('<tr><th style="text-align:left">experiments</th><td><div id="searchbox"><form action="." style="margin:0px"><label style="white-space:nowrap"><input id="filter_exp" type="text" name="search" placeholder="Filter" onkeyup="return filter(event)"><button onclick="return filter_(event)">Filter</button></label></form></div></td><!--<td>' + ''.join(f'<label style="white-space:nowrap"><input type="checkbox" name="{c}" value="exp{hash(c)}" checked onchange="toggle(event.target.value)" />{c}</label>' for jsons, c in experiments) + '</td>--></tr>\n')
+		html.write('<tr><th style="text-align:left">tags</th><td><div id="searchbox"><form action="." style="margin:0px"><label style="white-space:nowrap"><input id="filter_tag" type="text" name="search" placeholder="Filter" onkeyup="return filter(event)"><button onclick="return filter_(event)">Filter</button></label></form></div></td><!--<td></td>--></tr>\n')
 		html.write('</table><hr/>')
 		html.write('<table cellpadding="2px" cellspacing="0">')
 		for jsons, experiment_id in experiments:
@@ -328,7 +354,7 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 				meta = json.dumps(j['meta'], sort_keys = True, indent = 2, ensure_ascii = False) if j.get('meta') else None
 				html.write(f'<tr class="{hidden} {experiment_id}" {hidden}>')
 				html.write(f'''<td onclick="toggle('{meta_key}')" title="{generated_time}" style="border-right: 1px solid black">{j["iteration"]}</td>''')
-				html.write(''.join(f'<td class="col{hash(c)}">' + ''.join(f'<span style="margin-right:3px" {"hidden" if f != field else ""} class="field{hash(f)}">{fmt(j["columns"].get(c, {}).get(f, ""))}</span>' for f in fields) + '</td>' for c in columns))
+				html.write(''.join(f'<td class="col{hash(c)}">' + ''.join(f'<span title="{f}" style="margin-right:3px" {"hidden" if f != field else ""} class="field{hash(f)}">{fmt(j["columns"].get(c, {}).get(f, ""))}</span>' for f in fields) + '</td>' for c in columns))
 				html.write('</tr>\n')
 				html.write('<tr hidden class="{meta_key}" style="background-color:lightgray"><td><a href="{git_http}">@{git_revision}</a></td><td colspan="100">{git_comment}</td></tr>\n'.format(meta_key = meta_key, **j))
 				html.write(f'<tr hidden class="{meta_key}" style="background-color:lightgray"><td colspan="100"><pre>{meta}</pre></td></tr>\n' if meta else '')
@@ -359,7 +385,16 @@ def expjson(root_dir, experiment_id, epoch = None, iteration = None, columns = {
 	else:
 		git_revision, git_comment = ''
 
-	obj = dict(experiment_id = experiment_id, iteration = f'epoch{epoch:02d}_iter{iteration:07d}' if epoch is not None and iteration is not None else 'test', columns = columns, time = int(time.time()), meta = meta, git_revision = git_revision, git_comment = git_comment, git_http = git_http.replace('%h', git_revision) if git_http else None)
+	obj = dict(
+		experiment_id = experiment_id, 
+		iteration = f'epoch{epoch:02d}_iter{iteration:07d}' if epoch is not None and iteration is not None else 'test', 
+		columns = columns, 
+		time = int(time.time()), 
+		meta = meta, 
+		git_revision = git_revision, 
+		git_comment = git_comment, 
+		git_http = git_http.replace('%h', git_revision) if git_http else None
+	)
 	
 	json_dir = os.path.join(root_dir, 'json')
 	os.makedirs(json_dir, exist_ok = True)

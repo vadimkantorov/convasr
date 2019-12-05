@@ -130,7 +130,7 @@ class JasperNet(nn.Module):
 		aux = {}
 
 		if y is not None and ylen is not None:
-			log_probs = [F.log_softmax(l, dim = 1) for l in logits]
+			log_probs = [F.log_softmax(l, dim = 1).float() for l in logits]
 			loss = [F.ctc_loss(l.permute(2, 0, 1), y[:, i], output_lengths[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') / ylen[:, 0] for i, l in enumerate(log_probs)]
 			aux = dict(loss = sum(loss), log_probs = log_probs)
 

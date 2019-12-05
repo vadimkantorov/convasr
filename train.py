@@ -52,7 +52,7 @@ def traineval(args):
 
 	lang = importlib.import_module(args.lang)
 	labels = [dataset.Labels(lang, name = 'char')] + [dataset.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
-	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, **(dict(inplace = False, dict = lambda logits, output_lengths: (logits, output_lengths)) if args.onnx else {}))
+	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, **(dict(inplace = False, dict = lambda logits, output_lengths: (logits,)) if args.onnx else {}))
 
 	if args.onnx:
 		torch.set_grad_enabled(False)
@@ -64,13 +64,12 @@ def traineval(args):
 		input_, input_lengths_fraction_ = torch.rand(sample_batch_size, args.num_input_features, sample_time, device = args.device), torch.ones(sample_batch_size, device = args.device)
 		logits, output_lengths = model(input_, input_lengths_fraction_)
 
-		torch.onnx.export(model, (input_, input_lengths_fraction_), args.onnx, opset_version = 11, do_constant_folding = True, input_names = ['x', 'xlen'], output_names = ['logits', 'output_lengths'], dynamic_axes = dict(x = {0 : 'B'}, xlen = {0 : 'B'}, logits = {0 : 'B'}, output_lengths = {0 : 'B'}))
+		torch.onnx.export(model, (input_, ), args.onnx, opset_version = 11, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B'}, xlen = {0 : 'B'}, logits = {0 : 'B'}))
 
-		ort_session = onnxruntime.InferenceSession(args.onnx)
-		ort_inputs = dict(x = input_.cpu().numpy(), xlen = input_lengths_fraction_.cpu().numpy())
-		logits_, output_lengths_ = ort_session.run(None, ort_inputs)
+		onnxrt_session = onnxruntime.InferenceSession(args.onnx)
+		onnxrt_inputs = dict(x = input_.cpu().numpy())
+		logits_, = onnxrt_session.run(None, ort_inputs)
 		assert torch.allclose(logits[0].cpu(), torch.from_numpy(logits_), rtol = 1e-03, atol = 1e-05)
-		assert torch.allclose(output_lengths[0].cpu(), torch.from_numpy(output_lengths_))
 		return
 
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
@@ -108,7 +107,7 @@ def traineval(args):
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
 			print(f'\n{val_dataset_name}@{iteration}')
 			ref_tra_, logits_ = [], []
-			analyze = args.analyze is not None or val_dataset_name in args.analyze
+			analyze = args.analyze == [] or (args.analyze is not None and val_dataset_name in args.analyze)
 			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits) in enumerate(apply_model(val_data_loader)):
 				logits_.append(logits if not training and args.logits else None)
 				stats = [[evaluate_transcript(analyze, l, t, *zipped[:4]) for l, t in zip(labels, zipped[4:])] for zipped in zip(references, loss.tolist(), entropy.tolist(), audio_paths, *decoded)]
