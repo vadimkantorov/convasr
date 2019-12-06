@@ -22,6 +22,7 @@ parser.add_argument('--lang', default = 'ru')
 parser.add_argument('--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'], help = 'for frontend')
 parser.add_argument('--model', default = 'JasperNetBigInplace')
 parser.add_argument('--onnx')
+parser.add_argument('--stft-mode', choices = ['conv', ''], default = '')
 parser.add_argument('-B', type = int, default = 128)
 parser.add_argument('-T', type = int, default = 10)
 args = parser.parse_args()
@@ -39,8 +40,8 @@ if args.onnx:
 	model = lambda x: onnxrt_session.run(None, dict(x = x))
 	load_batch = lambda x: x.numpy()
 else:
-	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window)
-	model = getattr(models, args.model)(args.num_input_features, [len(labels)], frontend = frontend if args.frontend else None)
+	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, stft_mode = args.stft_mode) if args.frontend else None
+	model = getattr(models, args.model)(args.num_input_features, [len(labels)], frontend = frontend)
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'])
 	model = model.to(args.device)

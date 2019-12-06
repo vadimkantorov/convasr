@@ -296,7 +296,7 @@ class AugmentingFrontend(nn.Module):
 		return features
 
 class LogFilterBankFrontend(nn.Module):
-	def __init__(self, out_channels, sample_rate, window_size, window_stride, window, dither = 1e-5, preemphasis = 0.97, eps = 1e-20, normalize_signal = True, normalize_features = True, stft_mode = None):
+	def __init__(self, out_channels, sample_rate, window_size, window_stride, window, dither = 1e-5, preemphasis = 0.97, eps = 1e-20, normalize_signal = True, normalize_features = True, stft_mode = None, window_periodic = True):
 		super().__init__()
 		self.stft_mode = stft_mode
 		self.dither = dither
@@ -310,29 +310,26 @@ class LogFilterBankFrontend(nn.Module):
 		self.hop_length = int(window_stride * sample_rate)
 		self.nfft = 2 ** math.ceil(math.log2(self.win_length))
 		
-		self.register_buffer('window', getattr(torch, window)(self.win_length).float())
+		self.register_buffer('window', getattr(torch, window)(self.win_length, periodic = window_periodic).float())
 		self.register_buffer('mel_basis', torch.from_numpy(librosa.filters.mel(sample_rate, self.nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2))).float())
 	
-		if stft_mode is not None:
-			import numpy as np
-			fourier_basis = np.fft.fft(np.eye(self.nfft))
-			cutoff = self.nfft // 2 + 1
-			fourier_basis = torch.as_tensor(np.vstack([np.real(fourier_basis[:cutoff, :]), np.imag(fourier_basis[:cutoff, :])]))
-			self.register_buffer('forward_basis', fourier_basis[:, None, :])
+		if stft_mode:
+			self.freq_cutoff = self.nfft // 2 + 1
+			fourier_basis = torch.rfft(torch.eye(self.nfft), signal_ndim = 1, onesided = False)
+			forward_basis = fourier_basis[:self.freq_cutoff].permute(2, 0, 1).reshape(-1, 1, fourier_basis.shape[1])
+			forward_basis = forward_basis * torch.as_tensor(librosa.util.pad_center(self.window, self.nfft)).float()
+			self.register_buffer('forward_basis', forward_basis)
 
 	def stft_magnitude_squared(self, signal):
-		if self.stft_mode is not None:
-			signal = signal.unsqueeze(1)
-			signal = F.pad(signal.unsqueeze(1), (int(self.nfft / 2), int(self.nfft / 2), 0, 0), mode='reflect')
-			signal = signal.squeeze(1)
+		if self.stft_mode:
+			signal = F.pad(signal.unsqueeze(1).unsqueeze(1), (self.nfft // 2, self.nfft // 2, 0, 0), mode = 'reflect').squeeze(1)
 			forward_transform = F.conv1d(signal, self.forward_basis, stride = self.hop_length)
-			cutoff = self.nfft // 2 + 1
 			forward_transform.pow_(2)
-			real_squared = forward_transform[:, :cutoff, :]
-			imag_squared = forward_transform[:, cutoff:, :]
+			real_squared = forward_transform[:, :self.freq_cutoff, :]
+			imag_squared = forward_transform[:, self.freq_cutoff:, :]
 			return real_squared + imag_squared
 		else:
-			return torch.stft(signal, self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window).pow(2).sum(dim = -1)
+			return torch.stft(signal, self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = True, pad_mode = 'reflect').pow(2).sum(dim = -1)
 
 	def forward(self, signal):
 		signal = normalize_signal(signal) if self.normalize_signal else signal
