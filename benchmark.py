@@ -39,7 +39,7 @@ if args.onnx:
 	model = lambda x: onnxrt_session.run(None, dict(x = x))
 	load_batch = lambda x: x.numpy()
 else:
-	frontend = models.LogFilterBank(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window)
+	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window)
 	model = getattr(models, args.model)(args.num_input_features, [len(labels)], frontend = frontend if args.frontend else None)
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'])

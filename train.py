@@ -52,7 +52,8 @@ def traineval(args):
 
 	lang = importlib.import_module(args.lang)
 	labels = [dataset.Labels(lang, name = 'char')] + [dataset.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
-	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, **(dict(inplace = False, dict = lambda logits, output_lengths: (logits,)) if args.onnx else {}))
+	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window)
+	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, **(dict(frontend = frontend, inplace = False, dict = lambda logits, output_lengths: (logits,)) if args.onnx else {}))
 
 	if args.onnx:
 		torch.set_grad_enabled(False)
@@ -61,8 +62,8 @@ def traineval(args):
 		model.to(args.device)
 		#model = torch.nn.DataParallel(model)
 		sample_batch_size, sample_time = 16, 128
-		input_, input_lengths_fraction_ = torch.rand(sample_batch_size, args.num_input_features, sample_time, device = args.device), torch.ones(sample_batch_size, device = args.device)
-		logits, output_lengths = model(input_, input_lengths_fraction_)
+		input_ = torch.rand(sample_batch_size, args.num_input_features, sample_time, device = args.device)
+		logits, = model(input_)
 
 		torch.onnx.export(model, (input_, ), args.onnx, opset_version = 11, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B'}, xlen = {0 : 'B'}, logits = {0 : 'B'}))
 

@@ -136,12 +136,12 @@ class JasperNet(nn.Module):
 
 		return self.dict(logits = logits, output_lengths = output_lengths, **aux)
 
-	def freeze(self, backbone = True, decoder0 = True):
-		for m in (list(self.backbone) if backbone else []) + (list(self.decoder)[:1] if decoder0 else []):
+	def freeze(self, K = -1, backbone = True, decoder0 = True):
+		for m in (list(self.backbone[:K]) if backbone else []) + (list(self.decoder)[:1] if decoder0 else []):
 			for module in filter(lambda module: isinstance(module, nn.modules.batchnorm._BatchNorm), m.modules()):
 				module.eval()
 				module.train = lambda training: None
-
+				# use track_running_stats instead
 			for p in m.parameters():
 				p.requires_grad = False
 
@@ -272,7 +272,30 @@ def relu_dropout(x, p = 0, inplace = False, training = False):
 	mask.logical_not_()
 	return x.masked_fill_(mask, 0).div_(p1m) if inplace else (x.masked_fill(mask, 0) / p1m)
 
-class LogFilterBank(nn.Module):
+class AugmentingFrontend(nn.Module):
+	def __init__(self, frontend, feature_transform = None, waveform_transform = None, waveform_transform_debug_dir = None):
+		super().__init__()
+		self.frontend = frontend
+		self.feature_transform = feature_transform
+		self.waveform_transform = waveform_transform
+		self.waveform_transform_debug_dir = waveform_transform_debug_dir
+	
+	def forward(self, signal, audio_path = None, dataset_name = None, **kwargs):
+		if self.waveform_transform is not None:
+			signal = self.waveform_transform(signal, frontend.sample_rate, dataset_name = dataset_name)
+		
+		if self.waveform_transform_debug_dir:
+			# int16 or float?
+			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), frontend.sample_rate, signal.numpy())
+
+		features = self.frontend(signal)
+
+		if self.feature_transform is not None:
+			features = self.feature_transform(features, frontend.sample_rate, dataset_name = dataset_name)
+
+		return features
+
+class LogFilterBankFrontend(nn.Module):
 	def __init__(self, out_channels, sample_rate, window_size, window_stride, window, dither = 1e-5, preemphasis = 0.97, eps = 1e-20, normalize_signal = True, normalize_features = True, stft_mode = None):
 		super().__init__()
 		self.stft_mode = stft_mode
@@ -281,6 +304,7 @@ class LogFilterBank(nn.Module):
 		self.eps = eps
 		self.normalize_features = normalize_features
 		self.normalize_signal = normalize_signal
+		self.sample_rate = sample_rate
 
 		self.win_length = int(window_size * sample_rate)
 		self.hop_length = int(window_stride * sample_rate)
@@ -288,15 +312,33 @@ class LogFilterBank(nn.Module):
 		
 		self.register_buffer('window', getattr(torch, window)(self.win_length).float())
 		self.register_buffer('mel_basis', torch.from_numpy(librosa.filters.mel(sample_rate, self.nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2))).float())
+	
+		if stft_mode is not None:
+			import numpy as np
+			fourier_basis = np.fft.fft(np.eye(self.nfft))
+			cutoff = self.nfft // 2 + 1
+			fourier_basis = torch.as_tensor(np.vstack([np.real(fourier_basis[:cutoff, :]), np.imag(fourier_basis[:cutoff, :])]))
+			self.register_buffer('forward_basis', fourier_basis[:, None, :])
+
+	def stft_magnitude_squared(self, signal):
+		if self.stft_mode is not None:
+			signal = signal.unsqueeze(1)
+			signal = F.pad(signal.unsqueeze(1), (int(self.nfft / 2), int(self.nfft / 2), 0, 0), mode='reflect')
+			signal = signal.squeeze(1)
+			forward_transform = F.conv1d(signal, self.forward_basis, stride = self.hop_length)
+			cutoff = self.nfft // 2 + 1
+			forward_transform.pow_(2)
+			real_squared = forward_transform[:, :cutoff, :]
+			imag_squared = forward_transform[:, cutoff:, :]
+			return real_squared + imag_squared
+		else:
+			return torch.stft(signal, self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window).pow(2).sum(dim = -1)
 
 	def forward(self, signal):
 		signal = normalize_signal(signal) if self.normalize_signal else signal
 		signal = torch.cat([signal[..., :1], signal[..., 1:] - self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
 		signal = signal + self.dither * torch.randn_like(signal) if self.dither > 0 else signal
-
-		assert self.stft_mode is None
-		power_spectrum = torch.stft(signal, self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window).pow(2).sum(dim = -1)
-
+		power_spectrum = self.stft_magnitude_squared(signal)
 		features = (self.mel_basis @ power_spectrum + self.eps).log()
 		return normalize_features(features) if self.normalize_features else features 
 

@@ -282,13 +282,14 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 
 	with open(html_path, 'w') as html:
 		html.write('<html>')
-		html.write('''
-			<head>
-				<title>Results @ {generated_time}</title>
-				<script src="https://cdn.jsdelivr.net/npm/vega@5.8.1"></script>
-				<script src="https://cdn.jsdelivr.net/npm/vega-lite@4.0.0-beta.12"></script>
-				<script src="https://cdn.jsdelivr.net/npm/vega-embed@6.1.0"></script>
-			</head>
+		html.write(f'''
+		<head>
+			<title>Results @ {generated_time}</title>
+			<meta http-equiv="refresh" content="600" />
+			<script src="https://cdn.jsdelivr.net/npm/vega@5.8.1"></script>
+			<script src="https://cdn.jsdelivr.net/npm/vega-lite@4.0.0-beta.12"></script>
+			<script src="https://cdn.jsdelivr.net/npm/vega-embed@6.1.0"></script>
+		</head>
 		''')
 		html.write('<body onload="onload()">')
 		html.write('''
