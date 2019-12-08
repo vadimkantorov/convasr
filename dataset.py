@@ -39,12 +39,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				index -= len(ids)
 
 		signal, sample_rate = (audio_path, self.sample_rate) if isinstance(self.waveform_transform, transforms.SoxAug) else read_wav(audio_path, sample_rate = self.sample_rate)
+		
 		if self.waveform_transform is not None:
 			signal, sample_rate = self.waveform_transform(signal, self.sample_rate, dataset_name = dataset_name)
-		
 		if self.waveform_transform_debug_dir:
 			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path)), self.sample_rate, signal.numpy())
-
 		features = models.logfbank(signal, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, normalize = self.normalize_features)
 		if self.feature_transform is not None:
 			features, sample_rate = self.feature_transform(features, self.sample_rate, dataset_name = dataset_name)

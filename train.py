@@ -65,7 +65,7 @@ def traineval(args):
 		input_ = torch.rand(sample_batch_size, args.num_input_features, sample_time, device = args.device)
 		logits, = model(input_)
 
-		torch.onnx.export(model, (input_, ), args.onnx, opset_version = 11, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B'}, xlen = {0 : 'B'}, logits = {0 : 'B'}))
+		torch.onnx.export(model, (input_, ), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B'}, xlen = {0 : 'B'}, logits = {0 : 'B'}))
 
 		onnxrt_session = onnxruntime.InferenceSession(args.onnx)
 		onnxrt_inputs = dict(x = input_.cpu().numpy())
@@ -119,9 +119,11 @@ def traineval(args):
 					print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
 				ref_tra_.extend(stats)
 
+			print(metrics.aggregate(itertools.chain(*ref_tra_)))
+
 			transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)) if training else args.val_transcripts_format.format(val_dataset_name = val_dataset_name, decoder = args.decoder)
 			for r_ in zip(*ref_tra_):
-				cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([r[k] for r in r_ if not math.isinf(r[k]) and not math.isnan(r[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
+				cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([r[k] for r in r_ if not math.isinf(r[k]) and not math.isnan(r[k])]).mean()) for k in ['cer_pseudo', 'wer', 'loss', 'entropy']]
 				labels_name = r_[0]['labels']
 				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} | Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}\n')
 				
@@ -138,14 +140,16 @@ def traineval(args):
 				print('Logits:', logits_file_path)
 				torch.save(list(sorted([(r.update(dict(log_probs = l[0])) or r) for r, l in zip(ref_tra_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
 		
+		checkpoint_path = os.path.join(args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)) if training and not args.checkpoint_skip else None
 		if args.exphtml:
+			columns['checkpoint_path'] = checkpoint_path
 			vis.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, git_http = args.githttp)
 			vis.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
 			amp_state_dict = None # amp.state_dict()
 			optimizer_state_dict = None # optimizer.state_dict()
-			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, amp_state_dict = amp_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), os.path.join(args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)))
+			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, amp_state_dict = amp_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), checkpoint_path)
 
 		model.train()
 		torch.cuda.empty_cache()
@@ -347,6 +351,7 @@ if __name__ == '__main__':
 	parser.add_argument('--window-stride', type = float, default = 0.01, help = 'for frontend, in seconds')
 	parser.add_argument('--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'], help = 'for frontend')
 	parser.add_argument('--onnx')
+	parser.add_argument('--onnx-opset', type = int, default = 10, choices = [9, 10, 11])
 	parser.add_argument('--dropout', type = float, default = 0.2)
 	parser.add_argument('--githttp')
 

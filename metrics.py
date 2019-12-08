@@ -1,3 +1,4 @@
+import collections
 import Levenshtein
 
 def cer(hyp, ref):
@@ -330,49 +331,72 @@ def align(hyp, ref):
 	return h, r
 
 def analyze(ref, hyp, phonetic_replace_groups = []):
-	ref0, hyp0 = ref, hyp
-	#ref, hyp = Needleman().align(list(ref), list(hyp))
 	h, r = align(hyp, ref)
+
+	h, r = list(h), list(r)
+	for i in range(len(r)):
+		if r[i] != '|':
+			break
+		if h[i] == ' ':
+			r[i] = ' '
+	for i in reversed(range(len(r))):
+		if r[i] != '|':
+			break
+		if h[i] == ' ':
+			r[i] = ' '
+	h, r = ''.join(h), ''.join(r)
 
 	def words():
 		k = None
 		for i in range(1 + len(r)):
 			if i == len(r) or r[i] == ' ':
 				yield r[k : i], h[k : i]
-				k = None
-			elif r[i] != '|' and r[i] != ' ' and k is None:
-				k = i
+				k = i + 1 #None
+			#elif r[i] != '|' and r[i] != ' ' and k is None:
+			#	k = i
 
 	assert len(r) == len(h)
 	phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
+	hyp_pseudo, ref_pseudo = ' '.join((r_ if h_.count('|') < 0.5 * len(r_) and sum(ch != cr for cr, ch in zip(r_, h_)) <= 3 else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')
 	a = dict(
 		spaces = dict(
-			delete = sum(1 if r[i] == ' ' and h[i] != ' ' else 0 for i in range(len(r))),
-			insert = sum(1 if h[i] == ' ' and r[i] != ' ' else 0 for i in range(len(r))),
-			total = sum(1 if r[i] == ' ' else 0 for i in range(len(r)))
+			delete = sum(r[i] == ' ' and h[i] != ' ' for i in range(len(r))),
+			insert = sum(h[i] == ' ' and r[i] != ' ' for i in range(len(r))),
+			total =  sum(r[i] == ' ' for i in range(len(r)))
 		),
 		alignment = dict(ref = r, hyp = h),
 		chars = dict(
-			ok = sum(1 if r[i] == h[i] else 0 for i in range(len(r))), 
-			replace = sum(1 if r[i] != '|' and r[i] != h[i] and h[i] != '|' else 0 for i in range(len(r))),
-			replace_phonetic = sum(1 if r[i] != '|' and r[i] != h[i] and h[i] != '|' and phonetic_group(r[i]) == phonetic_group(h[i]) else 0 for i in range(len(r))), 
-			delete = sum(1 if r[i] != '|' and r[i] != h[i] and h[i] == '|' else 0 for i in range(len(r))),
-			insert = sum(1 if r[i] == '|' and h[i] != '|' else 0 for i in range(len(r))),
+			ok = sum(r[i] == h[i] for i in range(len(r))), 
+			replace = sum(r[i] != '|' and r[i] != h[i] and h[i] != '|' for i in range(len(r))),
+			replace_phonetic = sum(r[i] != '|' and r[i] != h[i] and h[i] != '|' and phonetic_group(r[i]) == phonetic_group(h[i]) for i in range(len(r))), 
+			delete = sum(r[i] != '|' and r[i] != h[i] and h[i] == '|' for i in range(len(r))),
+			insert = sum(r[i] == '|' and h[i] != '|' for i in range(len(r))),
 			total = len(r)
 		),
 		words = dict(
-			missing_prefix = sum(1 if h_[0] in ' |' else 0 for r_, h_ in words()),
-			missing_suffix = sum(1 if h_[-1] in ' |' else 0 for r_, h_ in words()),
-			ok_prefix_suffix = sum(1 if h_[0] not in ' |' and h_[-1] not in ' |' else 0 for r_, h_ in words()),
-			delete = sum(1 if h_.count('|') > len(r_) // 2 else 0 for r_, h_ in words()),
-			replace = sum(1 if sum(1 if h_[i] not in ' |' and h_[i] != r_[i] else 0 for i in range(len(r_))) > len(r_) // 2 else 0 for r_, h_ in words()),
-			total = sum(1 if c == ' ' else 0 for c in ref) + 1,
-			errors = list(sorted(set(r_.replace('|', '') for r_, h_ in words() if h_.count('|') > len(h_) // 4))),
-			cers = [cer(h_, r_) for r_, h_ in words()],
-			all = [dict(hyp = h_, ref = r_) for r_, h_ in words()]
+			missing_prefix = sum(h_[0] in ' |' for r_, h_ in words()),
+			missing_suffix = sum(h_[-1] in ' |' for r_, h_ in words()),
+			ok_prefix_suffix = sum(h_[0] not in ' |' and h_[-1] not in ' |' for r_, h_ in words()),
+			
+			delete = sum(h_.count('|') > len(r_) // 2 for r_, h_ in words()),
+			
+			total = ref.count(' ') + 1,
+			errors = [dict(hyp = h_, ref = r_) for r_, h_ in words() if h_ != r_],
 		),
+		cer_pseudo = cer(hyp_pseudo, ref_pseudo)
 	)
 	return a
+
+def aggregate(analyzed, p = 0.5):
+	errs = collections.defaultdict(int)
+	errs_words = collections.defaultdict(list)
+	for a in analyzed:
+		for hyp, ref in map(lambda b: (b['hyp'], b['ref']), a['words']['errors']):
+			e = sum(ch != cr for ch, cr in zip(hyp, ref)) if hyp.count('|') < p * len(ref) else -1
+			errs[e] += 1
+			errs_words[e > 0].append(dict(ref = ref, hyp = hyp))
+
+	return collections.OrderedDict(sorted(errs.items()))#, errs_words
 
 if __name__ == '__main__':
 	import argparse
@@ -381,5 +405,4 @@ if __name__ == '__main__':
 	parser.add_argument('--ref')
 	parser.add_argument('--hyp')
 	args = parser.parse_args()
-
 	print(analyze(args.ref, args.hyp, phonetic_replace_groups = ru.PHONETIC_REPLACE_GROUPS))
