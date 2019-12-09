@@ -16,18 +16,9 @@ import models
 import transforms
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, sample_rate, window_size, window_stride, window, num_input_features, labels, waveform_transform = None, feature_transform = None, max_duration = None, normalize_features = True, waveform_transform_debug_dir = None):
-		self.window_stride = window_stride
-		self.window_size = window_size
-		self.sample_rate = sample_rate
-		self.window = window
-		self.num_input_features = num_input_features
+	def __init__(self, source_paths, labels, frontend, max_duration = None):
 		self.labels = labels
-		self.waveform_transform = waveform_transform
-		self.feature_transform = feature_transform
-		self.normalize_features = normalize_features
-		self.waveform_transform_debug_dir = waveform_transform_debug_dir
-
+		self.frontend = frontend
 		self.ids = [list(sorted(((os.path.basename(data_or_path), row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if True and len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path), delimiter=',') if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1])) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])]
 
 	def __getitem__(self, index):
@@ -38,16 +29,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			else:
 				index -= len(ids)
 
-		signal, sample_rate = (audio_path, self.sample_rate) if isinstance(self.waveform_transform, transforms.SoxAug) else read_wav(audio_path, sample_rate = self.sample_rate)
-		
-		if self.waveform_transform is not None:
-			signal, sample_rate = self.waveform_transform(signal, self.sample_rate, dataset_name = dataset_name)
-		if self.waveform_transform_debug_dir:
-			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path)), self.sample_rate, signal.numpy())
-		features = models.logfbank(signal, self.sample_rate, self.window_size, self.window_stride, self.window, self.num_input_features, normalize = self.normalize_features)
-		if self.feature_transform is not None:
-			features, sample_rate = self.feature_transform(features, self.sample_rate, dataset_name = dataset_name)
-
+		signal, sample_rate = (audio_path, self.frontend.sample_rate) if isinstance(self.frontend.waveform_transform, transforms.SoxAug) else read_wav(audio_path, sample_rate = self.frontend.sample_rate)
+		features = self.frontend(signal)
 		reference_normalized = self.labels[0].encode(reference)[0]
 		targets = [labels.encode(reference)[1] for labels in self.labels]
 		return [dataset_name, audio_path, reference_normalized, features] + targets

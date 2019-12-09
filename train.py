@@ -27,7 +27,7 @@ def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
 		set_random_seed(seed)
 
-def traineval(args):
+def main(args):
 	checkpoints = [torch.load(checkpoint_path, map_location = 'cpu') for checkpoint_path in args.checkpoint]
 	checkpoint = (checkpoints + [{}])[0]
 	if len(checkpoints) > 1:
@@ -60,7 +60,6 @@ def traineval(args):
 		model.eval()
 		model.fuse_conv_bn_eval()
 		model.to(args.device)
-		#model = torch.nn.DataParallel(model)
 		sample_batch_size, sample_time = 16, 128
 		input_ = torch.rand(sample_batch_size, args.num_input_features, sample_time, device = args.device)
 		logits, = model(input_)
@@ -74,13 +73,12 @@ def traineval(args):
 		return
 
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
-	val_waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob)
-	val_feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob)
 	if args.val_waveform_transform_debug_dir:
 		args.val_waveform_transform_debug_dir = os.path.join(args.val_waveform_transform_debug_dir, str(val_waveform_transform) if isinstance(val_waveform_transform, transforms.RandomCompose) else val_waveform_transform.__class__.__name__)
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
 	
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = val_waveform_transform, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, feature_transform = val_feature_transform), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
+	val_frontend = models.AugmentationFrontend(frontend, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob), feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob))
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, labels, val_frontend), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
 	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.GreedyNoBlankDecoder() if args.decoder == 'GreedyNoBlankDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
 	def apply_model(data_loader):
@@ -119,7 +117,7 @@ def traineval(args):
 					print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
 				ref_tra_.extend(stats)
 
-			print(metrics.aggregate(itertools.chain(*ref_tra_)))
+			errs, errs_words = metrics.aggregate(itertools.chain(*ref_tra_))
 
 			transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)) if training else args.val_transcripts_format.format(val_dataset_name = val_dataset_name, decoder = args.decoder)
 			for r_ in zip(*ref_tra_):
@@ -131,6 +129,9 @@ def traineval(args):
 				if training:
 					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + labels_name, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
 					tensorboard.flush()
+			
+			with open(transcripts_path + '.txt', 'w') as f:
+				f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in errs_words[True]))
 			
 			with open(transcripts_path, 'w') as f:
 				json.dump([r for t in sorted(ref_tra_, key = lambda t: t[0]['cer'], reverse = True) for r in t], f, ensure_ascii = False, indent = 2, sort_keys = True)
@@ -152,7 +153,6 @@ def traineval(args):
 			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, amp_state_dict = amp_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), checkpoint_path)
 
 		model.train()
-		torch.cuda.empty_cache()
 
 	print(' Model capacity:', int(models.compute_capacity(model) / 1e6), 'million parameters\n')
 
@@ -173,9 +173,8 @@ def traineval(args):
 	if args.freeze:
 		model.freeze(backbone = True, decoder0 = True)
 
-	train_waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob)
-	train_feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob)
-	train_dataset = dataset.AudioTextDataset(args.train_data_path, sample_rate = args.sample_rate, window_size = args.window_size, window_stride = args.window_stride, window = args.window, labels = labels, num_input_features = args.num_input_features, waveform_transform = train_waveform_transform, feature_transform = train_feature_transform, max_duration = args.max_duration)
+	train_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob), feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob))
+	train_dataset = dataset.AudioTextDataset(args.train_data_path, labels, train_frontend, max_duration = args.max_duration)
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
 	sampler = dataset.BucketingSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing)
 	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = sampler, worker_init_fn = set_random_seed, timeout = args.timeout)
@@ -254,7 +253,7 @@ def traineval(args):
 				evaluate_model(val_data_loaders, epoch, iteration)
 
 			if iteration and args.iterations and iteration >= args.iterations:
-				sys.exit(0)
+				return
 
 			if iteration % args.log_iteration_interval == 0:
 				tensorboard.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
@@ -355,4 +354,4 @@ if __name__ == '__main__':
 	parser.add_argument('--dropout', type = float, default = 0.2)
 	parser.add_argument('--githttp')
 
-	traineval(parser.parse_args())
+	main(parser.parse_args())

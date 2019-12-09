@@ -272,7 +272,7 @@ def relu_dropout(x, p = 0, inplace = False, training = False):
 	mask.logical_not_()
 	return x.masked_fill_(mask, 0).div_(p1m) if inplace else (x.masked_fill(mask, 0) / p1m)
 
-class AugmentingFrontend(nn.Module):
+class AugmentationFrontend(nn.Module):
 	def __init__(self, frontend, feature_transform = None, waveform_transform = None, waveform_transform_debug_dir = None):
 		super().__init__()
 		self.frontend = frontend
@@ -295,6 +295,10 @@ class AugmentingFrontend(nn.Module):
 
 		return features
 
+	@property
+	def sample_rate(self):
+		return self.frontend.sample_rate
+
 class LogFilterBankFrontend(nn.Module):
 	def __init__(self, out_channels, sample_rate, window_size, window_stride, window, dither = 1e-5, preemphasis = 0.97, eps = 1e-20, normalize_signal = True, normalize_features = True, stft_mode = None, window_periodic = True):
 		super().__init__()
@@ -311,6 +315,7 @@ class LogFilterBankFrontend(nn.Module):
 		self.nfft = 2 ** math.ceil(math.log2(self.win_length))
 		
 		self.register_buffer('window', getattr(torch, window)(self.win_length, periodic = window_periodic).float())
+		#mel_basis = torchaudio.functional.create_fb_matrix(n_fft, n_mels = num_input_features, fmin = 0, fmax = int(sample_rate/2)).t() # when https://github.com/pytorch/audio/issues/287 is fixed
 		self.register_buffer('mel_basis', torch.from_numpy(librosa.filters.mel(sample_rate, self.nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2))).float())
 	
 		if stft_mode:
@@ -338,19 +343,6 @@ class LogFilterBankFrontend(nn.Module):
 		power_spectrum = self.stft_magnitude_squared(signal)
 		features = (self.mel_basis @ power_spectrum + self.eps).log()
 		return normalize_features(features) if self.normalize_features else features 
-
-def logfbank(signal, sample_rate, window_size, window_stride, window, num_input_features, dither = 1e-5, preemph = 0.97, normalize = True, eps = 1e-20):
-	signal = normalize_signal(signal)
-	signal = torch.cat([signal[..., :1], signal[..., 1:] - preemph * signal[..., :-1]], dim = -1)
-	win_length, hop_length = int(window_size * sample_rate), int(window_stride * sample_rate)
-	n_fft = 2 ** math.ceil(math.log2(win_length))
-	signal += dither * torch.randn_like(signal)
-	window = getattr(torch, window)(win_length, periodic = False).type_as(signal)
-	#mel_basis = torchaudio.functional.create_fb_matrix(n_fft, n_mels = num_input_features, fmin = 0, fmax = int(sample_rate/2)).t() # when https://github.com/pytorch/audio/issues/287 is fixed
-	mel_basis = torch.from_numpy(librosa.filters.mel(sample_rate, n_fft, n_mels=num_input_features, fmin=0, fmax=int(sample_rate/2))).type_as(signal)
-	power_spectrum = torch.stft(signal, n_fft, hop_length = hop_length, win_length = win_length, window = window, pad_mode = 'reflect', center = True).pow(2).sum(dim = -1)
-	features = torch.log(torch.matmul(mel_basis, power_spectrum) + eps)
-	return normalize_features(features) if normalize else features 
 
 def temporal_mask(x, lengths = None, lengths_fraction = None):
 	lengths = lengths if lengths is not None else compute_output_lengths(x, lengths_fraction)

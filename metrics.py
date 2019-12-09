@@ -357,7 +357,7 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 
 	assert len(r) == len(h)
 	phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
-	hyp_pseudo, ref_pseudo = ' '.join((r_ if h_.count('|') < 0.5 * len(r_) and sum(ch != cr for cr, ch in zip(r_, h_)) <= 3 else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')
+	hyp_pseudo, ref_pseudo = ' '.join((r_ if h_.count('|') < 0.5 * len(r_) and sum(ch != cr for cr, ch in zip(r_, h_)) <= 3 and len(r_.replace('|', '')) >= 4 else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')
 	a = dict(
 		spaces = dict(
 			delete = sum(r[i] == ' ' and h[i] != ' ' for i in range(len(r))),
@@ -394,9 +394,10 @@ def aggregate(analyzed, p = 0.5):
 		for hyp, ref in map(lambda b: (b['hyp'], b['ref']), a['words']['errors']):
 			e = sum(ch != cr for ch, cr in zip(hyp, ref)) if hyp.count('|') < p * len(ref) else -1
 			errs[e] += 1
-			errs_words[e > 0].append(dict(ref = ref, hyp = hyp))
-
-	return collections.OrderedDict(sorted(errs.items()))#, errs_words
+			if hyp.count('|') < 0.5 * len(ref) and e > 0 and e <= 3 and len(ref.replace('|', '')) >= 4:
+				errs_words[e > 0].append(dict(ref = ref, hyp = hyp))
+			
+	return collections.OrderedDict(sorted(errs.items())), errs_words
 
 if __name__ == '__main__':
 	import argparse
