@@ -352,13 +352,14 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 				generated_time = time.strftime(strftime, time.localtime(j['time']))
 				hidden = 'hidden' if i not in idx else ''
 				meta_key = f'meta{hash(experiment_id + str(j["iteration"]))}'
+				experiment_key = f'data-experiment-id="{experiment_id}"'
 				meta = json.dumps(j['meta'], sort_keys = True, indent = 2, ensure_ascii = False) if j.get('meta') else None
-				html.write(f'<tr class="{hidden} {experiment_id}" {hidden}>')
+				html.write(f'<tr {experiment_key} class="{hidden} {experiment_id}" {hidden}>')
 				html.write(f'''<td onclick="toggle('{meta_key}')" title="{generated_time}" style="border-right: 1px solid black">{j["iteration"]}</td>''')
 				html.write(''.join(f'<td class="col{hash(c)}">' + ''.join(f'<span title="{f}" style="margin-right:3px" {"hidden" if f != field else ""} class="field{hash(f)}">{fmt(j["columns"].get(c, {}).get(f, ""))}</span>' for f in fields) + '</td>' for c in columns))
 				html.write('</tr>\n')
-				html.write('<tr hidden class="{meta_key}" style="background-color:lightgray"><td><a href="{git_http}">@{git_revision}</a></td><td colspan="100">{git_comment}</td></tr>\n'.format(meta_key = meta_key, **j))
-				html.write(f'<tr hidden class="{meta_key}" style="background-color:lightgray"><td colspan="100"><pre>{meta}</pre></td></tr>\n' if meta else '')
+				html.write('<tr {experiment_key} hidden class="{meta_key}" style="background-color:lightgray"><td><a href="{git_http}">@{git_revision}</a></td><td colspan="100">{git_comment}</td></tr>\n'.format(meta_key = meta_key, experiment_key = experiment_key, **j))
+				html.write(f'<tr {experiment_key} hidden class="{meta_key}" style="background-color:lightgray"><td colspan="100"><pre>{meta}</pre></td></tr>\n' if meta else '')
 
 			html.write('<tr><td>&nbsp;</td></tr>')
 		html.write('</table></body></html>')

@@ -282,16 +282,16 @@ class AugmentationFrontend(nn.Module):
 	
 	def forward(self, signal, audio_path = None, dataset_name = None, **kwargs):
 		if self.waveform_transform is not None:
-			signal = self.waveform_transform(signal, frontend.sample_rate, dataset_name = dataset_name)
+			signal = self.waveform_transform(signal, self.frontend.sample_rate, dataset_name = dataset_name)
 		
 		if self.waveform_transform_debug_dir:
 			# int16 or float?
-			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), frontend.sample_rate, signal.numpy())
+			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), self.frontend.sample_rate, signal.numpy())
 
 		features = self.frontend(signal)
 
 		if self.feature_transform is not None:
-			features = self.feature_transform(features, frontend.sample_rate, dataset_name = dataset_name)
+			features = self.feature_transform(features, self.frontend.sample_rate, dataset_name = dataset_name)
 
 		return features
 
@@ -327,11 +327,10 @@ class LogFilterBankFrontend(nn.Module):
 
 	def stft_magnitude_squared(self, signal):
 		if self.stft_mode:
-			signal = F.pad(signal.unsqueeze(1).unsqueeze(1), (self.nfft // 2, self.nfft // 2, 0, 0), mode = 'reflect').squeeze(1)
-			forward_transform = F.conv1d(signal, self.forward_basis, stride = self.hop_length)
-			forward_transform.pow_(2)
-			real_squared = forward_transform[:, :self.freq_cutoff, :]
-			imag_squared = forward_transform[:, self.freq_cutoff:, :]
+			signal = F.pad(signal[:, None, None, :], (self.nfft // 2, self.nfft // 2, 0, 0), mode = 'reflect').squeeze(1)
+			forward_transform_squared = F.conv1d(signal, self.forward_basis, stride = self.hop_length).pow_(2)
+			real_squared = forward_transform_squared[:, :self.freq_cutoff, :]
+			imag_squared = forward_transform_squared[:, self.freq_cutoff:, :]
 			return real_squared + imag_squared
 		else:
 			return torch.stft(signal, self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = True, pad_mode = 'reflect').pow(2).sum(dim = -1)
