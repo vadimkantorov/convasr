@@ -62,13 +62,13 @@ def main(args):
 		model.to(args.device)
 		sample_batch_size, sample_time = 16, 1024
 		waveform_input = torch.rand(sample_batch_size, sample_time, device = args.device)
-		logits, = model(input_)
+		logits, = model(waveform_input)
 
-		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B'}, xlen = {0 : 'B'}, logits = {0 : 'B'}))
+		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B'}, logits = {0 : 'B'}))
 
 		onnxrt_session = onnxruntime.InferenceSession(args.onnx)
 		logits_, = onnxrt_session.run(None, dict(x = waveform_input.cpu().numpy()))
-		assert torch.allclose(logits[0].cpu(), torch.from_numpy(logits_), rtol = 1e-03, atol = 1e-05)
+		assert torch.allclose(logits[0].cpu(), torch.from_numpy(logits_), rtol = 1e-02, atol = 1e-03)
 		return
 
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None

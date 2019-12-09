@@ -328,7 +328,7 @@ class LogFilterBankFrontend(nn.Module):
 	def stft_magnitude_squared(self, signal):
 		if self.stft_mode:
 			signal = F.pad(signal[:, None, None, :], (self.nfft // 2, self.nfft // 2, 0, 0), mode = 'reflect').squeeze(1)
-			forward_transform_squared = F.conv1d(signal, self.forward_basis, stride = self.hop_length).pow_(2)
+			forward_transform_squared = F.conv1d(signal, self.forward_basis, stride = self.hop_length).pow(2)
 			real_squared = forward_transform_squared[:, :self.freq_cutoff, :]
 			imag_squared = forward_transform_squared[:, self.freq_cutoff:, :]
 			return real_squared + imag_squared
