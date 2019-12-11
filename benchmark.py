@@ -5,6 +5,7 @@ import torch
 import models
 import dataset
 import apex
+import torch.cuda.profiler
 import onnxruntime
 
 parser = argparse.ArgumentParser()
@@ -25,6 +26,7 @@ parser.add_argument('--onnx')
 parser.add_argument('--stft-mode', choices = ['conv', ''], default = '')
 parser.add_argument('-B', type = int, default = 128)
 parser.add_argument('-T', type = int, default = 10)
+parser.add_argument('--profile', action = 'store_true')
 args = parser.parse_args()
 
 torch.set_grad_enabled(False)
@@ -58,6 +60,11 @@ batch = batch.pin_memory()
 
 for i in range(args.iterations_warmup):
 	model(load_batch(batch))
+
+if args.profile:
+	apex.pyprof.nvtx.init()
+	torch.autograd.profiler.emit_nvtx()
+	torch.cuda.profiler.start()
 
 times = torch.FloatTensor(args.iterations)
 for i in range(args.iterations):

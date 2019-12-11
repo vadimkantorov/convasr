@@ -55,12 +55,12 @@ for audio_path in audio_paths:
 	reference = json.load(open(reference_path)) if os.path.exists(reference_path) else []
 	batch, cutpoints = [], []
 	if reference:
-		signal, sample_rate = dataset.read_wav(audio_path, sample_rate = sample_rate, stereo = True)
+		signal, sample_rate = dataset.read_audio(audio_path, sample_rate = sample_rate, stereo = True)
 		for b, e, channel, ref in [map(r.get, ['begin', 'end', 'channel', 'ref']) for r in reference]:
 			cutpoints.append((b, e, channel))
 			batch.append((os.path.basename(os.path.dirname(audio_path)), audio_path, ref, signal[None, int(b * sample_rate):int(e * sample_rate), channel], torch.IntTensor()))
 	else:
-		signal, sample_rate = dataset.read_wav(audio_path, sample_rate = sample_rate, stereo = True, normalize = False, dtype = torch.int16)
+		signal, sample_rate = dataset.read_audio(audio_path, sample_rate = sample_rate, stereo = True, normalize = False, dtype = torch.int16)
 		for channel, signal_ in enumerate(signal.t()):
 			chunks = dataset.remove_silence(vad, signal_, sample_rate, window_size) if args.vad is not False else [(0, len(signal))]
 			signal_ = models.normalize_signal(signal_)

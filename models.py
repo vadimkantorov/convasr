@@ -273,20 +273,18 @@ def relu_dropout(x, p = 0, inplace = False, training = False):
 	return x.masked_fill_(mask, 0).div_(p1m) if inplace else (x.masked_fill(mask, 0) / p1m)
 
 class AugmentationFrontend(nn.Module):
-	def __init__(self, frontend, feature_transform = None, waveform_transform = None, waveform_transform_debug_dir = None):
+	def __init__(self, frontend, feature_transform = None, waveform_transform = None):
 		super().__init__()
 		self.frontend = frontend
 		self.feature_transform = feature_transform
 		self.waveform_transform = waveform_transform
-		self.waveform_transform_debug_dir = waveform_transform_debug_dir
 	
-	def forward(self, signal, audio_path = None, dataset_name = None, **kwargs):
+	def forward(self, signal, audio_path = None, dataset_name = None, waveform_transform_debug = None, **kwargs):
 		if self.waveform_transform is not None:
 			signal = self.waveform_transform(signal, self.frontend.sample_rate, dataset_name = dataset_name)
 		
-		if self.waveform_transform_debug_dir:
-			# int16 or float?
-			scipy.io.wavfile.write(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), self.frontend.sample_rate, signal.numpy())
+		if waveform_transform_debug is not None:
+			waveform_transform_debug(audio_path, self.frontend.sample_rate, signal)
 
 		features = self.frontend(signal)
 

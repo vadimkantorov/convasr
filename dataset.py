@@ -16,9 +16,10 @@ import models
 import transforms
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, labels, frontend, max_duration = None):
+	def __init__(self, source_paths, labels, frontend, waveform_transform_debug_dir = None, max_duration = None):
 		self.labels = labels
 		self.frontend = frontend
+		self.waveform_transform_debug_dir = waveform_transform_debug_dir
 		self.ids = [list(sorted(((os.path.basename(data_or_path), row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if True and len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path), delimiter=',') if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1])) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])]
 
 	def __getitem__(self, index):
@@ -29,8 +30,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			else:
 				index -= len(ids)
 
-		signal, sample_rate = (audio_path, self.frontend.sample_rate) if isinstance(self.frontend.waveform_transform, transforms.SoxAug) else read_wav(audio_path, sample_rate = self.frontend.sample_rate)
-		features = self.frontend(signal)
+		signal, sample_rate = (audio_path, self.frontend.sample_rate) if isinstance(self.frontend.waveform_transform, transforms.SoxAug) else read_audio(audio_path, sample_rate = self.frontend.sample_rate)
+		# int16 or float?
+		features = self.frontend(signal, waveform_transform_debug = lambda audio_path, sample_rate, signal: write_wav(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav')) if self.waveform_transform_debug_dir else None)
 		reference_normalized = self.labels[0].encode(reference)[0]
 		targets = [labels.encode(reference)[1] for labels in self.labels]
 		return [dataset_name, audio_path, reference_normalized, features] + targets
@@ -156,7 +158,7 @@ def collate_fn(batch, pad_to = 128):
 	#input_: NCT, targets_: NLt, target_length_: NL, input_lengths_fraction_: N
 	return dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_
 
-def read_wav(audio_path, sample_rate, normalize = True, stereo = False, max_duration = None, dtype = torch.float32, byte_order = 'little'):
+def read_audio(audio_path, sample_rate, normalize = True, stereo = False, max_duration = None, dtype = torch.float32, byte_order = 'little'):
 	sample_rate_, signal = scipy.io.wavfile.read(audio_path) if audio_path.endswith('.wav') else (sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', '1', '-t', 'raw', '-']), byte_order = byte_order))) 
 
 	signal = (signal if stereo else signal.squeeze(1) if signal.shape[1] == 1 else signal.mean(1)) if len(signal.shape) > 1 else (signal if not stereo else signal[..., None])
@@ -171,6 +173,10 @@ def read_wav(audio_path, sample_rate, normalize = True, stereo = False, max_dura
 
 	assert sample_rate_ == sample_rate, 'Cannot resample non-float tensors because of librosa constraints'
 	return signal, sample_rate_
+
+def write_audio(audio_path, sample_rate, signal):
+	assert audio_path.endswith('.wav')
+	scipy.io.wavfile.write(audio_path, sample_rate, signal.numpy())
 
 def resample(signal, sample_rate_, sample_rate):
 	return torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate)), sample_rate
