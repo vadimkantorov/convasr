@@ -10,8 +10,8 @@ import onnxruntime
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--checkpoint')
-parser.add_argument('--devices', default = ['cuda:0'], nargs = '+')
-parser.add_argument('--iterations', type = int, default = 16)
+parser.add_argument('--devices', default = ['cuda'], nargs = '+')
+parser.add_argument('--iterations', type = int, default = 128)
 parser.add_argument('--iterations-warmup', type = int, default = 16)
 parser.add_argument('--frontend', action = 'store_true')
 parser.add_argument('--fp16', choices = ['', 'O0', 'O1', 'O2', 'O3'], default = None)
@@ -30,6 +30,7 @@ parser.add_argument('--profile-cuda', action = 'store_true')
 parser.add_argument('--profile-autograd')
 parser.add_argument('--dataparallel', action = 'store_true')
 args = parser.parse_args()
+args.devices = [0, 1]
 
 torch.set_grad_enabled(False)
 
