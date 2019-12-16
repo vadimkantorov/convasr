@@ -120,10 +120,9 @@ def main(args):
 			for r_ in zip(*ref_tra_):
 				labels_name = r_[0]['labels']
 				stats = metrics.aggregate(r_)
-				with open(transcripts_path + '.easy.txt', 'w') as f:
-					f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats['errors_easy']))
-				with open(transcripts_path + '.hard.txt', 'w') as f:
-					f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats['errors_hard']))
+				for t in metrics.error_types:
+					with open(f'{transcripts_path}.{t}.txt', 'w') as f:
+						f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats[t]))
 
 				print(stats['errors_distribution'])
 				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} CERPSEUDO: {cerpseudo_avg:.02%} MER: {mer_avg:.02%}\n'.format(**stats))

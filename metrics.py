@@ -359,9 +359,11 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 
 	assert len(r) == len(h)
 	phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
-	hyp_pseudo, ref_pseudo = ' '.join((r_ if is_small_typo(h_, r_)[0] else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')
+	hyp_pseudo, ref_pseudo = ' '.join((r_ if error_type(h_, r_)[0] == 'typo_easy' else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')
 	words = list(words())
-	missing = [dict(hyp = h_, ref = r_) for r_, h_ in words for is_small, num_errs in [is_small_typo(h_, r_)] if not is_small and num_errs > 0]
+	errors = [dict(hyp = h_, ref = r_, type = t) for r_, h_ in words for t, e in [error_type(h_, r_)] if t != 'ok']
+	errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in errors if r['type'] == t] for t in error_types}
+	
 	a = dict(
 		spaces = dict(
 			delete = sum(r[i] == ' ' and h[i] != ' ' for i in range(len(r))),
@@ -381,15 +383,12 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 			missing_prefix = sum(h_[0] in ' |' for r_, h_ in words),
 			missing_suffix = sum(h_[-1] in ' |' for r_, h_ in words),
 			ok_prefix_suffix = sum(h_[0] not in ' |' and h_[-1] not in ' |' for r_, h_ in words),
-			
 			delete = sum(h_.count('|') > len(r_) // 2 for r_, h_ in words),
-			
 			total = len(words),
-			errors = [dict(hyp = h_, ref = r_) for r_, h_ in words if h_ != r_],
-			missing = missing
+			errors = errors
 		),
 		cerpseudo = cer(hyp_pseudo, ref_pseudo),
-		mer = len(missing) / len(words)
+		mer = len(errors['missing']) / len(words)
 	)
 	return a
 
@@ -408,20 +407,30 @@ def aggregate(analyzed, p = 0.5):
 	errs_words = collections.defaultdict(list)
 	for a in analyzed:
 		if 'words' in a: 
-			for hyp, ref in map(lambda b: (b['hyp'], b['ref']), a['words']['errors']):
-				small_typo, e = is_small_typo(hyp, ref)
-				e = e if small_typo else -1
+			for hyp, ref in map(lambda b: (b['hyp'], b['ref']), sum(a['words']['errors'].values(), [])):
+				t, e = error_type(hyp, ref)
+				e = e if t == 'typo_easy' else -1 if t == 'typo_hard' else -2
 				errs[e] += 1
-				errs_words[e > 0].append(dict(ref = ref, hyp = hyp))
+				errs_words[t].append(dict(ref = ref, hyp = hyp))
 	stats['errors_distribution'] = dict(collections.OrderedDict(sorted(errs.items())))
-	stats['errors_easy'], stats['errors_hard'] = errs_words[True], errs_words[False]
+	stats.update(errs_words)
 			
 	return stats
 
-def is_small_typo(hyp, ref, p = 0.5, E = 3, L = 4, p_ = 0.3):
+def error_type(hyp, ref, p = 0.5, E = 3, L = 4):
 	e = sum(ch != cr for ch, cr in zip(hyp, ref))
 	ref_ = ref.replace('|', '')
-	return hyp.count('|') < p * len(ref) and ref.count('|') < p * len(ref) and e > 0 and e <= E and len(ref_) >= L, e # and e <= p * len(ref), e
+	is_typo = e > 0 and ((hyp.count('|') < p * len(ref) and ref.count('|') < p * len(ref)))
+	
+	if hyp == ref:
+		return 'ok', e
+	elif is_typo:
+		easy = e <= E and len(ref_) >= L
+		return 'typo_' + ('easy' if easy else 'hard'), e
+	else:
+		return 'missing', e
+
+error_types = ['typo_easy', 'typo_hard', 'missing']
 
 if __name__ == '__main__':
 	import argparse
