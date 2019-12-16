@@ -390,26 +390,27 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 	return a
 
 def aggregate(analyzed, p = 0.5):
+	mean_safe = float(torch.tensor([r[k] for r in analyzed if not math.isinf(r[k]) and not math.isnan(r[k])]).mean())
+	a = dict(
+		cer_avg = mean_safe('cer'),
+		wer_avg = mean_safe('wer')
+		entropy_avg = mean_safe('entropy'),
+		loss_avg = mean_safe('loss'),
+		cerpseudo_avg = mean_safe('cerpseudo_avg')
+	)
+
 	errs = collections.defaultdict(int)
 	errs_words = collections.defaultdict(list)
 	for a in analyzed:
-		for hyp, ref in map(lambda b: (b['hyp'], b['ref']), a['words']['errors']):
-			small_typo, e = is_small_typo(hyp, ref)
-			e = e if small_typo else -1
-			errs[e] += 1
-			errs_words[e > 0].append(dict(ref = ref, hyp = hyp))
+		if 'words' in a: 
+			for hyp, ref in map(lambda b: (b['hyp'], b['ref']), a['words']['errors']):
+				small_typo, e = is_small_typo(hyp, ref)
+				e = e if small_typo else -1
+				errs[e] += 1
+				errs_words[e > 0].append(dict(ref = ref, hyp = hyp))
+	a['errors_distribution'] = dict(collections.OrderedDict(sorted(errs.items())))
+	a['errors_easy', a['errors_hard'] = errs_words[True], errs_words[False]
 			
-	cer_avg, cerpseudo_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([r[k] for r in analyzed if not math.isinf(r[k]) and not math.isnan(r[k])]).mean()) for k in ['cer', 'cerpseudo', 'wer', 'loss', 'entropy']]
-	a = dict(
-		errors_distribution = collections.OrderedDict(sorted(errs.items())),
-		errors_easy = errs_words[True],
-		errors_hard = errs_words[False],
-		cer_avg = cer_avg,
-		wer_avg = wer_avg,
-		entropy_avg = entropy_avg,
-		loss_avg = loss_avg,
-		cerpseudo_avg = cerpseudo_avg
-	)
 	return a
 
 def is_small_typo(hyp, ref, p = 0.5, E = 3, L = 4, p_ = 0.3):
