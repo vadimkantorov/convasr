@@ -10,11 +10,11 @@ import onnxruntime
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--checkpoint')
-parser.add_argument('--device', default = 'cuda')
-parser.add_argument('--iterations', type = int, default = 128)
+parser.add_argument('--devices', default = ['cuda:0'], nargs = '+')
+parser.add_argument('--iterations', type = int, default = 16)
 parser.add_argument('--iterations-warmup', type = int, default = 16)
 parser.add_argument('--frontend', action = 'store_true')
-parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
+parser.add_argument('--fp16', choices = ['', 'O0', 'O1', 'O2', 'O3'], default = None)
 parser.add_argument('--num-input-features', default = 64, help = 'num of mel-scale features produced by logfbank frontend')
 parser.add_argument('--sample-rate', type = int, default = 8_000, help = 'for frontend')
 parser.add_argument('--window-size', type = float, default = 0.02, help = 'for frontend, in seconds')
@@ -26,7 +26,9 @@ parser.add_argument('--onnx')
 parser.add_argument('--stft-mode', choices = ['conv', ''], default = '')
 parser.add_argument('-B', type = int, default = 128)
 parser.add_argument('-T', type = int, default = 10)
-parser.add_argument('--profile', action = 'store_true')
+parser.add_argument('--profile-cuda', action = 'store_true')
+parser.add_argument('--profile-autograd')
+parser.add_argument('--dataparallel', action = 'store_true')
 args = parser.parse_args()
 
 torch.set_grad_enabled(False)
@@ -46,12 +48,16 @@ else:
 	model = getattr(models, args.model)(args.num_input_features, [len(labels)], frontend = frontend)
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'])
-	model = model.to(args.device)
+	model.to(args.devices[0])
 	model.eval()
 	model.fuse_conv_bn_eval()
 	if args.fp16:
-		model = apex.amp.initialize(model, opt_level = args.fp16)
-	load_batch = lambda x: x.to(args.device, non_blocking = True)
+		model = apex.amp.initialize(torch.nn.Sequential(model), opt_level = args.fp16, enabled = bool(args.fp16))[0]
+	if args.dataparallel:
+		model = torch.nn.DataParallel(model, device_ids = args.devices)
+	if args.fp16:
+		model.forward = lambda *args, old_fwd = model.forward, input_caster = lambda tensor: tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_type']), output_caster = lambda tensor: tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_outputs'] if apex.amp._amp_state.opt_properties.options.get('cast_model_outputs') is not None else torch.float32), **kwargs: apex.amp._initialize.applier(old_fwd(*apex.amp._initialize.applier(args, input_caster), **apex.amp._initialize.applier(kwargs, input_caster)), output_caster)
+	load_batch = lambda x: x.to(args.devices[0], non_blocking = True)
 
 tictoc = lambda: (torch.cuda.is_available and torch.cuda.synchronize()) or time.time()
 
@@ -61,16 +67,23 @@ batch = batch.pin_memory()
 for i in range(args.iterations_warmup):
 	model(load_batch(batch))
 
-if args.profile:
+if args.profile_cuda:
 	apex.pyprof.nvtx.init()
 	torch.autograd.profiler.emit_nvtx()
 	torch.cuda.profiler.start()
+if args.profile_autograd:
+	autograd_profiler = torch.autograd.profiler.profile()
+	autograd_profiler.__enter__()
 
 times = torch.FloatTensor(args.iterations)
 for i in range(args.iterations):
 	tic = tictoc()
 	model(load_batch(batch))
 	times[i] = tictoc() - tic
+
+if args.profile_autograd:
+	autograd_profiler.__exit__(None, None, None)
+	autograd_profiler.export_chrome_trace(args.profile_autograd)
 
 print(args)
 print('batch {} | stride {:.02f} sec | audio {:.02f} sec | load+proc {:.02f} msec'.format('x'.join(map(str, batch.shape)), args.window_stride, args.B * args.T, float(times.mean()) * 1000))

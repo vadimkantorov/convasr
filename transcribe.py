@@ -37,8 +37,9 @@ torch.set_grad_enabled(False)
 
 checkpoint = torch.load(args.checkpoint, map_location = 'cpu')
 sample_rate, window_size, window_stride, window, num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
+frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window)
 labels = dataset.Labels(importlib.import_module(checkpoint['lang']), name = 'char')
-model = getattr(models, checkpoint['model'])(num_input_features = num_input_features, num_classes = [len(labels)], dict = lambda logits, output_lengths: (logits, output_lengths))
+model = getattr(models, checkpoint['model'])(num_input_features, [len(labels)], frontend = frontend, dict = lambda logits, output_lengths: (logits[0], output_lengths[0]))
 model.load_state_dict(checkpoint['model_state_dict'])
 model = model.to(args.device)
 model.eval()
@@ -69,10 +70,7 @@ for audio_path in audio_paths:
 
 	tic = time.time()
 	dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ = dataset.collate_fn(batch)
-	features = models.logfbank(input_.squeeze(1), sample_rate, window_size, window_stride, window, num_input_features)
-	log_probs, output_lengths = model(features.to(args.device, non_blocking = True), input_lengths_fraction_.to(args.device, non_blocking = True))
-	log_probs, output_lengths = log_probs[0], output_lengths[0]
-	decoded = decoder.decode(log_probs, output_lengths)
+	decoded = decoder.decode(*model(input_.to(args.device, non_blocking = True), input_lengths_fraction_.to(args.device, non_blocking = True)))
 	toc = time.time()
 
 	transcript = labels.postprocess_transcript(' '.join(map(labels.decode, decoded)))

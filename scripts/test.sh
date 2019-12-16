@@ -2,7 +2,7 @@ set -e
 
 python3 train.py $@ \
   --githttp https://github.com/vadimkantorov/convasr/commit/%h \
-  --analyze --exphtml= \
+  --analyze \
   --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs256____fp16O2/checkpoint_epoch05_iter0040000.pt \
   --val-data-path kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv data/valset11102019/valset11102019.csv data/valset11102019/valset11102019.0.csv data/valset11102019/valset11102019.1.csv
 

@@ -116,22 +116,22 @@ def main(args):
 					print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
 				ref_tra_.extend(stats)
 
-			errs, errs_words = metrics.aggregate(itertools.chain(*ref_tra_))
-			print(errs)
-
 			transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)) if training else args.val_transcripts_format.format(val_dataset_name = val_dataset_name, decoder = args.decoder)
 			for r_ in zip(*ref_tra_):
-				cer_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([r[k] for r in r_ if not math.isinf(r[k]) and not math.isnan(r[k])]).mean()) for k in ['cer', 'wer', 'loss', 'entropy']]
 				labels_name = r_[0]['labels']
-				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} | Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%}\n')
+				stats = metrics.aggregate(r_)
+				with open(transcripts_path + '.easy.txt', 'w') as f:
+					f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats['errors_easy']))
+				with open(transcripts_path + '.hard.txt', 'w') as f:
+					f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats['errors_hard']))
+
+				print(stats['errors_distribution'])
+				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} CERPSEUDO: {cerpseudo_avg:.02%} \n'.format(**stats))
 				
-				columns[val_dataset_name + '_' + labels_name] = dict(cer_avg = cer_avg, wer_avg = wer_avg, loss_avg = loss_avg, entropy_avg = entropy_avg)
+				columns[val_dataset_name + '_' + labels_name] = dict(cer_avg = stats['cer_avg'], wer_avg = stats['wer_avg'], loss_avg = stats['loss_avg'], entropy_avg = stats['entropy_avg'], cerpseudo_avg = stats['cerpseudo_avg'], errors_distribution = dict(flyout = str(stats['errors_distribution']), name = 'errors_distribution'))
 				if training:
-					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + labels_name, dict(wer_avg = wer_avg * 100.0, cer_avg = cer_avg * 100.0, loss_avg = loss_avg), iteration) 
+					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + labels_name, dict(wer_avg = stats['wer_avg'] * 100.0, cer_avg = stats['cer_avg'] * 100.0, loss_avg = stats['loss_avg']), iteration) 
 					tensorboard.flush()
-			
-			with open(transcripts_path + '.txt', 'w') as f:
-				f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in errs_words[True]))
 			
 			with open(transcripts_path, 'w') as f:
 				json.dump([r for t in sorted(ref_tra_, key = lambda t: t[0]['cer'], reverse = True) for r in t], f, ensure_ascii = False, indent = 2, sort_keys = True)
@@ -143,13 +143,13 @@ def main(args):
 		
 		checkpoint_path = os.path.join(args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)) if training and not args.checkpoint_skip else None
 		if args.exphtml:
-			columns['checkpoint_path'] = checkpoint_path
+			#columns['checkpoint_path'] = checkpoint_path
 			vis.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, git_http = args.githttp)
 			vis.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
-			amp_state_dict = None # amp.state_dict()
-			optimizer_state_dict = None # optimizer.state_dict()
+			amp_state_dict = amp.state_dict()
+			optimizer_state_dict = optimizer.state_dict()
 			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, amp_state_dict = amp_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), checkpoint_path)
 
 		model.train()
@@ -182,7 +182,8 @@ def main(args):
 	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else optimizers.NoopLR(optimizer) 
 	iteration = 0
 	if checkpoint:
-		#optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+		amp.load_state_dict(checkpoint['amp_state_dict'])
 		iteration = 1 + checkpoint['iteration']
 		if args.train_data_path == checkpoint['args']['train_data_path']:
 			sampler.load_state_dict(checkpoint['sampler_state_dict'])

@@ -1,5 +1,7 @@
+import math
 import collections
 import Levenshtein
+import torch
 
 def cer(hyp, ref):
 	cer_ref_len = len(ref.replace(' ', '')) or 1
@@ -357,7 +359,7 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 
 	assert len(r) == len(h)
 	phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
-	hyp_pseudo, ref_pseudo = ' '.join((r_ if is_small_typo(h_, r_) else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')
+	hyp_pseudo, ref_pseudo = ' '.join((r_ if is_small_typo(h_, r_)[0] else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')
 	a = dict(
 		spaces = dict(
 			delete = sum(r[i] == ' ' and h[i] != ' ' for i in range(len(r))),
@@ -383,7 +385,7 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 			total = ref.count(' ') + 1,
 			errors = [dict(hyp = h_, ref = r_) for r_, h_ in words() if h_ != r_],
 		),
-		cer_pseudo = cer(hyp_pseudo, ref_pseudo)
+		cerpseudo = cer(hyp_pseudo, ref_pseudo)
 	)
 	return a
 
@@ -392,15 +394,28 @@ def aggregate(analyzed, p = 0.5):
 	errs_words = collections.defaultdict(list)
 	for a in analyzed:
 		for hyp, ref in map(lambda b: (b['hyp'], b['ref']), a['words']['errors']):
-			e = sum(ch != cr for ch, cr in zip(hyp, ref)) if hyp.count('|') < p * len(ref) else -1
+			small_typo, e = is_small_typo(hyp, ref)
+			e = e if small_typo else -1
 			errs[e] += 1
 			errs_words[e > 0].append(dict(ref = ref, hyp = hyp))
 			
-	return collections.OrderedDict(sorted(errs.items())), errs_words
+	cer_avg, cerpseudo_avg, wer_avg, loss_avg, entropy_avg = [float(torch.tensor([r[k] for r in analyzed if not math.isinf(r[k]) and not math.isnan(r[k])]).mean()) for k in ['cer', 'cerpseudo', 'wer', 'loss', 'entropy']]
+	a = dict(
+		errors_distribution = collections.OrderedDict(sorted(errs.items())),
+		errors_easy = errs_words[True],
+		errors_hard = errs_words[False],
+		cer_avg = cer_avg,
+		wer_avg = wer_avg,
+		entropy_avg = entropy_avg,
+		loss_avg = loss_avg,
+		cerpseudo_avg = cerpseudo_avg
+	)
+	return a
 
-def is_small_typo(hyp, ref):
+def is_small_typo(hyp, ref, p = 0.5, E = 3, L = 4, p_ = 0.3):
 	e = sum(ch != cr for ch, cr in zip(hyp, ref))
-	return hyp.count('|') < 0.5 * len(ref) and e > 0 and e <= 3 and len(ref.replace('|', '')) >= 4
+	ref_ = ref.replace('|', '')
+	return hyp.count('|') < p * len(ref) and ref.count('|') < p * len(ref) and e > 0 and e <= E and len(ref_) >= L, e # and e <= p * len(ref), e
 
 if __name__ == '__main__':
 	import argparse
