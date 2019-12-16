@@ -360,6 +360,8 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 	assert len(r) == len(h)
 	phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
 	hyp_pseudo, ref_pseudo = ' '.join((r_ if is_small_typo(h_, r_)[0] else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')
+	words = list(words())
+	missing = [dict(hyp = h_, ref = r_) for r_, h_ in words if not is_small_typo(h_, r_)]
 	a = dict(
 		spaces = dict(
 			delete = sum(r[i] == ' ' and h[i] != ' ' for i in range(len(r))),
@@ -376,27 +378,30 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 			total = len(r)
 		),
 		words = dict(
-			missing_prefix = sum(h_[0] in ' |' for r_, h_ in words()),
-			missing_suffix = sum(h_[-1] in ' |' for r_, h_ in words()),
-			ok_prefix_suffix = sum(h_[0] not in ' |' and h_[-1] not in ' |' for r_, h_ in words()),
+			missing_prefix = sum(h_[0] in ' |' for r_, h_ in words),
+			missing_suffix = sum(h_[-1] in ' |' for r_, h_ in words),
+			ok_prefix_suffix = sum(h_[0] not in ' |' and h_[-1] not in ' |' for r_, h_ in words),
 			
-			delete = sum(h_.count('|') > len(r_) // 2 for r_, h_ in words()),
+			delete = sum(h_.count('|') > len(r_) // 2 for r_, h_ in words),
 			
-			total = ref.count(' ') + 1,
-			errors = [dict(hyp = h_, ref = r_) for r_, h_ in words() if h_ != r_],
+			total = len(words),
+			errors = [dict(hyp = h_, ref = r_) for r_, h_ in words if h_ != r_],
+			missing = missing
 		),
-		cerpseudo = cer(hyp_pseudo, ref_pseudo)
+		cerpseudo = cer(hyp_pseudo, ref_pseudo),
+		mer = len(missing) / len(words)
 	)
 	return a
 
 def aggregate(analyzed, p = 0.5):
-	mean_safe = lambda k: float(torch.tensor([r[k] for r in analyzed if not math.isinf(r[k]) and not math.isnan(r[k])]).mean())
+	mean_safe = lambda k: float(torch.tensor([r[k] for r in analyzed if k in r and not math.isinf(r[k]) and not math.isnan(r[k])] or [-1.0]).mean())
 	stats = dict(
 		cer_avg = mean_safe('cer'),
 		wer_avg = mean_safe('wer'),
 		entropy_avg = mean_safe('entropy'),
 		loss_avg = mean_safe('loss'),
-		cerpseudo_avg = mean_safe('cerpseudo')
+		cerpseudo_avg = mean_safe('cerpseudo'),
+		mer_avg = mean_safe('mer')
 	)
 
 	errs = collections.defaultdict(int)

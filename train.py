@@ -126,7 +126,7 @@ def main(args):
 					f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats['errors_hard']))
 
 				print(stats['errors_distribution'])
-				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} CERPSEUDO: {cerpseudo_avg:.02%} \n'.format(**stats))
+				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} CERPSEUDO: {cerpseudo_avg:.02%} MER: {mer_avg:.02%}\n'.format(**stats))
 				
 				columns[val_dataset_name + '_' + labels_name] = dict(cer_avg = stats['cer_avg'], wer_avg = stats['wer_avg'], loss_avg = stats['loss_avg'], entropy_avg = stats['entropy_avg'], cerpseudo_avg = stats['cerpseudo_avg'], errors_distribution = dict(flyout = str(stats['errors_distribution']), name = 'errors_distribution'))
 				if training:
