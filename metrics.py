@@ -390,13 +390,13 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 	return a
 
 def aggregate(analyzed, p = 0.5):
-	mean_safe = float(torch.tensor([r[k] for r in analyzed if not math.isinf(r[k]) and not math.isnan(r[k])]).mean())
-	a = dict(
+	mean_safe = lambda k: float(torch.tensor([r[k] for r in analyzed if not math.isinf(r[k]) and not math.isnan(r[k])]).mean())
+	stats = dict(
 		cer_avg = mean_safe('cer'),
-		wer_avg = mean_safe('wer')
+		wer_avg = mean_safe('wer'),
 		entropy_avg = mean_safe('entropy'),
 		loss_avg = mean_safe('loss'),
-		cerpseudo_avg = mean_safe('cerpseudo_avg')
+		cerpseudo_avg = mean_safe('cerpseudo')
 	)
 
 	errs = collections.defaultdict(int)
@@ -408,10 +408,10 @@ def aggregate(analyzed, p = 0.5):
 				e = e if small_typo else -1
 				errs[e] += 1
 				errs_words[e > 0].append(dict(ref = ref, hyp = hyp))
-	a['errors_distribution'] = dict(collections.OrderedDict(sorted(errs.items())))
-	a['errors_easy', a['errors_hard'] = errs_words[True], errs_words[False]
+	stats['errors_distribution'] = dict(collections.OrderedDict(sorted(errs.items())))
+	stats['errors_easy'], stats['errors_hard'] = errs_words[True], errs_words[False]
 			
-	return a
+	return stats
 
 def is_small_typo(hyp, ref, p = 0.5, E = 3, L = 4, p_ = 0.3):
 	e = sum(ch != cr for ch, cr in zip(hyp, ref))
