@@ -361,7 +361,7 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 	phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
 	hyp_pseudo, ref_pseudo = ' '.join((r_ if is_small_typo(h_, r_)[0] else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')
 	words = list(words())
-	missing = [dict(hyp = h_, ref = r_) for r_, h_ in words if not is_small_typo(h_, r_)]
+	missing = [dict(hyp = h_, ref = r_) for r_, h_ in words if not is_small_typo(h_, r_)[0]]
 	a = dict(
 		spaces = dict(
 			delete = sum(r[i] == ' ' and h[i] != ' ' for i in range(len(r))),
