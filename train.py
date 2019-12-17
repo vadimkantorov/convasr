@@ -22,6 +22,7 @@ import metrics
 import models
 import optimizers
 import vis
+from collections import OrderedDict
 
 def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
@@ -144,7 +145,7 @@ def main(args):
 		if args.exphtml:
 			#columns['checkpoint_path'] = checkpoint_path
 			vis.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, git_http = args.githttp)
-			vis.exphtml(args.exphtml)
+			#vis.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
 			amp_state_dict = amp.state_dict()
@@ -154,9 +155,26 @@ def main(args):
 		model.train()
 
 	print(' Model capacity:', int(models.compute_capacity(model) / 1e6), 'million parameters\n')
-
+	from IPython.core import debugger
+	debug = debugger.Pdb().set_trace
 	if checkpoint:
-		model.load_state_dict(checkpoint['model_state_dict'], strict = False)
+		if args.loads_only_firstn_layers:
+			freezed_layers = set()
+			print(args.loads_only_firstn_layers)
+			new_state_dict = OrderedDict()
+			print("restoring model state dict only fistn layers")
+			for k,v in checkpoint['model_state_dict'].items():
+				layer = int(k.split('.')[1])
+				if "backbone" in k and layer <= args.loads_only_firstn_layers:
+					freezed_layers.add(k)
+					print(k)
+					new_state_dict[k]=v
+			model.load_state_dict(new_state_dict, strict = False)
+			for ln, params in model.named_parameters():
+				if ln in freezed_layers:
+					params.requires_grad = False
+		else:
+			model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 	
 	model.to(args.device)
 
@@ -275,6 +293,10 @@ def main(args):
 		evaluate_model(val_data_loaders, epoch, iteration)
 
 if __name__ == '__main__':
+	import os
+	os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+	os.environ["CUDA_VISIBLE_DEVICES"]="0"
+	
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--optimizer', choices = ['SGD', 'AdamW', 'NovoGrad', 'FusedNovoGrad'], default = 'SGD')
 	parser.add_argument('--max-norm', type = float, default = 100)
@@ -302,6 +324,7 @@ if __name__ == '__main__':
 	parser.add_argument('--val-batch-size', type = int, default = 64)
 	parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 	parser.add_argument('--checkpoint', nargs = '*', default = [], help = 'simple checkpoint weight averaging, for advanced weight averaging see Stochastic Weight Averaging')
+	parser.add_argument('--loads_only_firstn_layers', type = int, default=None, help='try to load only first n layers for fine tuning')
 	parser.add_argument('--checkpoint-skip', action = 'store_true')
 	parser.add_argument('--experiments-dir', default = 'data/experiments')
 	parser.add_argument('--experiment-dir', default = '{experiments_dir}/{experiment_id}')
