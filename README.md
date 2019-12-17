@@ -109,10 +109,10 @@ ls mydir/*.wav | xargs soxi -D | awk '{sum += $1} END {print sum / 60; print "mi
 # Docker commands
 ```shell
 # build scripts/Dockerfile
-sudo docker build -t convasr scripts
+sudo docker build --build-arg CUDAVERSION=101 --build-arg CUDAVERSIONPOINT=10.1 -t convasr scripts
 
 # run docker
-sudo docker run --runtime=nvidia --priveleged --cap-add=SYS_PTRACE -v ~/.ssh:/root/.ssh -v ~/stt_results:/root/stt_results -v ~/.gitconfig:/root/.gitconfig -v ~/.vimrc:/root/.vimrc -v ~/convasr:/root/convasr -v /home/data/ru_open_stt_wav:/root/convasr/ru_open_stt -v /home/data/kontur_calls_micro:/root/convasr/kontur_calls_micro -it --ipc=host convasr
+sudo docker run --runtime=nvidia --privileged --cap-add=SYS_PTRACE -v ~/.ssh:/root/.ssh -v ~/stt_results:/root/stt_results -v ~/.gitconfig:/root/.gitconfig -v ~/.vimrc:/root/.vimrc -v ~/convasr:/root/convasr -v /home/data/ru_open_stt_wav:/root/convasr/ru_open_stt -v /home/data/kontur_calls_micro:/root/convasr/kontur_calls_micro -v /home/data/valset17122019:/root/convasr/valset17122019 -it --ipc=host convasr
 
 sudo docker image rm -f convasr
 ```

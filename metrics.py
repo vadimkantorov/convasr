@@ -359,7 +359,8 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 
 	assert len(r) == len(h)
 	phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
-	hyp_pseudo, ref_pseudo = ' '.join((r_ if error_type(h_, r_)[0] == 'typo_easy' else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')
+	hypref_pseudo = {t : (' '.join((r_ if error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'])[t] else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')) for t in error_types}
+
 	words = list(words())
 	errors = [dict(hyp = h_, ref = r_, type = t) for r_, h_ in words for t, e in [error_type(h_, r_)] if t != 'ok']
 	errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in errors if r['type'] == t] for t in error_types}
@@ -387,20 +388,25 @@ def analyze(ref, hyp, phonetic_replace_groups = []):
 			total = len(words),
 			errors = errors
 		),
-		cerpseudo = cer(hyp_pseudo, ref_pseudo),
-		mer = len(errors['missing']) / len(words)
+		mer = len(errors['missing']) / len(words),
+
+		cer_easy = cer(*hypref_pseudo['typo_easy']),
+		cer_hard = cer(*hypref_pseudo['typo_hard']),
+		cer_missing = cer(*hypref_pseudo['missing'])
 	)
 	return a
 
 def aggregate(analyzed, p = 0.5):
 	mean_safe = lambda k: float(torch.tensor([r[k] for r in analyzed if k in r and not math.isinf(r[k]) and not math.isnan(r[k])] or [-1.0]).mean())
 	stats = dict(
+		loss_avg = mean_safe('loss'),
+		entropy_avg = mean_safe('entropy'),
 		cer_avg = mean_safe('cer'),
 		wer_avg = mean_safe('wer'),
-		entropy_avg = mean_safe('entropy'),
-		loss_avg = mean_safe('loss'),
-		cerpseudo_avg = mean_safe('cerpseudo'),
-		mer_avg = mean_safe('mer')
+		mer_avg = mean_safe('mer'),
+		cer_easy_avg = mean_safe('cer_easy'),
+		cer_hard_avg = mean_safe('cer_hard'),
+		cer_missing_avg = mean_safe('cer_missing')
 	)
 
 	errs = collections.defaultdict(int)
