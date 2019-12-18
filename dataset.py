@@ -81,6 +81,7 @@ class Labels:
 	repeat = '2'
 	word_start = '<'
 	word_end = '>'
+	candidate_sep = ';'
 
 	def __init__(self, lang, bpe = None, name = ''):
 		self.lang = lang
@@ -105,7 +106,7 @@ class Labels:
 		return list(filter(bool, (''.join(c for c in self.preprocess_word(w) if c in self).strip() for w in words)))
 
 	def normalize_text(self, text):
-		return ';'.join(' '.join(self.find_words(part)).lower().strip() for part in text.split(';')) or '*' 
+		return self.candidate_sep.join(' '.join(self.find_words(part)).lower().strip() for part in text.split(';')) or '*' 
 		#return ' '.join(f'{w[:-1]}{w[-1].upper()}' for w in self.find_words(text.lower())) or '*' 
 
 	def encode(self, text):
@@ -114,8 +115,11 @@ class Labels:
 		chr2idx = {l: i for i, l in enumerate(str(self))}
 		return normalized, torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
-	def decode(self, i, blank = None, space = None, replace2 = True):
-		return ''.join(self[int(idx)] if not replace2 or k == 0 or self[int(idx)] != self[int(i[k - 1])] else '' for k, idx in enumerate(i)).replace(self.blank, blank or self.blank).replace(self.space, space or self.space)
+	def decode(self, idx, blank = None, space = None, replace2 = True):
+		return self.candidate_sep.join(''.join(self[int(idx)] if not replace2 or k == 0 or self[int(idx)] != self[int(i[k - 1])] else '' for k, idx in enumerate(i)).replace(self.blank, blank or self.blank).replace(self.space, space or self.space).strip() for i in (idx if isinstance(idx[0], list) else [idx]))
+
+	def split_candidates(self, text):
+		return text.split(self.candidate_sep)
 
 	def postprocess_transcript(self, text, phonetic_replace_groups = []):
 		replaceblank = lambda s: s.replace(self.blank * 10, ' ').replace(self.blank, '')

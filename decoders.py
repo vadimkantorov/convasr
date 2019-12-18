@@ -2,7 +2,7 @@ import torch
 
 class GreedyDecoder:
 	def decode(self, log_probs, output_lengths, K = 1):
-		return [l[:o] for o, l in zip(torch.as_tensor(output_lengths).tolist(), log_probs.argmax(dim = 1).tolist())]
+		return [l[:o] for o, l in zip(torch.as_tensor(output_lengths).tolist(), log_probs.argmax(dim = 1).tolist())]#, [1.0] * len(log_probs)
 
 class GreedyNoBlankDecoder:
 	def decode(self, log_probs, output_lengths, K = 1):
@@ -30,5 +30,5 @@ class BeamSearchDecoder:
 	def decode(self, log_probs, output_lengths):
 		list_or_one = lambda xs: xs if len(xs) > 1 else xs[0]
 		decoded_chr, decoded_scores, decoded_offsets, decoded_lengths = self.beam_search_decoder.decode(log_probs.permute(0, 2, 1).cpu(), torch.as_tensor(output_lengths).cpu().int())
-		decoded_top = decoded_scores.topk(self.topk, dim = 1).indices
-		return [list_or_one([d[int(t_)][:l[int(t_)]].tolist() for t_ in t.tolist()]) for d, l, t in zip(decoded_chr, decoded_lengths, decoded_top)]
+		decoded_top_scores, decoded_top_inds = decoded_scores.topk(self.topk, dim = 1)
+		return [list_or_one([d[t_, :l[t_]].tolist() for t_ in t.tolist()]) for d, l, t in zip(decoded_chr, decoded_lengths, decoded_top_inds)]#, [list_or_one(t) for t in decoded_top_scores.tolist()]

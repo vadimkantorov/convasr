@@ -332,68 +332,75 @@ def align(hyp, ref):
 			i += 1
 	return h, r
 
-def analyze(ref, hyp, phonetic_replace_groups = []):
-	h, r = align(hyp, ref)
-
-	h, r = list(h), list(r)
-	for i in range(len(r)):
-		if r[i] != '|':
-			break
-		if h[i] == ' ':
-			r[i] = ' '
-	for i in reversed(range(len(r))):
-		if r[i] != '|':
-			break
-		if h[i] == ' ':
-			r[i] = ' '
-	h, r = ''.join(h), ''.join(r)
-
-	def words():
-		k = None
-		for i in range(1 + len(r)):
-			if i == len(r) or r[i] == ' ':
-				yield r[k : i], h[k : i]
-				k = i + 1 #None
-			#elif r[i] != '|' and r[i] != ' ' and k is None:
-			#	k = i
-
-	assert len(r) == len(h)
-	phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
-	hypref_pseudo = {t : (' '.join((r_ if error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'])[t] else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')) for t in error_types}
-
-	words = list(words())
-	errors = [dict(hyp = h_, ref = r_, type = t) for r_, h_ in words for t, e in [error_type(h_, r_)] if t != 'ok']
-	errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in errors if r['type'] == t] for t in error_types}
+def analyze(ref, hyp, labels, phonetic_replace_groups = [], full = False):
+	hyp_orig = hyp
+	hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
+	hyp, ref = map(labels.postprocess_transcript, [hyp, ref])
+	hyp_phonetic, ref_phonetic = [labels.postprocess_transcript(s, phonetic_replace_groups = phonetic_replace_groups) for s in [hyp, ref]]
 	
-	a = dict(
-		spaces = dict(
-			delete = sum(r[i] == ' ' and h[i] != ' ' for i in range(len(r))),
-			insert = sum(h[i] == ' ' and r[i] != ' ' for i in range(len(r))),
-			total =  sum(r[i] == ' ' for i in range(len(r)))
-		),
-		alignment = dict(ref = r, hyp = h),
-		chars = dict(
-			ok = sum(r[i] == h[i] for i in range(len(r))), 
-			replace = sum(r[i] != '|' and r[i] != h[i] and h[i] != '|' for i in range(len(r))),
-			replace_phonetic = sum(r[i] != '|' and r[i] != h[i] and h[i] != '|' and phonetic_group(r[i]) == phonetic_group(h[i]) for i in range(len(r))), 
-			delete = sum(r[i] != '|' and r[i] != h[i] and h[i] == '|' for i in range(len(r))),
-			insert = sum(r[i] == '|' and h[i] != '|' for i in range(len(r))),
-			total = len(r)
-		),
-		words = dict(
-			missing_prefix = sum(h_[0] in ' |' for r_, h_ in words),
-			missing_suffix = sum(h_[-1] in ' |' for r_, h_ in words),
-			ok_prefix_suffix = sum(h_[0] not in ' |' and h_[-1] not in ' |' for r_, h_ in words),
-			delete = sum(h_.count('|') > len(r_) // 2 for r_, h_ in words),
-			total = len(words),
-			errors = errors
-		),
-		mer = len(errors['missing']) / len(words),
+	a = dict(hyp_orig = hyp_orig, ref = ref, hyp = hyp, cer = cer(hyp, ref), wer = wer(hyp, ref), per = cer(hyp_phonetic, ref_phonetic), phonetic = dict(ref = ref_phonetic, hyp = hyp_phonetic))
+	
+	if full:
+		h, r = map(list, align(hyp, ref))
+		for i in range(len(r)):
+			if r[i] != '|':
+				break
+			if h[i] == ' ':
+				r[i] = ' '
+		for i in reversed(range(len(r))):
+			if r[i] != '|':
+				break
+			if h[i] == ' ':
+				r[i] = ' '
+		h, r = ''.join(h), ''.join(r)
 
-		cer_easy = cer(*hypref_pseudo['typo_easy']),
-		cer_hard = cer(*hypref_pseudo['typo_hard']),
-		cer_missing = cer(*hypref_pseudo['missing'])
-	)
+		def words():
+			k = None
+			for i in range(1 + len(r)):
+				if i == len(r) or r[i] == ' ':
+					yield r[k : i], h[k : i]
+					k = i + 1 #None
+				#elif r[i] != '|' and r[i] != ' ' and k is None:
+				#	k = i
+
+		assert len(r) == len(h)
+		phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
+		hypref_pseudo = {t : (' '.join((r_ if error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'])[t] else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')) for t in error_types}
+
+		words = list(words())
+		errors = [dict(hyp = h_, ref = r_, type = t) for r_, h_ in words for t, e in [error_type(h_, r_)] if t != 'ok']
+		errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in errors if r['type'] == t] for t in error_types}
+		
+		a.update(dict(
+			spaces = dict(
+				delete = sum(r[i] == ' ' and h[i] != ' ' for i in range(len(r))),
+				insert = sum(h[i] == ' ' and r[i] != ' ' for i in range(len(r))),
+				total =  sum(r[i] == ' ' for i in range(len(r)))
+			),
+			alignment = dict(ref = r, hyp = h),
+			chars = dict(
+				ok = sum(r[i] == h[i] for i in range(len(r))), 
+				replace = sum(r[i] != '|' and r[i] != h[i] and h[i] != '|' for i in range(len(r))),
+				replace_phonetic = sum(r[i] != '|' and r[i] != h[i] and h[i] != '|' and phonetic_group(r[i]) == phonetic_group(h[i]) for i in range(len(r))), 
+				delete = sum(r[i] != '|' and r[i] != h[i] and h[i] == '|' for i in range(len(r))),
+				insert = sum(r[i] == '|' and h[i] != '|' for i in range(len(r))),
+				total = len(r)
+			),
+			words = dict(
+				missing_prefix = sum(h_[0] in ' |' for r_, h_ in words),
+				missing_suffix = sum(h_[-1] in ' |' for r_, h_ in words),
+				ok_prefix_suffix = sum(h_[0] not in ' |' and h_[-1] not in ' |' for r_, h_ in words),
+				delete = sum(h_.count('|') > len(r_) // 2 for r_, h_ in words),
+				total = len(words),
+				errors = errors
+			),
+			mer = len(errors['missing']) / len(words),
+
+			cer_easy = cer(*hypref_pseudo['typo_easy']),
+			cer_hard = cer(*hypref_pseudo['typo_hard']),
+			cer_missing = cer(*hypref_pseudo['missing'])
+		))
+
 	return a
 
 def aggregate(analyzed, p = 0.5):

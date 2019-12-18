@@ -22,6 +22,7 @@ import metrics
 import models
 import optimizers
 import vis
+import exphtml
 
 def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
@@ -60,8 +61,7 @@ def main(args):
 		model.eval()
 		model.fuse_conv_bn_eval()
 		model.to(args.device)
-		sample_batch_size, sample_time = 16, 1024
-		waveform_input = torch.rand(sample_batch_size, sample_time, device = args.device)
+		waveform_input = torch.rand(args.onnx_sample_batch_size, args.onnx_sample_time, device = args.device)
 		logits, = model(waveform_input)
 
 		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B'}, logits = {0 : 'B'}))
@@ -80,23 +80,17 @@ def main(args):
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, labels, val_frontend, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
 	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.GreedyNoBlankDecoder() if args.decoder == 'GreedyNoBlankDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
+	@torch.no_grad()
 	def apply_model(data_loader):
 		for dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ in data_loader:
-			with torch.no_grad():
-				log_probs, output_lengths, loss = map(model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device)).get, ['log_probs', 'output_lengths', 'loss'])
+			log_probs, output_lengths, loss = map(model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device)).get, ['log_probs', 'output_lengths', 'loss'])
 			entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, output_lengths))
 			decoded = [list(map(l.decode, d.decode(lp, o))) for l, d, lp, o in zip(labels, decoder, log_probs, output_lengths)]
 			log_probs = list(map(models.unpad, log_probs, output_lengths))
 			yield audio_path_, reference_, loss.cpu(), entropy_char.cpu(), decoded, log_probs
 
 	def evaluate_transcript(analyze, labels, hyp, ref, loss, entropy, audio_path):
-		hyp, ref = min((metrics.cer(h, r), (h, r)) for r in ref.split(';') for h in (hyp if isinstance(hyp, list) else [hyp]))[1]
-		hyp, ref = map(labels.postprocess_transcript, [hyp, ref])
-		cer, wer = metrics.cer(hyp, ref), metrics.wer(hyp, ref) 
-		hyp_phonetic, ref_phonetic = [labels.postprocess_transcript(s, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS) for s in [hyp, ref]]
-		per = metrics.cer(hyp_phonetic, ref_phonetic)
-		analyzed = metrics.analyze(ref, hyp, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS) if analyze else {}
-		return dict(ref = ref, hyp = hyp, cer = cer, wer = wer, per = per, labels = labels.name, phonetic = dict(ref = ref_phonetic, hyp = hyp_phonetic), audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss, **analyzed)
+		return dict(labels = labels.name, audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss, **metrics.analyze(ref, hyp, labels, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze))
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None):
 		training = epoch is not None and iteration is not None
@@ -120,9 +114,10 @@ def main(args):
 			for r_ in zip(*ref_tra_):
 				labels_name = r_[0]['labels']
 				stats = metrics.aggregate(r_)
-				for t in metrics.error_types:
-					with open(f'{transcripts_path}.{t}.txt', 'w') as f:
-						f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats[t]))
+				if analyze:
+					for t in metrics.error_types:
+						with open(f'{transcripts_path}.{t}.txt', 'w') as f:
+							f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats[t]))
 
 				print(stats['errors_distribution'])
 				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} [{cer_easy_avg:.02%} - {cer_hard_avg:.02%} - {cer_missing_avg:.02%}]  MER: {mer_avg:.02%}\n'.format(**stats))
@@ -143,8 +138,8 @@ def main(args):
 		checkpoint_path = os.path.join(args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)) if training and not args.checkpoint_skip else None
 		if args.exphtml:
 			#columns['checkpoint_path'] = checkpoint_path
-			vis.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, git_http = args.githttp)
-			vis.exphtml(args.exphtml)
+			exphtml.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, git_http = args.githttp)
+			exphtml.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
 			amp_state_dict = amp.state_dict()
@@ -350,6 +345,8 @@ if __name__ == '__main__':
 	parser.add_argument('--window-stride', type = float, default = 0.01, help = 'for frontend, in seconds')
 	parser.add_argument('--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'], help = 'for frontend')
 	parser.add_argument('--onnx')
+	parser.add_argument('--onnx-sample-batch-size', type = int, default = 16)
+	parser.add_argument('--onnx-sample-time', type = int, default = 1024)
 	parser.add_argument('--onnx-opset', type = int, default = 10, choices = [9, 10, 11])
 	parser.add_argument('--dropout', type = float, default = 0.2)
 	parser.add_argument('--githttp')
