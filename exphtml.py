@@ -44,7 +44,7 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 		try:
 			j = json.load(open(path))
 			j['path'] = path
-			j['git_http'], j['git_revision'], j['git_comment'] = j.get('git_http', ''), j.get('git_revision', ''), j.get('git_comment', '')
+			j['meta'], j['tag'], j['iteration'], j['git_http'], j['git_revision'], j['git_comment'] = j.get('meta', {}), j.get('tag', ''), j.get('iteration', ''), j.get('git_http', ''), j.get('git_revision', ''), j.get('git_comment', '')
 			return j
 		except:
 			return {}
@@ -61,23 +61,24 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 	by_time = lambda e: e['time']
 	by_iteration = lambda e: (e['iteration'], e['time'])
 	by_max_event_time = lambda exp: max(map(by_time, exp[0]))
-	columns_union = lambda experiments: set(sum((list_map(strip_hidden, e['columns']) for events, *_ in experiments for e in events), []))
-	fields_union = lambda experiments: set(sum((list_map(strip_hidden, c) for events, *_ in experiments for e in events for c in e['columns'].values()), []))
+	columns_union = lambda experiments: set(sum((list_map(strip_hidden, e['columns']) for events in experiments for e in events), []))
+	fields_union = lambda experiments: set(sum((list_map(strip_hidden, c) for events in experiments for e in events for c in e['columns'].values()), []))
+	tags_union = lambda experiments: set(e['tag'] for events in experiments for e in events)
 	last_event_by_column = lambda events, c: [e for e in events if c in map(strip_hidden, e['columns'])][-1]
 	last_event_by_field = lambda events, f: [e for e in events if f in sum(map(list, e['columns'].values()), [])][-1]
 	
-	experiments = sorted(map0(lambda events: sorted(events, key = by_iteration), groupby(events, by_experiment_id)), key = by_max_event_time, reverse = True)
-	experiments_ids = [experiment_id for events, experiment_id in experiments]
+	experiments, experiments_id = zip(*sorted(map0(lambda events: sorted(events, key = by_iteration), groupby(events, by_experiment_id)), key = by_max_event_time, reverse = True))
 
 	columns = sorted(columns_union(experiments))
 	fields = sorted(fields_union(experiments))
+	tags = sorted(tags_union(experiments))
 
 	experiment_recent = experiments[0]
 	columns_recent = columns_union([experiment_recent])
 	fields_recent = columns_union([experiment_recent])
 
-	columns_hidden = {c : c not in columns_recent or hide(c) in last_event_by_column(experiment_recent[0], c) for c in columns}
-	fields_hidden =  {f : f not in fields_recent or hide(f) in last_event_by_field(experiment_recent[0], f) for f in fields}
+	columns_checked = {c : not ( c not in columns_recent or hide(c) in last_event_by_column(experiment_recent, c) ) for c in columns}
+	fields_checked =  {f : not ( f not in fields_recent or hide(f) in last_event_by_field(experiment_recent, f) ) for f in fields}
 
 	with open(html_path, 'w') as html:
 		html.write('<html>')
@@ -92,6 +93,10 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 				.nowrap {white-space:nowrap}
 				.m0 {margin:0px}
 				.textleft {text-align:left}
+				.mr{margin-right:3px}
+				.sepright {border-right: 1px solid black}
+				.git {background-color:lightblue}
+				.meta {background-color:lightgray}
 			</style>
 		''')
 		html.write('</head>')
@@ -117,15 +122,6 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 					});
 			}
 
-			function filter(event)
-			{
-				if (event.keyCode === 13)
-				{
-					event.preventDefault();
-					event.target.nextSibling.click();
-				}
-			}
-
 			function filter_(event)
 			{
 				const filter_field = document.getElementById('filter_field').value, filter_col = document.getElementById('filter_col').value, filter_exp = document.getElementById('filter_exp').value;
@@ -139,56 +135,36 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 		html.write(f'<h1>Generated at {generated_time}</h1>')
 		html.write('<table width="100%">')
 	
-		def render_header_line(name, names, hidden):
-			return f'<tr><th class="textleft">{name}</th><td><div id="searchbox"><form action="." class="m0"><label class="nowrap"><input id="filter_{name}" type="text" name="search" placeholder="Filter" onkeyup="return filter(event)"><button onclick="return filter_(event)">Filter</button></label></form></div></td><td>' + (''.join(f'<label class="nowrap"><input type="checkbox" name="{c}" value="{name}{hash(c)}" {"checked" if not hidden[c] else ""} onchange="toggle(event.target.value)" />{c}</label>' for c in names) if hidden is not True else '') + '</td></tr>'
+		def render_header_line(name, names, checked):
+			return f'<tr><th class="textleft">{name}</th><td><div id="searchbox"><form action="." class="m0"><label class="nowrap"><input type="text" name="search" placeholder="Filter"></label></form></div></td><td>' + (''.join(f'<label class="nowrap"><input type="checkbox" name="{c}" {"checked" if checked is True or checked[c] else ""}/>{c}</label>' for c in names) if checked is not False else '') + '</td></tr>'
 
 		def render_experiment(events, experiment_id):
 			generated_time = time.strftime(strftime, time.localtime(events[-1]['time']))
-			return f'''<tr><td title="{generated_time}" onclick="toggle('{experiment_id}.hidden')"><strong>{experiment_id}</strong></td>''' + ''.join(f'<td class="col{hash(c)}"><strong>{c}</strong></td>' for c in columns) + '</tr>'
+			res = f'''<tr><td title="{generated_time}"><strong>{experiment_id}</strong></td>''' + ''.join(f'<td><strong>{c}</strong></td>' for c in columns) + '</tr>'
+			for i, e in enumerate(events):
+				generated_time = time.strftime(strftime, time.localtime(e['time']))
+				meta = json.dumps(e['meta'], sort_keys = True, indent = 2, ensure_ascii = False)
+				res += '<tr><td title="{generated_time}" class="sepright">{iteration}</td>'.format(generated_time = generated_time, **e)
+				res += ''.join('<td>' + ''.join(f'<span title="{f}" class="mr">{render_cell(e, c, f)}</span>' for f in fields) + '</td>' for c in columns)
+				res += '</tr>'
+				res += '<tr class="git"><td><a href="{git_http}">@{git_revision}</a></td><td colspan="100">{git_comment}</td></tr>\n'.format(**e)
+				res += f'<tr class="meta"><td colspan="100"><pre>{meta}</pre></td></tr>\n'
+			return res
 
-		def render_cell():
-			return '{:.04f}'.format(o) if isinstance(o, float) else '''<a href="_blank" onclick="toggle('{key}'); return false">{name}</a>'''.format(key = key, **o) if isinstance(o, dict) else str(o)
+		def render_cell(event, column, field):
+			return event['columns'].get(column, {}).get(field, '')
 
-		html.write(render_header_line('fields', fields, fields_hidden))
-		html.write(render_header_line('columns', columns, columns_hidden))
-		html.write(render_header_line('experiments', experiments_ids, True))
-		# TODO: add tags, change hidden to checked
+		html.write(render_header_line('fields', fields, fields_checked))
+		html.write(render_header_line('columns', columns, columns_checked))
+		html.write(render_header_line('experiments', experiments_id, False))
+		html.write(render_header_line('tags', tags, True))
 		html.write('</table><hr/>')
-
-		#key = lambda experiment_id, iteration = '', column = '', field = '': f'flyout{experiment_id}_{iteration}_{column}_{field}'.replace('.', '_')
 		
 		html.write('<table cellpadding="2px" cellspacing="0">')
-		for experiment in experiments:
-			html.write(render_experiment(*experiment))
-		#	idx = set([0, len(jsons) - 1] + [i for i, j in enumerate(jsons) if 'iter' not in j['iteration']])
-
-		#	for i, j in enumerate(jsons):
-		#		generated_time = time.strftime(strftime, time.localtime(j['time']))
-		#		hidden = 'hidden' if i not in idx else ''
-		#		meta_key = f'meta{hash(experiment_id + str(j["iteration"]))}'
-		#		experiment_key = f'data-experiment-id="{experiment_id}"'
-		#		iteration = j.get('iteration', '')
-
-		#		meta = json.dumps(j['meta'], sort_keys = True, indent = 2, ensure_ascii = False) if j.get('meta') else None
-		#		html.write(f'<tr {experiment_key} class="{hidden} {experiment_id}" {hidden}>')
-		#		html.write(f'''<td onclick="toggle('{meta_key}')" title="{generated_time}" style="border-right: 1px solid black">{iteration}</td>''')
-		#		html.write(''.join(f'<td class="col{hash(c)}">' + ''.join(f'<span title="{f}" style="margin-right:3px" {"hidden" if f != field else ""} class="field{hash(f)}">{fmt(j["columns"].get(c, {}).get(f, ""), key = key(experiment_id, iteration, c, f))}</span>' for f in fields) + '</td>' for c in columns))
-		#		html.write('</tr>\n')
-
-		#		for c in columns:
-		#			for f in fields:
-		#				val = j['columns'].get(c, {}).get(f, '')
-		#				if isinstance(val, dict):
-		#					flyout_key = key(experiment_id, iteration, c, f)
-		#					html.write('<tr {experiment_key} hidden class="{flyout_key}" style="background-color:lightcoral"><td colspan="100"><pre>{flyout}</pre></td></tr>\n'.format(flyout = val['flyout'], flyout_key = flyout_key, experiment_key = experiment_key))
-		#		
-		#		html.write('<tr {experiment_key} hidden class="{meta_key}" style="background-color:lightblue"><td><a href="{git_http}">@{git_revision}</a></td><td colspan="100">{git_comment}</td></tr>\n'.format(meta_key = meta_key, experiment_key = experiment_key, **j))
-		#		html.write(f'<tr {experiment_key} hidden class="{meta_key}" style="background-color:lightgray"><td colspan="100"><pre>{meta}</pre></td></tr>\n' if meta else '')
-
-		# 	html.write('<tr><td>&nbsp;</td> </tr>')
-		
+		for events, experiment_id in zip(experiments, experiments_id):
+			html.write(render_experiment(events, experiment_id))
 		html.write('</table></body></html>')
-
+		
 		try:
 			subprocess.check_call(['git', 'add', '-A'], cwd = root_dir)
 			subprocess.check_call(['git', 'commit', '-a', '--allow-empty-message', '-m', ''], cwd = root_dir)
