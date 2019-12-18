@@ -185,7 +185,7 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 		#		html.write('<tr {experiment_key} hidden class="{meta_key}" style="background-color:lightblue"><td><a href="{git_http}">@{git_revision}</a></td><td colspan="100">{git_comment}</td></tr>\n'.format(meta_key = meta_key, experiment_key = experiment_key, **j))
 		#		html.write(f'<tr {experiment_key} hidden class="{meta_key}" style="background-color:lightgray"><td colspan="100"><pre>{meta}</pre></td></tr>\n' if meta else '')
 
-		#	html.write('<tr><td>&nbsp;</td></tr>')
+		# 	html.write('<tr><td>&nbsp;</td> </tr>')
 		
 		html.write('</table></body></html>')
 
