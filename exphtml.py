@@ -44,7 +44,7 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 		try:
 			j = json.load(open(path))
 			j['path'] = path
-			j['meta'], j['tag'], j['iteration'], j['git_http'], j['git_revision'], j['git_comment'] = j.get('meta', {}), j.get('tag', ''), j.get('iteration', ''), j.get('git_http', ''), j.get('git_revision', ''), j.get('git_comment', '')
+			j['meta'], j['tag'], j['iteration'], j['git_http'], j['git_revision'], j['git_comment'] = j.get('meta', {}), j.get('tag', 'default'), j.get('iteration', ''), j.get('git_http', ''), j.get('git_revision', ''), j.get('git_comment', '')
 			return j
 		except:
 			return {}
@@ -75,15 +75,14 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 
 	experiment_recent = experiments[0]
 	columns_recent = columns_union([experiment_recent])
-	fields_recent = columns_union([experiment_recent])
+	fields_recent = fields_union([experiment_recent])
 
-	columns_checked = {c : not ( c not in columns_recent or hide(c) in last_event_by_column(experiment_recent, c) ) for c in columns}
-	fields_checked =  {f : not ( f not in fields_recent or hide(f) in last_event_by_field(experiment_recent, f) ) for f in fields}
+	columns_checked = {c : c in columns_recent and hide(c) not in last_event_by_column(experiment_recent, c) for c in columns}
+	fields_checked =  {f : f in fields_recent and hide(f) not in last_event_by_field(experiment_recent, f) for f in fields}
+
 
 	with open(html_path, 'w') as html:
-		html.write('<html>')
-		html.write('<head>')
-		html.write(f'<title>Results @ {generated_time}</title>')
+		html.write(f'<html><head><title>Results @ {generated_time}</title>')
 		html.write('''
 			<meta http-equiv="refresh" content="600" />
 			<script src="https://cdn.jsdelivr.net/npm/vega@5.8.1"></script>
@@ -133,37 +132,45 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 			}
 		</script>''')
 		html.write(f'<h1>Generated at {generated_time}</h1>')
-		html.write('<table width="100%">')
 	
 		def render_header_line(name, names, checked):
-			return f'<tr><th class="textleft">{name}</th><td><div id="searchbox"><form action="." class="m0"><label class="nowrap"><input type="text" name="search" placeholder="Filter"></label></form></div></td><td>' + (''.join(f'<label class="nowrap"><input type="checkbox" name="{c}" {"checked" if checked is True or checked[c] else ""}/>{c}</label>' for c in names) if checked is not False else '') + '</td></tr>'
+			return f'<tr><th class="textleft">{name}</th><td><label class="nowrap"><input type="search" name="{name}" placeholder="Filter"></label></td><td>' + (''.join(f'<label class="nowrap"><input type="checkbox" name="{c}" {"checked" if checked is True or checked[c] else ""}/>{c}</label>' for c in names) if checked is not False else '') + '</td></tr>'
+		def render_value(val):
+			if isinstance(val, int) or isinstance(val, float):
+				return '{:.04f}'.format(val)
+			return str(val)
 
+		def render_cell(event, column, field, append = []):
+			val = event['columns'].get(column, {}).get(field, '')
+			if isinstance(val, dict):
+				cell = f'<a href="#" onclick="return false">{val["name"]}</a>'
+				append.append('<tr hidden><td colspan="100"><pre>{cell}</pre></td></tr>'.format(cell = render_value(val['flyout'])))
+			else:
+				cell = render_value(val)
+			return cell 
+
+		hidden = lambda checked: "hidden" if not checked else ""
 		def render_experiment(events, experiment_id):
 			generated_time = time.strftime(strftime, time.localtime(events[-1]['time']))
-			res = f'''<tr><td title="{generated_time}"><strong>{experiment_id}</strong></td>''' + ''.join(f'<td><strong>{c}</strong></td>' for c in columns) + '</tr>'
+			res = f'''<tr><td title="{generated_time}"><strong>{experiment_id}</strong></td>''' + ''.join(f'<td {hidden(columns_checked[c])}><strong>{c}</strong></td>' for c in columns) + '</tr>'
 			for i, e in enumerate(events):
 				generated_time = time.strftime(strftime, time.localtime(e['time']))
 				meta = json.dumps(e['meta'], sort_keys = True, indent = 2, ensure_ascii = False)
 				res += '<tr><td title="{generated_time}" class="sepright">{iteration}</td>'.format(generated_time = generated_time, **e)
-				res += ''.join('<td>' + ''.join(f'<span title="{f}" class="mr">{render_cell(e, c, f)}</span>' for f in fields) + '</td>' for c in columns)
+				append = []
+				res += ''.join(f'<td {hidden(columns_checked[c])}>' + ''.join(f'<span title="{f}" class="mr" {hidden(fields_checked[f])}>{render_cell(e, c, f, append)}</span>' for f in fields) + '</td>' for c in columns)
 				res += '</tr>'
-				res += '<tr class="git"><td><a href="{git_http}">@{git_revision}</a></td><td colspan="100">{git_comment}</td></tr>\n'.format(**e)
-				res += f'<tr class="meta"><td colspan="100"><pre>{meta}</pre></td></tr>\n'
+				res += ''.join(append)
+				res += '<tr class="git" hidden><td><a href="{git_http}">commit: @{git_revision}</a></td><td colspan="100">message: {git_comment}</td></tr>\n'.format(**e)
+				res += f'<tr class="meta" hidden><td colspan="100"><pre>{meta}</pre></td></tr>'
 			return res
-
-		def render_cell(event, column, field):
-			return event['columns'].get(column, {}).get(field, '')
-
+		html.write('<form action="."><table width="100%">')
 		html.write(render_header_line('fields', fields, fields_checked))
 		html.write(render_header_line('columns', columns, columns_checked))
 		html.write(render_header_line('experiments', experiments_id, False))
 		html.write(render_header_line('tags', tags, True))
-		html.write('</table><hr/>')
-		
-		html.write('<table cellpadding="2px" cellspacing="0">')
-		for events, experiment_id in zip(experiments, experiments_id):
-			html.write(render_experiment(events, experiment_id))
-		html.write('</table></body></html>')
+		html.write('<tr><td></td><td><input type="submit" value="Filter" style="width:100%" /></td></tr>')
+		html.write('</table></form><hr/><table cellpadding="2px" cellspacing="0">' + ''.join(map(render_experiment, experiments, experiments_id)) + '</table></body></html>')
 		
 		try:
 			subprocess.check_call(['git', 'add', '-A'], cwd = root_dir)
