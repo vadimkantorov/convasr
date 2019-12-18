@@ -55,6 +55,7 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 	strip_hidden = lambda s: s.lstrip('.')
 	hide = lambda s: '.' + strip_hidden(s)
 
+	random_key = lambda: random.randint(1, int(1e9))
 	events = list(filter(None, (json_load(os.path.join(json_dir, json_file)) for json_file in os.listdir(json_dir))))
 	by_experiment_id = lambda e: e['experiment_id']
 	by_tag = lambda e: e['tag']
@@ -102,33 +103,10 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 		html.write('<body onload="onload()">')
 		html.write('''
 		<script>
-			var toggle = className => Array.from(document.querySelectorAll(`.${className}`)).map(e => {e.hidden = !e.hidden});
+			var toggle = selector => Array.from(document.querySelectorAll(`${selector}`)).map(e => {e.hidden = !e.hidden});
 
 			function onload()
 			{
-				const hash = window.location.hash.replace('#', '');
-				const parts = hash.length > 0 ? hash.split(';') : [];
-				
-				parts
-					.map(p => p.split('='))
-					.map(([prefix, selector]) =>
-					{
-						if(selector)
-						{
-							Array.from(document.querySelectorAll(`input[value^=${prefix}]:not([name*=${selector}])`)).map(checkbox => checkbox.click());
-							document.getElementById(`filter_${prefix}`).value = selector;
-						}
-					});
-			}
-
-			function filter_(event)
-			{
-				const filter_field = document.getElementById('filter_field').value, filter_col = document.getElementById('filter_col').value, filter_exp = document.getElementById('filter_exp').value;
-				window.location.hash = `field=${filter_field};col=${filter_col};exp=${filter_exp} `.replace('field=;', '').replace('col=;', '').replace('exp= ', '').trimEnd();
-				
-				window.location.reload();
-				event.preventDefault();
-				return false;
 			}
 		</script>''')
 		html.write(f'<h1>Generated at {generated_time}</h1>')
@@ -143,8 +121,9 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 		def render_cell(event, column, field, append = []):
 			val = event['columns'].get(column, {}).get(field, '')
 			if isinstance(val, dict):
-				cell = f'<a href="#" onclick="return false">{val["name"]}</a>'
-				append.append('<tr hidden><td colspan="100"><pre>{cell}</pre></td></tr>'.format(cell = render_value(val['flyout'])))
+				key = 'cell{random_key()}'
+				cell = f'''<a href="#" onclick='toggle("#{key}"); return false'>{val["name"]}</a>'''
+				append.append('<tr hidden id="{key}"><td colspan="100"><pre>{cell}</pre></td></tr>'.format(key = key, cell = render_value(val['flyout'])))
 			else:
 				cell = render_value(val)
 			return cell 
