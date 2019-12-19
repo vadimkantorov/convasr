@@ -162,7 +162,8 @@ def main(args):
 	model.to(args.device)
 
 	if not args.train_data_path:
-		#model.fuse_conv_bn_eval()
+		if not args.adapt_bn:
+			model.fuse_conv_bn_eval()
 		if args.fp16:
 			model = apex.amp.initialize(model, opt_level = args.fp16)
 		model = torch.nn.DataParallel(model)
