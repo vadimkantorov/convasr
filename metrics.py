@@ -404,7 +404,7 @@ def analyze(ref, hyp, labels, phonetic_replace_groups = [], full = False):
 	return a
 
 def aggregate(analyzed, p = 0.5):
-	mean_safe = lambda k: float(torch.tensor([r[k] for r in analyzed if k in r and not math.isinf(r[k]) and not math.isnan(r[k])] or [-1.0]).mean())
+	mean_safe = lambda k: float(torch.FloatTensor([r[k] for r in analyzed if k in r and not math.isinf(r[k]) and not math.isnan(r[k])] or [-1.0]).mean())
 	stats = dict(
 		loss_avg = mean_safe('loss'),
 		entropy_avg = mean_safe('entropy'),
@@ -417,7 +417,7 @@ def aggregate(analyzed, p = 0.5):
 	)
 
 	errs = collections.defaultdict(int)
-	errs_words = collections.defaultdict(list)
+	errs_words = {t : [] for t in error_types}
 	for a in analyzed:
 		if 'words' in a: 
 			for hyp, ref in map(lambda b: (b['hyp'], b['ref']), sum(a['words']['errors'].values(), [])):

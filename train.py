@@ -5,7 +5,6 @@ import math
 import time
 import shutil
 import random
-import itertools
 import argparse
 import importlib
 import torch
@@ -54,7 +53,7 @@ def main(args):
 	lang = importlib.import_module(args.lang)
 	labels = [dataset.Labels(lang, name = 'char')] + [dataset.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, stft_mode = 'conv' if args.onnx else None)
-	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, **(dict(frontend = frontend, inplace = False, dict = lambda logits, log_probs, output_lengths, **kwargs: logits) if args.onnx else {}))
+	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, **(dict(frontend = frontend, inplace = False, dict = lambda logits, log_probs, output_lengths, **kwargs: logits[0]) if args.onnx else {}))
 
 	if args.onnx:
 		torch.set_grad_enabled(False)
@@ -68,7 +67,7 @@ def main(args):
 
 		onnxrt_session = onnxruntime.InferenceSession(args.onnx)
 		logits_ = onnxrt_session.run(None, dict(x = waveform_input.cpu().numpy()))
-		assert torch.allclose(logits[0].cpu(), torch.from_numpy(logits_[0]), rtol = 1e-02, atol = 1e-03)
+		assert torch.allclose(logits.cpu(), torch.from_numpy(logits_), rtol = 1e-02, atol = 1e-03)
 		return
 
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
@@ -80,10 +79,11 @@ def main(args):
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, labels, val_frontend, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
 	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.GreedyNoBlankDecoder() if args.decoder == 'GreedyNoBlankDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
-	@torch.no_grad()
-	def apply_model(data_loader):
-		for dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ in data_loader:
-			log_probs, output_lengths, loss = map(model(input_.to(args.device), input_lengths_fraction_.to(args.device), y = targets_.to(args.device), ylen = target_length_.to(args.device)).get, ['log_probs', 'output_lengths', 'loss'])
+	def apply_model(data_loader, model):
+		for dataset_name_, audio_path_, reference_, x, xlen, y, ylen in data_loader:
+			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
+			with torch.no_grad():
+				log_probs, output_lengths, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'output_lengths', 'loss'])
 			entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, output_lengths))
 			decoded = [list(map(l.decode, d.decode(lp, o))) for l, d, lp, o in zip(labels, decoder, log_probs, output_lengths)]
 			log_probs = list(map(models.unpad, log_probs, output_lengths))
@@ -92,18 +92,24 @@ def main(args):
 	def evaluate_transcript(analyze, labels, hyp, ref, loss, entropy, audio_path):
 		return dict(labels = labels.name, audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss, **metrics.analyze(ref, hyp, labels, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze))
 
-	def evaluate_model(val_data_loaders, epoch = None, iteration = None):
+	def evaluate_model(val_data_loaders, epoch = None, iteration = None, adapt_bn = False):
 		training = epoch is not None and iteration is not None
-		model.eval()
 		columns = {}
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
 			print(f'\n{val_dataset_name}@{iteration}')
 			ref_tra_, logits_ = [], []
 			analyze = args.analyze == [] or (args.analyze is not None and val_dataset_name in args.analyze)
-			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits) in enumerate(apply_model(val_data_loader)):
+
+			model.eval()
+			if adapt_bn:
+				for _ in apply_model(val_data_loader, models.reset_bn_running_stats(model)):
+					pass
+
+			model.eval()
+			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits) in enumerate(apply_model(val_data_loader, model)):
 				logits_.append(logits if not training and args.logits else None)
 				stats = [[evaluate_transcript(analyze, l, t, *zipped[:4]) for l, t in zip(labels, zipped[4:])] for zipped in zip(references, loss.tolist(), entropy.tolist(), audio_paths, *decoded)]
-				for r in itertools.chain(*stats) if args.verbose else []:
+				for r in sum(stats, []) if args.verbose else []:
 					print(f'{val_dataset_name}@{iteration}:', batch_idx , '/', len(val_data_loader), '|', args.experiment_id)
 					print('REF: {labels} "{ref_}"'.format(ref_ = r['alignment']['ref'] if analyze else r['ref'], **r))
 					print('HYP: {labels} "{hyp_}"'.format(hyp_ = r['alignment']['hyp'] if analyze else r['hyp'], **r))
@@ -114,15 +120,15 @@ def main(args):
 			for r_ in zip(*ref_tra_):
 				labels_name = r_[0]['labels']
 				stats = metrics.aggregate(r_)
-				if analyze:
-					for t in metrics.error_types:
-						with open(f'{transcripts_path}.{t}.txt', 'w') as f:
-							f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats[t]))
+				for t in (metrics.error_types if analyze else []):
+					with open(f'{transcripts_path}.{t}.txt', 'w') as f:
+						f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats[t]))
 
 				print(stats['errors_distribution'])
 				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} [{cer_easy_avg:.02%} - {cer_hard_avg:.02%} - {cer_missing_avg:.02%}]  MER: {mer_avg:.02%}\n'.format(**stats))
 				
-				columns[val_dataset_name + '_' + labels_name] = dict(cer_avg = stats['cer_avg'], wer_avg = stats['wer_avg'], loss_avg = stats['loss_avg'], entropy_avg = stats['entropy_avg'], cereasy_avg = stats['cer_easy_avg'], cer_hard_avg = stats['cer_hard_avg'], cer_missing_avg = stats['cer_missing_avg'], errors_distribution = dict(flyout = str(stats['errors_distribution']), name = 'errors_distribution'))
+				loss_hist = vis.histc_vega(torch.tensor([r['loss'] for r in r_]), min = 0, max = 3, bins = 20)
+				columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = loss_hist)}
 				if training:
 					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + labels_name, dict(wer_avg = stats['wer_avg'] * 100.0, cer_avg = stats['cer_avg'] * 100.0, loss_avg = stats['loss_avg']), iteration) 
 					tensorboard.flush()
@@ -138,7 +144,7 @@ def main(args):
 		checkpoint_path = os.path.join(args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)) if training and not args.checkpoint_skip else None
 		if args.exphtml:
 			#columns['checkpoint_path'] = checkpoint_path
-			exphtml.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, git_http = args.githttp)
+			print(exphtml.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, tag = 'train' if training else 'test', git_http = args.githttp))
 			exphtml.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
@@ -156,12 +162,11 @@ def main(args):
 	model.to(args.device)
 
 	if not args.train_data_path:
-		model.eval()
-		model.fuse_conv_bn_eval()
-		if args.fp16:
-			model = apex.amp.initialize(model, opt_level = args.fp16)
-		model = torch.nn.DataParallel(model)
-		evaluate_model(val_data_loaders)
+		#model.fuse_conv_bn_eval()
+		#if args.fp16:
+		#	model = apex.amp.initialize(model, opt_level = args.fp16)
+		#model = torch.nn.DataParallel(model)
+		evaluate_model(val_data_loaders, adapt_bn = args.adapt_bn)
 		return
 
 	if args.freeze:
@@ -212,13 +217,13 @@ def main(args):
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1. / K) * avg
 	for epoch in range(sampler.epoch, args.epochs):
 		time_epoch_start = time.time()
-		for dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_ in train_data_loader:
+		for dataset_name_, audio_path_, reference_, x, xlen, y, ylen in train_data_loader:
 			toc_data = time.time()
-			lr = scheduler.get_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
+			lr = scheduler.get_last_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
 			
-			input_, input_lengths_, targets_, target_length_ = input_.to(args.device, non_blocking = True), input_lengths_fraction_.to(args.device, non_blocking = True), targets_.to(args.device, non_blocking = True), target_length_.to(args.device, non_blocking = True)
-			log_probs, output_lengths, loss = map(model(input_, input_lengths_fraction_, y = targets_, ylen = target_length_).get, ['log_probs', 'output_lengths', 'loss'])
-			example_weights = target_length_[:, 0]
+			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
+			log_probs, output_lengths, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'output_lengths', 'loss'])
+			example_weights = ylen[:, 0]
 			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, float(loss.mean())
 			entropy = float(models.entropy(log_probs[0], output_lengths[0], dim = 1).mean()) 
 			toc_fwd = time.time()
@@ -350,5 +355,5 @@ if __name__ == '__main__':
 	parser.add_argument('--onnx-opset', type = int, default = 10, choices = [9, 10, 11])
 	parser.add_argument('--dropout', type = float, default = 0.2)
 	parser.add_argument('--githttp')
-
+	parser.add_argument('--adapt-bn', action = 'store_true')
 	main(parser.parse_args())

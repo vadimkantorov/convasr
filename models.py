@@ -132,7 +132,7 @@ class JasperNet(nn.Module):
 
 		if y is not None and ylen is not None:
 			loss = [F.ctc_loss(l.permute(2, 0, 1), y[:, i], output_lengths[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') / ylen[:, 0] for i, l in enumerate(log_probs)]
-			aux = dict(loss = sum(loss), log_probs = log_probs)
+			aux = dict(loss = sum(loss))
 
 		return self.dict(logits = logits, log_probs = log_probs, output_lengths = output_lengths, **aux)
 
@@ -370,3 +370,20 @@ def normalize_features(features, dim = -1, eps = 1e-20):
 
 def unpad(x, lens, device = 'cpu'):
 	return [e[..., :l].to(device) for e, l in zip(x, lens)]
+
+class reset_bn_running_stats(nn.Module):
+	def __init__(self, model):
+		super().__init__()
+		self.model = model
+		self.n = 0
+		self.bn = [module for module in self.model.modules() if isinstance(module, nn.modules.batchnorm._BatchNorm)]
+		for bn in self.bn:
+			bn.running_mean = torch.zeros_like(bn.running_mean)
+			bn.running_var = torch.ones_like(bn.running_var)
+			bn.train()
+
+	def forward(self, x, *args, **kwargs):
+		for bn in self.bn:
+			bn.momentum = len(x) / (self.n + len(x))
+		self.n += len(x)
+		return self.model(x, *args, **kwargs)

@@ -11,9 +11,9 @@ import argparse
 import base64
 import subprocess
 import matplotlib
-matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import seaborn
+import altair
 import torch
 import torch.nn.functional as F
 import dataset
@@ -22,6 +22,11 @@ import metrics
 import models
 
 labels = dataset.Labels(ru)
+
+def histc_vega(tensor, min, max, bins):
+	bins = torch.linspace(min, max, bins)
+	hist = tensor.histc(min = bins.min(), max = bins.max(), bins = len(bins)).int()
+	return altair.Chart(altair.Data(values = [dict(x = b, y = v) for b, v in zip(bins.tolist(), hist.tolist())])).mark_bar().encode(x = altair.X('x:Q'), y = altair.Y('y:Q')).to_dict()
 
 def tra(transcripts):
 	ref_tra = list(sorted(json.load(open(transcripts)), key = lambda j: j['cer']))

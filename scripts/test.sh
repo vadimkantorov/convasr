@@ -2,9 +2,9 @@ set -e
 
 python3 train.py $@ \
   --githttp https://github.com/vadimkantorov/convasr/commit/%h \
-  --analyze --exphtml= \
-  --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs256____fp16O2/checkpoint_epoch05_iter0040000.pt \
-  --val-data-path kontur_calls_micro/kontur_calls_micro.csv valset11102019/valset11102019.csv # kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv data/clean_val.csv data/valset17122019/valset17122019.csv data/valset17122019/valset17122019.0.csv data/valset17122019/valset17122019.1.csv \
+  --analyze \
+  --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs256____fp16O2/checkpoint_epoch05_iter0040000.pt data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs256____fp16O2/checkpoint_epoch04_iter0035000.pt data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs256____fp16O2/checkpoint_epoch05_iter0037500.pt \
+  --val-data-path data/mixed_val.csv kontur_calls_micro/kontur_calls_micro.csv valset11102019/valset11102019.csv valset17122019/valset17122019.csv # kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv data/clean_val.csv data/ data/valset17122019/valset17122019.0.csv data/valset17122019/valset17122019.1.csv \
 
 #  --decoder BeamSearchDecoder --beam-width 5000 --decoder-topk 1000 --lm  data/lm/chats_05_prune.binary \
 
@@ -22,7 +22,7 @@ python3 train.py $@ \
 #  --val-data-path ../sample_ok/sample_ok.convasr.csv ../sample_ok/sample_ok.convasr.0.csv ../sample_ok/sample_ok.convasr.1.csv \
 
     #data/valset11102019/valset_2019-10-11_0.csv data/valset11102019/valset_2019-10-11_1.csv data/valset11102019/valset_2019-10-11.csv \
-    #data/mixed_val.csv data/clean_val.csv
+    # data/clean_val.csv
 
 #  --val-waveform-transform SpecLowPass 3500
 

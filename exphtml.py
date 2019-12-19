@@ -27,14 +27,15 @@ def expjson(root_dir, experiment_id, epoch = None, iteration = None, columns = {
 		tag = tag
 	)
 	
-	json_dir = os.path.join(root_dir, 'json')
+	json_dir = os.path.join(root_dir, 'events')
 	os.makedirs(json_dir, exist_ok = True)
 	name = f'{int(time.time())}.{random.randint(10, 99)}.json' if name is None else name
 	json_path = os.path.join(json_dir, name)
 	json.dump(obj, open(json_path, 'w'), sort_keys = True, indent = 2, ensure_ascii = False)
+	return json_path
 
 def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repeat = 5, timeout = 5):
-	json_dir = os.path.join(root_dir, 'json')
+	json_dir = os.path.join(root_dir, 'events')
 	html_dir = os.path.join(root_dir, html_dir)
 	os.makedirs(html_dir, exist_ok = True)
 	html_path = os.path.join(html_dir, 'index.html')
@@ -44,7 +45,7 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 		try:
 			j = json.load(open(path))
 			j['path'] = path
-			j['meta'], j['tag'], j['iteration'], j['git_http'], j['git_revision'], j['git_comment'] = j.get('meta', {}), j.get('tag', 'default'), j.get('iteration', ''), j.get('git_http', ''), j.get('git_revision', ''), j.get('git_comment', '')
+			j['meta'], j['tag'], j['iteration'], j['git_http'], j['git_revision'], j['git_comment'] = j.get('meta', {}), j.get('tag') or 'default', j.get('iteration', ''), j.get('git_http', ''), j.get('git_revision', ''), j.get('git_comment', '')
 			return j
 		except:
 			return {}
@@ -93,11 +94,12 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 				.nowrap {white-space:nowrap}
 				.m0 {margin:0px}
 				.textleft {text-align:left}
-				.mr{margin-right:3px}
+				.mr {margin-right:3px}
+				.mt {margin-top: 20px}
 				.sepright {border-right: 1px solid black}
 				.git {background:lightblue}
 				.flyout {background:lightgray}
-				.odd {background:#FFF}
+				.odd {background:darkgray}
 			</style>
 		''')
 		html.write('</head>')
@@ -111,20 +113,28 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 			}
 		</script>''')
 		html.write(f'<h1>Generated at {generated_time}</h1>')
-	
+		
+		def render_expand(name, selector, prepend = '', expand_char = '±'):
+			return f'''<a href="#" onclick='{prepend} toggle("{selector}"); return false'>{name}{expand_char}</a>'''
+
 		def render_header_line(name, names, checked):
 			return f'<tr><th class="textleft">{name}</th><td><label class="nowrap"><input type="search" name="{name}" placeholder="Filter"></label></td><td>' + (''.join(f'<label class="nowrap"><input type="checkbox" onchange="toggle(event.target.value)" value=".{name}{hash(c)}" name="{c}" {"checked" if checked is True or checked[c] else ""} />{c}</label>' for c in names) if checked is not False else '') + '</td></tr>'
+		
 		def render_value(val):
 			if isinstance(val, int) or isinstance(val, float):
 				return '{:.04f}'.format(val)
-			return str(val)
+			elif isinstance(val, dict):
+				return json.dumps(val, sort_keys = True, indent = 2, ensure_ascii = False)
+			else:
+				return str(val)
 
 		def render_cell(event, column, field, append = []):
 			val = event['columns'].get(column, {}).get(field, '')
 			if isinstance(val, dict):
 				key = f'cell{random_key()}'
-				cell = f'''<a href="#" onclick='toggle("#{key}"); return false'>{val["name"]}±</a>'''
-				append.append('<tr hidden id="{key}" class="flyout"><td colspan="100"><pre>{cell}</pre></td></tr>'.format(key = key, cell = render_value(val['flyout'])))
+				prepend = f'(!document.getElementById("{key}_").classList.contains("vega-embed")) && vegaEmbed("#{key}_", JSON.parse(document.querySelector("#{key}_ pre").innerText));' if isinstance(val.get('value'), dict) and  'vega' in val['value'].get('$schema', '') else ''
+				cell = render_expand(val.get('name', field), f'#{key}', prepend)
+				append.append('<tr hidden id="{key}" class="flyout"><td colspan="100" id="{key}_"><pre>{append_cell}</pre></td></tr>'.format(key = key, append_cell = render_value(val['value'])))
 			else:
 				cell = render_value(val)
 			return cell 
@@ -132,19 +142,23 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 		hidden = lambda checked: "hidden" if not checked else ""
 		def render_experiment(events, experiment_id):
 			generated_time = time.strftime(strftime, time.localtime(events[-1]['time']))
-			res = f'''<tr><td><strong>tag</strong></td><td title="{generated_time}"><strong>{experiment_id}</strong></td>''' + ''.join(f'<td {hidden(columns_checked[c])} class="columns{hash(c)}"><strong>{c}</strong></td>' for c in columns) + '</tr>'
-			for i, (events_by_tag, *_) in enumerate(groupby(events, by_tag, by_time)):
-				for e in events_by_tag:
+			key_exp = f'experiments{hash(experiment_id)}'
+			res = f'''<tr class="mt"><td><strong>tag</strong></td><td title="{generated_time}"><strong>{render_expand(experiment_id, '.' + key_exp)}</strong></td>''' + ''.join(f'<td {hidden(columns_checked[c])} class="columns{hash(c)}"><strong>{c}</strong></td>' for c in columns) + '</tr>'
+			for i, (events_by_tag, tag) in enumerate(groupby(events, by_tag, by_time)):
+				for j, e in enumerate(events_by_tag):
 					generated_time = time.strftime(strftime, time.localtime(e['time']))
 					meta = json.dumps(e['meta'], sort_keys = True, indent = 2, ensure_ascii = False)
-					key = f'meta{random_key()}'
-					res += '''<tr class="{odd}"><td>{tag}</td><td title="{generated_time}" class="sepright"><a href="#" onclick='toggle(".{key}"); return false'>{iteration}±</a></td>'''.format(odd = 'odd' if i % 2== 1 else '', key = key, generated_time = generated_time, **e)
+					key_meta = f'meta{random_key()}'
+					key_tag = f'tags{hash(tag)}'
+					show = j == 0 or j == len(events_by_tag) - 1
+					odd = i % 1 == 1
+					res += f'''<tr class="{'odd' if odd else ''} {key_tag} {key_exp}" {'hidden' if not show else ''}><td>{tag}</td><td title="{generated_time}" class="sepright">{render_expand(e["iteration"], "." + key_meta)}</td>'''
 					append = []
 					res += ''.join(f'<td {hidden(columns_checked[c])} class="columns{hash(c)}">' + ''.join(f'<span title="{f}" class="mr fields{hash(f)}" {hidden(fields_checked[f])}>{render_cell(e, c, f, append)}</span>' for f in fields) + '</td>' for c in columns)
 					res += '</tr>'
 					res += ''.join(append)
-					res += '<tr class="git {key}" hidden><td><a href="{git_http}">commit: @{git_revision}</a></td><td colspan="100">message: {git_comment}</td></tr>\n'.format(key = key, **e)
-					res += f'<tr class="flyout {key}" hidden><td colspan="100"><pre>{meta}</pre></td></tr>'
+					res += '<tr class="git {key_meta}" hidden><td></td><td><a href="{git_http}">commit: @{git_revision}</a></td><td colspan="100">message: {git_comment}</td></tr>\n'.format(key_meta = key_meta, **e)
+					res += f'<tr class="flyout {key_meta}" hidden><td colspan="100"><pre>{meta}</pre></td></tr>' if e['meta'] else ''
 			return res
 		html.write('<form action="."><table width="100%">')
 		html.write(render_header_line('fields', fields, fields_checked))
