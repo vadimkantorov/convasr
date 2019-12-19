@@ -64,7 +64,7 @@ def main(args):
 		waveform_input = torch.rand(args.onnx_sample_batch_size, args.onnx_sample_time, device = args.device)
 		logits, = model(waveform_input)
 
-		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B'}, logits = {0 : 'B'}))
+		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B', 1: 'x'}, logits = {0 : 'B', 2: 'rows'}))
 
 		onnxrt_session = onnxruntime.InferenceSession(args.onnx)
 		logits_, = onnxrt_session.run(None, dict(x = waveform_input.cpu().numpy()))
