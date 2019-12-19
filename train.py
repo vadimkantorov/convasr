@@ -163,9 +163,9 @@ def main(args):
 
 	if not args.train_data_path:
 		#model.fuse_conv_bn_eval()
-		#if args.fp16:
-		#	model = apex.amp.initialize(model, opt_level = args.fp16)
-		#model = torch.nn.DataParallel(model)
+		if args.fp16:
+			model = apex.amp.initialize(model, opt_level = args.fp16)
+		model = torch.nn.DataParallel(model)
 		evaluate_model(val_data_loaders, adapt_bn = args.adapt_bn)
 		return
 
