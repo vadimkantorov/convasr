@@ -32,7 +32,7 @@ class Decoder(nn.Sequential):
 
 class ConvSamePadding(nn.Sequential):
 	def __init__(self, in_channels, out_channels, kernel_size, stride, dilation, bias, groups, separable):
-		padding = dilation * max(1, kernel_size // 2)
+		padding = dilation * kernel_size // 2
 		if separable:
 			assert dilation == 1
 			super().__init__(
@@ -102,12 +102,12 @@ class JasperNet(nn.Module):
 				#num_channels = (in_width_factor * base_wdith, out_width_factor * base_width) # seems they do this in https://github.com/NVIDIA/DeepLearningExamples/blob/21120850478d875e9f2286d13143f33f35cd0c74/PyTorch/SpeechRecognition/Jasper/configs/jasper10x5dr_nomask.toml
 				num_channels_residual.append(in_width_factor * base_width)
 				# use None in num_channels_residual
-				backbone.append(ConvBN(kernel_size = kernel_size, num_channels = num_channels, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = True))
+				backbone.append(ConvBN(num_channels = num_channels, kernel_size = kernel_size, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = True))
 			in_width_factor = out_width_factor
 
 		backbone.extend([
-			ConvBN(kernel_size = kernel_size_epilogue, num_channels = (in_width_factor * base_width, out_width_factors_large[0] * base_width), dropout = dropout_epilogue, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = False),
-			ConvBN(kernel_size = 1, num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = False),
+			ConvBN(num_channels = (in_width_factor * base_width, out_width_factors_large[0] * base_width), kernel_size = kernel_size_epilogue, dropout = dropout_epilogue, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = False),
+			ConvBN(num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), kernel_size = 1, dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = False),
 		])
 		self.frontend = frontend if frontend is not None else nn.Identity()
 		self.backbone = backbone
@@ -126,15 +126,15 @@ class JasperNet(nn.Module):
 				residual.append(x)
 
 		logits = self.decoder(x)
+		log_probs = [F.log_softmax(l, dim = 1).float() for l in logits]
 		output_lengths = [compute_output_lengths(l, xlen) for l in logits]
 		aux = {}
 
 		if y is not None and ylen is not None:
-			log_probs = [F.log_softmax(l, dim = 1).float() for l in logits]
 			loss = [F.ctc_loss(l.permute(2, 0, 1), y[:, i], output_lengths[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') / ylen[:, 0] for i, l in enumerate(log_probs)]
 			aux = dict(loss = sum(loss), log_probs = log_probs)
 
-		return self.dict(logits = logits, output_lengths = output_lengths, **aux)
+		return self.dict(logits = logits, log_probs = log_probs, output_lengths = output_lengths, **aux)
 
 	def freeze(self, K = -1, backbone = True, decoder0 = True):
 		for m in (list(self.backbone[:K]) if backbone else []) + (list(self.decoder)[:1] if decoder0 else []):

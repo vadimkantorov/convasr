@@ -54,7 +54,7 @@ def main(args):
 	lang = importlib.import_module(args.lang)
 	labels = [dataset.Labels(lang, name = 'char')] + [dataset.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, stft_mode = 'conv' if args.onnx else None)
-	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, **(dict(frontend = frontend, inplace = False, dict = lambda logits, output_lengths: (logits,)) if args.onnx else {}))
+	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, **(dict(frontend = frontend, inplace = False, dict = lambda logits, log_probs, output_lengths, **kwargs: logits) if args.onnx else {}))
 
 	if args.onnx:
 		torch.set_grad_enabled(False)
@@ -62,13 +62,13 @@ def main(args):
 		model.fuse_conv_bn_eval()
 		model.to(args.device)
 		waveform_input = torch.rand(args.onnx_sample_batch_size, args.onnx_sample_time, device = args.device)
-		logits, = model(waveform_input)
+		logits = model(waveform_input)
 
-		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B', 1: 'x'}, logits = {0 : 'B', 2: 'rows'}))
+		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B', 1 : 'T'}, logits = {0 : 'B', 1 : 'C', 2: 't'}))
 
 		onnxrt_session = onnxruntime.InferenceSession(args.onnx)
-		logits_, = onnxrt_session.run(None, dict(x = waveform_input.cpu().numpy()))
-		assert torch.allclose(logits[0].cpu(), torch.from_numpy(logits_), rtol = 1e-02, atol = 1e-03)
+		logits_ = onnxrt_session.run(None, dict(x = waveform_input.cpu().numpy()))
+		assert torch.allclose(logits[0].cpu(), torch.from_numpy(logits_[0]), rtol = 1e-02, atol = 1e-03)
 		return
 
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
