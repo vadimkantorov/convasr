@@ -97,7 +97,7 @@ def main(args):
 		columns = {}
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
 			print(f'\n{val_dataset_name}@{iteration}')
-			ref_tra_, logits_ = [], []
+			refhyp_, logits_ = [], []
 			analyze = args.analyze == [] or (args.analyze is not None and val_dataset_name in args.analyze)
 
 			model.eval()
@@ -114,32 +114,35 @@ def main(args):
 					print('REF: {labels} "{ref_}"'.format(ref_ = r['alignment']['ref'] if analyze else r['ref'], **r))
 					print('HYP: {labels} "{hyp_}"'.format(hyp_ = r['alignment']['hyp'] if analyze else r['hyp'], **r))
 					print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
-				ref_tra_.extend(stats)
+				refhyp_.extend(stats)
 
 			transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)) if training else args.val_transcripts_format.format(val_dataset_name = val_dataset_name, decoder = args.decoder)
-			for r_ in zip(*ref_tra_):
+			for r_ in zip(*refhyp_):
 				labels_name = r_[0]['labels']
 				stats = metrics.aggregate(r_)
 				for t in (metrics.error_types if analyze else []):
 					with open(f'{transcripts_path}.{t}.txt', 'w') as f:
 						f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats[t]))
 
-				loss = torch.FloatTensor([r['loss'] for r in r_]).sort().values
 				print('errors', stats['errors_distribution'])
-				print('loss', {k : '{:.2f}'.format(float(loss[int(len(loss) * k / 100)])) for k in range(0, 100, 10)})
+				cer = torch.FloatTensor([r['cer'] for r in r_])
+				loss = torch.FloatTensor([r['loss'] for r in r_])
+				print('cer', metrics.quantiles(cer))
+				print('loss', metrics.quantiles(loss))
 				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} [{cer_easy_avg:.02%} - {cer_hard_avg:.02%} - {cer_missing_avg:.02%}]  MER: {mer_avg:.02%}\n'.format(**stats))
-				columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20))}
+				columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_file_name', 'cer', 'mer', 'alignment')] + [(r['audio_file_name'], r['cer'], r['mer'], vis.colorize_alignment(r)) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
 				if training:
 					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + labels_name, dict(wer_avg = stats['wer_avg'] * 100.0, cer_avg = stats['cer_avg'] * 100.0, loss_avg = stats['loss_avg']), iteration) 
 					tensorboard.flush()
 			
 			with open(transcripts_path, 'w') as f:
-				json.dump([r for t in sorted(ref_tra_, key = lambda t: t[0]['cer'], reverse = True) for r in t], f, ensure_ascii = False, indent = 2, sort_keys = True)
+				json.dump([r for t in sorted(refhyp_, key = lambda t: t[0]['cer'], reverse = True) for r in t], f, ensure_ascii = False, indent = 2, sort_keys = True)
+				vis.errors(transcripts_path, args.vis_errors_audio)
 			
 			if args.logits:
 				logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
 				print('Logits:', logits_file_path)
-				torch.save(list(sorted([(r.update(dict(log_probs = l[0])) or r) for r, l in zip(ref_tra_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
+				torch.save(list(sorted([(r.update(dict(log_probs = l[0])) or r) for r, l in zip(refhyp_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
 		
 		checkpoint_path = os.path.join(args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)) if training and not args.checkpoint_skip else None
 		if args.exphtml:
@@ -357,5 +360,6 @@ if __name__ == '__main__':
 	parser.add_argument('--onnx-opset', type = int, default = 10, choices = [9, 10, 11])
 	parser.add_argument('--dropout', type = float, default = 0.2)
 	parser.add_argument('--githttp')
+	parser.add_argument('--vis-errors-audio', action = 'store_true')
 	parser.add_argument('--adapt-bn', action = 'store_true')
 	main(parser.parse_args())

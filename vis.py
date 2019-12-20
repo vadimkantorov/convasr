@@ -28,16 +28,13 @@ def histc_vega(tensor, min, max, bins):
 	hist = tensor.histc(min = bins.min(), max = bins.max(), bins = len(bins)).int()
 	return altair.Chart(altair.Data(values = [dict(x = b, y = v) for b, v in zip(bins.tolist(), hist.tolist())])).mark_bar().encode(x = altair.X('x:Q'), y = altair.Y('y:Q')).to_dict()
 
-def tra(transcripts):
-	ref_tra = list(sorted(json.load(open(transcripts)), key = lambda j: j['cer']))
-	vis = open(transcripts + '.html' , 'w')
-	vis.write(f'<html><meta charset="utf-8"><body><h1>{args.transcripts}</h1><table style="border-collapse:collapse"><thead><tr><th>cer</th><th>filename</th><th>audio</th><th><div>reference</div><div>transcript</div></th></tr></thead><tbody>')
+def colorize_alignment(r):
+	span = lambda word, t = None: '<span style="{style}">{word}</span>'.format(word = word, style = 'background-color:' + dict(ok = 'green', missing = 'red', typo_easy = 'lightgreen', typo_hard = 'pink')[t] if t is not None else '')
+	return '<pre>ref: {ref}\nhyp: {hyp}</pre>'.format(ref = ' '.join(span(w['ref'], w['type'] if w['type'] == 'ok' else None) for w in r['words']['all']), hyp = ' '.join(span(w['hyp'], w['type']) for w in r['words']['all']))
 
-	for i, (reference, transcript, filename, cer) in enumerate(list(map(j.get, ['reference', 'transcript', 'filename', 'cer'])) for j in ref_tra):
-		encoded = base64.b64encode(open(filename, 'rb').read()).decode()
-		vis.write(f'<tr><td style="border-right: 2px black solexperiment_id">{cer:.02%}</td> <td style="font-size:xx-small">{os.path.basename(filename)}</td> <td><audio controls src="data:audio/wav;base64,{encoded}"/></td><td><div><b>{reference}</b></div><div>{transcript}</div></td></tr>\n')
-
-	vis.write('</tbody></table></body></html>')
+def errors(transcripts, audio):
+	refhyp = json.load(open(transcripts))
+	open(transcripts + '.html' , 'w').write(f'<html><meta charset="utf-8"><body><h1>{transcripts}</h1><table style="border-collapse:collapse; width: 100%"><thead><tr><th>cer</th><th>mer</th><th>audio_file_name</th><th>audio</th><th><div>ref</div><div>hyp</div></th></tr></thead><tbody>' + '\n'.join(f'<tr><td>{r["cer"]:.02%}</td><td style="border-right: 2px black solid">{r["mer"]:.02%}</td><td style="font-size:xx-small">{r["audio_file_name"]}</td><td>' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"/>' if audio else '') + f'</td><td>{colorize_alignment(r)}</td></tr>' for r in refhyp) + '</tbody></table></body></html>')
 
 def meanstd(logits):
 	cov = lambda m: m @ m.t()
@@ -210,9 +207,10 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
 
-	cmd = subparsers.add_parser('tra')
+	cmd = subparsers.add_parser('errors')
 	cmd.add_argument('transcripts', default = 'data/transcripts.json')
-	cmd.set_defaults(func = tra)
+	cmd.add_argument('--audio', action = 'store_true')
+	cmd.set_defaults(func = errors)
 
 	cmd = subparsers.add_parser('meanstd')
 	cmd.add_argument('--logits', default = 'data/logits.pt')

@@ -3,6 +3,10 @@ import collections
 import Levenshtein
 import torch
 
+def quantiles(tensor):
+	tensor = tensor.sort().values
+	return {k : '{:.2f}'.format(float(tensor[int(len(tensor) * k / 100)])) for k in range(0, 100, 10)}
+
 def cer(hyp, ref):
 	cer_ref_len = len(ref.replace(' ', '')) or 1
 	return Levenshtein.distance(hyp.replace(' ', '').lower(), ref.replace(' ', '').lower()) / cer_ref_len if hyp != ref else 0
@@ -368,8 +372,8 @@ def analyze(ref, hyp, labels, phonetic_replace_groups = [], full = False):
 		hypref_pseudo = {t : (' '.join((r_ if error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'])[t] else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')) for t in error_types}
 
 		words = list(words())
-		errors = [dict(hyp = h_, ref = r_, type = t) for r_, h_ in words for t, e in [error_type(h_, r_)] if t != 'ok']
-		errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in errors if r['type'] == t] for t in error_types}
+		words_ = [dict(hyp = h_, ref = r_, type = t) for r_, h_ in words for t, e in [error_type(h_, r_)]]
+		errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in words_ if r['type'] == t] for t in error_types}
 		
 		a.update(dict(
 			spaces = dict(
@@ -392,7 +396,8 @@ def analyze(ref, hyp, labels, phonetic_replace_groups = [], full = False):
 				ok_prefix_suffix = sum(h_[0] not in ' |' and h_[-1] not in ' |' for r_, h_ in words),
 				delete = sum(h_.count('|') > len(r_) // 2 for r_, h_ in words),
 				total = len(words),
-				errors = errors
+				errors = errors,
+				all = words_
 			),
 			mer = len(errors['missing']) / len(words),
 
