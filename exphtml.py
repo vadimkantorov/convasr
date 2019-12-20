@@ -123,7 +123,9 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 			if isinstance(val, int) or isinstance(val, float):
 				return '{:.04f}'.format(val)
 			elif isinstance(val, dict):
-				return json.dumps(val, sort_keys = True, indent = 2, ensure_ascii = False)
+				return '<pre>' + json.dumps(val, sort_keys = True, indent = 2, ensure_ascii = False) + '</pre>'
+			elif isinstance(val, list):
+				return '<table style="width:100%">' + '\n'.join('<tr>' + ''.join(f'<td>{render_value(f)}</td>' for f in row) + '</tr>' for row in val) + '</table>'
 			else:
 				return str(val)
 
@@ -133,7 +135,7 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 				key = f'cell{random_key()}'
 				prepend = f'(!document.getElementById("{key}_").classList.contains("vega-embed")) && vegaEmbed("#{key}_", JSON.parse(document.querySelector("#{key}_ pre").innerText));' if isinstance(val.get('value'), dict) and  'vega' in val['value'].get('$schema', '') else ''
 				cell = render_expand(val.get('name', field), f'#{key}', prepend)
-				append.append(f'<tr hidden id="{key}" class="flyout"><td></td><td>{render_expand(column + " > " + field, "#" + key)}</td><td colspan="100" id="{key}_"><pre>{render_value(val["value"])}</pre></td></tr>')
+				append.append(f'<tr hidden id="{key}" class="flyout"><td></td><td>{render_expand(column + " > " + field, "#" + key)}</td><td colspan="100" id="{key}_">{render_value(val["value"])}</td></tr>')
 			else:
 				cell = render_value(val)
 			return cell 
