@@ -133,7 +133,7 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 				key = f'cell{random_key()}'
 				prepend = f'(!document.getElementById("{key}_").classList.contains("vega-embed")) && vegaEmbed("#{key}_", JSON.parse(document.querySelector("#{key}_ pre").innerText));' if isinstance(val.get('value'), dict) and  'vega' in val['value'].get('$schema', '') else ''
 				cell = render_expand(val.get('name', field), f'#{key}', prepend)
-				append.append('<tr hidden id="{key}" class="flyout"><td colspan="100" id="{key}_"><pre>{append_cell}</pre></td></tr>'.format(key = key, append_cell = render_value(val['value'])))
+				append.append(f'<tr hidden id="{key}" class="flyout"><td></td><td>{render_expand(column + " > " + field, "#" + key)}</td><td colspan="100" id="{key}_"><pre>{render_value(val["value"])}</pre></td></tr>')
 			else:
 				cell = render_value(val)
 			return cell 

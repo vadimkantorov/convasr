@@ -124,11 +124,11 @@ def main(args):
 					with open(f'{transcripts_path}.{t}.txt', 'w') as f:
 						f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats[t]))
 
-				print(stats['errors_distribution'])
+				loss = torch.FloatTensor([r['loss'] for r in r_]).sort().values
+				print('errors', stats['errors_distribution'])
+				print('loss', {k : '{:.2f}'.format(float(loss[int(len(loss) * k / 100)])) for k in range(0, 100, 10)})
 				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} [{cer_easy_avg:.02%} - {cer_hard_avg:.02%} - {cer_missing_avg:.02%}]  MER: {mer_avg:.02%}\n'.format(**stats))
-				
-				loss_hist = vis.histc_vega(torch.tensor([r['loss'] for r in r_]), min = 0, max = 3, bins = 20)
-				columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = loss_hist)}
+				columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20))}
 				if training:
 					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + labels_name, dict(wer_avg = stats['wer_avg'] * 100.0, cer_avg = stats['cer_avg'] * 100.0, loss_avg = stats['loss_avg']), iteration) 
 					tensorboard.flush()
@@ -144,7 +144,7 @@ def main(args):
 		checkpoint_path = os.path.join(args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)) if training and not args.checkpoint_skip else None
 		if args.exphtml:
 			#columns['checkpoint_path'] = checkpoint_path
-			print(exphtml.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, tag = 'train' if training else 'test', git_http = args.githttp))
+			exphtml.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, tag = 'train' if training else 'test', git_http = args.githttp)
 			exphtml.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
@@ -163,6 +163,7 @@ def main(args):
 
 	if not args.train_data_path:
 		if not args.adapt_bn:
+			model.eval()
 			model.fuse_conv_bn_eval()
 		if args.fp16:
 			model = apex.amp.initialize(model, opt_level = args.fp16)
