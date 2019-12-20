@@ -137,6 +137,7 @@ def main(args):
 			
 			with open(transcripts_path, 'w') as f:
 				json.dump([r for t in sorted(refhyp_, key = lambda t: t[0]['cer'], reverse = True) for r in t], f, ensure_ascii = False, indent = 2, sort_keys = True)
+			if analyze:
 				vis.errors(transcripts_path, args.vis_errors_audio)
 			
 			if args.logits:
