@@ -146,21 +146,21 @@ class Labels:
 		return chr.lower() in self.alphabet
 
 def collate_fn(batch, pad_to = 128):
-	dataset_name, audio_path, reference, sample_inputs, *sample_targets = batch[0]
-	inputs_max_len, *targets_max_len = [(max(b[k].shape[-1] for b in batch) // pad_to + 1) * pad_to for k in range(3, len(batch[0]))]
-	targets_max_len = max(targets_max_len)
-	input_ = torch.zeros(len(batch), len(sample_inputs), inputs_max_len, dtype = torch.float32)
-	targets_ = torch.zeros(len(batch), len(sample_targets), targets_max_len, dtype = torch.int32)
-	input_lengths_fraction_, target_length_ = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_targets), dtype = torch.int32)
+	dataset_name, audio_path, reference, sample_x, *sample_y = batch[0]
+	xmax_len, *ymax_len = [(max(b[k].shape[-1] for b in batch) // pad_to + 1) * pad_to for k in range(3, len(batch[0]))]
+	ymax_len = max(ymax_len)
+	x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = torch.float32)
+	y = torch.zeros(len(batch), len(sample_y), ymax_len, dtype = torch.int32)
+	xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.int32)
 	for k, (dataset_name, audio_path, reference, input, *targets) in enumerate(batch):
-		input_lengths_fraction_[k] = input.shape[-1] / input_.shape[-1]
-		input_[k, ..., :input.shape[-1]] = input
+		xlen[k] = input.shape[-1] / x.shape[-1]
+		x[k, ..., :input.shape[-1]] = input
 		for j, t in enumerate(targets):
-			targets_[k, j, :t.shape[-1]] = t
-			target_length_[k, j] = len(t)
+			y[k, j, :t.shape[-1]] = t
+			ylen[k, j] = len(t)
 	dataset_name_, audio_path_, reference_, *_ = zip(*batch)
-	#input_: NCT, targets_: NLt, target_length_: NL, input_lengths_fraction_: N
-	return dataset_name_, audio_path_, reference_, input_, input_lengths_fraction_, targets_, target_length_
+	#x: NCT, y: NLt, ylen: NL, xlen: N
+	return dataset_name_, audio_path_, reference_, x, xlen, y, ylen
 
 def read_audio(audio_path, sample_rate, normalize = True, stereo = False, max_duration = None, dtype = torch.float32, byte_order = 'little'):
 	sample_rate_, signal = scipy.io.wavfile.read(audio_path) if audio_path.endswith('.wav') else (sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', '1', '-t', 'raw', '-']), byte_order = byte_order))) 

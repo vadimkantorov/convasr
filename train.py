@@ -79,6 +79,8 @@ def main(args):
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, labels, val_frontend, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
 	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.GreedyNoBlankDecoder() if args.decoder == 'GreedyNoBlankDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
+	vocab = set(map(str.strip, open(args.vocab))) if args.vocab else set()
+
 	def apply_model(data_loader, model):
 		for dataset_name_, audio_path_, reference_, x, xlen, y, ylen in data_loader:
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
@@ -90,7 +92,7 @@ def main(args):
 			yield audio_path_, reference_, loss.cpu(), entropy_char.cpu(), decoded, log_probs
 
 	def evaluate_transcript(analyze, labels, hyp, ref, loss, entropy, audio_path):
-		return dict(labels = labels.name, audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss, **metrics.analyze(ref, hyp, labels, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze))
+		return dict(labels = labels.name, audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss, **metrics.analyze(ref, hyp, labels, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab))
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None, adapt_bn = False):
 		training = epoch is not None and iteration is not None
@@ -363,4 +365,5 @@ if __name__ == '__main__':
 	parser.add_argument('--githttp')
 	parser.add_argument('--vis-errors-audio', action = 'store_true')
 	parser.add_argument('--adapt-bn', action = 'store_true')
+	parser.add_argument('--vocab', default = 'data/vocab_word_list.txt')
 	main(parser.parse_args())
