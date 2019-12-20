@@ -64,10 +64,10 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 	by_iteration = lambda e: (e['iteration'], e['time'])
 	by_max_event_time = lambda exp: max(map(by_time, exp[0]))
 	columns_union = lambda experiments: set(sum((list_map(strip_hidden, e['columns']) for events in experiments for e in events), []))
-	fields_union = lambda experiments: set(sum((list_map(strip_hidden, c) for events in experiments for e in events for c in e['columns'].values()), []))
+	fields_union = lambda experiments : set(sum((list_map(strip_hidden, c) for events in experiments for e in events for c in e['columns'].values()), []))
 	tags_union = lambda experiments: set(e['tag'] for events in experiments for e in events)
-	last_event_by_column = lambda events, c: [e for e in events if c in map(strip_hidden, e['columns'])][-1]
-	last_event_by_field = lambda events, f: [e for e in events if f in sum(map(list, e['columns'].values()), [])][-1]
+	last_event_by_column = lambda events, c: ([dict(columns = {})] + [e for e in events for c_ in [map(strip_hidden, e['columns'])] if c in c_ or hide(c) in c_])[-1]
+	last_event_by_field = lambda events, f: ([dict(columns = {})] + [e for e in events for f_ in [sum(map(list, e['columns'].values()), [])] if f in f_ or hide(f) in f_])[-1]
 
 	experiments, experiments_id = zip(*sorted(map0(lambda events: sorted(events, key = by_iteration), groupby(events, by_experiment_id)), key = by_max_event_time, reverse = True))
 
@@ -76,12 +76,11 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 	tags = sorted(tags_union(experiments))
 
 	experiment_recent = experiments[0]
-	columns_recent = columns_union([experiment_recent])
-	fields_recent = fields_union([experiment_recent])
+	columns_recent = columns_union([experiment_recent[-1:]])
+	fields_recent = fields_union([experiment_recent[-1:]])
 
-	columns_checked = {c : c in columns_recent and hide(c) not in last_event_by_column(experiment_recent, c) for c in columns}
-	#fields_checked =  {f : f in fields_recent and hide(f) not in last_event_by_field(experiment_recent, f) for f in fields}
-	fields_checked = {f : f == fields[0] for f in fields}
+	columns_checked = {c : c in columns_recent and hide(c) not in columns_recent for c in columns}
+	fields_checked =  {f : f in fields_recent and hide(f) not in fields_recent for f in fields}
 
 	with open(html_path, 'w') as html:
 		html.write(f'<html><head><title>Results @ {generated_time}</title>')
