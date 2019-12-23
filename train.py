@@ -177,8 +177,7 @@ def main(args):
 		evaluate_model(val_data_loaders, adapt_bn = args.adapt_bn)
 		return
 
-	if args.freeze:
-		model.freeze(backbone = True, decoder0 = True)
+	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder)
 
 	train_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob), feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob))
 	train_dataset = dataset.AudioTextDataset(args.train_data_path, labels, train_frontend, max_duration = args.max_duration)
@@ -351,7 +350,8 @@ if __name__ == '__main__':
 	parser.add_argument('--timeout', type = float, default = 0, help = 'crash after specified timeout spent in DataLoader')
 	parser.add_argument('--max-duration', type = float, default = 10, help = 'in seconds; drop in DataLoader all utterances longer than this value')
 	parser.add_argument('--exphtml', default = '../stt_results')
-	parser.add_argument('--freeze', action = 'store_true', help = 'freeze earlier layers')
+	parser.add_argument('--freeze-backbone', type = int, default = 0, help = 'freeze number of backbone layers')
+	parser.add_argument('--freeze-decoder', action = 'store_true', help = 'freeze decoder0')
 	parser.add_argument('--num-input-features', default = 64, help = 'num of mel-scale features produced by logfbank frontend')
 	parser.add_argument('--sample-rate', type = int, default = 8_000, help = 'for frontend')
 	parser.add_argument('--window-size', type = float, default = 0.02, help = 'for frontend, in seconds')

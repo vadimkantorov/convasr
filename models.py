@@ -136,8 +136,8 @@ class JasperNet(nn.Module):
 
 		return self.dict(logits = logits, log_probs = log_probs, output_lengths = output_lengths, **aux)
 
-	def freeze(self, K = -1, backbone = True, decoder0 = True):
-		for m in (list(self.backbone[:K]) if backbone else []) + (list(self.decoder)[:1] if decoder0 else []):
+	def freeze(self, backbone = 0, decoder0 = False):
+		for m in (list(self.backbone[:backbone]) if backbone else []) + (list(self.decoder)[:1] if decoder0 else []):
 			for module in filter(lambda module: isinstance(module, nn.modules.batchnorm._BatchNorm), m.modules()):
 				module.eval()
 				module.train = lambda training: None

@@ -34,6 +34,7 @@ def colorize_alignment(r):
 
 def errors(transcripts, audio):
 	refhyp = json.load(open(transcripts))
+	# https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
 	open(transcripts + '.html' , 'w').write(f'<html><meta charset="utf-8"><body><h1>{transcripts}</h1><table style="border-collapse:collapse; width: 100%"><thead><tr><th>cer</th><th>mer</th><th>audio_file_name</th><th>audio</th><th><div>ref</div><div>hyp</div></th></tr></thead><tbody>' + '\n'.join(f'<tr><td>{r["cer"]:.02%}</td><td style="border-right: 2px black solid">{r["mer"]:.02%}</td><td>{r["audio_file_name"]}</td><td>' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"/>' if audio else '') + f'</td><td>{colorize_alignment(r)}</td></tr>' for r in refhyp) + '</tbody></table></body></html>')
 
 def meanstd(logits):
@@ -156,6 +157,7 @@ def vis(logits, MAX_ENTROPY = 1.0):
 	for segment in torch.load(logits):
 		audio_path, filename, logits, log_probs, cer, reference_aligned, transcript_aligned = map(segment.get, ['audio_path', 'filename', 'logits', 'log_probs', 'cer', 'reference_aligned', 'transcript_aligned'])
 		entropy = models.entropy(log_probs, dim = 0, sum = False)
+		entropy_ = models.entropy(log_probs[:-1], dim = 0, sum = False)
 		margin = models.margin(log_probs, dim = 0)
 		#energy = features.exp().sum(dim = 0)[::2]
 
