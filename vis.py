@@ -21,7 +21,12 @@ import ru
 import metrics
 import models
 
-labels = dataset.Labels(ru)
+def subset(refhyp, arg, min, max):
+	refhyp_ = json.load(open(refhyp))
+	refhyp_ = list(filter(lambda r: (min <= r[arg] if min is not None else True) and (r[arg] <= max if max is not None else True), refhyp_))
+	filename = refhyp + f'.subset_{arg}_min{min}_max{max}.json'
+	json.dump(refhyp_, open(filename, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	print(filename)
 
 def histc_vega(tensor, min, max, bins):
 	bins = torch.linspace(min, max, bins)
@@ -75,6 +80,7 @@ def meanstd(logits):
 	plt.savefig(logits + '.jpg', dpi = 150)
 
 def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, json_, bpe):
+	labels = dataset.Labels(ru)
 	if experiment_id.endswith('.json'):
 		reftra = json.load(open(experiment_id))
 		for reftra_ in reftra:
@@ -153,6 +159,7 @@ def words(train_data_path, val_data_path):
 			print(w, c1, c2)
 
 def vis(logits, MAX_ENTROPY = 1.0):
+	labels = dataset.Labels(ru)
 	ticks = lambda labelsize = 2.5, length = 0: plt.gca().tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length) or [ax.set_linewidth(0) for ax in plt.gca().spines.values()]
 	logits_path = logits + '.html'
 	html = open(logits_path, 'w')
@@ -247,6 +254,13 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('vis')
 	cmd.add_argument('logits')
 	cmd.set_defaults(func = vis)
+
+	cmd = subparsers.add_parser('subset')
+	cmd.add_argument('refhyp')
+	cmd.add_argument('--arg', required = True, choices = ['cer', 'mer', 'der', 'wer'])
+	cmd.add_argument('--min', type = float)
+	cmd.add_argument('--max', type = float)
+	cmd.set_defaults(func = subset)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')
