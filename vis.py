@@ -32,10 +32,13 @@ def colorize_alignment(r):
 	span = lambda word, t = None: '<span style="{style}">{word}</span>'.format(word = word, style = 'background-color:' + dict(ok = 'green', missing = 'red', typo_easy = 'lightgreen', typo_hard = 'pink')[t] if t is not None else '')
 	return '<pre>ref: {ref}\nhyp: {hyp}</pre>'.format(ref = ' '.join(span(w['ref'], w['type'] if w['type'] == 'ok' else None) for w in r['words']['all']), hyp = ' '.join(span(w['hyp'], w['type']) for w in r['words']['all']))
 
-def errors(transcripts, audio):
-	refhyp = json.load(open(transcripts))
+def errors(ours, theirs = None, audio_file_name = None, audio = False):
+	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
+	read_refhyp = lambda path: list(filter(lambda r: not good_audio_file_name or r['audio_file_name'] in good_audio_file_name, json.load(open(ours)))) if path is not None else []
+	ours_, theirs_ = read_refhyp(ours), {r['audio_file_name'] : r for r in read_refhyp(theirs)}
 	# https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
-	open(transcripts + '.html' , 'w').write(f'<html><meta charset="utf-8"><body><h1>{transcripts}</h1><table style="border-collapse:collapse; width: 100%"><thead><tr><th>cer</th><th>mer</th><th>audio_file_name</th><th>audio</th><th><div>ref</div><div>hyp</div></th></tr></thead><tbody>' + '\n'.join(f'<tr><td>{r["cer"]:.02%}</td><td style="border-right: 2px black solid">{r["mer"]:.02%}</td><td>{r["audio_file_name"]}</td><td>' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"/>' if audio else '') + f'</td><td>{colorize_alignment(r)}</td></tr>' for r in refhyp) + '</tbody></table></body></html>')
+	fmt_ours_theirs = lambda r_ours, r_theirs: ''.join(f'<td>{r["cer"]:.02%}</td><td>{r["mer"]:.02%}</td><td class="br">{colorize_alignment(r)}</td>' for r in [r_ours] + ([r_theirs] if r_theirs is not None else []))
+	open(ours + '.html' , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th></th></th></th>' + f'<th colspan="3">ours<br/>{ours}</th><th colspan="3">theirs<br/>{theirs}</th></tr>' + '<tr><th>audio_file_name</th><th>audio</th><th>cer ours</th><th>mer ours</th><th></th><th>cer theirs</th><th>mer theirs</th><th></th></tr>' + '\n'.join(f'<tr><td>{r["audio_file_name"]}</td><td class="br">' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"/>' if audio else '') + fmt_ours_theirs(r, r_) + '</tr>' for r in ours_ for r_ in [theirs_.get(r['audio_file_name'])]) + '</table></body></html>')
 
 def meanstd(logits):
 	cov = lambda m: m @ m.t()
@@ -210,7 +213,9 @@ if __name__ == '__main__':
 	subparsers = parser.add_subparsers()
 
 	cmd = subparsers.add_parser('errors')
-	cmd.add_argument('transcripts', default = 'data/transcripts.json')
+	cmd.add_argument('ours', default = 'data/transcripts.json')
+	cmd.add_argument('--theirs')
+	cmd.add_argument('--audio_file_name')
 	cmd.add_argument('--audio', action = 'store_true')
 	cmd.set_defaults(func = errors)
 
