@@ -77,7 +77,7 @@ def meanstd(logits):
 	plt.subplots_adjust(top = 0.99, bottom=0.01, hspace=0.8, wspace=0.4)
 	plt.savefig(logits + '.jpg', dpi = 150)
 
-def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, json_, bpe):
+def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe):
 	labels = dataset.Labels(ru)
 	if experiment_id.endswith('.json'):
 		reftra = json.load(open(experiment_id))
@@ -87,7 +87,7 @@ def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer3
 			reftra_['cer'] = metrics.cer(hyp, ref)
 			reftra_['wer'] = metrics.wer(hyp, ref)
 
-		cer_, wer_ = [torch.tensor([r[k] for r in reftra])for k in ['cer', 'wer']]
+		cer_, wer_ = [torch.tensor([r[k] for r in reftra]) for k in ['cer', 'wer']]
 		cer_avg, wer_avg = float(cer_.mean()), float(wer_.mean())
 		print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')
 		loss_ = torch.tensor([r.get('loss', 0) for r in reftra])
@@ -132,7 +132,7 @@ def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer3
 		iteration = f[eidx:].replace('.json', '')
 		val_dataset_name = f[f.find('transcripts_') + len('transcripts_'):eidx]
 		checkpoint = os.path.join(experiment_dir, 'checkpoint_' + f[eidx:].replace('.json', '.pt')) if not json_ else f
-		val = torch.tensor([j['entropy' if entropy else 'loss' if loss else 'per' if per else 'cer'] for j in json.load(open(f)) if j['labels'].startswith(bpe)] or [0.0])
+		val = torch.tensor([j['wer' if wer else 'entropy' if entropy else 'loss' if loss else 'per' if per else 'cer'] for j in json.load(open(f)) if j['labels'].startswith(bpe)] or [0.0])
 		val = val[~(torch.isnan(val) | torch.isinf(val))]
 
 		if cer10 or cer20 or cer30 or cer40 or cer50:
@@ -234,6 +234,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--entropy', action = 'store_true')
 	cmd.add_argument('--loss', action = 'store_true')
 	cmd.add_argument('--per', action = 'store_true')
+	cmd.add_argument('--wer', action = 'store_true')
 	cmd.add_argument('--cer10', action = 'store_true')
 	cmd.add_argument('--cer15', action = 'store_true')
 	cmd.add_argument('--cer20', action = 'store_true')
