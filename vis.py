@@ -22,10 +22,8 @@ import metrics
 import models
 
 def subset(refhyp, arg, min, max):
-	refhyp_ = json.load(open(refhyp))
-	refhyp_ = list(filter(lambda r: (min <= r[arg] if min is not None else True) and (r[arg] <= max if max is not None else True), refhyp_))
-	filename = refhyp + f'.subset_{arg}_min{min}_max{max}.json'
-	json.dump(refhyp_, open(filename, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	filename = refhyp + f'.subset_{arg}_min{min}_max{max}.txt'
+	open(filename, 'w').write('\n'.join(r['audio_file_name'] for r in json.load(open(refhyp)) if (min <= r[arg] if min is not None else True) and (r[arg] <= max if max is not None else True)))
 	print(filename)
 
 def histc_vega(tensor, min, max, bins):
