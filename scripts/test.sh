@@ -3,9 +3,11 @@ set -e
 python3 train.py $@ \
   --githttp https://github.com/vadimkantorov/convasr/commit/%h \
   --analyze \
-  --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs256____fp16O2/checkpoint_epoch05_iter0040000.pt \
-  --val-data-path data/clean_val.csv kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv data/valset17122019/valset17122019.csv data/valset17122019/valset17122019.0.csv data/valset17122019/valset17122019.1.csv
+  --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-3_wd1e-3_bs8___bpe_bpe_bi200_conv1d_epilogue40_finetune_decays_newval_freeze7_lr001_bs8/checkpoint_epoch09_iter0010000.pt \
+  --val-data-path data/clean_val.csv data/valset_by_rec22122019.0.csv data/valset_by_rec22122019.1.csv data/valset_by_rec22122019.csv \
+  --bpe data/tts_dataset_bi_200.model 
 #  --val-data-path data/clean_val.csv kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv data/valset11102019/valset11102019.csv data/valset11102019/valset11102019.0.csv data/valset11102019/valset11102019.1.csv
+#  --checkpoint  best_checkpoints/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs256___bpe_bpe_bi200_conv1d_epilogue40_checkpoint_epoch06_iter0050498.pt \
 
 #--checkpoint data/checkpoint_epoch02_iter0065000.pt #data/experiments/JasperNetBigInplace_NovoGrad_lr1e-2_wd1e-3_bs80/checkpoint_epoch02_iter0050000.pt data/experiments/JasperNetBigInplace_NovoGrad_lr1e-2_wd1e-3_bs80/checkpoint_epoch02_iter0052500.pt data/experiments/JasperNetBigInplace_NovoGrad_lr1e-2_wd1e-3_bs80/checkpoint_epoch02_iter0055000.pt data/experiments/JasperNetBigInplace_NovoGrad_lr1e-2_wd1e-3_bs80/checkpoint_epoch02_iter0057500.pt data/experiments/JasperNetBigInplace_NovoGrad_lr1e-2_wd1e-3_bs80/checkpoint_epoch02_iter0060000.pt data/experiments/JasperNetBigInplace_NovoGrad_lr1e-2_wd1e-3_bs80/checkpoint_epoch02_iter0062500.pt 
 

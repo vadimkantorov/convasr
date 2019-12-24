@@ -65,7 +65,8 @@ def main(args):
 		waveform_input = torch.rand(sample_batch_size, sample_time, device = args.device)
 		logits, = model(waveform_input)
 
-		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B'}, logits = {0 : 'B'}))
+		#torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B'}, logits = {0 : 'B'}))
+		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B', 1: 'x'}, logits = {0 : 'B', 2: 'rows'}))
 
 		onnxrt_session = onnxruntime.InferenceSession(args.onnx)
 		logits_, = onnxrt_session.run(None, dict(x = waveform_input.cpu().numpy()))
@@ -121,9 +122,10 @@ def main(args):
 			for r_ in zip(*ref_tra_):
 				labels_name = r_[0]['labels']
 				stats = metrics.aggregate(r_)
-				for t in metrics.error_types:
-					with open(f'{transcripts_path}.{t}.txt', 'w') as f:
-						f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats[t]))
+				if analyze:
+					for t in metrics.error_types:
+						with open(f'{transcripts_path}.{t}.txt', 'w') as f:
+							f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats[t]))
 
 				print(stats['errors_distribution'])
 				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} [{cer_easy_avg:.02%} - {cer_hard_avg:.02%} - {cer_missing_avg:.02%}]  MER: {mer_avg:.02%}\n'.format(**stats))
@@ -148,7 +150,7 @@ def main(args):
 			#vis.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
-			amp_state_dict = amp.state_dict()
+			amp_state_dict = apex.amp.state_dict()
 			optimizer_state_dict = optimizer.state_dict()
 			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, amp_state_dict = amp_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), checkpoint_path)
 
@@ -158,24 +160,32 @@ def main(args):
 	from IPython.core import debugger
 	debug = debugger.Pdb().set_trace
 	if checkpoint:
+		layer_names = [k for k,v in checkpoint['model_state_dict'].items()]
+		
 		if args.loads_only_firstn_layers:
-			freezed_layers = set()
 			print(args.loads_only_firstn_layers)
 			new_state_dict = OrderedDict()
 			print("restoring model state dict only fistn layers")
 			for k,v in checkpoint['model_state_dict'].items():
 				layer = int(k.split('.')[1])
 				if "backbone" in k and layer <= args.loads_only_firstn_layers:
-					freezed_layers.add(k)
 					print(k)
 					new_state_dict[k]=v
 			model.load_state_dict(new_state_dict, strict = False)
+		else:
+			model.load_state_dict(checkpoint['model_state_dict'], strict = False)
+
+		if args.freeze_firstn_layers:
+			freezed_layers = set()
+			for layer_name in layer_names:
+				layer_index = int(layer_name.split('.')[1])
+				if "backbone" in layer_name and layer_index <= args.freeze_firstn_layers:
+					freezed_layers.add(layer_name)
+			
 			for ln, params in model.named_parameters():
 				if ln in freezed_layers:
 					params.requires_grad = False
-		else:
-			model.load_state_dict(checkpoint['model_state_dict'], strict = False)
-	
+		
 	model.to(args.device)
 
 	if not args.train_data_path:
@@ -198,7 +208,7 @@ def main(args):
 	optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else apex.optimizers.FusedNovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'FusedNovoGrad' else None
 	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else optimizers.NoopLR(optimizer) 
 	iteration = 0
-	if checkpoint:
+	if False and checkpoint and not args.loads_only_firstn_layers:
 		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 		amp.load_state_dict(checkpoint['amp_state_dict'])
 		iteration = 1 + checkpoint['iteration']
@@ -295,7 +305,7 @@ def main(args):
 if __name__ == '__main__':
 	import os
 	os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-	os.environ["CUDA_VISIBLE_DEVICES"]="0"
+	os.environ["CUDA_VISIBLE_DEVICES"]="1"
 	
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--optimizer', choices = ['SGD', 'AdamW', 'NovoGrad', 'FusedNovoGrad'], default = 'SGD')
@@ -325,6 +335,7 @@ if __name__ == '__main__':
 	parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 	parser.add_argument('--checkpoint', nargs = '*', default = [], help = 'simple checkpoint weight averaging, for advanced weight averaging see Stochastic Weight Averaging')
 	parser.add_argument('--loads_only_firstn_layers', type = int, default=None, help='try to load only first n layers for fine tuning')
+	parser.add_argument('--freeze_firstn_layers', type = int, default=None, help='try to freeze only first n layers for fine tuning')
 	parser.add_argument('--checkpoint-skip', action = 'store_true')
 	parser.add_argument('--experiments-dir', default = 'data/experiments')
 	parser.add_argument('--experiment-dir', default = '{experiments_dir}/{experiment_id}')
