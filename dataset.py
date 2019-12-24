@@ -199,7 +199,7 @@ def bpetrain(input_path, output_prefix, vocab_size, model_type, max_sentencepiec
 	sentencepiece.SentencePieceTrainer.Train(f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size} --model_type={model_type}' + (f' --max_sentencepiece_length={max_sentencepiece_length}' if max_sentencepiece_length else ''))
 
 def subset(input_path, audio_file_name, output_path):
-	output_path = output_path or (ours + (audio_file_name.split('subset')[-1] if audio_file_name else '') + '.csv')
+	output_path = output_path or (input_path + (audio_file_name.split('subset')[-1] if audio_file_name else '') + '.csv')
 	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
 	open(output_path,'w').writelines(line for line in open(input_path) if os.path.basename(line.split(',')[0]) in good_audio_file_name)
 
