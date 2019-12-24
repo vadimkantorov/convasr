@@ -198,6 +198,11 @@ def remove_silence(vad, signal, sample_rate, window_size):
 def bpetrain(input_path, output_prefix, vocab_size, model_type, max_sentencepiece_length):
 	sentencepiece.SentencePieceTrainer.Train(f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size} --model_type={model_type}' + (f' --max_sentencepiece_length={max_sentencepiece_length}' if max_sentencepiece_length else ''))
 
+def subset(input_path, audio_file_name, output_path):
+	output_path = output_path or (ours + (audio_file_name.split('subset')[-1] if audio_file_name else '') + '.csv')
+	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
+	open(output_path,'w').writelines(line for line in open(input_path) if os.path.basename(line.split(',')[0]) in good_audio_file_name)
+
 if __name__ == '__main__':
 	import argparse
 	parser = argparse.ArgumentParser()
@@ -210,6 +215,12 @@ if __name__ == '__main__':
 	cmd.add_argument('--max-sentencepiece-length', type = int, default = None)
 	cmd.set_defaults(func = bpetrain)
 	
+	cmd = subparsers.add_parser('subset')
+	cmd.add_argument('--input-path', '-i', required = True)
+	cmd.add_argument('--output-path', '-o')
+	cmd.add_argument('--audio-file-name', required = True)
+	cmd.set_default(func = subset)
+
 	args = vars(parser.parse_args())
 	func = args.pop('func')
 	func(**args)
