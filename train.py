@@ -160,7 +160,7 @@ def main(args):
 
 		model.train()
 
-	print(' Model capacity:', int(models.compute_capacity(model) / 1e6), 'million parameters\n')
+	print(' Model capacity:', int(models.compute_capacity(model, scale = 1e6)), 'million parameters\n')
 
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'], strict = False)

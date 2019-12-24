@@ -1,11 +1,11 @@
 set -e
 
-INPUT=$1 
+INPUT=${1:-data/speechcore/openstt_bad_model.json} 
 LO=${2:-0.3}
 HI=${3:-0.5}
 
 OUTPUTMIN=$(python3 vis.py subset $INPUT --arg cer --min $HI)
-OUTPUTMAX=$(python3 vis.py subset $INPUT --arg cer --max $HI)
+OUTPUTMAX=$(python3 vis.py subset $INPUT --arg cer --max $LO)
 OUTPUTMINMAX=$(python3 vis.py subset $INPUT --arg cer --min $LO --max $HI)
 
 echo $OUTPUTMIN && python3 vis.py errors $INPUT --audio-file-name $OUTPUTMIN --audio

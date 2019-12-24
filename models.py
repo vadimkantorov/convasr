@@ -358,8 +358,8 @@ def margin(log_probs, dim = 1):
 def compute_output_lengths(x, lengths_fraction):
 	return (lengths_fraction * x.shape[-1]).ceil().int() if lengths_fraction is not None else torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.int)
 
-def compute_capacity(model):
-	return sum(map(torch.numel, model.parameters()))
+def compute_capacity(model, scale = 1):
+	return sum(map(torch.numel, model.parameters())) / scale
 
 def normalize_signal(signal, dim = -1, eps = 1e-5):
 	signal = signal.to(torch.float32)
