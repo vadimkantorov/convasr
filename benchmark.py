@@ -52,12 +52,7 @@ else:
 	model.to(args.devices[0])
 	model.eval()
 	model.fuse_conv_bn_eval()
-	if args.fp16:
-		model = apex.amp.initialize(torch.nn.Sequential(model), opt_level = args.fp16, enabled = bool(args.fp16))[0]
-	if args.dataparallel:
-		model = torch.nn.DataParallel(model, device_ids = args.devices)
-	if args.fp16:
-		model.forward = lambda *args, old_fwd = model.forward, input_caster = lambda tensor: tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_type']), output_caster = lambda tensor: tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_outputs'] if apex.amp._amp_state.opt_properties.options.get('cast_model_outputs') is not None else torch.float32), **kwargs: apex.amp._initialize.applier(old_fwd(*apex.amp._initialize.applier(args, input_caster), **apex.amp._initialize.applier(kwargs, input_caster)), output_caster)
+	model, *_ = models.data_parallel(model, opt_level = args.fp16, enabled = bool(args.fp16))
 	load_batch = lambda x: x.to(args.devices[0], non_blocking = True)
 
 tictoc = lambda: (torch.cuda.is_available and torch.cuda.synchronize()) or time.time()

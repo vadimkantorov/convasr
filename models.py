@@ -387,3 +387,12 @@ class reset_bn_running_stats(nn.Module):
 			bn.momentum = len(x) / (self.n + len(x))
 		self.n += len(x)
 		return self.model(x, *args, **kwargs)
+
+def data_parallel(model, optimizer = None, opt_level = None, **kwargs):
+	if opt_level is None:
+		return torch.nn.DataParallel(model), optimizer
+	model, optimizer = apex.amp.initialize(nn.Sequential(model), optimizers = optimizer, opt_level = opt_level, **kwargs) if optimizer is not None else (apex.amp.initialize(nn.Sequential(model), opt_level = opt_level, **kwargs), None)
+	model = torch.nn.DataParallel(model[0])
+	model.forward = lambda *args, old_fwd = model.forward, input_caster = lambda tensor: tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_type']), output_caster = lambda tensor: tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_outputs'] if apex.amp._amp_state.opt_properties.options.get('cast_model_outputs') is not None else torch.float32), **kwargs: apex.amp._initialize.applier(old_fwd(*apex.amp._initialize.applier(args, input_caster), **apex.amp._initialize.applier(kwargs, input_caster)), output_caster)
+	return model, optimizer
+
