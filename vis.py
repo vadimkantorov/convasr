@@ -23,7 +23,7 @@ import models
 
 def subset(refhyp, arg, min, max):
 	filename = refhyp + f'.subset_{arg}_min{min}_max{max}.txt'
-	open(filename, 'w').write('\n'.join(r['audio_file_name'] for r in json.load(open(refhyp)) if (min <= r[arg] if min is not None else True) and (r[arg] <= max if max is not None else True)))
+	open(filename, 'w').write('\n'.join(r['audio_file_name'] for r in json.load(open(refhyp)) if (min <= r[arg] if min is not None else True) and (r[arg] < max if max is not None else True)))
 	print(filename)
 
 def histc_vega(tensor, min, max, bins):
@@ -41,7 +41,9 @@ def errors(ours, theirs = None, audio_file_name = None, audio = False):
 	ours_, theirs_ = read_refhyp(ours), {r['audio_file_name'] : r for r in read_refhyp(theirs)}
 	# https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
 	fmt_ours_theirs = lambda r_ours, r_theirs: ''.join(f'<td>{r["cer"]:.02%}</td><td>{r["mer"]:.02%}</td><td class="br">{colorize_alignment(r)}</td>' for r in [r_ours] + ([r_theirs] if r_theirs is not None else []))
-	open(ours + '.html' , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th></th><th></th>' + f'<th colspan="3">ours<br/>{ours}</th><th colspan="3">theirs<br/>{theirs}</th></tr>' + '<tr><th>audio_file_name</th><th>audio</th><th>cer ours</th><th>mer ours</th><th></th><th>cer theirs</th><th>mer theirs</th><th></th></tr>' + '\n'.join(f'<tr><td>{r["audio_file_name"]}</td><td class="br">' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"/>' if audio else '') + fmt_ours_theirs(r, r_) + '</tr>' for r in ours_ for r_ in [theirs_.get(r['audio_file_name'])]) + '</table></body></html>')
+	output_file_name = ours + (audio_file_name.split('subset')[-1] if audio_file_name else '') + '.html'
+	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th></th><th></th>' + f'<th colspan="3">ours<br/>{ours}</th><th colspan="3">theirs<br/>{theirs}</th></tr>' + '<tr><th>audio_file_name</th><th>audio</th><th>cer ours</th><th>mer ours</th><th></th><th>cer theirs</th><th>mer theirs</th><th></th></tr>' + '\n'.join(f'<tr><td>{r["audio_file_name"]}</td><td class="br">' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"/>' if audio else '') + fmt_ours_theirs(r, r_) + '</tr>' for r in ours_ for r_ in [theirs_.get(r['audio_file_name'])]) + '</table></body></html>')
+	print(output_file_name)
 
 def meanstd(logits):
 	cov = lambda m: m @ m.t()
@@ -220,7 +222,7 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('errors')
 	cmd.add_argument('ours', default = 'data/transcripts.json')
 	cmd.add_argument('--theirs')
-	cmd.add_argument('--audio_file_name')
+	cmd.add_argument('--audio-file-name')
 	cmd.add_argument('--audio', action = 'store_true')
 	cmd.set_defaults(func = errors)
 

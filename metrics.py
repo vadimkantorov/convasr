@@ -40,7 +40,7 @@ def unused_levenshtein(a, b):
 
 	return current[n]
 
-class Alignment(object):
+class Needleman:
 	SCORE_UNIFORM = 1
 	SCORE_PROPORTION = 2
 
@@ -55,6 +55,8 @@ class Alignment(object):
 		self.score_ins = -3
 		self.separator = '|'
 		self.mode = Alignment.SCORE_UNIFORM
+		self.semi_global = False
+		self.matrix = None
 
 	def set_score(self, score_null=None, score_sub=None, score_del=None, score_ins=None):
 		if score_null is not None:
@@ -130,13 +132,6 @@ class Alignment(object):
 				idx += 1
 				continue
 		return map_b2a
-
-
-class Needleman(Alignment):
-	def __init__(self, *args):
-		super(Needleman, self).__init__()
-		self.semi_global = False
-		self.matrix = None
 
 	def init_matrix(self):
 		rows = self.len_a + 1
@@ -243,79 +238,6 @@ class Needleman(Alignment):
 		self.init_matrix()
 		self.compute_matrix()
 		return self.backtrack()
-
-
-class Hirschberg(Alignment):
-	def __init__(self):
-		super(Hirschberg, self).__init__()
-		self.needleman = Needleman()
-
-	def last_row(self, seqa, seqb):
-		lena = len(seqa)
-		lenb = len(seqb)
-		pre_row = [0] * (lenb + 1)
-		cur_row = [0] * (lenb + 1)
-
-		for j in range(1, lenb + 1):
-			pre_row[j] = pre_row[j - 1] + self.insert(seqb[j - 1])
-
-		for i in range(1, lena + 1):
-			cur_row[0] = self.delete(seqa[i - 1]) + pre_row[0]
-			for j in range(1, lenb + 1):
-				score_sub = pre_row[j - 1] + self.match(seqa[i - 1], seqb[j - 1])
-				score_del = pre_row[j] + self.delete(seqa[i - 1])
-				score_ins = cur_row[j - 1] + self.insert(seqb[j - 1])
-				cur_row[j] = max(score_sub, score_del, score_ins)
-
-			pre_row = cur_row
-			cur_row = [0] * (lenb + 1)
-
-		return pre_row
-
-	def align_rec(self, seq_a, seq_b):
-		aligned_a, aligned_b = [], []
-		len_a, len_b = len(seq_a), len(seq_b)
-
-		if len_a == 0:
-			for i in range(len_b):
-				aligned_a.append(self.separator * len(seq_b[i]))
-				aligned_b.append(seq_b[i])
-		elif len_b == 0:
-			for i in range(len_a):
-				aligned_a.append(seq_a[i])
-				aligned_b.append(self.separator * len(seq_a[i]))
-
-		elif len(seq_a) == 1:
-			aligned_a, aligned_b = self.needleman.align(seq_a, seq_b)
-
-		else:
-			mid_a = int(len_a / 2)
-
-			rowleft = self.last_row(seq_a[:mid_a], seq_b)
-			rowright = self.last_row(seq_a[mid_a:][::-1], seq_b[::-1])
-
-			rowright.reverse()
-
-			row = [l + r for l, r in zip(rowleft, rowright)]
-			maxidx, maxval = max(enumerate(row), key=lambda a: a[1])
-
-			mid_b = maxidx
-
-			aligned_a_left, aligned_b_left = self.align_rec(seq_a[:mid_a], seq_b[:mid_b])
-			aligned_a_right, aligned_b_right = self.align_rec(seq_a[mid_a:], seq_b[mid_b:])
-			aligned_a = aligned_a_left + aligned_a_right
-			aligned_b = aligned_b_left + aligned_b_right
-
-		return aligned_a, aligned_b
-
-	def align(self, seq_a, seq_b, mode=None):
-		self.seq_a = seq_a
-		self.seq_b = seq_b
-		self.len_a = len(self.seq_a)
-		self.len_b = len(self.seq_b)
-		if mode is not None:
-			self.mode = mode
-		return self.align_rec(self.seq_a, self.seq_b)
 
 def align(hyp, ref):
 	ref, hyp = Needleman().align(list(ref), list(hyp))
