@@ -35,13 +35,13 @@ def colorize_alignment(r):
 	span = lambda word, t = None: '<span style="{style}">{word}</span>'.format(word = word, style = 'background-color:' + dict(ok = 'green', missing = 'red', typo_easy = 'lightgreen', typo_hard = 'pink')[t] if t is not None else '')
 	return '<pre>ref: {ref}\nhyp: {hyp}</pre>'.format(ref = ' '.join(span(w['ref'], w['type'] if w['type'] == 'ok' else None) for w in r['words']['all']), hyp = ' '.join(span(w['hyp'], w['type']) for w in r['words']['all']))
 
-def errors(ours, theirs = None, audio_file_name = None, audio = False):
+def errors(ours, theirs = None, audio_file_name = None, audio = False, output_file_name = None):
 	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
 	read_refhyp = lambda path: list(filter(lambda r: not good_audio_file_name or r['audio_file_name'] in good_audio_file_name, json.load(open(ours)))) if path is not None else []
 	ours_, theirs_ = read_refhyp(ours), {r['audio_file_name'] : r for r in read_refhyp(theirs)}
 	# https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
 	fmt_ours_theirs = lambda r_ours, r_theirs: ''.join(f'<td>{r["cer"]:.02%}</td><td>{r["mer"]:.02%}</td><td class="br">{colorize_alignment(r)}</td>' for r in [r_ours] + ([r_theirs] if r_theirs is not None else []))
-	output_file_name = ours + (audio_file_name.split('subset')[-1] if audio_file_name else '') + '.html'
+	output_file_name = output_file_name or (ours + (audio_file_name.split('subset')[-1] if audio_file_name else '') + '.html')
 	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th></th>' + f'<th colspan="3">ours<br/>{ours}</th><th colspan="3">theirs<br/>{theirs}</th></tr>' + '<tr><th>audio</th><th>cer ours</th><th>mer ours</th><th></th><th>cer theirs</th><th>mer theirs</th><th></th></tr>' + '\n'.join(f'<tr><td>' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"></audio>' if audio else '') + f'<div class="nowrap">{r["audio_file_name"]}</div></td>' +  fmt_ours_theirs(r, r_) + '</tr>' for r in ours_ for r_ in [theirs_.get(r['audio_file_name'])]) + '</table></body></html>')
 	print(output_file_name)
 
@@ -225,6 +225,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--theirs')
 	cmd.add_argument('--audio-file-name')
 	cmd.add_argument('--audio', action = 'store_true')
+	cmd.add_argument('--output-file-name', '-o')
 	cmd.set_defaults(func = errors)
 
 	cmd = subparsers.add_parser('meanstd')
