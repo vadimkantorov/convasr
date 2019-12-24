@@ -154,7 +154,7 @@ def main(args):
 			exphtml.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
-			amp_state_dict = amp.state_dict()
+			amp_state_dict = apex.amp.state_dict()
 			optimizer_state_dict = optimizer.state_dict()
 			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer_state_dict, amp_state_dict = amp_state_dict, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), checkpoint_path)
 
