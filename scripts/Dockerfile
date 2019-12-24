@@ -41,7 +41,7 @@ RUN curl -so /miniconda.sh https://repo.continuum.io/miniconda/Miniconda3-latest
  && rm /miniconda.sh
 ENV PATH=/miniconda/bin:$PATH
 
-RUN pip install ipython matplotlib seaborn
+RUN pip install ipython matplotlib seaborn altair
 
 # Prerequisites for building PyTorch from source (just in case)
 RUN /miniconda/bin/conda install -y scipy scikit-learn numba numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
