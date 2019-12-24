@@ -42,7 +42,7 @@ def errors(ours, theirs = None, audio_file_name = None, audio = False):
 	# https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
 	fmt_ours_theirs = lambda r_ours, r_theirs: ''.join(f'<td>{r["cer"]:.02%}</td><td>{r["mer"]:.02%}</td><td class="br">{colorize_alignment(r)}</td>' for r in [r_ours] + ([r_theirs] if r_theirs is not None else []))
 	output_file_name = ours + (audio_file_name.split('subset')[-1] if audio_file_name else '') + '.html'
-	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th></th><th></th>' + f'<th colspan="3">ours<br/>{ours}</th><th colspan="3">theirs<br/>{theirs}</th></tr>' + '<tr><th>audio_file_name</th><th>audio</th><th>cer ours</th><th>mer ours</th><th></th><th>cer theirs</th><th>mer theirs</th><th></th></tr>' + '\n'.join(f'<tr><td>{r["audio_file_name"]}</td><td class="br">' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"/>' if audio else '') + fmt_ours_theirs(r, r_) + '</tr>' for r in ours_ for r_ in [theirs_.get(r['audio_file_name'])]) + '</table></body></html>')
+	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th></th>' + f'<th colspan="3">ours<br/>{ours}</th><th colspan="3">theirs<br/>{theirs}</th></tr>' + '<tr><th>audio</th><th>cer ours</th><th>mer ours</th><th></th><th>cer theirs</th><th>mer theirs</th><th></th></tr>' + '\n'.join(f'<tr><td>' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"></audio>' if audio else '') + f'<div class="nowrap">{r["audio_file_name"]}</div></td>' +  fmt_ours_theirs(r, r_) + '</tr>' for r in ours_ for r_ in [theirs_.get(r['audio_file_name'])]) + '</table></body></html>')
 	print(output_file_name)
 
 def meanstd(logits):
@@ -178,6 +178,7 @@ def vis(logits, MAX_ENTROPY = 1.0):
 		plt.plot(top1, 'b', linewidth = 0.3)
 		plt.plot(top2, 'g', linewidth = 0.3)
 		plt.plot(entropy, 'r', linewidth = 0.3)
+		plt.plot(entropy_, 'tomato', linewidth = 0.3)
 		bad = entropy > MAX_ENTROPY
 		bad_ = torch.cat([bad[1:], bad[:1]])
 		for begin, end in zip((~bad & bad_).nonzero().squeeze(1).tolist(), (bad & ~bad_).nonzero().squeeze(1).tolist()):
