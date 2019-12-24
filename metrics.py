@@ -54,7 +54,7 @@ class Needleman:
 		self.score_del = -3
 		self.score_ins = -3
 		self.separator = '|'
-		self.mode = Alignment.SCORE_UNIFORM
+		self.mode = self.SCORE_UNIFORM
 		self.semi_global = False
 		self.matrix = None
 
@@ -69,9 +69,9 @@ class Needleman:
 			self.score_ins = score_ins
 
 	def match(self, a, b):
-		if a == b and self.mode == Alignment.SCORE_UNIFORM:
+		if a == b and self.mode == self.SCORE_UNIFORM:
 			return self.score_null
-		elif self.mode == Alignment.SCORE_UNIFORM:
+		elif self.mode == self.SCORE_UNIFORM:
 			return self.score_sub
 		elif a == b:
 			return self.score_null * len(a)
@@ -82,7 +82,7 @@ class Needleman:
 		"""
 		deleted elements are on seqa
 		"""
-		if self.mode == Alignment.SCORE_UNIFORM:
+		if self.mode == self.SCORE_UNIFORM:
 			return self.score_del
 		return self.score_del * len(a)
 
@@ -90,7 +90,7 @@ class Needleman:
 		"""
 		inserted elements are on seqb
 		"""
-		if self.mode == Alignment.SCORE_UNIFORM:
+		if self.mode == self.SCORE_UNIFORM:
 			return self.score_ins
 		return self.score_ins * len(a)
 

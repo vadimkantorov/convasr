@@ -171,7 +171,7 @@ def main(args):
 		if not args.adapt_bn:
 			model.eval()
 			model.fuse_conv_bn_eval()
-		model, *_ = models.data_parallel(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.keep_batchnorm_fp32)
+		model, *_ = models.data_parallel(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 		evaluate_model(val_data_loaders, adapt_bn = args.adapt_bn)
 		return
 
@@ -202,7 +202,7 @@ def main(args):
 		else:
 			sampler.shuffle(epoch = sampler.epoch + 1)
 
-	model, optimizer = models.datap_parallel(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+	model, optimizer = models.data_parallel(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 	model.train()
 
 	os.makedirs(args.experiment_dir, exist_ok = True)
