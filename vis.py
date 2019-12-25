@@ -36,9 +36,8 @@ def errors(ours, theirs = None, audio_file_name = None, audio = False, output_fi
 	read_refhyp = lambda path: list(filter(lambda r: not good_audio_file_name or r['audio_file_name'] in good_audio_file_name, json.load(open(path)))) if path is not None else []
 	ours_, theirs_ = read_refhyp(ours), {r['audio_file_name'] : r for r in read_refhyp(theirs)}
 	# https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
-	fmt_ours_theirs = lambda r_ours, r_theirs: '<td>' + ''.join('<div>{cer:.02%}</div>'.format(**r) for r in [r_ours] + ([r_theirs] if r_theirs is not None else []))  + '</td><td>'+  ''.join('<div>{cer:.02%}</div>'.format(**r) for r in [r_ours] + ([r_theirs] if r_theirs is not None else [])) + '</td><td class="br">' +  ''.join(f'<div>{colorize_alignment(r)}</div>' for r in [r_ours] + ([r_theirs] if r_theirs is not None else [])) + '</td>'
 	output_file_name = output_file_name or (ours + (audio_file_name.split('subset')[-1] if audio_file_name else '') + '.html')
-	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} td {border-top: 1px solid black} .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th></th>' + f'<th colspan="3">ours<br/>{ours}</th><th colspan="3">theirs<br/>{theirs}</th></tr>' + '<tr><th>audio</th><th>cer</th><th>mer</th><th></th></tr>' + '\n'.join(f'<tr><td>' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"></audio>' if audio else '') + f'<div class="nowrap">{r["audio_file_name"]}</div></td>' +  fmt_ours_theirs(r, r_) + '</tr>' for r in ours_ for r_ in [theirs_.get(r['audio_file_name'])]) + '</table></body></html>')
+	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} td {border-top: 1px solid black} .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th>audio</th><th></th><th>cer</th><th>mer</th><th></th></tr>' + '\n'.join(f'<tr><td>' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"></audio>' if audio and i == 0 else '') + f'<div class="nowrap">{r["audio_file_name"] if i == 0 else ""}</div></td>' + f'<td>{ours if i == 0 else theirs}</td><td>{r_["cer"]:.02%}</td><td class="br">{r_["mer"]:.02%}</td><td>{colorize_alignment(r_)}</td>' + '</tr>' for r in ours_ for i, r_ in enumerate(filter(None, [r, theirs_.get(r['audio_file_name'])]))) + '</table></body></html>')
 	print(output_file_name)
 
 def meanstd(logits):
@@ -170,7 +169,8 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 		
 		log_probs = F.log_softmax(logits, dim = 0)
 		entropy = models.entropy(log_probs, dim = 0, sum = False)
-		entropy_ = models.entropy(log_probs[:-1], dim = 0, sum = False)
+		log_probs_ = F.log_softmax(logits[:-1], dim = 0)
+		entropy_ = models.entropy(log_probs_, dim = 0, sum = False)
 		margin = models.margin(log_probs, dim = 0)
 		#energy = features.exp().sum(dim = 0)[::2]
 
@@ -266,7 +266,7 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('logits')
 	cmd.add_argument('logits')
 	cmd.add_argument('--audio-file-name')
-	cmd.set_defaults(func = vis)
+	cmd.set_defaults(func = logits)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')
