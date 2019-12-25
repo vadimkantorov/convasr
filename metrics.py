@@ -372,11 +372,30 @@ def error_type(hyp, ref, p = 0.5, E = 3, L = 4):
 
 error_types = ['typo_easy', 'typo_hard', 'missing']
 
+def subset(refhyp, arg, min, max):
+	filename = refhyp + f'.subset_{arg}_min{min}_max{max}.txt'
+	open(filename, 'w').write('\n'.join(r['audio_file_name'] for r in json.load(open(refhyp)) if (min <= r[arg] if min is not None else True) and (r[arg] < max if max is not None else True)))
+	print(filename)
+
 if __name__ == '__main__':
 	import argparse
 	import ru
 	parser = argparse.ArgumentParser()
+	subparsers = parser.add_subparsers()
+	
+	cmd = subparsers.add_parser('analyze')
 	parser.add_argument('--ref')
 	parser.add_argument('--hyp')
+	cmd.set_defaults(func = analyze)
+	
+	cmd = subparsers.add_parser('subset')
+	cmd.add_argument('refhyp')
+	cmd.add_argument('--arg', required = True, choices = ['cer', 'mer', 'der', 'wer'])
+	cmd.add_argument('--min', type = float)
+	cmd.add_argument('--max', type = float)
+	cmd.set_defaults(func = subset)
+
 	args = parser.parse_args()
-	print(analyze(args.ref, args.hyp, phonetic_replace_groups = ru.PHONETIC_REPLACE_GROUPS))
+	args = vars(parser.parse_args())
+	func = args.pop('func')
+	func(**args)

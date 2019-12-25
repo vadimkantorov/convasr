@@ -22,11 +22,6 @@ import ru
 import metrics
 import models
 
-def subset(refhyp, arg, min, max):
-	filename = refhyp + f'.subset_{arg}_min{min}_max{max}.txt'
-	open(filename, 'w').write('\n'.join(r['audio_file_name'] for r in json.load(open(refhyp)) if (min <= r[arg] if min is not None else True) and (r[arg] < max if max is not None else True)))
-	print(filename)
-
 def histc_vega(tensor, min, max, bins):
 	bins = torch.linspace(min, max, bins)
 	hist = tensor.histc(min = bins.min(), max = bins.max(), bins = len(bins)).int()
@@ -159,7 +154,8 @@ def words(train_data_path, val_data_path):
 		if c1 > 1 and c2 < 1000:
 			print(w, c1, c2)
 
-def vis(logits, MAX_ENTROPY = 1.0):
+def vis(logits, audio_file_name, MAX_ENTROPY = 1.0):
+	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
 	labels = dataset.Labels(ru)
 	ticks = lambda labelsize = 2.5, length = 0: plt.gca().tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length) or [ax.set_linewidth(0) for ax in plt.gca().spines.values()]
 	logits_path = logits + '.html'
@@ -167,6 +163,9 @@ def vis(logits, MAX_ENTROPY = 1.0):
 	html.write('<html><body>')
 	for segment in torch.load(logits):
 		audio_file_name, logits = map(segment.get, ['audio_file_name', 'logits'])
+		if good_audio_file_name and audio_file_name not in good_audio_file_name:
+			continue
+		
 		ref_aligned, hyp_aligned = segment['alignment']['ref'], segment['alignment']['hyp']
 		
 		log_probs = F.log_softmax(logits, dim = 0)
@@ -266,14 +265,8 @@ if __name__ == '__main__':
 
 	cmd = subparsers.add_parser('vis')
 	cmd.add_argument('logits')
+	cmd.add_argument('--audio-file-name')
 	cmd.set_defaults(func = vis)
-
-	cmd = subparsers.add_parser('subset')
-	cmd.add_argument('refhyp')
-	cmd.add_argument('--arg', required = True, choices = ['cer', 'mer', 'der', 'wer'])
-	cmd.add_argument('--min', type = float)
-	cmd.add_argument('--max', type = float)
-	cmd.set_defaults(func = subset)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')
