@@ -154,7 +154,7 @@ def words(train_data_path, val_data_path):
 		if c1 > 1 and c2 < 1000:
 			print(w, c1, c2)
 
-def vis(logits, audio_file_name, MAX_ENTROPY = 1.0):
+def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
 	labels = dataset.Labels(ru)
 	ticks = lambda labelsize = 2.5, length = 0: plt.gca().tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length) or [ax.set_linewidth(0) for ax in plt.gca().spines.values()]
@@ -263,7 +263,7 @@ if __name__ == '__main__':
 	cmd.add_argument('val_data_path')
 	cmd.set_defaults(func = words)
 
-	cmd = subparsers.add_parser('vis')
+	cmd = subparsers.add_parser('logits')
 	cmd.add_argument('logits')
 	cmd.add_argument('--audio-file-name')
 	cmd.set_defaults(func = vis)
