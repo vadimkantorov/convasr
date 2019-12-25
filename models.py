@@ -5,6 +5,7 @@ import functools
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import apex
 import librosa
 
 class Decoder(nn.Sequential):
