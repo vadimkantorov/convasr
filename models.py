@@ -368,8 +368,8 @@ def normalize_signal(signal, dim = -1, eps = 1e-5):
 def normalize_features(features, dim = -1, eps = 1e-20):
 	return (features - features.mean(dim = dim, keepdim = True)) / (features.std(dim = dim, keepdim = True) + eps)
 
-def unpad(x, lens, device = 'cpu'):
-	return [e[..., :l].to(device) for e, l in zip(x, lens)]
+def unpad(x, lens):
+	return [e[..., :l] for e, l in zip(x, lens)]
 
 class reset_bn_running_stats(nn.Module):
 	def __init__(self, model):

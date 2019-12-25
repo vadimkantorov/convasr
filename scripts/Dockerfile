@@ -41,10 +41,11 @@ RUN curl -so /miniconda.sh https://repo.continuum.io/miniconda/Miniconda3-latest
  && rm /miniconda.sh
 ENV PATH=/miniconda/bin:$PATH
 
-RUN pip install ipython matplotlib seaborn altair
+RUN pip install ipython seaborn altair
+RUN pip install https://github.com/matplotlib/matplotlib/archive/v3.2.0rc2.tar.gz
 
 # Prerequisites for building PyTorch from source (just in case)
-RUN /miniconda/bin/conda install -y scipy scikit-learn numba numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
+RUN /miniconda/bin/conda install -y scipy scikit-learn numba numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing pillow
 RUN conda install -y -c pytorch magma-cuda${CUDAVERSION}
 
 # RUN conda install -y pytorch cudatoolkit=$CUDAVERSIONPOINT -c pytorch

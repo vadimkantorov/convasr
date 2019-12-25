@@ -11,6 +11,7 @@ import argparse
 import base64
 import subprocess
 import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn
 import altair
@@ -165,29 +166,39 @@ def vis(logits, MAX_ENTROPY = 1.0):
 	html = open(logits_path, 'w')
 	html.write('<html><body>')
 	for segment in torch.load(logits):
-		audio_path, filename, logits, log_probs, cer, reference_aligned, transcript_aligned = map(segment.get, ['audio_path', 'filename', 'logits', 'log_probs', 'cer', 'reference_aligned', 'transcript_aligned'])
+		audio_file_name, logits = map(segment.get, ['audio_file_name', 'logits'])
+		ref_aligned, hyp_aligned = segment['alignment']['ref'], segment['alignment']['hyp']
+		
+		log_probs = F.log_softmax(logits, dim = 0)
 		entropy = models.entropy(log_probs, dim = 0, sum = False)
 		entropy_ = models.entropy(log_probs[:-1], dim = 0, sum = False)
 		margin = models.margin(log_probs, dim = 0)
 		#energy = features.exp().sum(dim = 0)[::2]
 
 		plt.figure(figsize = (6, 0.7))
-		plt.suptitle(filename, fontsize = 4)
+		#plt.suptitle(audio_file_name, fontsize = 4)
 		top1, top2 = log_probs.exp().topk(2, dim = 0).values
 		plt.hlines(1.0, 0, entropy.shape[-1] - 1, linewidth = 0.2)
 		plt.plot(top1, 'b', linewidth = 0.3)
 		plt.plot(top2, 'g', linewidth = 0.3)
 		plt.plot(entropy, 'r', linewidth = 0.3)
 		plt.plot(entropy_, 'tomato', linewidth = 0.3)
-		bad = entropy > MAX_ENTROPY
-		bad_ = torch.cat([bad[1:], bad[:1]])
-		for begin, end in zip((~bad & bad_).nonzero().squeeze(1).tolist(), (bad & ~bad_).nonzero().squeeze(1).tolist()):
+		bad = (entropy > MAX_ENTROPY).tolist()
+		runs = []
+		for i, b in enumerate(bad):
+			if b:
+				if not runs or not bad[i - 1]:
+					runs.append([i, i])
+				else:
+					runs[-1][1] += 1
+
+		for begin, end in runs:
 			plt.axvspan(begin, end, color='red', alpha=0.2)
 
 		plt.ylim(0, 2)
 		plt.xlim(0, entropy.shape[-1] - 1)
-		xlabels = list(map('\n'.join, zip(*labels.idx2str(log_probs.topk(5, dim = 0).indices, blank = '.', space = '_'))))
-		#xlabels = labels.idx2str(log_probs.argmax(dim = 0)).replace(labels.blank, '.').replace(labels.space, '_')
+		xlabels = list(map('\n'.join, zip(*labels.split_candidates(labels.decode(log_probs.topk(5, dim = 0).indices.tolist(), blank = '.', space = '_', replace2 = False)))))
+		#xlabels_ = labels.decode(log_probs.argmax(dim = 0).tolist(), blank = '.', space = '_', replace2 = False)
 		plt.xticks(torch.arange(entropy.shape[-1]), xlabels, fontfamily = 'monospace')
 		ticks()
 		
@@ -196,11 +207,10 @@ def vis(logits, MAX_ENTROPY = 1.0):
 		plt.savefig(buf, format = 'jpg', dpi = 600)
 		plt.close()
 		
-		html.write(f'<h4>{audio_name} | cer: {cer:.02f}</h4>')
-		html.write(f'<pre>ref: {ref_aligned}</pre>')
-		html.write(f'<pre>hyp: {hyp_aligned}</pre>')
+		html.write('<h4>{audio_file_name} | cer: {cer:.02f}</h4>'.format(**segment))
+		html.write(colorize_alignment(segment))
 		html.write('<img style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(encoded = base64.b64encode(buf.getvalue()).decode()))	
-		html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio><hr/>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode()))
+		html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio><hr/>'.format(encoded = base64.b64encode(open(segment['audio_path'], 'rb').read()).decode()))
 	html.write('''<script>
 		Array.from(document.querySelectorAll('img')).map(img => {
 			img.onclick = (evt) => {

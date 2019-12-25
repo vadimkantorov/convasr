@@ -85,11 +85,11 @@ def main(args):
 		for dataset_name_, audio_path_, reference_, x, xlen, y, ylen in data_loader:
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
 			with torch.no_grad():
-				log_probs, output_lengths, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'output_lengths', 'loss'])
+				logits, log_probs, output_lengths, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'output_lengths', 'loss'])
 			entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, output_lengths))
 			decoded = [list(map(l.decode, d.decode(lp, o))) for l, d, lp, o in zip(labels, decoder, log_probs, output_lengths)]
-			log_probs = list(map(models.unpad, log_probs, output_lengths))
-			yield audio_path_, reference_, loss.cpu(), entropy_char.cpu(), decoded, log_probs
+			logits = list(map(models.unpad, logits, output_lengths))
+			yield audio_path_, reference_, loss.cpu(), entropy_char.cpu(), decoded, logits
 
 	def evaluate_transcript(analyze, labels, hyp, ref, loss, entropy, audio_path):
 		return dict(labels = labels.name, audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss, **metrics.analyze(ref, hyp, labels, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab))
@@ -109,7 +109,7 @@ def main(args):
 
 			model.eval()
 			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits) in enumerate(apply_model(val_data_loader, model)):
-				logits_.append(logits if not training and args.logits else None)
+				logits_.extend(zip(*[[t.cpu() for t in t_] for t_ in logits]) if not training and args.logits else [])
 				stats = [[evaluate_transcript(analyze, l, t, *zipped[:4]) for l, t in zip(labels, zipped[4:])] for zipped in zip(references, loss.tolist(), entropy.tolist(), audio_paths, *decoded)]
 				for r in sum(stats, []) if args.verbose else []:
 					print(f'{val_dataset_name}@{iteration}:', batch_idx , '/', len(val_data_loader), '|', args.experiment_id)
@@ -140,12 +140,12 @@ def main(args):
 			with open(transcripts_path, 'w') as f:
 				json.dump([r for t in sorted(refhyp_, key = lambda t: t[0]['cer'], reverse = True) for r in t], f, ensure_ascii = False, indent = 2, sort_keys = True)
 			if analyze:
-				vis.errors(transcripts_path, args.vis_errors_audio)
+				vis.errors(ours = transcripts_path, audio = args.vis_errors_audio)
 			
 			if args.logits:
 				logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
-				print('Logits:', logits_file_path)
-				torch.save(list(sorted([(r.update(dict(log_probs = l[0])) or r) for r, l in zip(refhyp_, logits_)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
+				torch.save(list(sorted([r_.update(dict(logits = l_)) or r_ for r, l in zip(refhyp_, logits_) for r_, l_ in zip(r, l)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
+				print('Logits saved:', logits_file_path)
 		
 		checkpoint_path = os.path.join(args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)) if training and not args.checkpoint_skip else None
 		if args.exphtml:
