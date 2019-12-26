@@ -1,37 +1,30 @@
 import torch
 import torch.nn.functional as F
 
-def ctc_loss___(log_probs, targets, input_lengths, target_lengths, blank = 0, reduction = 'none'):
+@torch.jit.script
+def ctc_loss___(log_probs, targets, input_lengths, target_lengths, blank : int = 0, reduction : str = 'none'):
 	targets_ = torch.full((targets.shape[0], 2 * targets.shape[-1] + 1), blank, device = targets.device, dtype = targets.dtype)
 	temporal_mask = torch.arange(targets.shape[-1], device = input_lengths.device, dtype = input_lengths.dtype).unsqueeze(0) < target_lengths.unsqueeze(1)
 	targets_[:, 1::2] = temporal_mask * targets + (~temporal_mask) * targets_[:, 1::2]
-
 	max_target_length = int(target_lengths.max())
 	max_target_length_ = 2 * max_target_length + 1
-	batch_size = targets.shape[0]
+	targets_ = targets_[:, :max_target_length_]
 
-	log_alpha = torch.empty(batch_size, log_probs.shape[0], 2 + max_target_length_, device = log_probs.device, dtype = log_probs.dtype)
-	neg_log_likelihood = torch.empty(batch_size, device = log_probs.device, dtype = log_probs.dtype)
-	
 	neginf = torch.as_tensor([float('-inf')], device = log_probs.device, dtype = log_probs.dtype)
-	log_alpha[:, :3].fill_(neginf.sum())
-	two_true = torch.as_tensor([True, True], device = targets.device)
 	
-	la3_ = torch.cat([two_true.unsqueeze(0).expand(batch_size, -1), targets_[:, 2:max_target_length_] != targets_[:, :max_target_length_-2]], dim = 1)
-
+	batch_size = targets.shape[0]
+	log_alpha = torch.empty(batch_size, log_probs.shape[0], 2 + max_target_length_, device = log_probs.device, dtype = log_probs.dtype)
+	log_alpha[:, :2 + 1].fill_(neginf.sum())
 	log_alpha[:, 0, 2 + 0] = log_probs[0, :, blank]
 	log_alpha[:, 0, 2 + 1] = log_probs[0, torch.arange(batch_size), targets_[:, 1]]
-
+	
+	log_probs_ = log_probs.gather(-1, targets_.expand(len(log_probs), -1, -1))
+	la3_ = torch.cat([torch.as_tensor([[True, True]], device = targets.device).expand(batch_size, -1), targets_[:, 2:] != targets_[:, :-2]], dim = 1)
 	for t in range(1, len(log_probs)):
 		la3 = log_alpha[:, t - 1, 0:-2]
 		la2 = log_alpha[:, t - 1, 1:-1]
 		la1 = log_alpha[:, t - 1, 2:]
-		log_alpha[:, t, 2:] = torch.logsumexp(torch.stack([la1, la2, torch.where(la3_, la3, neginf)]), dim = 0) + log_probs[t].gather(1, targets_[:, : 2 * max_target_length + 1])
-		#for b in range(batch_size):
-		#	la3 = log_alpha[b, t - 1, 0:-2]
-		#	la2 = log_alpha[b, t - 1, 1:-1]
-		#	la1 = log_alpha[b, t - 1, 2:]
-		#	log_alpha[b, t, 2:] = torch.logsumexp(torch.stack([la1, la2, torch.where(la3_[b], la3, neginf)]), dim = 0) + log_probs[t, b, targets_[b,  : 2 * max_target_length + 1]]
+		log_alpha[:, t, 2:] = log_probs_[t] + torch.logsumexp(torch.stack([la1, la2, torch.where(la3_, la3, neginf)]), dim = 0)
 
 	l1 = log_alpha[:, input_lengths - 1, 2 + target_lengths * 2].diag()
 	l2 = log_alpha[:, input_lengths - 1, 2 + target_lengths * 2 - 1].diag()
@@ -147,8 +140,8 @@ log_probs = torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_()
 targets = torch.randint(1, 20, (16, 50), dtype=torch.long)
 input_lengths = torch.full((16,), 50, dtype=torch.long)
 target_lengths = torch.randint(49,50,(16,), dtype=torch.long)
-loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction = 'none')
-loss_ = ctc_loss___(log_probs, targets, input_lengths, target_lengths, reduction = 'none')
+loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths, blank = 0, reduction = 'none')
+loss_ = ctc_loss___(log_probs, targets, input_lengths, target_lengths, blank = 0, reduction = 'none')
 
 print(loss)
 print(loss_)
