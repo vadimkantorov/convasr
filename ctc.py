@@ -3,15 +3,11 @@ import torch.nn.functional as F
 
 @torch.jit.script
 def ctc_loss___(log_probs, targets, input_lengths, target_lengths, blank : int = 0, reduction : str = 'none'):
-	max_target_length_ = 2 * int(target_lengths.max()) + 1
-	temporal_mask = torch.arange(targets.shape[-1], device = input_lengths.device, dtype = input_lengths.dtype).unsqueeze(0) < target_lengths.unsqueeze(1)
-	targets_ = torch.full((targets.shape[0], 2 * targets.shape[-1] + 1), blank, device = targets.device, dtype = targets.dtype)
-	targets_[:, 1::2] = torch.where(temporal_mask, targets, torch.tensor(blank, device = targets.device, dtype = targets.dtype))
-	targets_ = targets_[:, :max_target_length_]
-
-	B = torch.arange(len(Targets), device = input_lengths.device)
+	targets_ = torch.cat([targets, targets[:, :1]], dim = -1)
+	targets_ = torch.stack([torch.full_like(targets_, blank), targets_], dim = -1).flatten(start_dim = -2)
+	B = torch.arange(len(targets), device = input_lengths.device)
 	
-	log_alpha = torch.full((len(targets), len(log_probs), 2 + max_target_length_), float('-inf'), device = log_probs.device, dtype = log_probs.dtype)
+	log_alpha = torch.full((len(targets), len(log_probs), 2 + targets_.shape[-1]), float('-inf'), device = log_probs.device, dtype = log_probs.dtype)
 	log_alpha[:, 1:, 2:] = log_probs.gather(-1, targets_.expand(len(log_probs), -1, -1))[1:].permute(1, 0, 2)
 	log_alpha[:, 0, 2 + 0] = log_probs[0, :, blank]
 	log_alpha[:, 0, 2 + 1] = log_probs[0, B, targets_[:, 1]]
