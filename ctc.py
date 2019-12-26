@@ -9,15 +9,14 @@ def ctc_loss___(log_probs, targets, input_lengths, target_lengths, blank : int =
 	targets_[:, 1::2] = torch.where(temporal_mask, targets, torch.tensor(blank, device = targets.device, dtype = targets.dtype))
 	targets_ = targets_[:, :max_target_length_]
 
-	batch_size = len(targets)
-	B = torch.arange(batch_size, device = input_lengths.device)
+	B = torch.arange(len(Targets), device = input_lengths.device)
 	
-	log_alpha = torch.full((batch_size, len(log_probs), 2 + max_target_length_), float('-inf'), device = log_probs.device, dtype = log_probs.dtype)
+	log_alpha = torch.full((len(targets), len(log_probs), 2 + max_target_length_), float('-inf'), device = log_probs.device, dtype = log_probs.dtype)
 	log_alpha[:, 1:, 2:] = log_probs.gather(-1, targets_.expand(len(log_probs), -1, -1))[1:].permute(1, 0, 2)
 	log_alpha[:, 0, 2 + 0] = log_probs[0, :, blank]
 	log_alpha[:, 0, 2 + 1] = log_probs[0, B, targets_[:, 1]]
 	
-	la3_ = torch.cat([torch.as_tensor([[True, True]], device = targets.device).expand(batch_size, -1), targets_[:, 2:] != targets_[:, :-2]], dim = 1)
+	la3_ = torch.cat([torch.as_tensor([[True, True]], device = targets.device).expand(len(targets), -1), targets_[:, 2:] != targets_[:, :-2]], dim = 1)
 	neginf = torch.tensor(float('-inf'), device = log_probs.device, dtype = log_probs.dtype)
 	for t in range(1, len(log_probs)):
 		la3 = log_alpha[:, t - 1, 0:-2]
