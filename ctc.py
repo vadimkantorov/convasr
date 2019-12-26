@@ -12,9 +12,8 @@ def ctc_loss___(log_probs, targets, input_lengths, target_lengths, blank : int =
 
 	neginf = torch.as_tensor([float('-inf')], device = log_probs.device, dtype = log_probs.dtype)
 	
-	batch_size = targets.shape[0]
-	log_alpha = torch.empty(batch_size, log_probs.shape[0], 2 + max_target_length_, device = log_probs.device, dtype = log_probs.dtype)
-	log_alpha[:, :2 + 1].fill_(neginf.sum())
+	batch_size = len(targets)
+	log_alpha = torch.full((batch_size, log_probs.shape[0], 2 + max_target_length_), float(neginf), device = log_probs.device, dtype = log_probs.dtype)
 	log_alpha[:, 0, 2 + 0] = log_probs[0, :, blank]
 	log_alpha[:, 0, 2 + 1] = log_probs[0, torch.arange(batch_size), targets_[:, 1]]
 	
