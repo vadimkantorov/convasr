@@ -10,8 +10,6 @@ import itertools
 import argparse
 import base64
 import subprocess
-import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn
 import altair
@@ -21,6 +19,7 @@ import dataset
 import ru
 import metrics
 import models
+import ctc
 
 def histc_vega(tensor, min, max, bins):
 	bins = torch.linspace(min, max, bins)
@@ -161,8 +160,8 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 	html = open(logits_path, 'w')
 	html.write('<html><body>')
 	for segment in torch.load(logits):
-		audio_file_name, logits = map(segment.get, ['audio_file_name', 'logits'])
-		if good_audio_file_name and audio_file_name not in good_audio_file_name:
+		logits = segment['logits']
+		if good_audio_file_name and segment['audio_file_name'] not in good_audio_file_name:
 			continue
 		
 		ref_aligned, hyp_aligned = segment['alignment']['ref'], segment['alignment']['hyp']
@@ -173,6 +172,9 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 		entropy_ = models.entropy(log_probs_, dim = 0, sum = False)
 		margin = models.margin(log_probs, dim = 0)
 		#energy = features.exp().sum(dim = 0)[::2]
+
+		alignment = ctc.ctc_alignment(log_probs.unsqueeze(0), segment['y'].unsqueeze(0), torch.LongTensor([log_probs.shape[-1]), torch.LongTensor([len(segment['y'])]), blank = len(log_probs) - 1)[0]
+		print(alignment.shape)
 
 		plt.figure(figsize = (6, 0.7))
 		#plt.suptitle(audio_file_name, fontsize = 4)
@@ -194,7 +196,7 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 		for begin, end in runs:
 			plt.axvspan(begin, end, color='red', alpha=0.2)
 
-		plt.ylim(0, 2)
+		plt.ylim(0, 4)
 		plt.xlim(0, entropy.shape[-1] - 1)
 		xlabels = list(map('\n'.join, zip(*labels.split_candidates(labels.decode(log_probs.topk(5, dim = 0).indices.tolist(), blank = '.', space = '_', replace2 = False)))))
 		#xlabels_ = labels.decode(log_probs.argmax(dim = 0).tolist(), blank = '.', space = '_', replace2 = False)

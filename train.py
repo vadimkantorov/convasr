@@ -76,7 +76,7 @@ def main(args):
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
 	
 	val_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob), feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob))
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, labels, val_frontend, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, labels, args.sample_rate, frontend = val_frontend if not args.frontend_in_model else None, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
 	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.GreedyNoBlankDecoder() if args.decoder == 'GreedyNoBlankDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
 	vocab = set(map(str.strip, open(args.vocab))) if args.vocab else set()
@@ -86,20 +86,21 @@ def main(args):
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
 			with torch.no_grad():
 				logits, log_probs, output_lengths, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'output_lengths', 'loss'])
-			entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, output_lengths))
+	
+	entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, output_lengths))
 			decoded = [list(map(l.decode, d.decode(lp, o))) for l, d, lp, o in zip(labels, decoder, log_probs, output_lengths)]
 			logits = list(map(models.unpad, logits, output_lengths))
-			yield audio_path_, reference_, loss.cpu(), entropy_char.cpu(), decoded, logits
-
-	def evaluate_transcript(analyze, labels, hyp, ref, loss, entropy, audio_path):
-		return dict(labels = labels.name, audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss, **metrics.analyze(ref, hyp, labels, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab))
+			y = list(map(models.unpad, y, ylen))
+			yield audio_path_, reference_, loss.cpu(), entropy_char.cpu(), decoded, logits, y
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None, adapt_bn = False):
+		evaluate_transcript = lambda analyze, labels, hyp, ref, loss, entropy, audio_path: dict(labels = labels.name, audio_file_name = os.path.basename(audio_path), audio_path = audio_path, entropy = entropy, loss = loss, **metrics.analyze(ref, hyp, labels, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab))
+		
 		training = epoch is not None and iteration is not None
 		columns = {}
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
 			print(f'\n{val_dataset_name}@{iteration}')
-			refhyp_, logits_ = [], []
+			refhyp_, logits_, y_ = [], [], []
 			analyze = args.analyze == [] or (args.analyze is not None and val_dataset_name in args.analyze)
 
 			model.eval()
@@ -107,9 +108,11 @@ def main(args):
 				for _ in apply_model(val_data_loader, models.reset_bn_running_stats(model)):
 					pass
 
+
 			model.eval()
-			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits) in enumerate(apply_model(val_data_loader, model)):
+			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits, y) in enumerate(apply_model(val_data_loader, model)):
 				logits_.extend(zip(*[[t.cpu() for t in t_] for t_ in logits]) if not training and args.logits else [])
+				y_.extend(y)
 				stats = [[evaluate_transcript(analyze, l, t, *zipped[:4]) for l, t in zip(labels, zipped[4:])] for zipped in zip(references, loss.tolist(), entropy.tolist(), audio_paths, *decoded)]
 				for r in sum(stats, []) if args.verbose else []:
 					print(f'{val_dataset_name}@{iteration}:', batch_idx , '/', len(val_data_loader), '|', args.experiment_id)
@@ -144,7 +147,7 @@ def main(args):
 			
 			if args.logits:
 				logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
-				torch.save(list(sorted([r_.update(dict(logits = l_)) or r_ for r, l in zip(refhyp_, logits_) for r_, l_ in zip(r, l)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
+				torch.save(list(sorted([r_.update(dict(logits = l_, y = y_)) or r_ for r, l, y in zip(refhyp_, logits_, y_) for r_, l_, y_ in zip(r, l, y)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
 				print('Logits saved:', logits_file_path)
 		
 		checkpoint_path = os.path.join(args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)) if training and not args.checkpoint_skip else None
@@ -176,7 +179,7 @@ def main(args):
 	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder)
 
 	train_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob), feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob))
-	train_dataset = dataset.AudioTextDataset(args.train_data_path, labels, train_frontend, max_duration = args.max_duration)
+	train_dataset = dataset.AudioTextDataset(args.train_data_path, labels, args.sample_rate, frontend = train_frontend if not args.frontend_in_model else None, max_duration = args.max_duration)
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
 	sampler = dataset.BucketingSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing)
 	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = sampler, worker_init_fn = set_random_seed, timeout = args.timeout)
@@ -361,4 +364,5 @@ if __name__ == '__main__':
 	parser.add_argument('--vis-errors-audio', action = 'store_true')
 	parser.add_argument('--adapt-bn', action = 'store_true')
 	parser.add_argument('--vocab', default = 'data/vocab_word_list.txt')
+	parser.add_argument('--frontend-in-model', action = 'store_true')
 	main(parser.parse_args())

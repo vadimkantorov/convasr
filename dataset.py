@@ -16,9 +16,10 @@ import models
 import transforms
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, labels, frontend, waveform_transform_debug_dir = None, max_duration = None):
+	def __init__(self, source_paths, labels, sample_rate, frontend = None, swaveform_transform_debug_dir = None, max_duration = None):
 		self.labels = labels
 		self.frontend = frontend
+		self.sample_rate = sample_rate
 		self.waveform_transform_debug_dir = waveform_transform_debug_dir
 		self.ids = [list(sorted(((os.path.basename(data_or_path), row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if True and len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path), delimiter=',') if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1])) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])]
 
@@ -30,9 +31,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			else:
 				index -= len(ids)
 
-		signal, sample_rate = (audio_path, self.frontend.sample_rate) if isinstance(self.frontend.waveform_transform, transforms.SoxAug) else read_audio(audio_path, sample_rate = self.frontend.sample_rate)
+		signal, sample_rate = (audio_path, self.sample_rate) if isinstance(self.frontend.waveform_transform, transforms.SoxAug) else read_audio(audio_path, sample_rate = self.sample_rate)
 		# int16 or float?
-		features = self.frontend(signal, waveform_transform_debug = lambda audio_path, sample_rate, signal: write_wav(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav')) if self.waveform_transform_debug_dir else None)
+		features = self.frontend(signal, waveform_transform_debug = lambda audio_path, sample_rate, signal: write_wav(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav')) if self.waveform_transform_debug_dir else None) if self.frontend is not None else signal
 		reference_normalized = self.labels[0].encode(reference)[0]
 		targets = [labels.encode(reference)[1] for labels in self.labels]
 		return [dataset_name, audio_path, reference_normalized, features] + targets
