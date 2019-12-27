@@ -177,6 +177,10 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 		print(alignment.shape)
 
 		plt.figure(figsize = (6, 0.7))
+		plt.subplot(211)
+		plt.imshow(alignment.t(), origin = 'lower', aspect = 'auto')
+
+		plt.subplot(212)
 		#plt.suptitle(audio_file_name, fontsize = 4)
 		top1, top2 = log_probs.exp().topk(2, dim = 0).values
 		plt.hlines(1.0, 0, entropy.shape[-1] - 1, linewidth = 0.2)
