@@ -204,7 +204,7 @@ def main(args):
 
 	model, optimizer = models.data_parallel(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 	if checkpoint and args.fp16 and checkpoint['amp_state_dict'] is not None:
-		amp.load_state_dict(checkpoint['amp_state_dict'])
+		apex.amp.load_state_dict(checkpoint['amp_state_dict'])
 	
 	model.train()
 
