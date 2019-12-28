@@ -188,8 +188,6 @@ def main(args):
 	iteration = 0
 	if checkpoint:
 		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-		if args.fp16 and checkpoint['amp_state_dict'] is not None:
-			amp.load_state_dict(checkpoint['amp_state_dict'])
 		iteration = 1 + checkpoint['iteration']
 		if args.train_data_path == checkpoint['args']['train_data_path']:
 			sampler.load_state_dict(checkpoint['sampler_state_dict'])
@@ -205,6 +203,9 @@ def main(args):
 			sampler.shuffle(epoch = sampler.epoch + 1)
 
 	model, optimizer = models.data_parallel(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+	if checkpoint and args.fp16 and checkpoint['amp_state_dict'] is not None:
+		amp.load_state_dict(checkpoint['amp_state_dict'])
+	
 	model.train()
 
 	os.makedirs(args.experiment_dir, exist_ok = True)
