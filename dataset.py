@@ -16,7 +16,7 @@ import models
 import transforms
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, labels, sample_rate, frontend = None, swaveform_transform_debug_dir = None, max_duration = None):
+	def __init__(self, source_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, max_duration = None):
 		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
@@ -33,7 +33,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 		signal, sample_rate = (audio_path, self.sample_rate) if isinstance(self.frontend.waveform_transform, transforms.SoxAug) else read_audio(audio_path, sample_rate = self.sample_rate)
 		# int16 or float?
-		features = self.frontend(signal, waveform_transform_debug = lambda audio_path, sample_rate, signal: write_wav(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav')) if self.waveform_transform_debug_dir else None) if self.frontend is not None else signal
+		features = self.frontend(signal.unsqueeze(0), waveform_transform_debug = lambda audio_path, sample_rate, signal: write_wav(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav')) if self.waveform_transform_debug_dir else None).squeeze(0) if self.frontend is not None else signal
 		reference_normalized = self.labels[0].encode(reference)[0]
 		targets = [labels.encode(reference)[1] for labels in self.labels]
 		return [dataset_name, audio_path, reference_normalized, features] + targets

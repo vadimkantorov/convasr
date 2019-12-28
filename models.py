@@ -332,7 +332,7 @@ class LogFilterBankFrontend(nn.Module):
 			imag_squared = forward_transform_squared[:, self.freq_cutoff:, :]
 			return real_squared + imag_squared
 		else:
-			return torch.stft(signal, self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = True, pad_mode = 'reflect').pow(2).sum(dim = -1)
+			return signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = True, pad_mode = 'reflect').pow(2).sum(dim = -1)
 
 	def forward(self, signal):
 		signal = normalize_signal(signal) if self.normalize_signal else signal
