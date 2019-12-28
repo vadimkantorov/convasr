@@ -303,8 +303,7 @@ class LogFilterBankFrontend(nn.Module):
 		super().__init__()
 		self.stft_mode = stft_mode
 		self.dither = dither
-		self.preemphasis = preemphasis
-		self.eps = eps
+		self.preemphasis =  preemphasis
 		self.normalize_features = normalize_features
 		self.normalize_signal = normalize_signal
 		self.sample_rate = sample_rate
@@ -315,7 +314,8 @@ class LogFilterBankFrontend(nn.Module):
 		
 		self.register_buffer('window', getattr(torch, window)(self.win_length, periodic = window_periodic).float())
 		#mel_basis = torchaudio.functional.create_fb_matrix(n_fft, n_mels = num_input_features, fmin = 0, fmax = int(sample_rate/2)).t() # when https://github.com/pytorch/audio/issues/287 is fixed
-		self.register_buffer('mel_basis', torch.from_numpy(librosa.filters.mel(sample_rate, self.nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2))).float())
+		self.register_buffer('mel_basis', torch.from_numpy(librosa.filters.mel(sample_rate, self.nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2))).float().unsqueeze(-1))
+		self.register_buffer('eps', torch.tensor(eps, dtype = torch.float).expand(out_channels) if eps else None)
 	
 		if stft_mode:
 			self.freq_cutoff = self.nfft // 2 + 1
@@ -339,7 +339,7 @@ class LogFilterBankFrontend(nn.Module):
 		signal = torch.cat([signal[..., :1], signal[..., 1:] - self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
 		signal = signal + self.dither * torch.randn_like(signal) if self.dither > 0 else signal
 		power_spectrum = self.stft_magnitude_squared(signal)
-		features = (self.mel_basis @ power_spectrum + self.eps).log()
+		features = F.conv1d(power_spectrum, self.mel_basis, self.eps).log()
 		return normalize_features(features) if self.normalize_features else features 
 
 def temporal_mask(x, lengths = None, lengths_fraction = None):

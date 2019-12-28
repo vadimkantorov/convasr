@@ -173,9 +173,11 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 		margin = models.margin(log_probs, dim = 0)
 		#energy = features.exp().sum(dim = 0)[::2]
 
-		alignment = ctc.ctc_alignment(log_probs.unsqueeze(0), segment['y'].unsqueeze(0), torch.LongTensor([log_probs.shape[-1]), torch.LongTensor([len(segment['y'])]), blank = len(log_probs) - 1)[0]
+		alignment = ctc.ctc_alignment(log_probs.unsqueeze(0), segment['y'].unsqueeze(0), torch.LongTensor([log_probs.shape[-1]]), torch.LongTensor([len(segment['y'])]), blank = len(log_probs) - 1)[0]
 		print(alignment.shape)
-
+		# https://matplotlib.org/api/_as_gen/matplotlib.axes.Axes.secondary_xaxis.html
+		# https://stackoverflow.com/questions/4761623/changing-the-color-of-the-axis-ticks-and-labels-for-a-plot-in-matplotlib
+		# https://matplotlib.org/3.1.0/gallery/text_labels_and_annotations/text_fontdict.html
 		plt.figure(figsize = (6, 0.7))
 		plt.subplot(211)
 		plt.imshow(alignment.t(), origin = 'lower', aspect = 'auto')

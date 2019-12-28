@@ -66,7 +66,9 @@ def main(args):
 		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B', 1 : 'T'}, logits = {0 : 'B', 1 : 'C', 2: 't'}))
 
 		onnxrt_session = onnxruntime.InferenceSession(args.onnx)
-		logits_ = onnxrt_session.run(None, dict(x = waveform_input.cpu().numpy()))
+		
+		onnxruntime.set_default_logger_severity(0)
+		(logits_, ) = onnxrt_session.run(None, dict(x = waveform_input.cpu().numpy()))
 		assert torch.allclose(logits.cpu(), torch.from_numpy(logits_), rtol = 1e-02, atol = 1e-03)
 		return
 
@@ -87,7 +89,7 @@ def main(args):
 			with torch.no_grad():
 				logits, log_probs, output_lengths, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'output_lengths', 'loss'])
 	
-	entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, output_lengths))
+			entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, output_lengths))
 			decoded = [list(map(l.decode, d.decode(lp, o))) for l, d, lp, o in zip(labels, decoder, log_probs, output_lengths)]
 			logits = list(map(models.unpad, logits, output_lengths))
 			y = list(map(models.unpad, y, ylen))
@@ -107,8 +109,6 @@ def main(args):
 			if adapt_bn:
 				for _ in apply_model(val_data_loader, models.reset_bn_running_stats(model)):
 					pass
-
-
 			model.eval()
 			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits, y) in enumerate(apply_model(val_data_loader, model)):
 				logits_.extend(zip(*[[t.cpu() for t in t_] for t_ in logits]) if not training and args.logits else [])
