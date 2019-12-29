@@ -21,14 +21,92 @@ import metrics
 import models
 import ctc
 
-def histc_vega(tensor, min, max, bins):
-	bins = torch.linspace(min, max, bins)
-	hist = tensor.histc(min = bins.min(), max = bins.max(), bins = len(bins)).int()
-	return altair.Chart(altair.Data(values = [dict(x = b, y = v) for b, v in zip(bins.tolist(), hist.tolist())])).mark_bar().encode(x = altair.X('x:Q'), y = altair.Y('y:Q')).to_dict()
+def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
+	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
+	labels = dataset.Labels(ru)
+	tick_params = lambda ax, labelsize = 2.5, length = 0, **kwargs: ax.tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length, **kwargs) or [ax.set_linewidth(0) for ax in ax.spines.values()]
+	logits_path = logits + '.html'
+	html = open(logits_path, 'w')
+	html.write('<html><body>')
+	for r in torch.load(logits):
+		logits = r['logits']
+		if good_audio_file_name and r['audio_file_name'] not in good_audio_file_name:
+			continue
+		
+		ref_aligned, hyp_aligned = r['alignment']['ref'], r['alignment']['hyp']
+		
+		log_probs = F.log_softmax(logits, dim = 0)
+		entropy = models.entropy(log_probs, dim = 0, sum = False)
+		log_probs_ = F.log_softmax(logits[:-1], dim = 0)
+		entropy_ = models.entropy(log_probs_, dim = 0, sum = False)
+		margin = models.margin(log_probs, dim = 0)
+		#energy = features.exp().sum(dim = 0)[::2]
 
-def colorize_alignment(r):
-	span = lambda word, t = None: '<span style="{style}">{word}</span>'.format(word = word, style = 'background-color:' + dict(ok = 'green', missing = 'red', typo_easy = 'lightgreen', typo_hard = 'pink')[t] if t is not None else '')
-	return '<pre>ref: {ref}\nhyp: {hyp}</pre>'.format(ref = ' '.join(span(w['ref'], w['type'] if w['type'] == 'ok' else None) for w in r['words']['all']), hyp = ' '.join(span(w['hyp'], w['type']) for w in r['words']['all']))
+		alignment = ctc.ctc_alignment(log_probs.unsqueeze(0).permute(2, 0, 1), r['y'].unsqueeze(0).long(), torch.LongTensor([log_probs.shape[-1]]), torch.LongTensor([len(r['y'])]), blank = len(log_probs) - 1)[0].t()[1:(2 * len(r['y'])):2]
+		
+		plt.figure(figsize = (6, 2))
+		
+		top1, top2 = log_probs.exp().topk(2, dim = 0).values
+		plt.hlines(1.0, 0, entropy.shape[-1] - 1, linewidth = 0.2)
+		plt.plot(top1, 'b', linewidth = 0.3)
+		plt.plot(top2, 'g', linewidth = 0.3)
+		plt.plot(entropy, 'r', linewidth = 0.3)
+		plt.plot(entropy_, 'yellow', linewidth = 0.3)
+		bad = (entropy > MAX_ENTROPY).tolist()
+		#runs = []
+		#for i, b in enumerate(bad):
+		#	if b:
+		#		if not runs or not bad[i - 1]:
+		#			runs.append([i, i])
+		#		else:
+		#			runs[-1][1] += 1
+		#for begin, end in runs:
+		#	plt.axvspan(begin, end, color='red', alpha=0.2)
+
+		plt.ylim(0, 3.0)
+		plt.xlim(0, entropy.shape[-1] - 1)
+		xlabels = list(map('\n'.join, zip(*labels.split_candidates(labels.decode(log_probs.topk(5, dim = 0).indices.tolist(), blank = '.', space = '_', replace2 = False)))))
+		#xlabels_ = labels.decode(log_probs.argmax(dim = 0).tolist(), blank = '.', space = '_', replace2 = False)
+		plt.xticks(torch.arange(entropy.shape[-1]), xlabels, fontfamily = 'monospace')
+		tick_params(plt.gca())
+
+		ax = plt.gca().secondary_xaxis('top')
+		ref, ref_ = labels.decode(r['y']), alignment.max(dim = 1).indices
+		ax.set_xticklabels(ref)
+		ax.set_xticks(ref_)
+		tick_params(ax, colors = 'red')
+
+		k = 0
+		for i, c in enumerate(ref + ' '):
+			if c == ' ':
+				plt.axvspan(ref_[k] - 1, ref_[i - 1] + 1, facecolor = 'gray', alpha = 0.2)
+				k = i + 1
+
+		plt.subplots_adjust(left = 0, right = 1, bottom = 0.12, top = 0.95)
+
+		buf = io.BytesIO()
+		plt.savefig(buf, format = 'jpg', dpi = 600)
+		plt.close()
+		
+		html.write('<h4>{audio_file_name} | cer: {cer:.02f}</h4>'.format(**r))
+		html.write(colorize_alignment(r))
+		html.write('<img style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(encoded = base64.b64encode(buf.getvalue()).decode()))	
+		html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio><hr/>'.format(encoded = base64.b64encode(open(r['audio_path'], 'rb').read()).decode()))
+	html.write('''<script>
+		Array.from(document.querySelectorAll('img')).map(img => {
+			img.onclick = (evt) => {
+				const img = evt.target;
+				const dim = img.getBoundingClientRect();
+				const x = (evt.clientX - dim.left) / dim.width;
+				const audio = img.nextSibling;
+				audio.currentTime = x * audio.duration;
+				audio.play();
+			};
+		});
+	</script>''')
+	html.write('</body></html>')
+	print('\n', logits_path)
+
 
 def errors(ours, theirs = None, audio_file_name = None, audio = False, output_file_name = None):
 	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
@@ -38,40 +116,6 @@ def errors(ours, theirs = None, audio_file_name = None, audio = False, output_fi
 	output_file_name = output_file_name or (ours + (audio_file_name.split('subset')[-1] if audio_file_name else '') + '.html')
 	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} td {border-top: 1px solid black} .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th>audio</th><th></th><th>cer</th><th>mer</th><th></th></tr>' + '\n'.join(f'<tr><td>' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"></audio>' if audio and i == 0 else '') + f'<div class="nowrap">{r["audio_file_name"] if i == 0 else ""}</div></td>' + f'<td>{ours if i == 0 else theirs}</td><td>{r_["cer"]:.02%}</td><td class="br">{r_["mer"]:.02%}</td><td>{colorize_alignment(r_)}</td>' + '</tr>' for r in ours_ for i, r_ in enumerate(filter(None, [r, theirs_.get(r['audio_file_name'])]))) + '</table></body></html>')
 	print(output_file_name)
-
-def meanstd(logits):
-	cov = lambda m: m @ m.t()
-	L = torch.load(logits, map_location = 'cpu')
-
-	batch_m = [b.mean(dim = -1) for b in L['features']]
-	batch_mean = torch.stack(batch_m).mean(dim = 0)
-	batch_s = [b.std(dim = -1) for b in L['features']]
-	batch_std = torch.stack(batch_s).mean(dim = 0)
-	batch_c = [cov(b - m.unsqueeze(-1)) for b, m in zip(L['features'], batch_m)]
-	batch_cov = torch.stack(batch_c).mean(dim = 0)
-
-	conv1_m = [b.mean(dim = -1) for b in L['conv1']]
-	conv1_mean = torch.stack(conv1_m).mean(dim = 0)
-	conv1_s = [b.std(dim = -1) for b in L['conv1']]
-	conv1_std = torch.stack(conv1_s).mean(dim = 0)
-	conv1_c = [cov(b - m.unsqueeze(-1)) for b, m in zip(L['conv1'], conv1_m)]
-	conv1_cov = torch.stack(conv1_c).mean(dim = 0)
-	
-	plt.subplot(231)
-	plt.imshow(batch_mean[:10].unsqueeze(0), origin = 'lower', aspect = 'auto')
-	plt.subplot(232)
-	plt.imshow(batch_std[:10].unsqueeze(0), origin = 'lower', aspect = 'auto')
-	plt.subplot(233)
-	plt.imshow(batch_cov[:20, :20], origin = 'lower', aspect = 'auto')
-
-	plt.subplot(234)
-	plt.imshow(conv1_mean.unsqueeze(0), origin = 'lower', aspect = 'auto')
-	plt.subplot(235)
-	plt.imshow(conv1_std.unsqueeze(0), origin = 'lower', aspect = 'auto')
-	plt.subplot(236)
-	plt.imshow(conv1_cov, origin = 'lower', aspect = 'auto')
-	plt.subplots_adjust(top = 0.99, bottom=0.01, hspace=0.8, wspace=0.4)
-	plt.savefig(logits + '.jpg', dpi = 150)
 
 def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe):
 	labels = dataset.Labels(ru)
@@ -152,86 +196,48 @@ def words(train_data_path, val_data_path):
 		if c1 > 1 and c2 < 1000:
 			print(w, c1, c2)
 
-def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
-	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
-	labels = dataset.Labels(ru)
-	ticks = lambda labelsize = 2.5, length = 0: plt.gca().tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length) or [ax.set_linewidth(0) for ax in plt.gca().spines.values()]
-	logits_path = logits + '.html'
-	html = open(logits_path, 'w')
-	html.write('<html><body>')
-	for segment in torch.load(logits):
-		logits = segment['logits']
-		if good_audio_file_name and segment['audio_file_name'] not in good_audio_file_name:
-			continue
-		
-		ref_aligned, hyp_aligned = segment['alignment']['ref'], segment['alignment']['hyp']
-		
-		log_probs = F.log_softmax(logits, dim = 0)
-		entropy = models.entropy(log_probs, dim = 0, sum = False)
-		log_probs_ = F.log_softmax(logits[:-1], dim = 0)
-		entropy_ = models.entropy(log_probs_, dim = 0, sum = False)
-		margin = models.margin(log_probs, dim = 0)
-		#energy = features.exp().sum(dim = 0)[::2]
+def meanstd(logits):
+	cov = lambda m: m @ m.t()
+	L = torch.load(logits, map_location = 'cpu')
 
-		alignment = ctc.ctc_alignment(log_probs.unsqueeze(0), segment['y'].unsqueeze(0), torch.LongTensor([log_probs.shape[-1]]), torch.LongTensor([len(segment['y'])]), blank = len(log_probs) - 1)[0]
-		print(alignment.shape)
-		# https://matplotlib.org/api/_as_gen/matplotlib.axes.Axes.secondary_xaxis.html
-		# https://stackoverflow.com/questions/4761623/changing-the-color-of-the-axis-ticks-and-labels-for-a-plot-in-matplotlib
-		# https://matplotlib.org/3.1.0/gallery/text_labels_and_annotations/text_fontdict.html
-		plt.figure(figsize = (6, 0.7))
-		plt.subplot(211)
-		plt.imshow(alignment.t(), origin = 'lower', aspect = 'auto')
+	batch_m = [b.mean(dim = -1) for b in L['features']]
+	batch_mean = torch.stack(batch_m).mean(dim = 0)
+	batch_s = [b.std(dim = -1) for b in L['features']]
+	batch_std = torch.stack(batch_s).mean(dim = 0)
+	batch_c = [cov(b - m.unsqueeze(-1)) for b, m in zip(L['features'], batch_m)]
+	batch_cov = torch.stack(batch_c).mean(dim = 0)
 
-		plt.subplot(212)
-		#plt.suptitle(audio_file_name, fontsize = 4)
-		top1, top2 = log_probs.exp().topk(2, dim = 0).values
-		plt.hlines(1.0, 0, entropy.shape[-1] - 1, linewidth = 0.2)
-		plt.plot(top1, 'b', linewidth = 0.3)
-		plt.plot(top2, 'g', linewidth = 0.3)
-		plt.plot(entropy, 'r', linewidth = 0.3)
-		plt.plot(entropy_, 'tomato', linewidth = 0.3)
-		bad = (entropy > MAX_ENTROPY).tolist()
-		runs = []
-		for i, b in enumerate(bad):
-			if b:
-				if not runs or not bad[i - 1]:
-					runs.append([i, i])
-				else:
-					runs[-1][1] += 1
+	conv1_m = [b.mean(dim = -1) for b in L['conv1']]
+	conv1_mean = torch.stack(conv1_m).mean(dim = 0)
+	conv1_s = [b.std(dim = -1) for b in L['conv1']]
+	conv1_std = torch.stack(conv1_s).mean(dim = 0)
+	conv1_c = [cov(b - m.unsqueeze(-1)) for b, m in zip(L['conv1'], conv1_m)]
+	conv1_cov = torch.stack(conv1_c).mean(dim = 0)
+	
+	plt.subplot(231)
+	plt.imshow(batch_mean[:10].unsqueeze(0), origin = 'lower', aspect = 'auto')
+	plt.subplot(232)
+	plt.imshow(batch_std[:10].unsqueeze(0), origin = 'lower', aspect = 'auto')
+	plt.subplot(233)
+	plt.imshow(batch_cov[:20, :20], origin = 'lower', aspect = 'auto')
 
-		for begin, end in runs:
-			plt.axvspan(begin, end, color='red', alpha=0.2)
+	plt.subplot(234)
+	plt.imshow(conv1_mean.unsqueeze(0), origin = 'lower', aspect = 'auto')
+	plt.subplot(235)
+	plt.imshow(conv1_std.unsqueeze(0), origin = 'lower', aspect = 'auto')
+	plt.subplot(236)
+	plt.imshow(conv1_cov, origin = 'lower', aspect = 'auto')
+	plt.subplots_adjust(top = 0.99, bottom=0.01, hspace=0.8, wspace=0.4)
+	plt.savefig(logits + '.jpg', dpi = 150)
 
-		plt.ylim(0, 4)
-		plt.xlim(0, entropy.shape[-1] - 1)
-		xlabels = list(map('\n'.join, zip(*labels.split_candidates(labels.decode(log_probs.topk(5, dim = 0).indices.tolist(), blank = '.', space = '_', replace2 = False)))))
-		#xlabels_ = labels.decode(log_probs.argmax(dim = 0).tolist(), blank = '.', space = '_', replace2 = False)
-		plt.xticks(torch.arange(entropy.shape[-1]), xlabels, fontfamily = 'monospace')
-		ticks()
-		
-		plt.subplots_adjust(left=0, right=1, top=1, bottom=0.4)
-		buf = io.BytesIO()
-		plt.savefig(buf, format = 'jpg', dpi = 600)
-		plt.close()
-		
-		html.write('<h4>{audio_file_name} | cer: {cer:.02f}</h4>'.format(**segment))
-		html.write(colorize_alignment(segment))
-		html.write('<img style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(encoded = base64.b64encode(buf.getvalue()).decode()))	
-		html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio><hr/>'.format(encoded = base64.b64encode(open(segment['audio_path'], 'rb').read()).decode()))
-	html.write('''<script>
-		Array.from(document.querySelectorAll('img')).map(img => {
-			img.onclick = (evt) => {
-				const img = evt.target;
-				const dim = img.getBoundingClientRect();
-				const x = (evt.clientX - dim.left) / dim.width;
-				const audio = img.nextSibling;
-				audio.currentTime = x * audio.duration;
-				audio.play();
-			};
-		});
-	</script>''')
-	html.write('</body></html>')
-	print('\n', logits_path)
+def histc_vega(tensor, min, max, bins):
+	bins = torch.linspace(min, max, bins)
+	hist = tensor.histc(min = bins.min(), max = bins.max(), bins = len(bins)).int()
+	return altair.Chart(altair.Data(values = [dict(x = b, y = v) for b, v in zip(bins.tolist(), hist.tolist())])).mark_bar().encode(x = altair.X('x:Q'), y = altair.Y('y:Q')).to_dict()
+
+def colorize_alignment(r):
+	span = lambda word, t = None: '<span style="{style}">{word}</span>'.format(word = word, style = 'background-color:' + dict(ok = 'green', missing = 'red', typo_easy = 'lightgreen', typo_hard = 'pink')[t] if t is not None else '')
+	return '<pre>ref: {ref}\nhyp: {hyp}</pre>'.format(ref = ' '.join(span(w['ref'], w['type'] if w['type'] == 'ok' else None) for w in r['words']['all']), hyp = ' '.join(span(w['hyp'], w['type']) for w in r['words']['all']))
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()

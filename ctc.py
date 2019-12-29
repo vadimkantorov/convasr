@@ -8,7 +8,6 @@ def ctc_alignment(log_probs, targets, input_lengths, target_lengths, blank : int
 	targets_ = torch.cat([targets, targets[:, :1]], dim = -1)
 	targets_ = torch.stack([torch.full_like(targets_, blank), targets_], dim = -1).flatten(start_dim = -2)
 	B = torch.arange(len(targets), device = input_lengths.device)
-	
 	log_alpha = torch.full((len(targets), len(log_probs), 2 + targets_.shape[-1]), zero, device = log_probs.device, dtype = log_probs.dtype)
 	log_alpha[:, 0, 2 + 0] = log_probs[0, :, blank]
 	log_alpha[:, 0, 2 + 1] = log_probs[0, B, targets_[:, 1]]
@@ -48,8 +47,9 @@ def ctc_alignment(log_probs, targets, input_lengths, target_lengths, blank : int
 			
 			if step == (i, j):
 				break
-			
-			paths[b, step[0], step[1]] = True
+
+			i, j = step
+			paths[b, i, j] = True
 	return paths
 
 

@@ -110,9 +110,10 @@ def main(args):
 				for _ in apply_model(val_data_loader, models.reset_bn_running_stats(model)):
 					pass
 			model.eval()
+			cpu_list = lambda l: [[t.cpu() for t in t_] for t_ in l]
 			for batch_idx, (audio_paths, references, loss, entropy, decoded, logits, y) in enumerate(apply_model(val_data_loader, model)):
-				logits_.extend(zip(*[[t.cpu() for t in t_] for t_ in logits]) if not training and args.logits else [])
-				y_.extend(y)
+				logits_.extend(zip(*cpu_list(logits)) if not training and args.logits else [])
+				y_.extend(cpu_list(y))
 				stats = [[evaluate_transcript(analyze, l, t, *zipped[:4]) for l, t in zip(labels, zipped[4:])] for zipped in zip(references, loss.tolist(), entropy.tolist(), audio_paths, *decoded)]
 				for r in sum(stats, []) if args.verbose else []:
 					print(f'{val_dataset_name}@{iteration}:', batch_idx , '/', len(val_data_loader), '|', args.experiment_id)
