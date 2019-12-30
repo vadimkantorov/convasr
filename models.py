@@ -298,6 +298,10 @@ class AugmentationFrontend(nn.Module):
 	def sample_rate(self):
 		return self.frontend.sample_rate
 
+	@property
+	def skip_read_audio(self):
+		return 'SoxAug' in self.waveform_transform.__class__.__name__
+
 class LogFilterBankFrontend(nn.Module):
 	def __init__(self, out_channels, sample_rate, window_size, window_stride, window, dither = 1e-5, preemphasis = 0.97, eps = 1e-20, normalize_signal = True, normalize_features = True, stft_mode = None, window_periodic = True):
 		super().__init__()

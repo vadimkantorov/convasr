@@ -2,6 +2,7 @@ import math
 import collections
 import Levenshtein
 import torch
+import json
 
 def quantiles(tensor):
 	tensor = tensor.sort().values
@@ -384,8 +385,8 @@ if __name__ == '__main__':
 	subparsers = parser.add_subparsers()
 	
 	cmd = subparsers.add_parser('analyze')
-	parser.add_argument('--ref')
-	parser.add_argument('--hyp')
+	cmd.add_argument('--ref')
+	cmd.add_argument('--hyp')
 	cmd.set_defaults(func = analyze)
 	
 	cmd = subparsers.add_parser('subset')

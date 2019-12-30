@@ -1,6 +1,5 @@
 import os
 import re
-import csv
 import gzip
 import time
 import math
@@ -13,15 +12,14 @@ import scipy.io.wavfile
 import librosa
 import sentencepiece
 import models
-import transforms
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, max_duration = None):
+	def __init__(self, source_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, max_duration = None, delimiter = ','):
 		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
 		self.waveform_transform_debug_dir = waveform_transform_debug_dir
-		self.ids = [list(sorted(((os.path.basename(data_or_path), row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if True and len(row) > 2 else -1) for row in csv.reader(gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path), delimiter=',') if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1])) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])]
+		self.ids = [list(sorted(((os.path.basename(data_or_path), row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if True and len(row) > 2 else -1) for line in (gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if '"' not in line for row in [line.split(delimiter)] if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1])) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])]
 
 	def __getitem__(self, index):
 		for ids in self.ids:
@@ -31,7 +29,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			else:
 				index -= len(ids)
 
-		signal, sample_rate = (audio_path, self.sample_rate) if isinstance(self.frontend.waveform_transform, transforms.SoxAug) else read_audio(audio_path, sample_rate = self.sample_rate)
+		signal, sample_rate = (audio_path, self.sample_rate) if self.frontend.skip_read_audio else read_audio(audio_path, sample_rate = self.sample_rate)
 		# int16 or float?
 		features = self.frontend(signal.unsqueeze(0), waveform_transform_debug = lambda audio_path, sample_rate, signal: write_wav(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav')) if self.waveform_transform_debug_dir else None).squeeze(0) if self.frontend is not None else signal
 		reference_normalized = self.labels[0].encode(reference)[0]
@@ -203,6 +201,7 @@ def subset(input_path, audio_file_name, output_path):
 	output_path = output_path or (input_path + (audio_file_name.split('subset')[-1] if audio_file_name else '') + '.csv')
 	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
 	open(output_path,'w').writelines(line for line in open(input_path) if os.path.basename(line.split(',')[0]) in good_audio_file_name)
+	print(output_path)
 
 if __name__ == '__main__':
 	import argparse
@@ -220,7 +219,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o')
 	cmd.add_argument('--audio-file-name', required = True)
-	cmd.set_default(func = subset)
+	cmd.set_defaults(func = subset)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')

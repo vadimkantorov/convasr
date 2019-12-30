@@ -11,4 +11,3 @@ OUTPUTMINMAX=$(python3 metrics.py subset $INPUT --arg cer --min $LO --max $HI)
 echo $OUTPUTMIN && python3 vis.py errors $INPUT --audio-file-name $OUTPUTMIN --audio
 echo $OUTPUTMAX && python3 vis.py errors $INPUT --audio-file-name $OUTPUTMAX --audio
 echo $OUTPUTMINMAX && python3 vis.py errors $INPUT --audio-file-name $OUTPUTMINMAX --audio
-
