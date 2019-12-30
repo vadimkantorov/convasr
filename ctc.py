@@ -52,7 +52,6 @@ def ctc_alignment(log_probs, targets, input_lengths, target_lengths, blank : int
 			paths[b, i, j] = True
 	return paths
 
-
 @torch.jit.script
 def ctc_loss___(log_probs, targets, input_lengths, target_lengths, blank : int = 0, reduction : str = 'none'):
 	targets_ = torch.cat([targets, targets[:, :1]], dim = -1)

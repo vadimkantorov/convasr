@@ -28,7 +28,7 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 	logits_path = logits + '.html'
 	html = open(logits_path, 'w')
 	html.write('<html><body>')
-	for r in torch.load(logits):
+	for r in torch.load(logits)[:1]:
 		logits = r['logits']
 		if good_audio_file_name and r['audio_file_name'] not in good_audio_file_name:
 			continue
@@ -46,12 +46,13 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 		
 		plt.figure(figsize = (6, 2))
 		
-		top1, top2 = log_probs.exp().topk(2, dim = 0).values
+		prob_top1, prob_top2 = log_probs.exp().topk(2, dim = 0).values
 		plt.hlines(1.0, 0, entropy.shape[-1] - 1, linewidth = 0.2)
-		plt.plot(top1, 'b', linewidth = 0.3)
-		plt.plot(top2, 'g', linewidth = 0.3)
-		plt.plot(entropy, 'r', linewidth = 0.3)
-		plt.plot(entropy_, 'yellow', linewidth = 0.3)
+		artist_prob_top1, = plt.plot(prob_top1, 'b', linewidth = 0.3)
+		artist_prob_top2, = plt.plot(prob_top2, 'g', linewidth = 0.3)
+		artist_entropy, = plt.plot(entropy, 'r', linewidth = 0.3)
+		artist_entropy_, = plt.plot(entropy_, 'yellow', linewidth = 0.3)
+		plt.legend([artist_entropy, artist_entropy_, artist_prob_top1, artist_prob_top2], ['entropy', 'entropy, no blank', 'top1 prob', 'top2 prob'], loc = 1, fontsize = 'xx-small', frameon = False)
 		bad = (entropy > MAX_ENTROPY).tolist()
 		#runs = []
 		#for i, b in enumerate(bad):
