@@ -30,6 +30,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   sudo \
   wget \
   gdb parallel \
+  libfreetype6-dev \
   libboost-all-dev zlib1g-dev libbz2-dev liblzma-dev \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 

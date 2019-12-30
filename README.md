@@ -112,7 +112,7 @@ ls mydir/*.wav | xargs soxi -D | awk '{sum += $1} END {print sum / 60; print "mi
 sudo docker build --build-arg CUDAVERSION=101 --build-arg CUDAVERSIONPOINT=10.1 -t convasr scripts
 
 # run docker
-sudo docker run --runtime=nvidia --privileged --cap-add=SYS_PTRACE -v ~/.ssh:/root/.ssh -v ~/stt_results:/root/stt_results -v ~/.gitconfig:/root/.gitconfig -v ~/.vimrc:/root/.vimrc -v ~/convasr:/root/convasr -v /home/data/ru_open_stt_wav:/root/convasr/ru_open_stt -v /home/data/kontur_calls_micro:/root/convasr/kontur_calls_micro -v /home/data/valset17122019:/root/convasr/valset17122019 -v /home/data/valset11102019:/root/convasr/valset11102019 -v /home/data/speechcore:/root/convasr/data/speechcore -it --ipc=host convasr
+sudo docker run --runtime=nvidia --privileged --cap-add=SYS_PTRACE -v ~/.ssh:/root/.ssh -v ~/stt_results:/root/stt_results -v ~/.gitconfig:/root/.gitconfig -v ~/.vimrc:/root/.vimrc -v ~/convasr:/root/convasr -v /home/data/ru_open_stt_wav:/root/convasr/ru_open_stt -v /home/data/kontur_calls_micro:/root/convasr/kontur_calls_micro -v /home/data/valset17122019:/root/convasr/valset17122019 -v /home/data/valset11102019:/root/convasr/valset11102019 -v /home/data/speechcore:/root/convasr/data/speechcore -v/home/data/html:/root/convasr/data/html -it --ipc=host convasr
 
 sudo docker image rm -f convasr
 ```
