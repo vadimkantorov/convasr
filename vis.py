@@ -27,8 +27,8 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 	tick_params = lambda ax, labelsize = 2.5, length = 0, **kwargs: ax.tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length, **kwargs) or [ax.set_linewidth(0) for ax in ax.spines.values()]
 	logits_path = logits + '.html'
 	html = open(logits_path, 'w')
-	html.write('<html><body>')
-	for r in torch.load(logits)[:1]:
+	html.write('<html><meta charset="utf-8"/><body>')
+	for r in torch.load(logits):
 		logits = r['logits']
 		if good_audio_file_name and r['audio_file_name'] not in good_audio_file_name:
 			continue

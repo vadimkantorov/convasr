@@ -85,6 +85,7 @@ def exphtml(root_dir, html_dir = 'public', strftime = '%Y-%m-%d %H:%M:%S', repea
 	with open(html_path, 'w') as html:
 		html.write(f'<html><head><title>Results @ {generated_time}</title>')
 		html.write('''
+			<meta charset="utf-8" />
 			<meta http-equiv="refresh" content="600" />
 			<script src="https://cdn.jsdelivr.net/npm/vega@5.8.1"></script>
 			<script src="https://cdn.jsdelivr.net/npm/vega-lite@4.0.0-beta.12"></script>

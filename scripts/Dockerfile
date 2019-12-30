@@ -30,7 +30,6 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   sudo \
   wget \
   gdb parallel \
-  libfreetype6-dev \
   libboost-all-dev zlib1g-dev libbz2-dev liblzma-dev \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -42,12 +41,15 @@ RUN curl -so /miniconda.sh https://repo.continuum.io/miniconda/Miniconda3-latest
  && rm /miniconda.sh
 ENV PATH=/miniconda/bin:$PATH
 
+
+# Prerequisites for building PyTorch from source (just in case)
+RUN conda install -y scipy scikit-learn numba numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing pillow
+
 RUN pip install ipython seaborn altair
 RUN pip install https://github.com/matplotlib/matplotlib/archive/v3.2.0rc2.tar.gz
 
-# Prerequisites for building PyTorch from source (just in case)
-RUN /miniconda/bin/conda install -y scipy scikit-learn numba numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing pillow
 RUN conda install -y -c pytorch magma-cuda${CUDAVERSION}
+
 
 # RUN conda install -y pytorch cudatoolkit=$CUDAVERSIONPOINT -c pytorch
 RUN conda install -y pytorch cudatoolkit=$CUDAVERSIONOPOINT -c pytorch-nightly

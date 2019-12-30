@@ -4,7 +4,7 @@ INPUTFILE=$1
 OUTPUTDIR=./data/html
 
 EXT=${INPUTFILE##*.}
-DATE=$(date +%Y%m%d_%H%M%S)
+DATE=$(date +%Y%m%d%H%M%S)
 
 OUTPUTFILENAME=$(basename "$INPUTFILE").$DATE.$EXT
 
