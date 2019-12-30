@@ -184,13 +184,15 @@ def main(args):
 	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else optimizers.NoopLR(optimizer) 
 	iteration = 0
 	if checkpoint:
-		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-		if args.fp16 and checkpoint['amp_state_dict'] is not None:
-			amp.load_state_dict(checkpoint['amp_state_dict'])
+		#print(checkpoint['optimizer_state_dict'])
+		#optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+		#print(checkpoint['amp_state_dict'])
+		#if args.fp16 and checkpoint['amp_state_dict'] is not None:
+		#	apex.amp.load_state_dict(checkpoint['amp_state_dict'])
 		iteration = 1 + checkpoint['iteration']
 		if args.train_data_path == checkpoint['args']['train_data_path']:
 			sampler.load_state_dict(checkpoint['sampler_state_dict'])
-			scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+			#scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 			if sampler.batch_idx + 1 == len(sampler):
 				sampler.shuffle(epoch = sampler.epoch + 1, batch_idx = 0)
 			else:
@@ -240,7 +242,7 @@ def main(args):
 					torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
 					optimizer.step()
 					optimizer.zero_grad()
-					scheduler.step()
+					#scheduler.step()
 				loss_avg = moving_avg(loss_avg, loss_cur, max = 1000)
 				entropy_avg = moving_avg(entropy_avg, entropy, max = 4)
 			toc_bwd = time.time()
