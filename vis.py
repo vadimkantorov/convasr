@@ -28,7 +28,7 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 	logits_path = logits + '.html'
 	html = open(logits_path, 'w')
 	html.write('<html><meta charset="utf-8"/><body>')
-	for r in torch.load(logits):
+	for r in torch.load(logits)[:5]:
 		logits = r['logits']
 		if good_audio_file_name and r['audio_file_name'] not in good_audio_file_name:
 			continue
@@ -42,7 +42,7 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 		margin = models.margin(log_probs, dim = 0)
 		#energy = features.exp().sum(dim = 0)[::2]
 
-		alignment = ctc.ctc_alignment(log_probs.unsqueeze(0).permute(2, 0, 1), r['y'].unsqueeze(0).long(), torch.LongTensor([log_probs.shape[-1]]), torch.LongTensor([len(r['y'])]), blank = len(log_probs) - 1)[0].t()[1:(2 * len(r['y'])):2]
+		alignment = ctc.ctc_alignment(log_probs.unsqueeze(0).permute(2, 0, 1), r['y'].unsqueeze(0).long(), torch.LongTensor([log_probs.shape[-1]]), torch.LongTensor([len(r['y'])]), blank = len(log_probs) - 1)[0, :, :len(r['y'])]
 		
 		plt.figure(figsize = (6, 2))
 		
@@ -72,7 +72,7 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 		tick_params(plt.gca())
 
 		ax = plt.gca().secondary_xaxis('top')
-		ref, ref_ = labels.decode(r['y']), alignment.max(dim = 1).indices
+		ref, ref_ = labels.decode(r['y']), alignment.max(dim = 0).indices
 		ax.set_xticklabels(ref)
 		ax.set_xticks(ref_)
 		tick_params(ax, colors = 'red')

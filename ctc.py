@@ -4,53 +4,55 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 
-def ctc_alignment(log_probs, targets, input_lengths, target_lengths, blank : int = 0, reduction : str = 'none', add = (lambda t, dim = None: torch.max(t, dim = dim).values), zero = float('-inf')):#add = torch.logsumexp,
+@torch.jit.script
+def ctc_alignment(log_probs, targets, input_lengths, target_lengths, blank : int = 0, reduction : str = 'none', zero : float = float('-inf')):#, add = torch.logsumexp):# add = (lambda t, dim = None: torch.max(t, dim = dim).values), ):#,
 	targets_ = torch.cat([targets, targets[:, :1]], dim = -1)
 	targets_ = torch.stack([torch.full_like(targets_, blank), targets_], dim = -1).flatten(start_dim = -2)
 	B = torch.arange(len(targets), device = input_lengths.device)
-	log_alpha = torch.full((len(targets), len(log_probs), 2 + targets_.shape[-1]), zero, device = log_probs.device, dtype = log_probs.dtype)
+	log_alpha = torch.full((len(B), len(log_probs), 2 + targets_.shape[-1]), zero, device = log_probs.device, dtype = log_probs.dtype)
 	log_alpha[:, 0, 2 + 0] = log_probs[0, :, blank]
 	log_alpha[:, 0, 2 + 1] = log_probs[0, B, targets_[:, 1]]
 	log_alpha[:, 1:, 2:] = log_probs.gather(-1, targets_.expand(len(log_probs), -1, -1))[1:].permute(1, 0, 2)
 	
-	la3_ = torch.cat([torch.as_tensor([[True, True]], device = targets.device).expand(len(targets), -1), targets_[:, 2:] != targets_[:, :-2]], dim = 1)
+	diff_labels = torch.cat([torch.as_tensor([[False, False]], device = targets.device).expand(len(B), -1), targets_[:, 2:] != targets_[:, :-2]], dim = 1)
 	zero = torch.tensor(zero, device = log_probs.device, dtype = log_probs.dtype)
 	for t in range(1, len(log_probs)):
-		la3 = log_alpha[:, t - 1, :-2]
-		la2 = log_alpha[:, t - 1, 1:-1]
-		la1 = log_alpha[:, t - 1, 2:]
-		log_alpha[:, t, 2:] += add(torch.stack([la1, la2, torch.where(la3_, la3, zero)]), dim = 0)
+		log_alpha[:, t, 2:] += torch.logsumexp(torch.stack([log_alpha[:, t - 1, 2:], log_alpha[:, t - 1, 1:-1], torch.where(diff_labels, log_alpha[:, t - 1, :-2], zero)]), dim = 0)
 
-	l1 = log_alpha[B, input_lengths - 1, 2 + target_lengths * 2]
-	l2 = log_alpha[B, input_lengths - 1, 2 + target_lengths * 2 - 1]
-	loss = -add(torch.stack([l1, l2]), dim = 0)
+	l1l2 = log_alpha[B, input_lengths - 1].gather(-1, torch.stack([2 + target_lengths * 2 - 1, 2 + target_lengths * 2], dim = -1)) 
+	loss = -torch.logsumexp(l1l2, dim = -1)
+	
+	path = torch.zeros(len(B), len(log_probs), device = log_probs.device, dtype = torch.int64)
+	path[B, input_lengths - 1] = 2 + 2 * target_lengths - 1 + l1l2.max(dim = -1).indices
+	for t in range(len(log_probs) - 1, 1, -1):
+		indices = path[:, t]
+		indices_ = torch.stack([(indices - 2) * diff_labels[B, (indices - 2).clamp(min = 0)], (indices - 1).clamp(min = 0), indices], dim = -1)
+		path[:, t - 1] += (indices - 2 + log_alpha[B, t - 1].gather(-1, indices_).max(dim = -1).indices).clamp(min = 0)
+	return torch.zeros_like(log_alpha).scatter_(-1, path.unsqueeze(-1), 1.0)[..., 3::2]
 
-	log_alpha = log_alpha[:, :, 2:]
-	paths = torch.zeros_like(log_alpha, dtype = torch.bool)
+def align_slow(input_lengths, target_lengths, log_alpha, l1l2):
+	log_alpha_ = log_alpha[:, :, 2:]
+	paths = torch.zeros_like(log_alpha_, dtype = torch.bool)
 	for b in range(len(targets)):
-		table = log_alpha[b]
+		table = log_alpha_[b]
 		i = int(input_lengths[b] - 1)
 		j = max((table[i, int(target_lengths[b] * 2 + 1 - 1)], int(target_lengths[b] * 2 + 1 - 1)), (table[i, int(target_lengths[b] * 2 - 1)], int(target_lengths[b] * 2 - 1)))[1]
 		paths[b, i, j] = True
 		while i > 0 and j > 0:
 			val = zero
 			step = i, j
-			
 			if table[i - 1, j] > val:
 				step, val = (i - 1, j), table[i - 1, j]
-			
 			if table[i - 1, j - 1] > val:
 				step, val = (i - 1, j - 1), table[i - 1, j - 1]
-
 			if j > 1 and la3_[b, j] and table[i - 1, j - 2] > val:
 				step, val = (i - 1, j - 2), table[i - 1, j - 2]
 			
 			if step == (i, j):
 				break
-
 			i, j = step
 			paths[b, i, j] = True
-	return paths
+	return paths[:, :, 1::2]
 
 @torch.jit.script
 def ctc_loss___(log_probs, targets, input_lengths, target_lengths, blank : int = 0, reduction : str = 'none'):
