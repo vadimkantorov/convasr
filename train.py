@@ -124,9 +124,12 @@ def main(args):
 			for r_ in zip(*refhyp_):
 				labels_name = r_[0]['labels']
 				stats = metrics.aggregate(r_)
-				for t in (metrics.error_types if analyze else []):
-					with open(f'{transcripts_path}.{t}.txt', 'w') as f:
-						f.write('\n'.join('{hyp},{ref}'.format(**a).replace('|', '') for a in stats[t]))
+				if analyze:
+					with open(f'{transcripts_path}.missing.txt', 'w') as f:
+						f.writelines('{hyp},{ref},missing\n'.format(**a).replace('|', '') for a in stats['missing'])
+					with open(f'{transcripts_path}.typo.txt', 'w') as f:
+						for t in ['typo_easy', 'typo_hard']:
+							f.writelines('{hyp},{ref},{t}\n'.format(t = t, **a).replace('|', '') for a in stats[t])
 
 				print('errors', stats['errors_distribution'])
 				cer = torch.FloatTensor([r['cer'] for r in r_])
