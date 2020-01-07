@@ -14,8 +14,8 @@ bash_template = """
 	--scheduler MultiStepLR --decay-milestones 20000 35000 \
 	--lr 1e-2 \
 	--optimizer NovoGrad \
-	--train-data-path data/split/mixed/mixed_with_radio_train_{set_number}.csv \
-	--val-data-path data/split/radio_val.csv data/mixed_val.csv data/clean_val.csv kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv \
+	--train-data-path data/splits/mixed/mixed_with_radio_train_{set_number}.csv \
+	--val-data-path data/splits/radio_val.csv data/mixed_val.csv data/clean_val.csv kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv \
 	--analyze kontur_calls_micro.csv \
 	--val-iteration-interval 2500 \
 	--experiment-id radio_domainset_mixed_{set_number} \

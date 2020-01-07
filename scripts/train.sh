@@ -2,18 +2,22 @@ python3 train.py $@ \
   --githttp https://github.com/vadimkantorov/convasr/commit/%h \
   --verbose --lang ru \
   --model JasperNetBig \
-  --train-batch-size 256 --val-batch-size 256 \
-  --scheduler MultiStepLR --decay-milestones 100000 175000 \
-  --lr 1e-3 \
+  --train-batch-size 16 --val-batch-size 256 \
+  --scheduler MultiStepLR --decay-milestones 60000 130000 \
+  --lr 5e-4 \
   --optimizer NovoGrad \
-  --train-data-path data/radio_train_0.csv \
-  --val-data-path data/radio_val.csv data/mixed_val.csv data/clean_val.csv kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv \
+  --train-data-path data/trainset_by_rec22122019.csv \
+  --val-data-path data/mixed_val.csv data/clean_val.csv kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv data/valset_by_rec22122019.0.csv data/valset_by_rec22122019.1.csv  data/valset_by_rec22122019.csv \
   --analyze kontur_calls_micro.csv \
-  --val-iteration-interval 2500 \
-  --experiment-name pretrain_11 \
-  --checkpoint data/experiments/radio_domainset_0/checkpoint_epoch04_iter0028700.pt \
+  --val-iteration-interval 1000 \
+  --experiment-name long_train_finetune_bs16 \
+  --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs256____long_train/checkpoint_epoch18_iter0135000.pt \
   --fp16 O2 \
-  --epochs 10 #\
+  --epochs 30 #\
+
+
+#data/experiments/JasperNetBig_NovoGrad_lr1e-3_wd1e-3_bs256____long_train/checkpoint_epoch14_iter0105000.pt
+# data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs256____long_train/checkpoint_epoch08_iter0060000.pt 
 
 #  --fp16 O2 \
 #  --finetune --checkpoint-skip
