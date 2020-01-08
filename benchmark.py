@@ -52,7 +52,7 @@ else:
 	model.to(args.devices[0])
 	model.eval()
 	model.fuse_conv_bn_eval()
-	model, *_ = models.data_parallel(model, opt_level = args.fp16, enabled = bool(args.fp16))
+	model, *_ = models.data_parallel(model, opt_level = args.fp16, enabled = bool(args.fp16)) if args.dataparallel else (model, None)
 	load_batch = lambda x: x.to(args.devices[0], non_blocking = True)
 
 tictoc = lambda: (torch.cuda.is_available and torch.cuda.synchronize()) or time.time()

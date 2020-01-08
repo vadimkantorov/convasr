@@ -265,7 +265,7 @@ def analyze(ref, hyp, labels, phonetic_replace_groups = [], vocab = set(), full 
 	hyp, ref = map(labels.postprocess_transcript, [hyp, ref])
 	hyp_phonetic, ref_phonetic = [labels.postprocess_transcript(s, phonetic_replace_groups = phonetic_replace_groups) for s in [hyp, ref]]
 	
-	a = dict(hyp_orig = hyp_orig, ref = ref, hyp = hyp, cer = cer(hyp, ref), wer = wer(hyp, ref), per = cer(hyp_phonetic, ref_phonetic), phonetic = dict(ref = ref_phonetic, hyp = hyp_phonetic), der = sum(w in vocab for w in ref.split()) / (1 + ref.count(' ')) )
+	a = dict(hyp_orig = hyp_orig, ref = ref, hyp = hyp, cer = cer(hyp, ref), wer = wer(hyp, ref), per = cer(hyp_phonetic, ref_phonetic), phonetic = dict(ref = ref_phonetic, hyp = hyp_phonetic), der = sum(w in vocab for w in hyp.split()) / (1 + hyp.count(' ')) )
 	
 	if full:
 		h, r = map(list, align(hyp, ref))
@@ -341,7 +341,8 @@ def aggregate(analyzed, p = 0.5):
 		mer_avg = mean_safe('mer'),
 		cer_easy_avg = mean_safe('cer_easy'),
 		cer_hard_avg = mean_safe('cer_hard'),
-		cer_missing_avg = mean_safe('cer_missing')
+		cer_missing_avg = mean_safe('cer_missing'),
+		der_avg = mean_safe('der')
 	)
 
 	errs = collections.defaultdict(int)

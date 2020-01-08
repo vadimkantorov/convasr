@@ -136,7 +136,7 @@ def main(args):
 				loss = torch.FloatTensor([r['loss'] for r in r_])
 				print('cer', metrics.quantiles(cer))
 				print('loss', metrics.quantiles(loss))
-				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} [{cer_easy_avg:.02%} - {cer_hard_avg:.02%} - {cer_missing_avg:.02%}]  MER: {mer_avg:.02%}\n'.format(**stats))
+				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} [{cer_easy_avg:.02%} - {cer_hard_avg:.02%} - {cer_missing_avg:.02%}]  MER: {mer_avg:.02%} DER: {der_avg:.02%}\n'.format(**stats))
 				columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_file_name', 'cer', 'mer', 'alignment')] + [(r['audio_file_name'], r['cer'], r['mer'], vis.colorize_alignment(r)) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
 				if training:
 					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + labels_name, dict(wer_avg = stats['wer_avg'] * 100.0, cer_avg = stats['cer_avg'] * 100.0, loss_avg = stats['loss_avg']), iteration) 
@@ -223,6 +223,8 @@ def main(args):
 	tic, toc_fwd, toc_bwd = time.time(), time.time(), time.time()
 	loss_avg, entropy_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0, 0.0
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1. / K) * avg
+	#import IPython; IPython.embed();
+	
 	for epoch in range(sampler.epoch, args.epochs):
 		time_epoch_start = time.time()
 		for dataset_name_, audio_path_, reference_, x, xlen, y, ylen in train_data_loader:
@@ -246,7 +248,7 @@ def main(args):
 					torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
 					optimizer.step()
 					optimizer.zero_grad()
-					scheduler.step()
+					#scheduler.step()
 				loss_avg = moving_avg(loss_avg, loss_cur, max = 1000)
 				entropy_avg = moving_avg(entropy_avg, entropy, max = 4)
 			toc_bwd = time.time()

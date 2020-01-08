@@ -118,7 +118,7 @@ def errors(ours, theirs = None, audio_file_name = None, audio = False, output_fi
 	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} td {border-top: 1px solid black} .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th>audio</th><th></th><th>cer</th><th>mer</th><th></th></tr>' + '\n'.join(f'<tr><td>' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"></audio>' if audio and i == 0 else '') + f'<div class="nowrap">{r["audio_file_name"] if i == 0 else ""}</div></td>' + f'<td>{ours if i == 0 else theirs}</td><td>{r_["cer"]:.02%}</td><td class="br">{r_["mer"]:.02%}</td><td>{colorize_alignment(r_)}</td>' + '</tr>' for r in ours_ for i, r_ in enumerate(filter(None, [r, theirs_.get(r['audio_file_name'])]))) + '</table></body></html>')
 	print(output_file_name)
 
-def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe):
+def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe, der):
 	labels = dataset.Labels(ru)
 	if experiment_id.endswith('.json'):
 		reftra = json.load(open(experiment_id))
@@ -173,7 +173,7 @@ def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer3
 		iteration = f[eidx:].replace('.json', '')
 		val_dataset_name = f[f.find('transcripts_') + len('transcripts_'):eidx]
 		checkpoint = os.path.join(experiment_dir, 'checkpoint_' + f[eidx:].replace('.json', '.pt')) if not json_ else f
-		val = torch.tensor([j['wer' if wer else 'entropy' if entropy else 'loss' if loss else 'per' if per else 'cer'] for j in json.load(open(f)) if j['labels'].startswith(bpe)] or [0.0])
+		val = torch.tensor([j['wer' if wer else 'entropy' if entropy else 'loss' if loss else 'per' if per else 'der' if der else 'cer'] for j in json.load(open(f)) if j['labels'].startswith(bpe)] or [0.0])
 		val = val[~(torch.isnan(val) | torch.isinf(val))]
 
 		if cer10 or cer20 or cer30 or cer40 or cer50:
@@ -271,6 +271,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--cer50', action = 'store_true')
 	cmd.add_argument('--json', dest = "json_", action = 'store_true')
 	cmd.add_argument('--bpe', default = 'char')
+	cmd.add_argument('--der', action = 'store_true')
 	cmd.set_defaults(func = cer)
 
 	cmd = subparsers.add_parser('words')
