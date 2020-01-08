@@ -34,13 +34,11 @@ def main(args):
 		checkpoint['model_state_dict'] = {k : sum(c['model_state_dict'][k] for c in checkpoints) / len(checkpoints) for k in checkpoint['model_state_dict']}
 
 	args.experiment_id = args.experiment_id.format(model = args.model, train_batch_size = args.train_batch_size, optimizer = args.optimizer, lr = args.lr, weight_decay = args.weight_decay, time = time.strftime('%Y-%m-%d_%H-%M-%S'), experiment_name = args.experiment_name, bpe = 'bpe' if args.bpe else '', train_waveform_transform = f'aug{args.train_waveform_transform[0]}{args.train_waveform_transform_prob or ""}' if args.train_waveform_transform else '', train_feature_transform = f'aug{args.train_feature_transform[0]}{args.train_feature_transform_prob or ""}' if args.train_feature_transform else '').replace('e-0', 'e-').rstrip('_')
-	if 'experiment_id' in checkpoint and not args.experiment_name:
-		args.experiment_id = checkpoint['experiment_id']
-
+	if checkpoint and 'experiment_id' in checkpoint['args'] and not args.experiment_name:
+		args.experiment_id = checkpoint['args']['experiment_id']
 	args.experiment_dir = args.experiment_dir.format(experiments_dir = args.experiments_dir, experiment_id = args.experiment_id)
-	args.lang, args.model, args.num_input_features = checkpoint.get('lang', args.lang), checkpoint.get('model', args.model), checkpoint.get('num_input_features', args.num_input_features)
-	if not args.train_data_path and checkpoint and 'args' in checkpoint:
-		args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['sample_rate', 'window', 'window_size', 'window_stride'])
+	if checkpoint:
+		args.lang, args.model, args.num_input_features, args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['lang', 'model', 'num_input_features', 'sample_rate', 'window', 'window_size', 'window_stride'])
 
 	print('\n', 'Arguments:', args)
 	print('\n', 'Experiment id:', args.experiment_id, '\n')
@@ -159,7 +157,7 @@ def main(args):
 			exphtml.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
-			torch.save(dict(model = model.module.__class__.__name__, model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer.state_dict(), amp_state_dict = apex.amp.state_dict() if args.fp16 else None, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), experiment_id = args.experiment_id, lang = args.lang, num_input_features = args.num_input_features, time = time.time()), checkpoint_path)
+			torch.save(dict(model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer.state_dict(), amp_state_dict = apex.amp.state_dict() if args.fp16 else None, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), time = time.time()), checkpoint_path)
 
 		model.train()
 
@@ -190,19 +188,13 @@ def main(args):
 	iteration = 0
 	if checkpoint:
 		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-		iteration = 1 + checkpoint['iteration']
+		iteration = checkpoint['iteration']
+		# load scheduler and sampler state if training continues on the same dataset
 		if args.train_data_path == checkpoint['args']['train_data_path']:
 			sampler.load_state_dict(checkpoint['sampler_state_dict'])
 			scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-			if sampler.batch_idx + 1 == len(sampler):
-				sampler.shuffle(epoch = sampler.epoch + 1, batch_idx = 0)
-			else:
-				#TODO: remove next line
-				sampler.epoch = checkpoint['epoch']
-				sampler.shuffle(epoch = sampler.epoch, batch_idx = sampler.batch_idx + 1)
-				#sampler.batch_idx += 1
 		else:
-			sampler.shuffle(epoch = sampler.epoch + 1)
+			sampler.shuffle(epoch = sampler.epoch + 1, batch_idx = 0)
 
 	model, optimizer = models.data_parallel(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 	if checkpoint and args.fp16 and checkpoint['amp_state_dict'] is not None:
@@ -258,6 +250,7 @@ def main(args):
 			time_ms_avg = moving_avg(time_ms_avg, time_ms_data + time_ms_model, max = 10_000)
 			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}> loss: {loss_cur:.2f} <{loss_avg:.2f}> time: ({"x".join(map(str, x.shape))}) {time_ms_data:.2f}+{time_ms_fwd:4.0f}+{time_ms_bwd:4.0f} <{time_ms_avg:.0f}> | lr: {lr:.5f}')
 			iteration += 1
+			sampler.batch_idx += 1
 
 			if iteration > 0 and iteration % args.val_iteration_interval == 0:
 				evaluate_model(val_data_loaders, epoch, iteration)
@@ -281,8 +274,8 @@ def main(args):
 			tic = time.time()
 
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
-		sampler.shuffle(epoch) # TODO: redo bucketed sampling, move to beginning of epoch
-		evaluate_model(val_data_loaders, epoch, iteration)
+		sampler.shuffle(epoch+1) # TODO: redo bucketed sampling, move to beginning of epoch
+		evaluate_model(val_data_loaders, epoch+1, iteration)
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()

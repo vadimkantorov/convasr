@@ -50,7 +50,6 @@ class BucketingSampler(torch.utils.data.Sampler):
 	def __iter__(self):
 		for batch in self.shuffled[self.batch_idx:]:
 			yield batch
-			self.batch_idx += 1
 
 	def __len__(self):
 		return len(self.shuffled)
