@@ -19,15 +19,15 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.frontend = frontend
 		self.sample_rate = sample_rate
 		self.waveform_transform_debug_dir = waveform_transform_debug_dir
-		self.ids = [list(sorted(((os.path.basename(data_or_path), row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if True and len(row) > 2 else -1) for line in (gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if '"' not in line for row in [line.split(delimiter)] if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1])) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])]
+		self.examples = [list(sorted(((os.path.basename(data_or_path), row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if True and len(row) > 2 else -1) for line in (gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if '"' not in line for row in [line.split(delimiter)] if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1])) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])]
 
 	def __getitem__(self, index):
-		for ids in self.ids:
-			if index < len(ids):
-				dataset_name, audio_path, reference, duration = ids[index]
+		for examples in self.examples:
+			if index < len(examples):
+				dataset_name, audio_path, reference, duration = examples[index]
 				break
 			else:
-				index -= len(ids)
+				index -= len(examples)
 
 		signal, sample_rate = (audio_path, self.sample_rate) if self.frontend.skip_read_audio else read_audio(audio_path, sample_rate = self.sample_rate)
 		# int16 or float?
@@ -37,14 +37,16 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		return [dataset_name, audio_path, reference_normalized, features] + targets
 
 	def __len__(self):
-		return sum(map(len, self.ids))
+		return sum(map(len, self.examples))
 
 class BucketingSampler(torch.utils.data.Sampler):
-	def __init__(self, dataset, batch_size = 1, mixing = None):
+	def __init__(self, dataset, bucket, batch_size = 1, mixing = None):
 		super().__init__(dataset)
+		
 		self.dataset = dataset
 		self.batch_size = batch_size
-		self.mixing = mixing or ([1 / len(self.dataset.ids)] * len(self.dataset.ids))
+		self.mixing = mixing or ([1 / len(self.dataset.examples)] * len(self.dataset.examples))
+		self.buckets = torch.IntTensor(list(map(bucket, self.dataset.examples)))
 		self.shuffle(epoch = 0)
 
 	def __iter__(self):
@@ -59,8 +61,8 @@ class BucketingSampler(torch.utils.data.Sampler):
 
 		mixing = [int(m * self.batch_size) for m in self.mixing]
 		chunk = lambda xs, chunks: [xs[i * batch_size : (1 + i) * batch_size] for batch_size in [ len(xs) // chunks ] for i in range(chunks)]
-		num_batches = int(len(self.dataset.ids[0]) // self.batch_size + 0.5)
-		inds = [chunk(i, num_batches) for k, subset in enumerate(self.dataset.ids) for i in [sum(map(len, self.dataset.ids[:k])) + torch.arange(len(subset))]]
+		num_batches = int(len(self.dataset.examples[0]) // self.batch_size + 0.5)
+		inds = [chunk(i, num_batches) for k, subset in enumerate(self.dataset.examples) for i in [sum(map(len, self.dataset.examples[:k])) + torch.arange(len(subset))]]
 		batches = [torch.cat([i[torch.randperm(len(i), generator = generator)[:m]] for i, m in zip(t, mixing)]).tolist() for t in zip(*inds)]
 		self.shuffled = [batches[k] for k in torch.randperm(len(batches), generator = generator).tolist()]
 
@@ -140,22 +142,26 @@ class Labels:
 	def __contains__(self, chr):
 		return chr.lower() in self.alphabet
 
-def collate_fn(batch, pad_to = 128):
-	dataset_name, audio_path, reference, sample_x, *sample_y = batch[0]
-	xmax_len, *ymax_len = [(max(b[k].shape[-1] for b in batch) // pad_to + 1) * pad_to for k in range(3, len(batch[0]))]
-	ymax_len = max(ymax_len)
-	x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = torch.float32)
-	y = torch.zeros(len(batch), len(sample_y), ymax_len, dtype = torch.int32)
-	xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.int32)
-	for k, (dataset_name, audio_path, reference, input, *targets) in enumerate(batch):
-		xlen[k] = input.shape[-1] / x.shape[-1]
-		x[k, ..., :input.shape[-1]] = input
-		for j, t in enumerate(targets):
-			y[k, j, :t.shape[-1]] = t
-			ylen[k, j] = len(t)
-	dataset_name_, audio_path_, reference_, *_ = zip(*batch)
-	#x: NCT, y: NLt, ylen: NL, xlen: N
-	return dataset_name_, audio_path_, reference_, x, xlen, y, ylen
+class BatchCollater:
+	def __init__(self, time_padding_multiple = 1):
+		self.time_padding_muliple = time_padding_multiple
+
+	def __call__(self, batch):
+		dataset_name, audio_path, reference, sample_x, *sample_y = batch[0]
+		xmax_len, *ymax_len = [(max(b[k].shape[-1] for b in batch) // self.time_padding_multiple + 1) * pad_to for k in range(3, len(batch[0]))]
+		ymax_len = max(ymax_len)
+		x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = torch.float32)
+		y = torch.zeros(len(batch), len(sample_y), ymax_len, dtype = torch.int32)
+		xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.int32)
+		for k, (dataset_name, audio_path, reference, input, *targets) in enumerate(batch):
+			xlen[k] = input.shape[-1] / x.shape[-1]
+			x[k, ..., :input.shape[-1]] = input
+			for j, t in enumerate(targets):
+				y[k, j, :t.shape[-1]] = t
+				ylen[k, j] = len(t)
+		dataset_name_, audio_path_, reference_, *_ = zip(*batch)
+		#x: NCT, y: NLt, ylen: NL, xlen: N
+		return dataset_name_, audio_path_, reference_, x, xlen, y, ylen
 
 def read_audio(audio_path, sample_rate, normalize = True, stereo = False, max_duration = None, dtype = torch.float32, byte_order = 'little'):
 	sample_rate_, signal = scipy.io.wavfile.read(audio_path) if audio_path.endswith('.wav') else (sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', '1', '-t', 'raw', '-']), byte_order = byte_order))) 
@@ -187,6 +193,13 @@ def remove_silence(vad, signal, sample_rate, window_size):
 	voice.append(False)
 	voice = torch.tensor(voice)
 	voice, _voice = voice[1:], voice[:-1]
+	
+	# 1. merge if gap < 1 sec
+	# 2. remove if len < 0.5 sec
+	# 3. filter by energy
+	# 4. cut sends by energy
+
+	
 	begin_end = list(zip((~_voice & voice).nonzero().squeeze(1).tolist(), (~voice & _voice).nonzero().squeeze(1).tolist()))
 	return (frame_len * torch.IntTensor(begin_end)).tolist()
 

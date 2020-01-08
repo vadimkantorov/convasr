@@ -72,9 +72,10 @@ def main(args):
 	if args.val_waveform_transform_debug_dir:
 		args.val_waveform_transform_debug_dir = os.path.join(args.val_waveform_transform_debug_dir, str(val_waveform_transform) if isinstance(val_waveform_transform, transforms.RandomCompose) else val_waveform_transform.__class__.__name__)
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
-	
+
+	batch_collater = dataset.BatchCollater(args.batch_time_padding_multiple)
 	val_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob), feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob))
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, labels, args.sample_rate, frontend = val_frontend if not args.frontend_in_model else None, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir), num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, labels, args.sample_rate, frontend = val_frontend if not args.frontend_in_model else None, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir), num_workers = args.num_workers, collate_fn = batch_collater, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
 	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.GreedyNoBlankDecoder() if args.decoder == 'GreedyNoBlankDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
 	vocab = set(map(str.strip, open(args.vocab))) if args.vocab else set()
@@ -181,8 +182,8 @@ def main(args):
 	train_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob), feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob))
 	train_dataset = dataset.AudioTextDataset(args.train_data_path, labels, args.sample_rate, frontend = train_frontend if not args.frontend_in_model else None, max_duration = args.max_duration)
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
-	sampler = dataset.BucketingSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing)
-	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = dataset.collate_fn, pin_memory = True, batch_sampler = sampler, worker_init_fn = set_random_seed, timeout = args.timeout)
+	sampler = dataset.BucketingSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing, bucket = lambda example: int(example[-1] / args.window_stride / args.batch_time_padding_multiple))
+	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = batch_collater, pin_memory = True, batch_sampler = sampler, worker_init_fn = set_random_seed, timeout = args.timeout)
 	optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else apex.optimizers.FusedNovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'FusedNovoGrad' else None
 	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else optimizers.NoopLR(optimizer) 
 	iteration = 0
@@ -244,8 +245,23 @@ def main(args):
 				if iteration % args.train_batch_accumulate_iterations == 0:
 					torch.nn.utils.clip_grad_norm_(apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm)
 					optimizer.step()
+
+					if iteration % args.log_iteration_interval == 0:
+						tensorboard.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
+						for param_name, param in model.module.named_parameters():
+							if param.grad is None:
+								continue
+							tag = 'params/' + param_name.replace('.', '/')
+							norm, grad_norm = param.norm(), param.grad.norm()
+							ratio = grad_norm / (1e-9 + norm)
+							tensorboard.add_scalars(tag, dict(norm = float(norm), grad_norm = float(grad_norm), ratio = float(ratio)), iteration)
+							if args.log_weight_distribution:
+								tensorboard.add_histogram(tag, param, iteration)
+								tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
+					
 					optimizer.zero_grad()
 					#scheduler.step()
+				
 				loss_avg = moving_avg(loss_avg, loss_cur, max = 1000)
 				entropy_avg = moving_avg(entropy_avg, entropy, max = 4)
 			toc_bwd = time.time()
@@ -262,19 +278,6 @@ def main(args):
 
 			if iteration and args.iterations and iteration >= args.iterations:
 				return
-
-			if iteration % args.log_iteration_interval == 0:
-				tensorboard.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
-				for param_name, param in model.module.named_parameters():
-					if param.grad is None:
-						continue
-					tag = 'params/' + param_name.replace('.', '/')
-					norm, grad_norm = param.norm(), param.grad.norm()
-					ratio = grad_norm / (1e-9 + norm)
-					tensorboard.add_scalars(tag, dict(norm = float(norm), grad_norm = float(grad_norm), ratio = float(ratio)), iteration)
-					if args.log_weight_distribution:
-						tensorboard.add_histogram(tag, param, iteration)
-						tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
 
 			tic = time.time()
 
@@ -367,4 +370,5 @@ if __name__ == '__main__':
 	parser.add_argument('--adapt-bn', action = 'store_true')
 	parser.add_argument('--vocab', default = 'data/vocab_word_list.txt')
 	parser.add_argument('--frontend-in-model', action = 'store_true')
+	parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
 	main(parser.parse_args())
