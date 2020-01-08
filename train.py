@@ -186,15 +186,19 @@ def main(args):
 	optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else apex.optimizers.FusedNovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'FusedNovoGrad' else None
 	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else optimizers.NoopLR(optimizer) 
 	iteration = 0
+	epoch = 0
 	if checkpoint:
 		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 		iteration = checkpoint['iteration']
+		epoch = checkpoint['epoch']
 		# load scheduler and sampler state if training continues on the same dataset
 		if args.train_data_path == checkpoint['args']['train_data_path']:
 			sampler.load_state_dict(checkpoint['sampler_state_dict'])
 			scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+	
 		else:
-			sampler.shuffle(epoch = sampler.epoch + 1, batch_idx = 0)
+			epoch += 1
+			sampler.batch_idx = 0
 
 	model, optimizer = models.data_parallel(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 	if checkpoint and args.fp16 and checkpoint['amp_state_dict'] is not None:
@@ -217,7 +221,8 @@ def main(args):
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1. / K) * avg
 	#import IPython; IPython.embed();
 	
-	for epoch in range(sampler.epoch, args.epochs):
+	for epoch in range(epoch, args.epochs):
+		sampler.shuffle(epoch)
 		time_epoch_start = time.time()
 		for batch_idx, (dataset_name_, audio_path_, reference_, x, xlen, y, ylen) in enumerate(train_data_loader, start=sampler.batch_idx):		
 			toc_data = time.time()
@@ -274,7 +279,6 @@ def main(args):
 			tic = time.time()
 
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
-		sampler.shuffle(epoch+1) # TODO: redo bucketed sampling, move to beginning of epoch
 		evaluate_model(val_data_loaders, epoch+1, iteration)
 
 if __name__ == '__main__':

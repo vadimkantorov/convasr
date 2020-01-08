@@ -48,17 +48,14 @@ class BucketingSampler(torch.utils.data.Sampler):
 		self.shuffle(epoch = 0)
 
 	def __iter__(self):
-		for batch in self.shuffled[self.batch_idx:]:
-			yield batch
+		return iter(self.shuffled[self.batch_idx:])
 
 	def __len__(self):
 		return len(self.shuffled)
 
-	def shuffle(self, epoch, batch_idx = 0):
-		self.epoch = epoch
-		self.batch_idx = batch_idx
+	def shuffle(self, epoch):
 		generator = torch.Generator()
-		generator.manual_seed(self.epoch)
+		generator.manual_seed(epoch)
 
 		mixing = [int(m * self.batch_size) for m in self.mixing]
 		chunk = lambda xs, chunks: [xs[i * batch_size : (1 + i) * batch_size] for batch_size in [ len(xs) // chunks ] for i in range(chunks)]
@@ -68,10 +65,10 @@ class BucketingSampler(torch.utils.data.Sampler):
 		self.shuffled = [batches[k] for k in torch.randperm(len(batches), generator = generator).tolist()]
 
 	def state_dict(self):
-		return dict(epoch = self.epoch, batch_idx = self.batch_idx, shuffled = self.shuffled)
+		return dict(batch_idx = self.batch_idx)
 
 	def load_state_dict(self, state_dict):
-		self.epoch, self.batch_idx, self.shuffled = state_dict['epoch'], state_dict['batch_idx'], (state_dict.get('shuffled') or self.shuffled)
+		self.batch_idx = state_dict['batch_idx']
 
 class Labels:
 	blank = '|'
