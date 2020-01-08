@@ -2,15 +2,18 @@ python3 train.py $@ \
   --githttp https://github.com/vadimkantorov/convasr/commit/%h \
   --verbose --lang ru \
   --model JasperNetBig \
-  --train-batch-size 256 --val-batch-size 64 \
-  --scheduler MultiStepLR --decay-milestones 25000 75000 \
-  --lr 1e-2 \
+  --train-batch-size 32 --val-batch-size 256 \
+  --scheduler MultiStepLR --decay-milestones 225000 275000 \
+  --lr 5e-4 \
   --optimizer NovoGrad \
-  --train-data-path data/mixed_train.csv \
+  --train-data-path data/trainset_for_microval08012020.csv \
   --val-data-path data/mixed_val.csv data/clean_val.csv kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv \
   --analyze kontur_calls_micro.csv \
   --val-iteration-interval 2500 \
-  --epochs 10 #\
+  --experiment-name microval_finetune \
+  --checkpoint best_checkpoints/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs256____long_train_checkpoint_epoch18_iter0135000.pt \
+  --fp16 O2 \
+  --epochs 30 #\
 
 #  --finetune --checkpoint-skip
 #  --bpe data/tts_dataset_bpe_5000_word.model \
