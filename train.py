@@ -185,9 +185,9 @@ def main(args):
 	sampler = dataset.BucketingSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing, bucket = lambda example: int(example[-1] / args.window_stride / args.batch_time_padding_multiple))
 	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = batch_collater, pin_memory = True, batch_sampler = sampler, worker_init_fn = set_random_seed, timeout = args.timeout)
 	optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else apex.optimizers.FusedNovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'FusedNovoGrad' else None
-	scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else torch.optim.lr_scheduler.StepLR(optimizer, step_size = args.decay_step_size, gamma = args.decay_gamma) if args.scheduler == 'StepLR' else optimizers.NoopLR(optimizer) 
-	iteration = 0
-	epoch = 0
+	scheduler = optimizers.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones, lr = args.lr) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else optimizers.NoopLR(optimizer) 
+	#TODO: check what happens after loading state of optimizer. what happens with passed defaults?
+	epoch, iteration = 0, 0
 	if checkpoint:
 		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 		iteration = checkpoint['iteration']
@@ -293,7 +293,7 @@ if __name__ == '__main__':
 	parser.add_argument('--momentum', type = float, default = 0.9)
 	parser.add_argument('--nesterov', action = 'store_true')
 	parser.add_argument('--betas', nargs = '*', type = float, default = (0.9, 0.999))
-	parser.add_argument('--scheduler', choices = ['MultiStepLR', 'PolynomialDecayLR', 'StepLR'], default = None)
+	parser.add_argument('--scheduler', choices = ['MultiStepLR', 'PolynomialDecayLR'], default = None)
 	parser.add_argument('--decay-gamma', type = float, default = 0.1)
 	parser.add_argument('--decay-milestones', nargs = '*', type = int, default = [25_000, 50_000], help = 'for MultiStepLR')
 	parser.add_argument('--decay-power', type = float, default = 2.0, help = 'for PolynomialDecayLR')
