@@ -12,6 +12,8 @@ import scipy.io.wavfile
 import librosa
 import sentencepiece
 import models
+import itertools
+
 
 class AudioTextDataset(torch.utils.data.Dataset):
 	def __init__(self, source_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, max_duration = None, delimiter = ','):
@@ -19,16 +21,10 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.frontend = frontend
 		self.sample_rate = sample_rate
 		self.waveform_transform_debug_dir = waveform_transform_debug_dir
-		self.examples = [list(sorted(((os.path.basename(data_or_path), row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if True and len(row) > 2 else -1) for line in (gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if '"' not in line for row in [line.split(delimiter)] if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1])) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])]
+		self.examples = sum([list(sorted(((os.path.basename(data_or_path), row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if True and len(row) > 2 else -1) for line in (gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if '"' not in line for row in [line.split(delimiter)] if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1])) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])], [])
 
 	def __getitem__(self, index):
-		for examples in self.examples:
-			if index < len(examples):
-				dataset_name, audio_path, reference, duration = examples[index]
-				break
-			else:
-				index -= len(examples)
-
+		dataset_name, audio_path, reference, duration = self.examples[index]
 		signal, sample_rate = (audio_path, self.sample_rate) if self.frontend.skip_read_audio else read_audio(audio_path, sample_rate = self.sample_rate)
 		# int16 or float?
 		features = self.frontend(signal.unsqueeze(0), waveform_transform_debug = lambda audio_path, sample_rate, signal: write_wav(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav')) if self.waveform_transform_debug_dir else None).squeeze(0) if self.frontend is not None else signal
@@ -37,7 +33,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		return [dataset_name, audio_path, reference_normalized, features] + targets
 
 	def __len__(self):
-		return sum(map(len, self.examples))
+		return len(self.examples)
 
 class BucketingSampler(torch.utils.data.Sampler):
 	def __init__(self, dataset, bucket, batch_size = 1, mixing = None):
@@ -45,8 +41,10 @@ class BucketingSampler(torch.utils.data.Sampler):
 		
 		self.dataset = dataset
 		self.batch_size = batch_size
-		self.mixing = mixing or ([1 / len(self.dataset.examples)] * len(self.dataset.examples))
-		self.buckets = torch.IntTensor(list(map(bucket, self.dataset.examples)))
+		#self.mixing = mixing or ([1 / len(self.dataset.examples)] * len(self.dataset.examples))
+		key = lambda example_idx: bucket(self.dataset.examples[example_idx])
+		self.buckets = {k : list(g) for k, g in itertools.groupby(sorted(range(len(self.dataset)), key = key), key = key)}
+		self.batch_idx = 0
 		self.shuffle(epoch = 0)
 
 	def __iter__(self):
@@ -56,15 +54,17 @@ class BucketingSampler(torch.utils.data.Sampler):
 		return len(self.shuffled)
 
 	def shuffle(self, epoch):
-		generator = torch.Generator()
-		generator.manual_seed(epoch)
-
-		mixing = [int(m * self.batch_size) for m in self.mixing]
-		chunk = lambda xs, chunks: [xs[i * batch_size : (1 + i) * batch_size] for batch_size in [ len(xs) // chunks ] for i in range(chunks)]
-		num_batches = int(len(self.dataset.examples[0]) // self.batch_size + 0.5)
-		inds = [chunk(i, num_batches) for k, subset in enumerate(self.dataset.examples) for i in [sum(map(len, self.dataset.examples[:k])) + torch.arange(len(subset))]]
-		batches = [torch.cat([i[torch.randperm(len(i), generator = generator)[:m]] for i, m in zip(t, mixing)]).tolist() for t in zip(*inds)]
-		self.shuffled = [batches[k] for k in torch.randperm(len(batches), generator = generator).tolist()]
+		rng = torch.Generator()
+		rng.manual_seed(epoch)
+		shuffle = lambda e: [e[k] for k in torch.randperm(len(e), generator = rng).tolist()]
+		num_batches = int(math.ceil(len(self.dataset) / self.batch_size))
+		batch_sequentially = lambda e: [e[i * self.batch_size : (1 + i) * self.batch_size] for i in range(int(math.ceil(len(e) / self.batch_size)))]
+		batches = sum([batch_sequentially(shuffle(g)) for g in self.buckets.values()], [])
+		#batches = batch_sequentially(list(range(len(self.dataset))))
+		#mixing = [int(m * self.batch_size) for m in self.mixing]
+		#inds = [chunk(i, num_batches) for k, subset in enumerate(self.dataset.examples) for i in [sum(map(len, self.dataset.examples[:k])) + torch.arange(len(subset))]]
+		#batches = [torch.cat([i[torch.randperm(len(i), generator = generator)[:m]] for i, m in zip(t, mixing)]).tolist() for t in zip(*inds)]
+		self.shuffled = [batches[k] for k in torch.randperm(len(batches), generator = rng).tolist()]
 
 	def state_dict(self):
 		return dict(batch_idx = self.batch_idx)
@@ -144,12 +144,11 @@ class Labels:
 
 class BatchCollater:
 	def __init__(self, time_padding_multiple = 1):
-		self.time_padding_muliple = time_padding_multiple
+		self.time_padding_multiple = time_padding_multiple
 
 	def __call__(self, batch):
 		dataset_name, audio_path, reference, sample_x, *sample_y = batch[0]
-		xmax_len, *ymax_len = [(max(b[k].shape[-1] for b in batch) // self.time_padding_multiple + 1) * pad_to for k in range(3, len(batch[0]))]
-		ymax_len = max(ymax_len)
+		xmax_len, ymax_len = [int(math.ceil(max(b[k].shape[-1] for b in batch) / self.time_padding_multiple)) * self.time_padding_multiple for k in [3, 4]]
 		x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = torch.float32)
 		y = torch.zeros(len(batch), len(sample_y), ymax_len, dtype = torch.int32)
 		xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.int32)
