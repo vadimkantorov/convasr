@@ -53,6 +53,11 @@ def main(args):
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, stft_mode = 'conv' if args.onnx else None)
 	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, frontend = frontend if args.onnx or args.frontend_in_model else None, **(dict(inplace = False, dict = lambda logits, log_probs, output_lengths, **kwargs: logits[0]) if args.onnx else {}))
 
+	print(' Model capacity:', int(models.compute_capacity(model, scale = 1e6)), 'million parameters\n')
+
+	if checkpoint:
+		model.load_state_dict(checkpoint['model_state_dict'], strict = False)
+
 	if args.onnx:
 		torch.set_grad_enabled(False)
 		model.eval()
@@ -161,11 +166,6 @@ def main(args):
 			torch.save(dict(model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer.state_dict(), amp_state_dict = apex.amp.state_dict() if args.fp16 else None, scheduler_state_dict = scheduler.state_dict(), sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), time = time.time()), checkpoint_path)
 
 		model.train()
-
-	print(' Model capacity:', int(models.compute_capacity(model, scale = 1e6)), 'million parameters\n')
-
-	if checkpoint:
-		model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 	
 	model.to(args.device)
 
