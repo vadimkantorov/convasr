@@ -185,17 +185,22 @@ def main(args):
 	sampler = dataset.BucketingSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing, bucket = lambda example: int(math.ceil((example[-1] / args.window_stride + 1) / args.batch_time_padding_multiple))) #+1 mean bug fix with bucket sizing
 	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = batch_collater, pin_memory = True, batch_sampler = sampler, worker_init_fn = set_random_seed, timeout = args.timeout)
 	optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else apex.optimizers.FusedNovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'FusedNovoGrad' else None
-	scheduler = optimizers.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones, lr = args.lr) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else optimizers.NoopLR(optimizer) 
+	
+	if checkpoint:
+		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+		if not args.skip_optimizer_reset:
+			optimizers.reset_options(optimizer)
+	
+	scheduler = optimizers.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else optimizers.NoopLR(optimizer) 
 	#TODO: check what happens after loading state of optimizer. what happens with passed defaults?
 	epoch, iteration = 0, 0
 	if checkpoint:
-		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 		iteration = checkpoint['iteration']
 		epoch = checkpoint['epoch']
 		# load scheduler and sampler state if training continues on the same dataset
 		if args.train_data_path == checkpoint['args']['train_data_path']:
 			sampler.load_state_dict(checkpoint['sampler_state_dict'])
-			scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+			#scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 	
 		else:
 			epoch += 1
@@ -260,7 +265,7 @@ def main(args):
 								tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
 					
 					optimizer.zero_grad()
-					#scheduler.step()
+					scheduler.step()
 				
 				loss_avg = moving_avg(loss_avg, loss_cur, max = 1000)
 				entropy_avg = moving_avg(entropy_avg, entropy, max = 4)
@@ -289,6 +294,7 @@ if __name__ == '__main__':
 	parser.add_argument('--optimizer', choices = ['SGD', 'AdamW', 'NovoGrad', 'FusedNovoGrad'], default = 'SGD')
 	parser.add_argument('--max-norm', type = float, default = 100)
 	parser.add_argument('--lr', type = float, default = 1e-2)
+	parser.add_argument('--skip-optimizer-reset', action = 'store_true')
 	parser.add_argument('--weight-decay', type = float, default = 1e-3)
 	parser.add_argument('--momentum', type = float, default = 0.9)
 	parser.add_argument('--nesterov', action = 'store_true')

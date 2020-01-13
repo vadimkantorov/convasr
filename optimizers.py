@@ -1,19 +1,24 @@
 import torch
 
+def reset_options(optimizer):
+	for param_group in optimizer.param_groups:
+		param_group.update(optimizer.defaults)
+		print(param_group['lr'], optimizer.defaults)
+
 class NoopLR(torch.optim.lr_scheduler._LRScheduler):
 	def get_lr(self):
 		return [group['lr'] for group in self.optimizer.param_groups]
 
 class MultiStepLR(torch.optim.lr_scheduler._LRScheduler):
-	def __init__(self, optimizer, gamma, milestones, last_epoch = -1, lr = None):
-		self.init_lr = [group['lr'] if lr is None else lr for group in optimizer.param_groups]
+	def __init__(self, optimizer, gamma, milestones, last_epoch = -1):
+		self.init_lr = [group['lr'] for group in optimizer.param_groups]
 		self.gamma = gamma
 		self.milestones = milestones
 		super().__init__(optimizer, last_epoch)
 	
 	def get_lr(self):
-		global_step = self.last_epoch
-		gamma_power = [[i for i, m in enumerate(self.milestones) if global_step >= m] + [0]][0]
+		global_step = self.last_epoch #iteration number in pytorch
+		gamma_power = ([0] + [i + 1 for i, m in enumerate(self.milestones) if global_step >= m])[-1]
 		return [init_lr * (self.gamma ** gamma_power) for init_lr in self.init_lr]
 
 class PolynomialDecayLR(torch.optim.lr_scheduler._LRScheduler):
