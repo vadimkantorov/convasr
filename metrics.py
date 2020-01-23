@@ -8,18 +8,18 @@ def quantiles(tensor):
 	tensor = tensor.sort().values
 	return {k : '{:.2f}'.format(float(tensor[int(len(tensor) * k / 100)])) for k in range(0, 100, 10)}
 
-def cer(hyp, ref):
+def cer(hyp, ref, edit_distance = Levenshtein.distance):
 	cer_ref_len = len(ref.replace(' ', '')) or 1
-	return Levenshtein.distance(hyp.replace(' ', '').lower(), ref.replace(' ', '').lower()) / cer_ref_len if hyp != ref else 0
+	return edit_distance(hyp.replace(' ', '').lower(), ref.replace(' ', '').lower()) / cer_ref_len if hyp != ref else 0
 
-def wer(hyp, ref):
+def wer(hyp, ref, edit_distance = Levenshtein.distance):
 	# build mapping of words to integers, Levenshtein package only accepts strings
 	b = set(hyp.split() + ref.split())
 	word2char = dict(zip(b, range(len(b))))
 	wer_ref_len = len(ref.split()) or 1
-	return Levenshtein.distance(''.join([chr(word2char[w]) for w in hyp.split()]), ''.join([chr(word2char[w]) for w in ref.split()])) / wer_ref_len if hyp != ref else 0
+	return edit_distance(''.join([chr(word2char[w]) for w in hyp.split()]), ''.join([chr(word2char[w]) for w in ref.split()])) / wer_ref_len if hyp != ref else 0
 
-def unused_levenshtein(a, b):
+def levenshtein(a, b):
 	"""Calculates the Levenshtein distance between a and b.
 	The code was copied from: http://hetland.org/coding/python/levenshtein.py
 	"""
@@ -42,6 +42,7 @@ def unused_levenshtein(a, b):
 	return current[n]
 
 class Needleman:
+	# taken from https://github.com/leebird/alignment/blob/master/alignment/alignment.py
 	SCORE_UNIFORM = 1
 	SCORE_PROPORTION = 2
 
@@ -374,11 +375,6 @@ def error_type(hyp, ref, p = 0.5, E = 3, L = 4):
 
 error_types = ['typo_easy', 'typo_hard', 'missing']
 
-def subset(refhyp, arg, min, max):
-	filename = refhyp + f'.subset_{arg}_min{min}_max{max}.txt'
-	open(filename, 'w').write('\n'.join(r['audio_file_name'] for r in json.load(open(refhyp)) if (min <= r[arg] if min is not None else True) and (r[arg] < max if max is not None else True)))
-	print(filename)
-
 if __name__ == '__main__':
 	import argparse
 	import ru
@@ -389,13 +385,6 @@ if __name__ == '__main__':
 	cmd.add_argument('--ref')
 	cmd.add_argument('--hyp')
 	cmd.set_defaults(func = analyze)
-	
-	cmd = subparsers.add_parser('subset')
-	cmd.add_argument('refhyp')
-	cmd.add_argument('--arg', required = True, choices = ['cer', 'mer', 'der', 'wer'])
-	cmd.add_argument('--min', type = float)
-	cmd.add_argument('--max', type = float)
-	cmd.set_defaults(func = subset)
 
 	args = parser.parse_args()
 	args = vars(parser.parse_args())

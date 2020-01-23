@@ -1,6 +1,7 @@
 python3 transcribe.py $@ \
-  --data-path data/kontur_fullrecs --output-path data/kontur_fullrecs_ \
-  --checkpoint data/checkpoint_epoch02_iter0065000.pt 
+  --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs256____fp16O2/checkpoint_epoch05_iter0040000.pt \
+  -i data/echomsk -o data/echomsk.out
+  #--data-path data/kontur_fullrecs --output-path data/kontur_fullrecs_ \
 
 #  --data-path data/2019.10.19_calls --output-path data/2019.10.19_calls_ \
 

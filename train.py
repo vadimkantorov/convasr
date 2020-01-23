@@ -225,7 +225,6 @@ def main(args):
 	tic, toc_fwd, toc_bwd = time.time(), time.time(), time.time()
 	loss_avg, entropy_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0, 0.0
 	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1. / K) * avg
-	#import IPython; IPython.embed();
 	
 	for epoch in range(epoch, args.epochs):
 		sampler.shuffle(epoch)

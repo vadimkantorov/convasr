@@ -42,7 +42,7 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 		margin = models.margin(log_probs, dim = 0)
 		#energy = features.exp().sum(dim = 0)[::2]
 
-		alignment = ctc.ctc_alignment(log_probs.unsqueeze(0).permute(2, 0, 1), r['y'].unsqueeze(0).long(), torch.LongTensor([log_probs.shape[-1]]), torch.LongTensor([len(r['y'])]), blank = len(log_probs) - 1)[0, :, :len(r['y'])]
+		alignment = ctc.ctc_loss(log_probs.unsqueeze(0).permute(2, 0, 1), r['y'].unsqueeze(0).long(), torch.LongTensor([log_probs.shape[-1]]), torch.LongTensor([len(r['y'])]), blank = len(log_probs) - 1, alignment = True)[0, :, :len(r['y'])]
 		
 		plt.figure(figsize = (6, 2))
 		
@@ -107,7 +107,6 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 	</script>''')
 	html.write('</body></html>')
 	print('\n', logits_path)
-
 
 def errors(ours, theirs = None, audio_file_name = None, audio = False, output_file_name = None):
 	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
