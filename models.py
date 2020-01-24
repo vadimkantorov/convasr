@@ -361,7 +361,7 @@ def margin(log_probs, dim = 1):
 	return torch.sub(*probs.topk(2, dim = dim).values)
 
 def compute_output_lengths(x, lengths_fraction):
-	return (lengths_fraction * x.shape[-1]).ceil().int() if lengths_fraction is not None else torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.int)
+	return (lengths_fraction * x.shape[-1]).ceil().long() if lengths_fraction is not None else torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.long)
 
 def compute_capacity(model, scale = 1):
 	return sum(map(torch.numel, model.parameters())) / scale

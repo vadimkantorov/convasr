@@ -34,7 +34,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	def __len__(self):
 		return len(self.examples)
 
-class BucketingSampler(torch.utils.data.Sampler):
+class BucketingBatchSampler(torch.utils.data.Sampler):
 	def __init__(self, dataset, bucket, batch_size = 1, mixing = None):
 		super().__init__(dataset)
 		
@@ -149,8 +149,8 @@ class BatchCollater:
 		dataset_name, audio_path, reference, sample_x, *sample_y = batch[0]
 		xmax_len, ymax_len = [int(math.ceil(max(b[k].shape[-1] for b in batch) / self.time_padding_multiple)) * self.time_padding_multiple for k in [3, 4]]
 		x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = torch.float32)
-		y = torch.zeros(len(batch), len(sample_y), ymax_len, dtype = torch.int32)
-		xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.int32)
+		y = torch.zeros(len(batch), len(sample_y), ymax_len, dtype = torch.long)
+		xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.long)
 		for k, (dataset_name, audio_path, reference, input, *targets) in enumerate(batch):
 			xlen[k] = input.shape[-1] / x.shape[-1]
 			x[k, ..., :input.shape[-1]] = input
@@ -163,6 +163,7 @@ class BatchCollater:
 
 def read_audio(audio_path, sample_rate, normalize = True, stereo = False, max_duration = None, dtype = torch.float32, byte_order = 'little'):
 	sample_rate_, signal = scipy.io.wavfile.read(audio_path) if audio_path.endswith('.wav') else (sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', '1', '-t', 'raw', '-']), byte_order = byte_order))) 
+	#TODO: fix stereo for mp3
 
 	signal = (signal if stereo else signal.squeeze(1) if signal.shape[1] == 1 else signal.mean(1)) if len(signal.shape) > 1 else (signal if not stereo else signal[..., None])
 	if max_duration is not None:
