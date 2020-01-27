@@ -5,39 +5,45 @@ def reset_options(optimizer):
 		param_group.update(optimizer.defaults)
 		print(param_group['lr'], optimizer.defaults)
 
-class NoopLR(torch.optim.lr_scheduler._LRScheduler):
-	def get_lr(self):
+class LRScheduler:
+	def __init__(self, optimizer):
+		self.optimizer = optimizer
+
+	def step(self, step):
+		for group, lr in zip(self.optimizer.param_groups, self.get_lr(step)):
+			group['lr'] = lr
+
+class NoopLR(LRScheduler):
+	def get_lr(self, step):
 		return [group['lr'] for group in self.optimizer.param_groups]
 
-class MultiStepLR(torch.optim.lr_scheduler._LRScheduler):
-	def __init__(self, optimizer, gamma, milestones, last_epoch = -1):
+class MultiStepLR(LRScheduler):
+	def __init__(self, optimizer, gamma, milestones):
 		self.init_lr = [group['lr'] for group in optimizer.param_groups]
 		self.gamma = gamma
 		self.milestones = milestones
-		super().__init__(optimizer, last_epoch)
+		super().__init__(optimizer)
 	
-	def get_lr(self):
-		global_step = self.last_epoch #iteration number in pytorch
-		gamma_power = ([0] + [i + 1 for i, m in enumerate(self.milestones) if global_step >= m])[-1]
+	def get_lr(self, step):
+		gamma_power = ([0] + [i + 1 for i, m in enumerate(self.milestones) if step >= m])[-1]
 		return [init_lr * (self.gamma ** gamma_power) for init_lr in self.init_lr]
 
-class PolynomialDecayLR(torch.optim.lr_scheduler._LRScheduler):
-	def __init__(self, optimizer, decay_steps, power = 1.0, begin_decay_at = 0, end_lr = 0.0, warmup_steps = 0, last_epoch = -1):
+class PolynomialDecayLR(LRScheduler):
+	def __init__(self, optimizer, decay_steps, power = 1.0, begin_decay_at = 0, end_lr = 0.0, warmup_steps = 0):
 		self.decay_steps = decay_steps
 		self.power = power
 		self.begin_decay_at = begin_decay_at
 		self.end_lr = end_lr
 		self.warmup_steps = warmup_steps
 		self.init_lr = [group['lr'] for group in optimizer.param_groups]
-		super().__init__(optimizer, last_epoch)
+		super().__init__(optimizer)
 
-	def get_lr(self):
-		global_step = self.last_epoch
-		lr = list(map(lambda init_lr: (init_lr * global_step / self.warmup_steps) if self.warmup_steps > 0 and global_step < self.warmup_steps else init_lr, self.init_lr))
-		if global_step >= self.begin_decay_at:
-			global_step = min(global_step - self.begin_decay_at, self.decay_steps)
-			lr = list(map(lambda init_lr: self.end_lr + (init_lr - self.end_lr) * ((self.decay_steps - global_step) / self.decay_steps) ** self.power if global_step < self.decay_steps else self.end_lr, lr))
-		return lr
+	def get_lr(self, step):
+		lrs = list(map(lambda init_lr: (init_lr * step / self.warmup_steps) if self.warmup_steps > 0 and step < self.warmup_steps else init_lr, self.init_lr))
+		if step >= self.begin_decay_at:
+			step = min(step - self.begin_decay_at, self.decay_steps)
+			lrs = list(map(lambda init_lr: self.end_lr + (init_lr - self.end_lr) * ((self.decay_steps - step) / self.decay_steps) ** self.power if step < self.decay_steps else self.end_lr, lr))
+		return lrs
 
 class NovoGrad(torch.optim.Optimizer):
 	def __init__(self, params, lr = 1.0, betas = (0.95, 0.98), eps = 1e-8, weight_decay = 0.0, dampening = False):

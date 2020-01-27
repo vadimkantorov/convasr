@@ -65,7 +65,7 @@ def main(args):
 		model.to(args.device)
 		waveform_input = torch.rand(args.onnx_sample_batch_size, args.onnx_sample_time, device = args.device)
 		logits = model(waveform_input)
-		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B', 1 : 'T'}, logits = {0 : 'B', 1 : 'C', 2: 't'}))
+		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B', 1 : 'T'}, logits = {0 : 'B', 2: 't'}))
 		onnxrt_session = onnxruntime.InferenceSession(args.onnx)
 		onnxruntime_logger_severity_verbose = 0
 		onnxruntime.set_default_logger_severity(onnxruntime_logger_severity_verbose)
@@ -195,16 +195,12 @@ def main(args):
 	#TODO: check what happens after loading state of optimizer. what happens with passed defaults?
 	epoch, iteration = 0, 0
 	if checkpoint:
-		iteration = checkpoint['iteration']
-		epoch = checkpoint['epoch']
-		# load scheduler and sampler state if training continues on the same dataset
+		epoch, iteration = checkpoint['epoch'], checkpoint['iteration']
+		# load sampler state if training continues on the same dataset
 		if args.train_data_path == checkpoint['args']['train_data_path']:
 			sampler.load_state_dict(checkpoint['sampler_state_dict'])
-			#scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-	
 		else:
 			epoch += 1
-			sampler.batch_idx = 0
 
 	model, optimizer = models.data_parallel(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 	if checkpoint and args.fp16 and checkpoint['amp_state_dict'] is not None:
@@ -231,7 +227,7 @@ def main(args):
 		time_epoch_start = time.time()
 		for batch_idx, (dataset_name_, audio_path_, reference_, x, xlen, y, ylen) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc_data = time.time()
-			lr = scheduler.get_last_lr()[0]; lr_avg = moving_avg(lr_avg, lr, max = 1)
+			lr = optimizer.param_groups[0]['lr']; lr_avg = moving_avg(lr_avg, lr, max = 1)
 			
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
 			log_probs, output_lengths, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'output_lengths', 'loss'])
@@ -264,7 +260,7 @@ def main(args):
 								tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
 					
 					optimizer.zero_grad()
-					scheduler.step()
+					scheduler.step(iteration)
 				
 				loss_avg = moving_avg(loss_avg, loss_cur, max = 1000)
 				entropy_avg = moving_avg(entropy_avg, entropy, max = 4)
@@ -285,6 +281,7 @@ def main(args):
 
 			tic = time.time()
 
+		sampler.batch_idx = 0
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
 		evaluate_model(val_data_loaders, epoch+1, iteration)
 
@@ -311,7 +308,7 @@ if __name__ == '__main__':
 	parser.add_argument('--iterations', type = int, default = None)
 	parser.add_argument('--train-data-path', nargs = '*', default = [])
 	parser.add_argument('--train-data-mixing', type = float, nargs = '*')
-	parser.add_argument('--val-data-path', nargs = '+')
+	parser.add_argument('--val-data-path', nargs = '*', default = [])
 	parser.add_argument('--num-workers', type = int, default = 32)
 	parser.add_argument('--train-batch-size', type = int, default = 64)
 	parser.add_argument('--val-batch-size', type = int, default = 64)

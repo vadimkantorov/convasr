@@ -13,7 +13,7 @@ import metrics
 import decoders
 import ctc
 
-def segment_transcript(b, e, idx, labels, max_segment_seconds):
+def segment_transcript(labels, idx, b, e, max_segment_seconds):
 	sec = lambda k: k / len(idx) * (e - b)
 	i = 0
 	for j in range(1, 1 + len(idx)):
@@ -42,7 +42,6 @@ def main(args):
 	#model = models.data_parallel(model)
 
 	decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
-
 	
 	example = lambda audio_path, signal, b, e, sample_rate, channel, ref_normalized, targets: (os.path.basename(os.path.dirname(audio_path)), audio_path, ref_normalized, signal[None, int(b * sample_rate):int(e * sample_rate), channel], targets)	
 
@@ -75,7 +74,7 @@ def main(args):
 		print(args.checkpoint, os.path.basename(audio_path))
 		print('Time: audio {audio:.02f} sec | voice {voice:.02f} sec | processing {processing:.02f} sec'.format(audio = signal.numel() / sample_rate, voice = sum(e - b for b, e, c in cutpoints), processing = time.time() - tic))
 
-		segments = [[b_, e_, t_, r, c] for (b, e, c), d, r in zip(cutpoints, decoded, ref) for b_, e_, t_ in segment_transcript(b, e, d, labels, args.max_segment_seconds)] if args.vad is not False else [[b, e, labels.postprocess_transcript(labels.decode(d)), r, c] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
+		segments = [[b_, e_, t_, r, c] for (b, e, c), d, r in zip(cutpoints, decoded, ref) for b_, e_, t_ in segment_transcript(labels, d, b, e, args.max_segment_seconds)] if args.vad is not False else [[b, e, labels.postprocess_transcript(labels.decode(d)), r, c] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
 		
 		hyp = labels.postprocess_transcript(' '.join(map(labels.decode, decoded)))
 		ref = ' '.join(ref)
