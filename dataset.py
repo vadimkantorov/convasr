@@ -123,8 +123,8 @@ class Labels:
 					k = c
 		
 		idx = idx if isinstance(idx[0], list) else [idx]
-		candidates = [[int(idx) for k, idx in enumerate(i) if not replace2 or k == 0 or int(idx) != int(i[k - 1])] for i in idx]
-		return self.candidate_sep.join(''.join(self[idx[k][c]] for c in C).replace(self.blank, blank or self.blank).replace(self.space, space or self.space) for k, C in enumerate(candidates)) #, [list(timestamp_words(c)) for C in (candidates if ts is not None else []) ]
+		candidates = [[k for k, idx in enumerate(i) if not replace2 or k == 0 or int(idx) != int(i[k - 1])] for i in idx]
+		return self.candidate_sep.join(''.join(self[int(idx[k][c])] for c in C).replace(self.blank, blank or self.blank).replace(self.space, space or self.space) for k, C in enumerate(candidates)) , [list(timestamp_words(c)) for C in (candidates if ts is not None else []) ]
 
 	def split_candidates(self, text):
 		return text.split(self.candidate_sep)
