@@ -111,20 +111,24 @@ class Labels:
 		chr2idx = {l: i for i, l in enumerate(str(self))}
 		return normalized, torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
-	def decode(self, idx, ts = None, blank = None, space = None, replace2 = True):
-		def timestamp_words(C):
-			k = None
-			for c in C + [None]:
-				if c == self.space_idx or c is None:
-					if k is not None:
-						yield (ts[k], ts[c if c is not None else -1])
-					k = None
-				elif k is None:
-					k = c
-		
-		idx = idx if isinstance(idx[0], list) else [idx]
-		candidates = [[k for k, idx in enumerate(i) if not replace2 or k == 0 or int(idx) != int(i[k - 1])] for i in idx]
-		return self.candidate_sep.join(''.join(self[int(idx[k][c])] for c in C).replace(self.blank, blank or self.blank).replace(self.space, space or self.space) for k, C in enumerate(candidates)) , [list(timestamp_words(c)) for C in (candidates if ts is not None else []) ]
+	def decode(self, idx, ts = None, replace_blank = True, replace_space = False, replace_repeat = True):
+		i, words = None, []
+		for j, k in enumerate(idx + [self.space_idx]):
+			if k == self.space_idx and i is not None:
+				word = ''.join(self[idx[ij]] for ij in range(i, j) if replace_repeat is False or ij == 0 or idx[ij] != idx[ij - 1])
+
+				if replace_blank is not False:
+					word = word.replace(self.blank, '' if replace_blank is True else replace_blank)
+				if replace_space is not False:
+					word = word.replace(self.space, replace_space)
+				if replace_repeat is True:
+					word = ''.join(c if i == 0 or c != self.repeat else word[i - 1] for i, c in enumerate(word))
+
+				words.append(dict(word = word, **(dict(begin = float(ts[i]), end = float(ts[j - 1])) if ts is not None else {})))
+				i = None
+			elif i is None:
+				i = j
+		return words
 
 	def split_candidates(self, text):
 		return text.split(self.candidate_sep)

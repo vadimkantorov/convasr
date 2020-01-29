@@ -18,7 +18,7 @@ def segment_transcript(labels, idx, b, e, max_segment_seconds):
 	i = 0
 	for j in range(1, 1 + len(idx)):
 		if j == len(idx) or (idx[j] == labels.space_idx and sec(j - 1) - sec(i) > max_segment_seconds):
-			yield (b + sec(i), b + sec(j - 1), labels.postprocess_transcript(labels.decode(idx[i:j])))
+			yield (b + sec(i), b + sec(j - 1), labels.postprocess_transcript(labels.decode(idx[i:j])[0]))
 			i = j + 1
 
 def main(args):
@@ -74,10 +74,13 @@ def main(args):
 		print(args.checkpoint, os.path.basename(audio_path))
 		print('Time: audio {audio:.02f} sec | voice {voice:.02f} sec | processing {processing:.02f} sec'.format(audio = signal.numel() / sample_rate, voice = sum(e - b for b, e, c in cutpoints), processing = time.time() - tic))
 
-		segments = [[b_, e_, t_, r, c] for (b, e, c), d, r in zip(cutpoints, decoded, ref) for b_, e_, t_ in segment_transcript(labels, d, b, e, args.max_segment_seconds)] if args.vad is not False else [[b, e, labels.postprocess_transcript(labels.decode(d)), r, c] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
+		#segments = [[c, b_, e_, r, t_] for (b, e, c), d, r in zip(cutpoints, decoded, ref) for b_, e_, t_ in segment_transcript(labels, d, b, e, args.max_segment_seconds)] if args.vad is not False else [[c, b, e, r, labels.postprocess_transcript(labels.decode(d)[0])] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
 		
-		hyp = labels.postprocess_transcript(' '.join(map(labels.decode, decoded)))
+		ts = torch.linspace(0, 1, steps = log_probs.shape[-1]) * (x.shape[-1] / sample_rate)
+		segments = [[c, b, e, r, labels.decode(d, ts, replace_blank = True, replace_repeat = True)] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
+
 		ref = ' '.join(ref)
+		hyp = ' '.join(w['word'] for c, b, e, r, h in segments for w in h)
 		open(os.path.join(args.output_path, os.path.basename(audio_path) + '.txt'), 'w').write(hyp)
 		if args.verbose:
 			print('HYP:', hyp)
@@ -87,25 +90,25 @@ def main(args):
 			if args.align:
 				print('Input time steps:', log_probs.shape[-1], '| Target time steps:', y.shape[-1])
 				tic = time.time()
-				alignment = ctc.ctc_loss_(log_probs.permute(2, 0, 1).half(), y.long(), output_lengths, ylen, blank = labels.blank_idx, alignment = True).argmax(dim = 0)
+				alignment = ctc.ctc_loss_(log_probs.permute(2, 0, 1).half(), y.long(), output_lengths, ylen, blank = labels.blank_idx, alignment = True)
 				print('Alignment time: {:.02f} sec'.format(time.time() - tic))
-				#ref, ref_ = labels.decode(r['y']), alignment.max(dim = 0).indices
-				#k = 0
-				#for i, c in enumerate(ref + ' '):
-				#	if c == ' ':
-				#		plt.axvspan(ref_[k] - 1, ref_[i - 1] + 1, facecolor = 'gray', alpha = 0.2)
-				#		k = i + 1
-				
+				for i in range(len(y)):
+					import IPython; IPython.embed()
+					segments[i][-2] = labels.decode(y[i].tolist(), ts[alignment[i]])
+
 			print(f'CER: {cer:.02%}')
 
 		html_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.html')
 		with open(html_path, 'w') as html:
+			fmt_link = lambda begin, end, word = None: f'<a onclick="return play({begin},{end})" href="#" target="_blank">' + (word if word is not None else f'{begin:.02f}') + '</a>'
+			fmt_words = lambda h: h if isinstance(h, str) else ' '.join(fmt_link(**w) for w in h) if len(h) > 0 and isinstance(h[0], dict) else ' '.join(h)
+			
 			html.write('<html><head><meta charset="UTF-8"><style>.top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
 			html.write(f'<h4>{os.path.basename(audio_path)}</h4>')
 			html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode()))
 			html.write(f'<h3 class="channel0 channel">hyp #0:<span></span></h3><h3 class="channel0 reference channel">ref #0:<span></span></h3><h3 class="channel1 channel">hyp #1:<span></span></h3><h3 class="channel1 reference channel">ref #1:<span></span></h3><hr/>')
 			html.write('<table style="width:100%"><thead><th>begin</th><th>end</th><th>hyp</th><th>ref</th></tr></thead><tbody>')
-			html.write(''.join(f'<tr class="channel{c}"><td class="top"><a onclick="play({b:.02f}, {e:.02f}); return false;" href="#" target="_blank">{b:.02f}</a></td><td class="top">{e:.02f}</td><td class="top">{h}</td>' + (f'<td class="top reference">{r}</td>' if r else '') + '</tr>' for b, e, h, r, c in sorted(segments)))
+			html.write(''.join(f'<tr class="channel{c}"><td class="top">{fmt_link(b, e)}</td><td class="top">{e:.02f}</td><td class="top">{fmt_words(h)}</td>' + (f'<td class="top reference">{fmt_words(r)}</td>' if r else '') + '</tr>' for c, b, e, r, h in sorted(segments)))
 			html.write('</tbody></table>')
 			html.write('''<script>
 				const segments = SEGMENTS;
@@ -116,6 +119,7 @@ def main(args):
 					audio.currentTime = begin;
 					audio.dataset.endTime = end;
 					audio.play();
+					return false;
 				};
 
 				document.querySelector('audio').ontimeupdate = evt =>
@@ -124,10 +128,12 @@ def main(args):
 					const endtime = evt.target.dataset.endTime;
 
 					const [spanhyp0, spanref0, spanhyp1, spanref1] = document.querySelectorAll('span');
-					const [begin0, end0, hyp0, ref0, channel0] = segments.find(([begin, end, hyp, ref, channel]) => channel == 0 && begin <= time && time <= end) || [null, null, '', '', 0];
-					const [begin1, end1, hyp1, ref1, channel1] = segments.find(([begin, end, hyp, ref, channel]) => channel == 1 && begin <= time && time <= end) || [null, null, '', '', 1];
-					[spanhyp0.innerText, spanhyp1.innerText] = [hyp0, hyp1];
-					[spanref0.innerText, spanref1.innerText] = [ref0, ref1];
+					const [channel0, begin0, end0, ref0, hyp0] = segments.find(([channel, begin, end, ref, hyp]) => channel == 0 && begin <= time && time <= end) || [0, null, null, [], []];
+					const [channel1, begin1, end1, ref1, hyp1] = segments.find(([channel, begin, end, ref, hyp]) => channel == 1 && begin <= time && time <= end) || [1, null, null, [], []];
+					const fmt_words = words => words.map(w => w['word']).join(' ');
+					[spanhyp0.innerText, spanhyp1.innerText] = [fmt_words(hyp0), fmt_words(hyp1)];
+
+					//spanref0.innerText, spanref1.innerText] = , ref0, ref1];
 
 					if(time > endtime)
 						evt.target.pause();
