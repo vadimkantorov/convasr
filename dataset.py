@@ -115,7 +115,7 @@ class Labels:
 		decode_ = lambda i, j: self.postprocess_transcript2(''.join(self[idx[ij]] for ij in range(i, j) if replace_repeat is False or ij == 0 or idx[ij] != idx[ij - 1]))
 		
 		if ts is None:
-			return decode_(idx, 0, len(idx))
+			return decode_(0, len(idx))
 
 		i, words = None, []
 		for j, k in enumerate(idx + [self.space_idx]):
