@@ -66,13 +66,13 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 
 		plt.ylim(0, 3.0)
 		plt.xlim(0, entropy.shape[-1] - 1)
-		xlabels = list(map('\n'.join, zip(*labels.split_candidates(labels.decode(log_probs.topk(5, dim = 0).indices.tolist(), blank = '.', space = '_', replace2 = False)))))
+		xlabels = list(map('\n'.join, zip(*labels.split_candidates(labels.decode(log_probs.topk(5, dim = 0).indices.tolist(), replace_blank = '.', replace_space = '_', replace_repeat = False)))))
 		#xlabels_ = labels.decode(log_probs.argmax(dim = 0).tolist(), blank = '.', space = '_', replace2 = False)
 		plt.xticks(torch.arange(entropy.shape[-1]), xlabels, fontfamily = 'monospace')
 		tick_params(plt.gca())
 
 		ax = plt.gca().secondary_xaxis('top')
-		ref, ref_ = labels.decode(r['y']), alignment.max(dim = 0).indices
+		ref, ref_ = labels.decode(r['y']), alignment.argmax(dim = 0)
 		ax.set_xticklabels(ref)
 		ax.set_xticks(ref_)
 		tick_params(ax, colors = 'red')
@@ -98,9 +98,9 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 			img.onclick = (evt) => {
 				const img = evt.target;
 				const dim = img.getBoundingClientRect();
-				const x = (evt.clientX - dim.left) / dim.width;
+				const t = (evt.clientX - dim.left) / dim.width;
 				const audio = img.nextSibling;
-				audio.currentTime = x * audio.duration;
+				audio.currentTime = t * audio.duration;
 				audio.play();
 			};
 		});

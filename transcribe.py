@@ -28,8 +28,13 @@ def resegment(c, b, e, r, h, max_segment_seconds):
 	for j, w in enumerate(rh):
 		if j == len(rh) - 1 or w['end'] - rh[i[rhk] or 0]['end'] > max_segment_seconds:
 			first_last = dict(first = i[0] is None, last = j == len(rh) - 1)
-			rk, r_ = zip(*rh_(r, i[0], rh[j], **first_last))
-			hk, h_ = zip(*rh_(h, i[1], rh[j], **first_last))
+
+			r_ = rh_(r, i[0], rh[j], **first_last)
+			rk, r_ = zip(*r_) if r_ else ([i[0]], [])
+
+			h_ = rh_(h, i[1], rh[j], **first_last)
+			hk, h_ = zip(*h_) if h_ else ([i[1]], [])
+
 			i = (rk[-1], hk[-1])
 			yield [c, min(w['begin'] for w_ in [r_, h_] for w in w_), max(w['end'] for w_ in [r_, h_] for w in w_), r_, h_]
 
@@ -69,10 +74,10 @@ def main(args):
 				batch.append(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)))
 		else:
 			signal, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, stereo = True, normalize = False, dtype = torch.int16)
-			signal = signal[:len(signal) // 10]
+			signal = signal[:len(signal) // 3]
 			signal_normalized = models.normalize_signal(signal, dim = 0)
 			ref = labels.postprocess_transcript(labels.normalize_text(open(ref_path).read())) if os.path.exists(ref_path) else ''
-			ref = ref[:len(ref) // 10]
+			ref = ref[:len(ref) // 3]
 			for channel, signal_ in enumerate(signal.t()):
 				chunks = dataset.remove_silence(vad, signal_, sample_rate, window_size) if args.vad is not False else [(0, len(signal) / sample_rate)]
 				cutpoints.extend((b, e, channel) for b, e in chunks)
@@ -104,7 +109,7 @@ def main(args):
 			if args.align:
 				print('Input time steps:', log_probs.shape[-1], '| Target time steps:', y.shape[-1])
 				tic = time.time()
-				alignment = ctc.ctc_loss(log_probs.permute(2, 0, 1).half(), y.long(), output_lengths, ylen, blank = labels.blank_idx, alignment = True).argmax(dim = 0)
+				alignment = ctc.ctc_loss_(log_probs.permute(2, 0, 1), y.long(), output_lengths, ylen, blank = labels.blank_idx, alignment = True).argmax(dim = 0)
 				print('Alignment time: {:.02f} sec'.format(time.time() - tic))
 				for i in range(len(y)):
 					segments[i][-2] = labels.decode(y[i].tolist(), ts[alignment[i]])
@@ -114,15 +119,15 @@ def main(args):
 
 		html_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.html')
 		with open(html_path, 'w') as html:
-			fmt_link = lambda begin, end, word = None: f'<a onclick="return play({begin},{end})" href="#" target="_blank">' + (word if isinstance(word, str) else f'{word:.02f}') + '</a>'
+			fmt_link = lambda word, begin, end = None: f'<a onclick="return play({begin},{end})" title="{begin:.04f} - {end:.04f}" href="#" target="_blank">' + (word if isinstance(word, str) else f'{begin:.02f}' if word == 0 else f'{end:.02f}') + '</a>'
 			fmt_words = lambda h: h if isinstance(h, str) else ' '.join(fmt_link(**w) for w in h) if len(h) > 0 and isinstance(h[0], dict) else ' '.join(h)
-			
+			begin_end = lambda r: (min(w['begin'] for w in r), max(w['end'] for w in r)) if len(r) > 0 else (0, 0)
 			html.write('<html><head><meta charset="UTF-8"><style>.top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
 			html.write(f'<h4>{os.path.basename(audio_path)}</h4>')
 			html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode()))
 			html.write(f'<h3 class="channel0 channel">hyp #0:<span></span></h3><h3 class="channel0 reference channel">ref #0:<span></span></h3><h3 class="channel1 channel">hyp #1:<span></span></h3><h3 class="channel1 reference channel">ref #1:<span></span></h3><hr/>')
-			html.write('<table style="width:100%"><thead><th>begin</th><th>end</th><th style="width:50%">hyp</th><th style="width:50%">ref</th></tr></thead><tbody>')
-			html.write(''.join(f'<tr class="channel{c}"><td class="top">{fmt_link(b, e, b)}</td><td class="top">{fmt_link(b, e, e)}</td><td class="top">{fmt_words(h)}</td>' + (f'<td class="top reference">{fmt_words(r)}</td>' if r else '') + '</tr>' for c, b, e, r, h in sorted(segments, key = lambda s: s[:3])))
+			html.write('<table style="width:100%"><thead><th>begin</th><th>end</th><th style="width:50%">hyp</th><th style="width:50%">ref</th><th>begin</th><th>end</th></tr></thead><tbody>')
+			html.write(''.join(f'<tr class="channel{c}"><td class="top">{fmt_link(0, *begin_end(h))}</td><td class="top">{fmt_link(1, *begin_end(h))}</td><td class="top">{fmt_words(h)}</td>' + (f'<td class="top reference">{fmt_words(r)}</td>' if r else '') + f'<td class="top">{fmt_link(0, *begin_end(r))}</td><td class="top">{fmt_link(1, *begin_end(r))}</td></tr>' for c, b, e, r, h in sorted(segments, key = lambda s: s[:3])))
 			html.write('</tbody></table>')
 			html.write('''<script>
 				const segments = SEGMENTS;

@@ -112,19 +112,15 @@ class Labels:
 		return normalized, torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
 	def decode(self, idx, ts = None, replace_blank = True, replace_space = False, replace_repeat = True):
+		decode_ = lambda i, j: self.postprocess_transcript2(''.join(self[idx[ij]] for ij in range(i, j) if replace_repeat is False or ij == 0 or idx[ij] != idx[ij - 1]))
+		
+		if ts is None:
+			return decode_(idx, 0, len(idx))
+
 		i, words = None, []
 		for j, k in enumerate(idx + [self.space_idx]):
 			if k == self.space_idx and i is not None:
-				word = ''.join(self[idx[ij]] for ij in range(i, j) if replace_repeat is False or ij == 0 or idx[ij] != idx[ij - 1])
-
-				if replace_blank is not False:
-					word = word.replace(self.blank, '' if replace_blank is True else replace_blank)
-				if replace_space is not False:
-					word = word.replace(self.space, replace_space)
-				if replace_repeat is True:
-					word = ''.join(c if i == 0 or c != self.repeat else word[i - 1] for i, c in enumerate(word))
-
-				words.append(dict(word = word, **(dict(begin = float(ts[i]), end = float(ts[j - 1])) if ts is not None else {})))
+				words.append(dict(word = decode_(i, j), begin = float(ts[i]), end = float(ts[j - 1])))
 				i = None
 			elif i is None:
 				i = j
@@ -132,6 +128,17 @@ class Labels:
 
 	def split_candidates(self, text):
 		return text.split(self.candidate_sep)
+
+	#TODO: merge postprocess_transcript
+
+	def postprocess_transcript2(self, word, replace_blank = True, replace_space = False, replace_repeat = True):
+		if replace_blank is not False:
+			word = word.replace(self.blank, '' if replace_blank is True else replace_blank)
+		if replace_space is not False:
+			word = word.replace(self.space, replace_space)
+		if replace_repeat is True:
+			word = ''.join(c if i == 0 or c != self.repeat else word[i - 1] for i, c in enumerate(word))
+		return word
 
 	def postprocess_transcript(self, text, phonetic_replace_groups = []):
 		replaceblank = lambda s: s.replace(self.blank * 10, ' ').replace(self.blank, '')

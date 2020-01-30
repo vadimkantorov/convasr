@@ -19,6 +19,7 @@ def ctc_loss_(log_probs, targets, input_lengths, target_lengths, blank : int = 0
 		log_alpha[:, 2:] = log_probs[t].gather(-1, targets_) + prev.logsumexp(dim = 0)
 		log_alpha_[t, :, 2:] = prev.argmax(dim = 0)
 
+	#l1l2 = log_alpha[input_lengths - 1, B].gather(-1, torch.stack([zero_padding + target_lengths * 2 - 1, zero_padding + target_lengths * 2], dim = -1)) 
 	l1l2 = log_alpha.gather(-1, torch.stack([zero_padding + target_lengths * 2 - 1, zero_padding + target_lengths * 2], dim = -1)) 
 	loss = -torch.logsumexp(l1l2, dim = -1)
 	if not alignment:
@@ -27,9 +28,8 @@ def ctc_loss_(log_probs, targets, input_lengths, target_lengths, blank : int = 0
 	path = torch.zeros(len(log_probs), len(B), device = log_alpha.device, dtype = torch.long)
 	path[input_lengths - 1, B] = zero_padding + target_lengths * 2 - 1 + l1l2.argmax(dim = -1)
 	for t, indices in reversed(list(enumerate(path))[1:]):
-		indices_ = torch.stack([(indices - 2) * diff_labels.gather(-1, (indices - zero_padding).clamp_(min = 0).unsqueeze(-1)).squeeze(-1), (indices - 1).clamp_(min = 0), indices], dim = -1)
-		path[t - 1] += (indices - 2 + log_alpha_[t - 1].gather(-1, indices_).argmax(dim = -1)).clamp_(min = 0)
-	return torch.zeros_like(log_alpha_).scatter_(-1, path.unsqueeze(-1), 1.0)[..., (zero_padding + 1)::2]
+		path[t - 1] += indices - log_alpha_[t].gather(-1, indices.unsqueeze(-1)).squeeze(-1)
+	return torch.zeros_like(log_alpha_, dtype = torch.uint8).scatter_(-1, path.unsqueeze(-1), 1)[..., (zero_padding + 1)::2]
 
 #@torch.jit.script
 def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank : int = 0, reduction : str = 'none', alignment : bool = False):
