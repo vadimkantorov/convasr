@@ -111,18 +111,25 @@ class Labels:
 		chr2idx = {l: i for i, l in enumerate(str(self))}
 		return normalized, torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
-	def decode(self, idx, ts = None, replace_blank = True, replace_space = False, replace_repeat = True):
-		decode_ = lambda i, j: self.postprocess_transcript2(''.join(self[idx[ij]] for ij in range(i, j) if replace_repeat is False or ij == 0 or idx[ij] != idx[ij - 1]))
+	def decode(self, idx : list, ts = None, I = None, replace_blank = True, replace_space = False, replace_repeat = True):
+		decode_ = lambda i, j: self.postprocess_transcript2(''.join(self[idx[ij]] for ij in range(i, j + 1) if replace_repeat is False or ij == 0 or idx[ij] != idx[ij - 1]), replace_blank = replace_blank, replace_space = replace_space, replace_repeat = replace_repeat)
 		
 		if ts is None:
-			return decode_(0, len(idx))
+			return decode_(0, len(idx) - 1)
 
-		i, words = None, []
+		words, i = [], None
 		for j, k in enumerate(idx + [self.space_idx]):
 			if k == self.space_idx and i is not None:
-				words.append(dict(word = decode_(i, j), begin = float(ts[i]), end = float(ts[j - 1])))
+				#j__ = j
+				while j == len(idx) or (j > 0 and idx[j] in [self.space_idx, self.blank_idx]):
+					j -= 1
+
+				i_, j_ = int(i if I is None else I[i]), int(j if I is None else I[j])
+				#if j_ < i_:
+				#	import IPython; IPython.embed()
+				words.append(dict(word = decode_(i, j), begin = float(ts[i_]), end = float(ts[j_]), i = i_, j = j_))
 				i = None
-			elif i is None:
+			elif k not in [self.space_idx, self.blank_idx] and i is None:
 				i = j
 		return words
 
