@@ -2,8 +2,9 @@
 # - if given transcript, always align
 # - filter vad output
 # - support stereo inputs with or without vad, with or without alignment
-# - figure out stft shift
 # - fix up timestamps by segment begin point
+# - modify ctc to not materialize alignment matrix
+# - figure out stft shift
 
 import os
 import time
