@@ -1,3 +1,10 @@
+#TODO:
+# - if given transcript, always align
+# - filter vad output
+# - support stereo inputs with or without vad, with or without alignment
+# - figure out stft shift
+# - fix up timestamps by segment begin point
+
 import os
 import time
 import json
@@ -21,17 +28,17 @@ def segment_transcript(labels, idx, b, e, max_segment_seconds):
 			yield (b + sec(i), b + sec(j - 1), labels.postprocess_transcript(labels.decode(idx[i:j])[0]))
 			i = j + 1
 
-def resegment(c, b, e, r, h, max_segment_seconds):
+def resegment(c, r, h, rh, max_segment_seconds):
 	rh_ = lambda rh, i, w, first, last: [(k, u) for k, u in enumerate(rh) if (first or i is None or u['begin'] >= rh[i]['end']) and (last or u['end'] <= w['end'])]
-	rh, rhk = r, 0
+	rhk = [r, h].index(rh)
 	i = [None, None]
 	for j, w in enumerate(rh):
 		if j == len(rh) - 1 or w['end'] - rh[i[rhk] or 0]['end'] > max_segment_seconds:
-			first_last = dict(first = i[0] is None, last = j == len(rh) - 1)
+			first_last = dict(first = i[rhk] is None, last = j == len(rh) - 1)
 			r_ = rh_(r, i[0], rh[j], **first_last); rk, r_ = zip(*r_) if r_ else ([i[0]], [])
 			h_ = rh_(h, i[1], rh[j], **first_last); hk, h_ = zip(*h_) if h_ else ([i[1]], [])
 			i = (rk[-1], hk[-1])
-			yield [c, min(w['begin'] for w_ in [r_, h_] for w in w_), max(w['end'] for w_ in [r_, h_] for w in w_), r_, h_]
+			yield [c, r_, h_]
 
 def main(args):
 	os.makedirs(args.output_path, exist_ok = True)
@@ -68,7 +75,7 @@ def main(args):
 				cutpoints.append((b, e, channel))
 				batch.append(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)))
 		else:
-			signal, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = False, dtype = torch.int16)
+			signal, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = True, normalize = False, dtype = torch.int16); signal = signal.unsqueeze(1)
 			signal_normalized = models.normalize_signal(signal, dim = 0)
 			ref = labels.postprocess_transcript(labels.normalize_text(open(ref_path).read())) if os.path.exists(ref_path) else ''
 			for channel, signal_ in enumerate(signal.t()):
@@ -90,47 +97,44 @@ def main(args):
 		
 		ts = torch.linspace(0, 1, steps = log_probs.shape[-1]) * (x.shape[-1] / sample_rate)
 		
-		segments = [[c, b, e, r, labels.decode(d, ts, replace_blank = True, replace_repeat = True)] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
+		segments = [[c, r, labels.decode(d, ts, replace_blank = True, replace_repeat = True)] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
 
 		ref = ' '.join(ref)
-		hyp = ' '.join(w['word'] for c, b, e, r, h in segments for w in h)
+		hyp = ' '.join(w['word'] for c, r, h in segments for w in h)
 		open(os.path.join(args.output_path, os.path.basename(audio_path) + '.txt'), 'w').write(hyp)
 		if args.verbose:
 			print('HYP:', hyp)
 		
-		if ref:
+		if ref and args.align:
 			cer = metrics.cer(hyp, ref)#, edit_distance = metrics.levenshtein)
-			if args.align:
-				print('Input time steps:', log_probs.shape[-1], '| Target time steps:', y.shape[-1])
-				tic = time.time()
-				alignment = ctc.ctc_loss_(log_probs.permute(2, 0, 1), y.long(), output_lengths, ylen, blank = labels.blank_idx, alignment = True).cpu()
-				print('Alignment time: {:.02f} sec'.format(time.time() - tic))
-				for i in range(len(y)):
-					segments[i][-2] = labels.decode(y[i].tolist(), ts, alignment.argmax(dim = 0)[i])
+			print('Input time steps:', log_probs.shape[-1], '| Target time steps:', y.shape[-1])
+			tic = time.time()
+			alignment = ctc.ctc_loss_(log_probs.permute(2, 0, 1), y.long(), output_lengths, ylen, blank = labels.blank_idx, alignment = True).cpu()
+			print('Alignment time: {:.02f} sec'.format(time.time() - tic))
+			for i in range(len(y)):
+				segments[i][-2] = labels.decode(y[i].tolist(), ts, alignment.argmax(dim = 0)[i])
 			print(f'CER: {cer:.02%}')
-		#a = alignment.squeeze(1).t()
-		#imsave('data/alignment.png', a[:12000, :40000].cpu().float() * 255, origin = 'lower', cmap = 'gray')
-		#import IPython; IPython.embed()# 11360
-		segments = sum([list(resegment(*s, max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
-
+		else:
+			for i in range(len(y)):
+				segments[i][-2] = []
+		
+		segments = sum([list(resegment(*s, rh = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
 		#segments = list(sorted(segments, key = lambda s: s[:3]))
 
 		html_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.html')
 		with open(html_path, 'w') as html:
+			begin_end = lambda rh: (min(w['begin'] for w in rh), max(w['end'] for w in rh)) if len(rh) > 0 else (0, 0)
 			fmt_link = lambda word, begin, end, i = '', j = '': f'<a onclick="return play({begin},{end})" title="{begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + (word if isinstance(word, str) else f'{begin:.02f}' if word == 0 else f'{end:.02f}') + '</a>'
-			fmt_words = lambda h: h if isinstance(h, str) else ' '.join(fmt_link(**w) for w in h) if len(h) > 0 and isinstance(h[0], dict) else ' '.join(h)
-			begin_end = lambda r: (min(w['begin'] for w in r), max(w['end'] for w in r)) if len(r) > 0 else (0, 0)
-			
-			html.write('<html><head><meta charset="UTF-8"><style>.top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
-			html.write(f'<h4>{os.path.basename(audio_path)}</h4>')
-			html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode()))
-			html.write(f'<h3 class="channel0 channel">hyp #0:<span></span></h3><h3 class="channel0 reference channel">ref #0:<span></span></h3><h3 class="channel1 channel">hyp #1:<span></span></h3><h3 class="channel1 reference channel">ref #1:<span></span></h3><hr/>')
-			html.write('<table style="width:100%"><thead><th>begin</th><th>end</th><th style="width:50%">hyp</th><th style="width:50%">ref</th><th>begin</th><th>end</th></tr></thead><tbody>')
-			html.write(''.join(f'<tr class="channel{c}"><td class="top">{fmt_link(0, *begin_end(h))}</td><td class="top">{fmt_link(1, *begin_end(h))}</td><td class="top">{fmt_words(h)}</td>' + (f'<td class="top reference">{fmt_words(r)}</td>' if r else '') + f'<td class="top">{fmt_link(0, *begin_end(r))}</td><td class="top">{fmt_link(1, *begin_end(r))}</td></tr>' for c, b, e, r, h in segments))
-			html.write('</tbody></table>')
-			html.write('''<script>
-				const segments = SEGMENTS;
+			fmt_words = lambda rh: rh if isinstance(rh, str) else ' '.join(fmt_link(**w) for w in rh) if len(rh) > 0 and isinstance(rh[0], dict) else ' '.join(rh)
+			fmt_begin_end = 'data-begin="{}" data-end="{}"'.format
 
+			html.write('<html><head><meta charset="UTF-8"><style>.m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
+			html.write(f'<h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5>')
+			html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode()))
+			html.write(f'<pre class="channel"><h3 class="channel0 channel">hyp #0:<span></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span></span></h3></pre><hr/>')
+			html.write('<table style="width:100%"><thead><th>begin</th><th>end</th><th style="width:50%">hyp</th><th style="width:50%">ref</th><th>begin</th><th>end</th></tr></thead><tbody>')
+			html.write(''.join(f'<tr class="channel{c}"><td class="top">{fmt_link(0, *begin_end(h))}</td><td class="top">{fmt_link(1, *begin_end(h))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(*begin_end(h))}>{fmt_words(h)}</td>' + (f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(*begin_end(r))}>{fmt_words(r)}</td><td class="top">{fmt_link(0, *begin_end(r))}</td><td class="top">{fmt_link(1, *begin_end(r))}</td>' if r else '<td></td>' * 3) + f'</tr>' for c, r, h in segments))
+			html.write('''</tbody></table><script>
 				function play(begin, end)
 				{
 					const audio = document.querySelector('audio');
@@ -142,20 +146,22 @@ def main(args):
 
 				document.querySelector('audio').ontimeupdate = evt =>
 				{
-					const time = evt.target.currentTime;
-					const endtime = evt.target.dataset.endTime;
-
-					const [spanhyp0, spanref0, spanhyp1, spanref1] = document.querySelectorAll('span');
-					const [channel0, begin0, end0, ref0, hyp0] = segments.find(([channel, begin, end, ref, hyp]) => channel == 0 && begin <= time && time <= end) || [0, null, null, [], []];
-					const [channel1, begin1, end1, ref1, hyp1] = segments.find(([channel, begin, end, ref, hyp]) => channel == 1 && begin <= time && time <= end) || [1, null, null, [], []];
-					const fmt_words = words => words.map(w => w['word']).join(' ');
-					[spanhyp0.innerText, spanhyp1.innerText, spanref0.innerText, spanref1.innerText] = [fmt_words(hyp0), fmt_words(hyp1), fmt_words(ref0), fmt_words(ref1)];
-
+					const time = evt.target.currentTime, endtime = evt.target.dataset.endTime;
 					if(time > endtime)
+					{
 						evt.target.pause();
+						return;
+					}
+
+					document.querySelector('h5').innerText = time.toString();
+					const find = (segments, time, channel) => (segments.find(([rh, c, b, e]) => c == channel && b <= time && time <= e) || ['', channel, null, null])[0];
+					const [spanhyp0, spanref0, spanhyp1, spanref1] = document.querySelectorAll('span');
+					[spanhyp0.innerText, spanref0.innerText, spanhyp1.innerText, spanref1.innerText] = [find(hyp_segments, time, 0), find(ref_segments, time, 0), find(hyp_segments, time, 1), find(ref_segments, time, 1)];
 				};
-			</script>'''.replace('SEGMENTS', json.dumps(segments, ensure_ascii = False)))
-			html.write('</body></html>')
+
+				const make_segment = td => [td.innerText, td.dataset.channel, td.dataset.begin, td.dataset.end];
+				const hyp_segments = Array.from(document.querySelectorAll('.hyp')).map(make_segment), ref_segments = Array.from(document.querySelectorAll('.ref')).map(make_segment);
+			</script></body></html>''')
 		print(html_path)
 
 if __name__ == '__main__':
