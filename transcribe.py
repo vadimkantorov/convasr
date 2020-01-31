@@ -13,15 +13,6 @@ import metrics
 import decoders
 import ctc
 
-def imsave(fname, arr, vmin=None, vmax=None, cmap=None, format=None, origin=None):
-	from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-	from matplotlib.figure import Figure
-
-	fig = Figure(figsize=arr.shape[::-1], dpi=1, frameon=False)
-	canvas = FigureCanvas(fig)
-	fig.figimage(arr, cmap=cmap, vmin=vmin, vmax=vmax, origin=origin)
-	fig.savefig(fname, dpi=1, format=format)
-
 def segment_transcript(labels, idx, b, e, max_segment_seconds):
 	sec = lambda k: k / len(idx) * (e - b)
 	i = 0
@@ -37,16 +28,10 @@ def resegment(c, b, e, r, h, max_segment_seconds):
 	for j, w in enumerate(rh):
 		if j == len(rh) - 1 or w['end'] - rh[i[rhk] or 0]['end'] > max_segment_seconds:
 			first_last = dict(first = i[0] is None, last = j == len(rh) - 1)
-
 			r_ = rh_(r, i[0], rh[j], **first_last); rk, r_ = zip(*r_) if r_ else ([i[0]], [])
 			h_ = rh_(h, i[1], rh[j], **first_last); hk, h_ = zip(*h_) if h_ else ([i[1]], [])
-
-			res = [c, min(w['begin'] for w_ in [r_, h_] for w in w_), max(w['end'] for w_ in [r_, h_] for w in w_), r_, h_]
-			#if len(r_) > 20:
-			#	import IPython; IPython.embed()
 			i = (rk[-1], hk[-1])
-			#print(res[:3])
-			yield res
+			yield [c, min(w['begin'] for w_ in [r_, h_] for w in w_), max(w['end'] for w_ in [r_, h_] for w in w_), r_, h_]
 
 def main(args):
 	os.makedirs(args.output_path, exist_ok = True)
@@ -77,17 +62,15 @@ def main(args):
 		batch, cutpoints = [], []
 		ref_path, transcript_path = audio_path + '.txt', audio_path + '.json'
 		if os.path.exists(transcript_path):
-			signal_normalized, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, stereo = True, normalize = True, dtype = torch.float32)
+			signal_normalized, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = True, dtype = torch.float32)
 			transcript = json.load(open(transcript_path))
 			for b, e, channel, ref in [map(r.get, ['begin', 'end', 'channel', 'ref']) for r in transcript]:
 				cutpoints.append((b, e, channel))
 				batch.append(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)))
 		else:
-			signal, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, stereo = True, normalize = False, dtype = torch.int16)
-			signal = signal[:len(signal)]
+			signal, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = False, dtype = torch.int16)
 			signal_normalized = models.normalize_signal(signal, dim = 0)
 			ref = labels.postprocess_transcript(labels.normalize_text(open(ref_path).read())) if os.path.exists(ref_path) else ''
-			ref = ref[:len(ref)]
 			for channel, signal_ in enumerate(signal.t()):
 				chunks = dataset.remove_silence(vad, signal_, sample_rate, window_size) if args.vad is not False else [(0, len(signal) / sample_rate)]
 				cutpoints.extend((b, e, channel) for b, e in chunks)
@@ -166,7 +149,7 @@ def main(args):
 					const [channel0, begin0, end0, ref0, hyp0] = segments.find(([channel, begin, end, ref, hyp]) => channel == 0 && begin <= time && time <= end) || [0, null, null, [], []];
 					const [channel1, begin1, end1, ref1, hyp1] = segments.find(([channel, begin, end, ref, hyp]) => channel == 1 && begin <= time && time <= end) || [1, null, null, [], []];
 					const fmt_words = words => words.map(w => w['word']).join(' ');
-					//[spanhyp0.innerText, spanhyp1.innerText, spanref0.innerText, spanref1.innerText] = [fmt_words(hyp0), fmt_words(hyp1), fmt_words(ref0), fmt_words(ref1)];
+					[spanhyp0.innerText, spanhyp1.innerText, spanref0.innerText, spanref1.innerText] = [fmt_words(hyp0), fmt_words(hyp1), fmt_words(ref0), fmt_words(ref1)];
 
 					if(time > endtime)
 						evt.target.pause();

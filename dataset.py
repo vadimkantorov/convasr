@@ -191,11 +191,14 @@ class BatchCollater:
 		#x: NCT, y: NLt, ylen: NL, xlen: N
 		return dataset_name_, audio_path_, reference_, x, xlen, y, ylen
 
-def read_audio(audio_path, sample_rate, normalize = True, stereo = False, max_duration = None, dtype = torch.float32, byte_order = 'little'):
-	sample_rate_, signal = scipy.io.wavfile.read(audio_path) if audio_path.endswith('.wav') else (sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', '1', '-t', 'raw', '-']), byte_order = byte_order))) 
-	#TODO: fix stereo for mp3
+def read_audio(audio_path, sample_rate, normalize = True, mono = True, max_duration = None, dtype = torch.float32, byte_order = 'little'):
+	if audio_path.endswith('.wav'):
+		sample_rate_, signal = scipy.io.wavfile.read(audio_path) 
+	else:
+		num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path]))
+		sample_rate_, signal = sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', str(num_channels), '-t', 'raw', '-']), byte_order = byte_order)).reshape(-1, num_channels)
 
-	signal = (signal if stereo else signal.squeeze(1) if signal.shape[1] == 1 else signal.mean(1)) if len(signal.shape) > 1 else (signal if not stereo else signal[..., None])
+	signal = (signal if not mono else signal.squeeze(1) if signal.shape[1] == 1 else signal.float().mean(dim = 1)) if len(signal.shape) > 1 else (signal if mono else signal.unsqueeze(-1))
 	if max_duration is not None:
 		signal = signal[:int(max_duration * sample_rate_), ...]
 
