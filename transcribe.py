@@ -5,6 +5,7 @@
 # - fix up timestamps by segment begin point
 # - modify ctc to not materialize alignment matrix
 # - figure out stft shift
+# - disable repeat deduplication
 
 import os
 import time
@@ -110,17 +111,16 @@ def main(args):
 			cer = metrics.cer(hyp, ref)#, edit_distance = metrics.levenshtein)
 			print('Input time steps:', log_probs.shape[-1], '| Target time steps:', y.shape[-1])
 			tic = time.time()
-			alignment = ctc.ctc_loss_(log_probs.permute(2, 0, 1), y.long(), output_lengths, ylen, blank = labels.blank_idx, alignment = True).cpu()
+			alignment = ctc.ctc_loss_(log_probs.permute(2, 0, 1), y.long(), output_lengths, ylen, blank = labels.blank_idx, alignment = True)
 			print('Alignment time: {:.02f} sec'.format(time.time() - tic))
 			for i in range(len(y)):
-				segments[i][-2] = labels.decode(y[i].tolist(), ts, alignment.argmax(dim = 0)[i])
+				segments[i][-2] = labels.decode(y[i, :ylen[i]].tolist(), ts, alignment[i])
 			print(f'CER: {cer:.02%}')
 		else:
 			for i in range(len(y)):
 				segments[i][-2] = []
 		
 		segments = sum([list(resegment(*s, rh = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
-		#segments = list(sorted(segments, key = lambda s: s[:3]))
 
 		html_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.html')
 		with open(html_path, 'w') as html:

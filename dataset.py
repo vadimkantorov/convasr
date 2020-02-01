@@ -120,13 +120,13 @@ class Labels:
 		words, i = [], None
 		for j, k in enumerate(idx + [self.space_idx]):
 			if k == self.space_idx and i is not None:
-				#j__ = j
+				j__ = j
 				while j == len(idx) or (j > 0 and idx[j] in [self.space_idx, self.blank_idx]):
 					j -= 1
 
 				i_, j_ = int(i if I is None else I[i]), int(j if I is None else I[j])
-				#if j_ < i_:
-				#	import IPython; IPython.embed()
+				if j_ < i_:
+					import IPython; IPython.embed()
 				words.append(dict(word = decode_(i, j), begin = float(ts[i_]), end = float(ts[j_]), i = i_, j = j_))
 				i = None
 			elif k not in [self.space_idx, self.blank_idx] and i is None:
