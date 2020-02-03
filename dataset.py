@@ -111,7 +111,7 @@ class Labels:
 		chr2idx = {l: i for i, l in enumerate(str(self))}
 		return normalized, torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
-	def decode(self, idx : list, ts = None, I = None, replace_blank = True, replace_space = False, replace_repeat = True):
+	def decode(self, idx : list, ts = None, I = None, channel = 0, replace_blank = True, replace_space = False, replace_repeat = True):
 		decode_ = lambda i, j: self.postprocess_transcript2(''.join(self[idx[ij]] for ij in range(i, j + 1) if replace_repeat is False or ij == 0 or idx[ij] != idx[ij - 1]), replace_blank = replace_blank, replace_space = replace_space, replace_repeat = replace_repeat)
 		
 		if ts is None:
@@ -120,14 +120,14 @@ class Labels:
 		words, i = [], None
 		for j, k in enumerate(idx + [self.space_idx]):
 			if k == self.space_idx and i is not None:
-				j__ = j
+				#j__ = j
 				while j == len(idx) or (j > 0 and idx[j] in [self.space_idx, self.blank_idx]):
 					j -= 1
 
 				i_, j_ = int(i if I is None else I[i]), int(j if I is None else I[j])
-				if j_ < i_:
-					import IPython; IPython.embed()
-				words.append(dict(word = decode_(i, j), begin = float(ts[i_]), end = float(ts[j_]), i = i_, j = j_))
+				#if j_ < i_:
+				#	import IPython; IPython.embed()
+				words.append(dict(word = decode_(i, j), begin = float(ts[i_]), end = float(ts[j_]), i = i_, j = j_, channel = channel))
 				i = None
 			elif k not in [self.space_idx, self.blank_idx] and i is None:
 				i = j
@@ -191,18 +191,20 @@ class BatchCollater:
 		#x: NCT, y: NLt, ylen: NL, xlen: N
 		return dataset_name_, audio_path_, reference_, x, xlen, y, ylen
 
-def read_audio(audio_path, sample_rate, normalize = True, mono = True, max_duration = None, dtype = torch.float32, byte_order = 'little'):
+def read_audio(audio_path, sample_rate, normalize = True, mono = True, duration = None, dtype = torch.float32, byte_order = 'little'):
 	if audio_path.endswith('.wav'):
 		sample_rate_, signal = scipy.io.wavfile.read(audio_path) 
+		signal = singal[:, None] if len(signal.shape) == 1 else signal
 	else:
-		num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path]))
+		num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path])) if not mono else 1
 		sample_rate_, signal = sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', str(num_channels), '-t', 'raw', '-']), byte_order = byte_order)).reshape(-1, num_channels)
 
-	signal = (signal if not mono else signal.squeeze(1) if signal.shape[1] == 1 else signal.float().mean(dim = 1)) if len(signal.shape) > 1 else (signal if mono else signal.unsqueeze(-1))
-	if max_duration is not None:
-		signal = signal[:int(max_duration * sample_rate_), ...]
-
 	signal = torch.as_tensor(signal).to(dtype)
+	
+	if duration is not None:
+		signal = signal[:int(duration * sample_rate_), ...]
+	if mono:
+		signal = signal.float().mean(dim = -1, keepdim = True).to(dtype)
 	if normalize:
 		signal = models.normalize_signal(signal, dim = 0)
 	if dtype is torch.float32 and sample_rate_ != sample_rate:
@@ -212,8 +214,8 @@ def read_audio(audio_path, sample_rate, normalize = True, mono = True, max_durat
 	return signal, sample_rate_
 
 def write_audio(audio_path, sample_rate, signal):
-	assert audio_path.endswith('.wav')
 	scipy.io.wavfile.write(audio_path, sample_rate, signal.numpy())
+	return audio_path
 
 def resample(signal, sample_rate_, sample_rate):
 	return torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate)), sample_rate

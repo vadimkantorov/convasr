@@ -8,6 +8,7 @@
 # - disable repeat deduplication
 
 import os
+import io
 import time
 import json
 import base64
@@ -40,7 +41,7 @@ def resegment(c, r, h, rh, max_segment_seconds):
 			r_ = rh_(r, i[0], rh[j], **first_last); rk, r_ = zip(*r_) if r_ else ([i[0]], [])
 			h_ = rh_(h, i[1], rh[j], **first_last); hk, h_ = zip(*h_) if h_ else ([i[1]], [])
 			i = (rk[-1], hk[-1])
-			yield [c, r_, h_]
+			yield [c, list(r_), list(h_)]
 
 def main(args):
 	os.makedirs(args.output_path, exist_ok = True)
@@ -68,19 +69,20 @@ def main(args):
 
 	audio_paths = [args.data_path] if os.path.isfile(args.data_path) else [os.path.join(args.data_path, f) for f in os.listdir(args.data_path) if any(map(f.endswith, args.ext))]
 	for audio_path in audio_paths:
-		batch, cutpoints = [], []
+		batch, cutpoints, audio = [], [], []
 		ref_path, transcript_path = audio_path + '.txt', audio_path + '.json'
-		if os.path.exists(transcript_path):
+		if os.path.exists(transcript_path) and args.align:
 			signal_normalized, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = True, dtype = torch.float32)
 			transcript = json.load(open(transcript_path))
 			for b, e, channel, ref in [map(r.get, ['begin', 'end', 'channel', 'ref']) for r in transcript]:
 				cutpoints.append((b, e, channel))
 				batch.append(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)))
 		else:
-			signal, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = True, normalize = False, dtype = torch.int16); signal = signal.unsqueeze(1)
+			signal, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = False, dtype = torch.int16)
 			signal_normalized = models.normalize_signal(signal, dim = 0)
 			ref = labels.postprocess_transcript(labels.normalize_text(open(ref_path).read())) if os.path.exists(ref_path) else ''
 			for channel, signal_ in enumerate(signal.t()):
+				audio.append(dataset.write_audio(io.BytesIO(), sample_rate, signal_))
 				chunks = dataset.remove_silence(vad, signal_, sample_rate, window_size) if args.vad is not False else [(0, len(signal) / sample_rate)]
 				cutpoints.extend((b, e, channel) for b, e in chunks)
 				batch.extend(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)) for b, e in chunks)
@@ -99,7 +101,8 @@ def main(args):
 		
 		ts = torch.linspace(0, 1, steps = log_probs.shape[-1]) * (x.shape[-1] / sample_rate)
 		
-		segments = [[c, r, labels.decode(d, ts, replace_blank = True, replace_repeat = True)] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
+		begin_end = lambda rh: (min(w['begin'] for w in rh), max(w['end'] for w in rh)) if len(rh) > 0 else (0, 0)
+		segments = [[c, r, labels.decode(d, ts, replace_blank = True, replace_repeat = True, channel = c)] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
 
 		ref = ' '.join(ref)
 		hyp = ' '.join(w['word'] for c, r, h in segments for w in h)
@@ -121,24 +124,25 @@ def main(args):
 				segments[i][-2] = []
 		
 		segments = sum([list(resegment(*s, rh = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
+		segments = list(sorted(segments, key = lambda s: begin_end(s[-1] + s[-2]) + (s[0],)))
 
 		html_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.html')
 		with open(html_path, 'w') as html:
-			begin_end = lambda rh: (min(w['begin'] for w in rh), max(w['end'] for w in rh)) if len(rh) > 0 else (0, 0)
-			fmt_link = lambda word, begin, end, i = '', j = '': f'<a onclick="return play({begin},{end})" title="{begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + (word if isinstance(word, str) else f'{begin:.02f}' if word == 0 else f'{end:.02f}') + '</a>'
+			fmt_link = lambda word, channel, begin, end, i = '', j = '': f'<a onclick="return play({channel},{begin},{end})" title="#{channel}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + (word if isinstance(word, str) else f'{begin:.02f}' if word == 0 else f'{end:.02f}') + '</a>'
 			fmt_words = lambda rh: rh if isinstance(rh, str) else ' '.join(fmt_link(**w) for w in rh) if len(rh) > 0 and isinstance(rh[0], dict) else ' '.join(rh)
 			fmt_begin_end = 'data-begin="{}" data-end="{}"'.format
 
 			html.write('<html><head><meta charset="UTF-8"><style>.m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
-			html.write(f'<h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5>')
-			html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode()))
+			html.write(f'<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>')
+			html.write(''.join('<h6><pre>channel #{c}</pre></h6><audio id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>'.format(c = c, encoded = base64.b64encode(buf.getvalue()).decode()) for c, buf in enumerate(audio)))
 			html.write(f'<pre class="channel"><h3 class="channel0 channel">hyp #0:<span></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span></span></h3></pre><hr/>')
 			html.write('<table style="width:100%"><thead><th>begin</th><th>end</th><th style="width:50%">hyp</th><th style="width:50%">ref</th><th>begin</th><th>end</th></tr></thead><tbody>')
-			html.write(''.join(f'<tr class="channel{c}"><td class="top">{fmt_link(0, *begin_end(h))}</td><td class="top">{fmt_link(1, *begin_end(h))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(*begin_end(h))}>{fmt_words(h)}</td>' + (f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(*begin_end(r))}>{fmt_words(r)}</td><td class="top">{fmt_link(0, *begin_end(r))}</td><td class="top">{fmt_link(1, *begin_end(r))}</td>' if r else '<td></td>' * 3) + f'</tr>' for c, r, h in segments))
+			html.write(''.join(f'<tr class="channel{c}"><td class="top">{fmt_link(0, c, *begin_end(h))}</td><td class="top">{fmt_link(1, c, *begin_end(h))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(*begin_end(h))}>{fmt_words(h)}</td>' + (f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(*begin_end(r))}>{fmt_words(r)}</td><td class="top">{fmt_link(0,c, *begin_end(r))}</td><td class="top">{fmt_link(1, c, *begin_end(r))}</td>' if r else '<td></td>' * 3) + f'</tr>' for c, r, h in segments))
 			html.write('''</tbody></table><script>
-				function play(begin, end)
+				function play(channel, begin, end)
 				{
-					const audio = document.querySelector('audio');
+					Array.from(document.querySelectorAll('audio')).map(audio => audio.pause());
+					const audio = document.querySelector(`#audio${channel}`);
 					audio.currentTime = begin;
 					audio.dataset.endTime = end;
 					audio.play();
