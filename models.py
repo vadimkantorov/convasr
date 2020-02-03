@@ -117,7 +117,7 @@ class JasperNet(nn.Module):
 		self.dict = dict
 
 	def forward(self, x, xlen = None, y = None, ylen = None):
-		x = self.frontend(x)
+		x = self.frontend(x.squeeze(1))
 		residual = []
 		for i, subblock in enumerate(self.backbone):
 			x = subblock(x, residual = residual, lengths_fraction = xlen)
@@ -345,6 +345,10 @@ class LogFilterBankFrontend(nn.Module):
 		power_spectrum = self.stft_magnitude_squared(signal)
 		features = F.conv1d(power_spectrum, self.mel_basis, self.eps).log()
 		return normalize_features(features) if self.normalize_features else features 
+	
+	@property
+	def read_audio(self):
+		return True
 
 def temporal_mask(x, lengths = None, lengths_fraction = None):
 	lengths = lengths if lengths is not None else compute_output_lengths(x, lengths_fraction)

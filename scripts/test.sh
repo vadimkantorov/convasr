@@ -1,10 +1,10 @@
 set -e
 
 python3 train.py $@ \
-  --githttp https://github.com/vadimkantorov/convasr/commit/%h \
+  --exphtml= --githttp https://github.com/vadimkantorov/convasr/commit/%h \
   --analyze \
   --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs256____fp16O2/checkpoint_epoch05_iter0040000.pt \
-  --val-data-path valset17122019/valset17122019.csv #kontur_calls_micro/kontur_calls_micro.csv # valset17122019/valset_by_rec22122019.csv #data/clean_val.csv data/mixed_val.csv  valset11102019/valset11102019.csv #valset17122019/valset17122019.csv # kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv data/clean_val.csv data/ data/valset17122019/valset17122019.0.csv data/valset17122019/valset17122019.1.csv \
+  --val-data-path kontur_calls_micro/kontur_calls_micro.csv #valset17122019/valset17122019.csv # valset17122019/valset_by_rec22122019.csv #data/clean_val.csv data/mixed_val.csv  valset11102019/valset11102019.csv #valset17122019/valset17122019.csv # kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv data/clean_val.csv data/ data/valset17122019/valset17122019.0.csv data/valset17122019/valset17122019.1.csv \
 
 #python3 vis.py logits data/logits_kontur_calls_micro.csv.pt
 

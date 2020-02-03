@@ -24,15 +24,35 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 	def __getitem__(self, index):
 		dataset_name, audio_path, ref, duration = self.examples[index]
-		signal, sample_rate = read_audio(audio_path, sample_rate = self.sample_rate) if self.frontend.read_audio else (audio_path, self.sample_rate) 
+		signal, sample_rate = read_audio(audio_path, sample_rate = self.sample_rate, mono = True) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
+		signal = signal.t()
 		# int16 or float?
-		features = self.frontend(signal.unsqueeze(0), waveform_transform_debug = lambda audio_path, sample_rate, signal: write_wav(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav')) if self.waveform_transform_debug_dir else None).squeeze(0) if self.frontend is not None else signal
+		features = self.frontend(signal, waveform_transform_debug = lambda audio_path, sample_rate, signal: write_wav(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav')) if self.waveform_transform_debug_dir else None).squeeze(0) if self.frontend is not None else signal
 		ref_normalized = self.labels[0].encode(ref)[0]
 		targets = [labels.encode(ref)[1] for labels in self.labels]
 		return [dataset_name, audio_path, ref_normalized, features] + targets
 
 	def __len__(self):
 		return len(self.examples)
+
+class BatchCollater:
+	def __init__(self, time_padding_multiple = 1):
+		self.time_padding_multiple = time_padding_multiple
+
+	def __call__(self, batch):
+		dataset_name, audio_path, ref, sample_x, *sample_y = batch[0]
+		xmax_len, ymax_len = [int(math.ceil(max(b[k].shape[-1] for b in batch) / self.time_padding_multiple)) * self.time_padding_multiple for k in [3, 4]]
+		x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = torch.float32)
+		y = torch.zeros(len(batch), len(sample_y), ymax_len, dtype = torch.long)
+		xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.long)
+		for k, (dataset_name, audio_path, ref, input, *targets) in enumerate(batch):
+			xlen[k] = input.shape[-1] / x.shape[-1]
+			x[k, ..., :input.shape[-1]] = input
+			for j, t in enumerate(targets):
+				y[k, j, :t.shape[-1]] = t
+				ylen[k, j] = len(t)
+		dataset_name_, audio_path_, ref, *_ = zip(*batch)
+		return dataset_name_, audio_path_, ref, x, xlen, y, ylen
 
 class BucketingBatchSampler(torch.utils.data.Sampler):
 	def __init__(self, dataset, bucket, batch_size = 1, mixing = None):
@@ -171,30 +191,10 @@ class Labels:
 	def __contains__(self, chr):
 		return chr.lower() in self.alphabet
 
-class BatchCollater:
-	def __init__(self, time_padding_multiple = 1):
-		self.time_padding_multiple = time_padding_multiple
-
-	def __call__(self, batch):
-		dataset_name, audio_path, reference, sample_x, *sample_y = batch[0]
-		xmax_len, ymax_len = [int(math.ceil(max(b[k].shape[-1] for b in batch) / self.time_padding_multiple)) * self.time_padding_multiple for k in [3, 4]]
-		x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = torch.float32)
-		y = torch.zeros(len(batch), len(sample_y), ymax_len, dtype = torch.long)
-		xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.long)
-		for k, (dataset_name, audio_path, reference, input, *targets) in enumerate(batch):
-			xlen[k] = input.shape[-1] / x.shape[-1]
-			x[k, ..., :input.shape[-1]] = input
-			for j, t in enumerate(targets):
-				y[k, j, :t.shape[-1]] = t
-				ylen[k, j] = len(t)
-		dataset_name_, audio_path_, reference_, *_ = zip(*batch)
-		#x: NCT, y: NLt, ylen: NL, xlen: N
-		return dataset_name_, audio_path_, reference_, x, xlen, y, ylen
-
 def read_audio(audio_path, sample_rate, normalize = True, mono = True, duration = None, dtype = torch.float32, byte_order = 'little'):
 	if audio_path.endswith('.wav'):
 		sample_rate_, signal = scipy.io.wavfile.read(audio_path) 
-		signal = singal[:, None] if len(signal.shape) == 1 else signal
+		signal = signal[:, None] if len(signal.shape) == 1 else signal
 	else:
 		num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path])) if not mono else 1
 		sample_rate_, signal = sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', str(num_channels), '-t', 'raw', '-']), byte_order = byte_order)).reshape(-1, num_channels)

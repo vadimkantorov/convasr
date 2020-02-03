@@ -1,11 +1,12 @@
 #TODO:
-# - if given transcript, always align
-# - filter vad output
-# - support stereo inputs with or without vad, with or without alignment
-# - fix up timestamps by segment begin point
-# - modify ctc to not materialize alignment matrix
-# - figure out stft shift
-# - disable repeat deduplication
+# if given transcript, always align
+# support stereo inputs with or without vad, with or without alignment
+# fix up timestamps by segment begin point
+# figure out stft shift
+# disable repeat deduplication
+# fix 1.0400128364562988 11.540141105651855 cut
+# mix vad output for filtering full output
+# filter vad output
 
 import os
 import io
@@ -36,7 +37,10 @@ def resegment(c, r, h, rh, max_segment_seconds):
 	rhk = [r, h].index(rh)
 	i = [None, None]
 	for j, w in enumerate(rh):
+		#if c == 0:
+		#	print(rh[i[rhk] or 0]['end'], w['end'])
 		if j == len(rh) - 1 or w['end'] - rh[i[rhk] or 0]['end'] > max_segment_seconds:
+		#	print('cut')
 			first_last = dict(first = i[rhk] is None, last = j == len(rh) - 1)
 			r_ = rh_(r, i[0], rh[j], **first_last); rk, r_ = zip(*r_) if r_ else ([i[0]], [])
 			h_ = rh_(h, i[1], rh[j], **first_last); hk, h_ = zip(*h_) if h_ else ([i[1]], [])
@@ -72,11 +76,12 @@ def main(args):
 		batch, cutpoints, audio = [], [], []
 		ref_path, transcript_path = audio_path + '.txt', audio_path + '.json'
 		if os.path.exists(transcript_path) and args.align:
-			signal_normalized, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = True, dtype = torch.float32)
-			transcript = json.load(open(transcript_path))
-			for b, e, channel, ref in [map(r.get, ['begin', 'end', 'channel', 'ref']) for r in transcript]:
-				cutpoints.append((b, e, channel))
-				batch.append(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)))
+			pass
+			#signal_normalized, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = True, dtype = torch.float32)
+			#transcript = json.load(open(transcript_path))
+			#for b, e, channel, ref in [map(r.get, ['begin', 'end', 'channel', 'ref']) for r in transcript]:
+			#	cutpoints.append((b, e, channel))
+			#	batch.append(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)))
 		else:
 			signal, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = False, dtype = torch.int16)
 			signal_normalized = models.normalize_signal(signal, dim = 0)
@@ -124,6 +129,7 @@ def main(args):
 				segments[i][-2] = []
 		
 		segments = sum([list(resegment(*s, rh = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
+		#import IPython; IPython.embed()
 		segments = list(sorted(segments, key = lambda s: begin_end(s[-1] + s[-2]) + (s[0],)))
 
 		html_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.html')
@@ -134,7 +140,7 @@ def main(args):
 
 			html.write('<html><head><meta charset="UTF-8"><style>.m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
 			html.write(f'<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>')
-			html.write(''.join('<h6><pre>channel #{c}</pre></h6><audio id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio>'.format(c = c, encoded = base64.b64encode(buf.getvalue()).decode()) for c, buf in enumerate(audio)))
+			html.write(''.join('<figure class="m0"><figcaption>channel #{c}:</figcaption><audio id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio></figure>'.format(c = c, encoded = base64.b64encode(buf.getvalue()).decode()) for c, buf in enumerate(audio)))
 			html.write(f'<pre class="channel"><h3 class="channel0 channel">hyp #0:<span></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span></span></h3></pre><hr/>')
 			html.write('<table style="width:100%"><thead><th>begin</th><th>end</th><th style="width:50%">hyp</th><th style="width:50%">ref</th><th>begin</th><th>end</th></tr></thead><tbody>')
 			html.write(''.join(f'<tr class="channel{c}"><td class="top">{fmt_link(0, c, *begin_end(h))}</td><td class="top">{fmt_link(1, c, *begin_end(h))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(*begin_end(h))}>{fmt_words(h)}</td>' + (f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(*begin_end(r))}>{fmt_words(r)}</td><td class="top">{fmt_link(0,c, *begin_end(r))}</td><td class="top">{fmt_link(1, c, *begin_end(r))}</td>' if r else '<td></td>' * 3) + f'</tr>' for c, r, h in segments))
@@ -149,20 +155,23 @@ def main(args):
 					return false;
 				};
 
-				document.querySelector('audio').ontimeupdate = evt =>
+				Array.from(document.querySelectorAll('audio')).map(audio => 
 				{
-					const time = evt.target.currentTime, endtime = evt.target.dataset.endTime;
-					if(time > endtime)
+					audio.ontimeupdate = evt =>
 					{
-						evt.target.pause();
-						return;
-					}
+						const time = evt.target.currentTime, endtime = evt.target.dataset.endTime;
+						if(time > endtime)
+						{
+							evt.target.pause();
+							return;
+						}
 
-					document.querySelector('h5').innerText = time.toString();
-					const find = (segments, time, channel) => (segments.find(([rh, c, b, e]) => c == channel && b <= time && time <= e) || ['', channel, null, null])[0];
-					const [spanhyp0, spanref0, spanhyp1, spanref1] = document.querySelectorAll('span');
-					[spanhyp0.innerText, spanref0.innerText, spanhyp1.innerText, spanref1.innerText] = [find(hyp_segments, time, 0), find(ref_segments, time, 0), find(hyp_segments, time, 1), find(ref_segments, time, 1)];
-				};
+						document.querySelector('h5').innerText = time.toString();
+						const find = (segments, time, channel) => (segments.find(([rh, c, b, e]) => c == channel && b <= time && time <= e) || ['', channel, null, null])[0];
+						const [spanhyp0, spanref0, spanhyp1, spanref1] = document.querySelectorAll('span');
+						[spanhyp0.innerText, spanref0.innerText, spanhyp1.innerText, spanref1.innerText] = [find(hyp_segments, time, 0), find(ref_segments, time, 0), find(hyp_segments, time, 1), find(ref_segments, time, 1)];
+					};
+				});
 
 				const make_segment = td => [td.innerText, td.dataset.channel, td.dataset.begin, td.dataset.end];
 				const hyp_segments = Array.from(document.querySelectorAll('.hyp')).map(make_segment), ref_segments = Array.from(document.querySelectorAll('.ref')).map(make_segment);
