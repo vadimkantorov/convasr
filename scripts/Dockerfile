@@ -16,6 +16,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   tree \
   htop \
   bmon \
+  tmux \
   iotop \
   libglib2.0-0 \
   libsm6 \
