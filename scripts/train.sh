@@ -4,15 +4,16 @@ python3 train.py $@ \
   --model JasperNetBig \
   --train-batch-size 512 --val-batch-size 512 \
   --scheduler MultiStepLR --decay-milestones 100000 175000 \
-  --lr 1e-2 \
+  --lr 1e-3 \
   --optimizer NovoGrad \
   --train-data-path data/mixed_train.csv \
   --val-data-path data/mixed_val.csv data/clean_val.csv kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv data/valset_by_rec22122019.0.csv data/valset_by_rec22122019.1.csv  data/valset_by_rec22122019.csv \
   --analyze kontur_calls_micro.csv \
   --val-iteration-interval 2500 \
   --fp16 O2 \
-  --experiment-name long-train \
-  --epochs 40 #\
+  --experiment-name long-train_lr1e-4 \
+  --checkpoint  data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs512____long-train/checkpoint_epoch40_iter0144400.pt \
+  --epochs 50 #\
 
 #  --finetune --checkpoint-skip
 #  --bpe data/tts_dataset_bpe_5000_word.model \
