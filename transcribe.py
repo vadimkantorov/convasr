@@ -1,4 +1,7 @@
 #TODO:
+
+#batch by vad
+
 # if given transcript, always align
 # support stereo inputs with or without vad, with or without alignment
 # fix up timestamps by segment begin point
@@ -23,14 +26,7 @@ import models
 import metrics
 import decoders
 import ctc
-
-def segment_transcript(labels, idx, b, e, max_segment_seconds):
-	sec = lambda k: k / len(idx) * (e - b)
-	i = 0
-	for j in range(1, 1 + len(idx)):
-		if j == len(idx) or (idx[j] == labels.space_idx and sec(j - 1) - sec(i) > max_segment_seconds):
-			yield (b + sec(i), b + sec(j - 1), labels.postprocess_transcript(labels.decode(idx[i:j])[0]))
-			i = j + 1
+import vad
 
 def resegment(c, r, h, rh, max_segment_seconds):
 	rh_ = lambda rh, i, w, first, last: [(k, u) for k, u in enumerate(rh) if (first or i is None or u['begin'] >= rh[i]['end']) and (last or u['end'] <= w['end'])]
@@ -47,14 +43,10 @@ def resegment(c, r, h, rh, max_segment_seconds):
 			i = (rk[-1], hk[-1])
 			yield [c, list(r_), list(h_)]
 
+@torch.no_grad()
 def main(args):
 	os.makedirs(args.output_path, exist_ok = True)
 	
-	vad = webrtcvad.Vad()
-	vad.set_mode(args.vad if isinstance(args.vad, int) else 3)
-
-	torch.set_grad_enabled(False)
-
 	checkpoint = torch.load(args.checkpoint, map_location = 'cpu')
 	args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
 	batch_collater = dataset.BatchCollater(args.batch_time_padding_multiple)
@@ -72,31 +64,38 @@ def main(args):
 	example = lambda audio_path, signal, b, e, sample_rate, channel, ref_normalized, targets: (os.path.basename(os.path.dirname(audio_path)), audio_path, ref_normalized, signal[None, int(b * sample_rate):int(e * sample_rate), channel], targets)	
 
 	audio_paths = [args.data_path] if os.path.isfile(args.data_path) else [os.path.join(args.data_path, f) for f in os.listdir(args.data_path) if any(map(f.endswith, args.ext))]
-	for audio_path in audio_paths:
+	for audio_path in audio_paths[:1]:
 		batch, cutpoints, audio = [], [], []
 		ref_path, transcript_path = audio_path + '.txt', audio_path + '.json'
-		if os.path.exists(transcript_path) and args.align:
-			pass
-			#signal_normalized, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = True, dtype = torch.float32)
-			#transcript = json.load(open(transcript_path))
-			#for b, e, channel, ref in [map(r.get, ['begin', 'end', 'channel', 'ref']) for r in transcript]:
-			#	cutpoints.append((b, e, channel))
-			#	batch.append(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)))
-		else:
-			signal, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = False, dtype = torch.int16)
-			signal_normalized = models.normalize_signal(signal, dim = 0)
-			ref = labels.postprocess_transcript(labels.normalize_text(open(ref_path).read())) if os.path.exists(ref_path) else ''
-			for channel, signal_ in enumerate(signal.t()):
-				audio.append(dataset.write_audio(io.BytesIO(), sample_rate, signal_))
-				chunks = dataset.remove_silence(vad, signal_, sample_rate, window_size) if args.vad is not False else [(0, len(signal) / sample_rate)]
-				cutpoints.extend((b, e, channel) for b, e in chunks)
-				batch.extend(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)) for b, e in chunks)
+
+		#if os.path.exists(transcript_path) and args.align:
+		#	signal_normalized, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = True, dtype = torch.float32)
+		#	transcript = json.load(open(transcript_path))
+		#	for b, e, channel, ref in [map(r.get, ['begin', 'end', 'channel', 'ref']) for r in transcript]:
+		#		cutpoints.append((b, e, channel))
+		#		batch.append(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)))
+		#else:
+		
+		signal, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = False, dtype = torch.int16)
+
+		signal_normalized = models.normalize_signal(signal, dim = 0)
+		ref = labels.postprocess_transcript2(labels.normalize_text(open(ref_path).read())) if os.path.exists(ref_path) else ''
+		vad_ = []
+		for channel, signal_ in enumerate(signal.t()):
+			vad_.append(vad.detect_speech(signal_, sample_rate, args.window_size, aggressiveness = args.vad))
+			audio.append(dataset.write_audio(io.BytesIO(), sample_rate, signal_))
+			import IPython; IPython.embed()
+			chunks = [(0, len(signal) / sample_rate)]
+			cutpoints.extend((b, e, channel) for b, e in chunks)
+			batch.extend(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)) for b, e in chunks)
 
 		tic = time.time()
 		_, _, ref, x, xlen, y, ylen = batch_collater(batch)
 		x, xlen, y, ylen = [t.to(args.device) for t in [x, xlen, y, ylen]]
 		x, y, ylen = x.squeeze(1), y.squeeze(1), ylen.squeeze(1)
 		log_probs, output_lengths = model(x, xlen)
+		
+		#TODO: mask with vad
 		decoded = decoder.decode(log_probs, output_lengths)
 		
 		print(args.checkpoint, os.path.basename(audio_path))
@@ -106,8 +105,13 @@ def main(args):
 		
 		ts = torch.linspace(0, 1, steps = log_probs.shape[-1]) * (x.shape[-1] / sample_rate)
 		
-		begin_end = lambda rh: (min(w['begin'] for w in rh), max(w['end'] for w in rh)) if len(rh) > 0 else (0, 0)
-		segments = [[c, r, labels.decode(d, ts, replace_blank = True, replace_repeat = True, channel = c)] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
+		begin_end = lambda rh: (min(w['begin'] for w in rh), max(w['end'] for w in rh)) if len(rh) > 0 else (0, 0) #TODO: add i, j
+	
+		cut = lambda d, b, e, duration = len(signal) / sample_rate: d[int(len(d) * b / duration):(1 + int(len(d) * e / duration))]
+		segments = [[c, r, h] for c, r, h in [[c, [], labels.decode(cut(d, b, e), cut(ts, b, e), channel = c, replace_blank = True, replace_repeat = True, replace_space = False) ] for c, (cutpoints, d, r) in enumerate(zip(vad_, decoded, ref)) for b, e in cutpoints] if h]
+		#segments = [[c, r, labels.decode(d, ts, channel = c, replace_blank = True, replace_repeat = True, replace_space = False)] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
+
+		#import IPython; IPython.embed()
 
 		ref = ' '.join(ref)
 		hyp = ' '.join(w['word'] for c, r, h in segments for w in h)
@@ -128,8 +132,7 @@ def main(args):
 			for i in range(len(y)):
 				segments[i][-2] = []
 		
-		segments = sum([list(resegment(*s, rh = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
-		#import IPython; IPython.embed()
+		#segments = sum([list(resegment(*s, rh = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
 		segments = list(sorted(segments, key = lambda s: begin_end(s[-1] + s[-2]) + (s[0],)))
 
 		html_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.html')
@@ -140,6 +143,10 @@ def main(args):
 
 			html.write('<html><head><meta charset="UTF-8"><style>.m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
 			html.write(f'<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>')
+	
+			if len(audio) > 0:
+				html.write('<figure class="m0"><figcaption>both channels</figcaption><audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio></figure>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode()))
+			
 			html.write(''.join('<figure class="m0"><figcaption>channel #{c}:</figcaption><audio id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio></figure>'.format(c = c, encoded = base64.b64encode(buf.getvalue()).decode()) for c, buf in enumerate(audio)))
 			html.write(f'<pre class="channel"><h3 class="channel0 channel">hyp #0:<span></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span></span></h3></pre><hr/>')
 			html.write('<table style="width:100%"><thead><th>begin</th><th>end</th><th style="width:50%">hyp</th><th style="width:50%">ref</th><th>begin</th><th>end</th></tr></thead><tbody>')
@@ -199,4 +206,6 @@ if __name__ == '__main__':
 	parser.add_argument('--verbose', action = 'store_true')
 	parser.add_argument('--stereo', action = 'store_true')
 	args = parser.parse_args()
+	args.vad = args.vad if isinstance(args.vad, int) else 3
+	
 	main(args)

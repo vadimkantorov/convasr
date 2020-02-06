@@ -33,7 +33,6 @@ if __name__ == '__main__':
 	cmd.add_argument('--audio-file-name', required = True)
 	cmd.set_defaults(func = subset1)
 
-	
 	cmd = subparsers.add_parser('subset2')
 	cmd.add_argument('refhyp')
 	cmd.add_argument('--arg', required = True, choices = ['cer', 'mer', 'der', 'wer'])
@@ -44,4 +43,3 @@ if __name__ == '__main__':
 	args = vars(parser.parse_args())
 	func = args.pop('func')
 	func(**args)
-

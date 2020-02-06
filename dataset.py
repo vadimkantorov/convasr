@@ -51,8 +51,7 @@ class BatchCollater:
 			for j, t in enumerate(targets):
 				y[k, j, :t.shape[-1]] = t
 				ylen[k, j] = len(t)
-		dataset_name_, audio_path_, ref, *_ = zip(*batch)
-		return dataset_name_, audio_path_, ref, x, xlen, y, ylen
+		return tuple(zip(*batch))[:3] + (x, xlen, y, ylen)
 
 class BucketingBatchSampler(torch.utils.data.Sampler):
 	def __init__(self, dataset, bucket, batch_size = 1, mixing = None):
@@ -137,17 +136,17 @@ class Labels:
 		if ts is None:
 			return decode_(0, len(idx) - 1)
 
+		pad = [self.space_idx] if replace_blank is False else [self.space_idx, self.blank_idx]
+		
 		words, i = [], None
 		for j, k in enumerate(idx + [self.space_idx]):
 			if k == self.space_idx and i is not None:
-				#j__ = j
-				while j == len(idx) or (j > 0 and idx[j] in [self.space_idx, self.blank_idx]):
+				while j == len(idx) or (j > 0 and idx[j] in pad):
 					j -= 1
-
+				
 				i_, j_ = int(i if I is None else I[i]), int(j if I is None else I[j])
-				#if j_ < i_:
-				#	import IPython; IPython.embed()
 				words.append(dict(word = decode_(i, j), begin = float(ts[i_]), end = float(ts[j_]), i = i_, j = j_, channel = channel))
+
 				i = None
 			elif k not in [self.space_idx, self.blank_idx] and i is None:
 				i = j
@@ -167,17 +166,16 @@ class Labels:
 			word = ''.join(c if i == 0 or c != self.repeat else word[i - 1] for i, c in enumerate(word))
 		return word
 
-	def postprocess_transcript(self, text, phonetic_replace_groups = []):
-		replaceblank = lambda s: s.replace(self.blank * 10, ' ').replace(self.blank, '')
-		replace2 = lambda s: ''.join(c if i == 0 or c != self.repeat else s[i - 1] for i, c in enumerate(s))
-		replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
-		replacestar = lambda s: s.replace('*', '')
-		replacespace = lambda s, sentencepiece_space = '\u2581', sentencepiece_unk = '<unk>': s.replace(sentencepiece_space, ' ')
-		replacecap = lambda s: ''.join(c + ' ' if c.isupper() else c for c in s)
-		replacephonetic = lambda s: s.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g.lower()})
-		replacepunkt = lambda s: s.replace(',', '').replace('.', '')
-
-		return functools.reduce(lambda text, func: func(text), [replacepunkt, replacespace, replacecap, replaceblank, replace2, replace22, replacestar, replacephonetic, str.strip], text)
+	#def postprocess_transcript(self, text, phonetic_replace_groups = []):
+	#	replaceblank = lambda s: s.replace(self.blank * 10, ' ').replace(self.blank, '')
+	#	replace2 = lambda s: ''.join(c if i == 0 or c != self.repeat else s[i - 1] for i, c in enumerate(s))
+	#	replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
+	#	replacestar = lambda s: s.replace('*', '')
+	#	replacespace = lambda s, sentencepiece_space = '\u2581', sentencepiece_unk = '<unk>': s.replace(sentencepiece_space, ' ')
+	#	replacecap = lambda s: ''.join(c + ' ' if c.isupper() else c for c in s)
+	#	replacephonetic = lambda s: s.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g.lower()})
+	#	replacepunkt = lambda s: s.replace(',', '').replace('.', '')
+	#	return functools.reduce(lambda text, func: func(text), [replacepunkt, replacespace, replacecap, replaceblank, replace2, replace22, replacestar, replacephonetic, str.strip], text)
 
 	def __getitem__(self, idx):
 		return {self.blank_idx : self.blank, self.repeat_idx : self.repeat, self.space_idx : self.space}.get(idx) or (self.alphabet[idx] if self.bpe is None else self.bpe.IdToPiece(idx))
@@ -218,21 +216,4 @@ def write_audio(audio_path, sample_rate, signal):
 	return audio_path
 
 def resample(signal, sample_rate_, sample_rate):
-	return torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate)), sample_rate
-
-def remove_silence(vad, signal, sample_rate, window_size):
-	frame_len = int(window_size * sample_rate)
-	voice = [False]
-	voice.extend(vad.is_speech(signal[sample_idx : sample_idx + frame_len].numpy().tobytes(), sample_rate) if sample_idx + frame_len <= len(signal) else False for sample_idx in range(0, len(signal), frame_len))
-	voice.append(False)
-	voice = torch.tensor(voice)
-	voice, _voice = voice[1:], voice[:-1]
-	
-	# 1. merge if gap < 1 sec
-	# 2. remove if len < 0.5 sec
-	# 3. filter by energy
-	# 4. cut sends by energy
-
-	
-	begin_end = list(zip((~_voice & voice).nonzero().squeeze(1).tolist(), (~voice & _voice).nonzero().squeeze(1).tolist()))
-	return ((frame_len * torch.IntTensor(begin_end)).float() / sample_rate).int().tolist()
+	return torch.from_numpy(librosa.resample(signal.t().numpy(), sample_rate_, sample_rate)).t(), sample_rate
