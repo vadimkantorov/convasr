@@ -27,7 +27,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		signal, sample_rate = read_audio(audio_path, sample_rate = self.sample_rate, mono = True) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
 		signal = signal.t()
 		# int16 or float?
-		features = self.frontend(signal, waveform_transform_debug = lambda audio_path, sample_rate, signal: write_wav(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav')) if self.waveform_transform_debug_dir else None).squeeze(0) if self.frontend is not None else signal
+		features = self.frontend(signal, waveform_transform_debug = lambda audio_path, sample_rate, signal: write_audio(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), sample_rate, signal) if self.waveform_transform_debug_dir else None).squeeze(0) if self.frontend is not None else signal
 		ref_normalized = self.labels[0].encode(ref)[0]
 		targets = [labels.encode(ref)[1] for labels in self.labels]
 		return [dataset_name, audio_path, ref_normalized, features] + targets

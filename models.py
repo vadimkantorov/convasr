@@ -361,8 +361,7 @@ def entropy(log_probs, lengths = None, dim = 1, eps = 1e-9, sum = True, keepdim 
 	return (e.sum(dim = -1) / (eps + lengths.type_as(log_probs)) if lengths is not None else e.mean(dim = -1)) if sum else e
 
 def margin(log_probs, dim = 1):
-	probs = log_probs.exp()
-	return torch.sub(*probs.topk(2, dim = dim).values)
+	return torch.sub(*log_probs.exp().topk(2, dim = dim).values)
 
 def compute_output_lengths(x, lengths_fraction):
 	return (lengths_fraction * x.shape[-1]).ceil().long() if lengths_fraction is not None else torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.long)
@@ -384,17 +383,14 @@ class reset_bn_running_stats(nn.Module):
 	def __init__(self, model):
 		super().__init__()
 		self.model = model
-		self.n = 0
 		self.bn = [module for module in self.model.modules() if isinstance(module, nn.modules.batchnorm._BatchNorm)]
 		for bn in self.bn:
 			bn.running_mean = torch.zeros_like(bn.running_mean)
 			bn.running_var = torch.ones_like(bn.running_var)
+			bn.momentum = None
 			bn.train()
 
 	def forward(self, x, *args, **kwargs):
-		for bn in self.bn:
-			bn.momentum = len(x) / (self.n + len(x))
-		self.n += len(x)
 		return self.model(x, *args, **kwargs)
 
 def data_parallel(model, optimizer = None, opt_level = None, **kwargs):
@@ -405,3 +401,7 @@ def data_parallel(model, optimizer = None, opt_level = None, **kwargs):
 	model.forward = lambda *args, old_fwd = model.forward, input_caster = lambda tensor: tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_type']) if tensor.is_floating_point() else tensor, output_caster = lambda tensor: (tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_outputs'] if apex.amp._amp_state.opt_properties.options.get('cast_model_outputs') is not None else torch.float32)) if tensor.is_floating_point() else tensor, **kwargs: apex.amp._initialize.applier(old_fwd(*apex.amp._initialize.applier(args, input_caster), **apex.amp._initialize.applier(kwargs, input_caster)), output_caster)
 	return model, optimizer
 
+def silence_space_mask(log_probs, speech, blank_idx, space_idx):
+	greedy_decoded = log_probs.max(dim = 1).indices
+	silence = ~speech & (greedy_decoded == blank_idx)
+	return silence[:, None, :] * (~F.one_hot(torch.tensor(space_idx), log_probs.shape[1]).to(device = silence.device, dtype = silence.dtype))[None, :, None]

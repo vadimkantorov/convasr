@@ -11,6 +11,8 @@
 # mix vad output for filtering full output
 # filter vad output
 
+#segments = [[c, b_, e_, r, t_] for (b, e, c), d, r in zip(cutpoints, decoded, ref) for b_, e_, t_ in segment_transcript(labels, d, b, e, args.max_segment_seconds)] if args.vad is not False else [[c, b, e, r, labels.postprocess_transcript(labels.decode(d)[0])] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
+
 import os
 import io
 import time
@@ -80,38 +82,40 @@ def main(args):
 
 		signal_normalized = models.normalize_signal(signal, dim = 0)
 		ref = labels.postprocess_transcript2(labels.normalize_text(open(ref_path).read())) if os.path.exists(ref_path) else ''
-		vad_ = []
+		speech = []
 		for channel, signal_ in enumerate(signal.t()):
-			vad_.append(vad.detect_speech(signal_, sample_rate, args.window_size, aggressiveness = args.vad))
+			speech.append(vad.detect_speech(signal_, sample_rate, args.window_size, aggressiveness = args.vad))
 			audio.append(dataset.write_audio(io.BytesIO(), sample_rate, signal_))
-			import IPython; IPython.embed()
-			chunks = [(0, len(signal) / sample_rate)]
-			cutpoints.extend((b, e, channel) for b, e in chunks)
-			batch.extend(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)) for b, e in chunks)
+			b, e = 0, len(signal) / sample_rate
+			cutpoints.append((b, e, channel))
+			batch.append(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)))
 
 		tic = time.time()
 		_, _, ref, x, xlen, y, ylen = batch_collater(batch)
 		x, xlen, y, ylen = [t.to(args.device) for t in [x, xlen, y, ylen]]
 		x, y, ylen = x.squeeze(1), y.squeeze(1), ylen.squeeze(1)
 		log_probs, output_lengths = model(x, xlen)
-		
-		#TODO: mask with vad
+	
+
+		speech_ = torch.stack([s.reshape(-1, 160).min(dim = -1).values for s in speech])
+		speech_ = F.pad(speech_, [0, log_probs.shape[-1] - speech_.shape[-1]]).to(log_probs.device)
+		log_probs.masked_fill_(models.silence_space_mask(log_probs, speech_, space_idx = labels.space_idx, blank_idx = labels.blank_idx), float('-inf'))
+
 		decoded = decoder.decode(log_probs, output_lengths)
 		
 		print(args.checkpoint, os.path.basename(audio_path))
 		print('Time: audio {audio:.02f} sec | voice {voice:.02f} sec | processing {processing:.02f} sec'.format(audio = signal.numel() / sample_rate, voice = sum(e - b for b, e, c in cutpoints), processing = time.time() - tic))
 
-		#segments = [[c, b_, e_, r, t_] for (b, e, c), d, r in zip(cutpoints, decoded, ref) for b_, e_, t_ in segment_transcript(labels, d, b, e, args.max_segment_seconds)] if args.vad is not False else [[c, b, e, r, labels.postprocess_transcript(labels.decode(d)[0])] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
 		
 		ts = torch.linspace(0, 1, steps = log_probs.shape[-1]) * (x.shape[-1] / sample_rate)
 		
 		begin_end = lambda rh: (min(w['begin'] for w in rh), max(w['end'] for w in rh)) if len(rh) > 0 else (0, 0) #TODO: add i, j
 	
 		cut = lambda d, b, e, duration = len(signal) / sample_rate: d[int(len(d) * b / duration):(1 + int(len(d) * e / duration))]
-		segments = [[c, r, h] for c, r, h in [[c, [], labels.decode(cut(d, b, e), cut(ts, b, e), channel = c, replace_blank = True, replace_repeat = True, replace_space = False) ] for c, (cutpoints, d, r) in enumerate(zip(vad_, decoded, ref)) for b, e in cutpoints] if h]
-		#segments = [[c, r, labels.decode(d, ts, channel = c, replace_blank = True, replace_repeat = True, replace_space = False)] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
-
-		#import IPython; IPython.embed()
+		
+		#segments = [[c, r, h] for c, r, h in [[c, [], labels.decode(cut(d, b, e), cut(ts, b, e), channel = c, replace_blank = True, replace_repeat = True, replace_space = False) ] for c, (cutpoints, d, r) in enumerate(zip(speech, decoded, ref)) for b, e in cutpoints] if h]
+		
+		segments = [[c, r, labels.decode(d, ts, channel = c, replace_blank = True, replace_repeat = True, replace_space = False)] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
 
 		ref = ' '.join(ref)
 		hyp = ' '.join(w['word'] for c, r, h in segments for w in h)
@@ -132,7 +136,7 @@ def main(args):
 			for i in range(len(y)):
 				segments[i][-2] = []
 		
-		#segments = sum([list(resegment(*s, rh = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
+		segments = sum([list(resegment(*s, rh = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
 		segments = list(sorted(segments, key = lambda s: begin_end(s[-1] + s[-2]) + (s[0],)))
 
 		html_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.html')
