@@ -22,17 +22,17 @@ def subset(input_path, output_path, audio_file_name, arg, min, max):
 def cut(input_path, output_path, sample_rate, window_size, aggressiveness, min_duration, max_duration):
 	os.makedirs(output_path, exist_ok = True)
 	signal, sample_rate = dataset.read_audio(input_path, sample_rate, normalize = False, dtype = torch.int16)
+	speech = vad.detect_speech(signal, sample_rate, window_size, aggressiveness)
 
 	# ensure can expand and half-expand
-	for channel, signal_ in enumerate(signal.t()):
-		speech = vad.detect_speech(signal, sample_rate, window_size, aggressiveness)
-		segments = vad.segment(speech, max_duration = max_duration)
+	for c, channel in enumerate(signal.t()):
+		segments = vad.segment(speech[:, c], max_duration = max_duration)
 		for s in segments:
 			begin, end = s['i'] / sample_rate, s['j'] / sample_rate
 			duration = end - begin
 			if min_duration <= duration <= max_duration:
-				output_file_name = os.path.basename(input_path) + f'.{channel}.{begin:.06f}-{end:.06f}.wav'
-				dataset.write_audio(os.path.join(output_path, output_file_name), sample_rate, signal_[s['i'] : 1 + s['j']])
+				output_file_name = os.path.basename(input_path) + f'.{c}-{begin:.06f}-{end:.06f}.wav'
+				dataset.write_audio(os.path.join(output_path, output_file_name), sample_rate, channel[s['i'] : 1 + s['j']])
 		
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()

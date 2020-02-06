@@ -118,6 +118,7 @@ class JasperNet(nn.Module):
 
 	def forward(self, x, xlen = None, y = None, ylen = None):
 		x = self.frontend(x.squeeze(1))
+		print('in model', x.shape)
 		residual = []
 		for i, subblock in enumerate(self.backbone):
 			x = subblock(x, residual = residual, lengths_fraction = xlen)

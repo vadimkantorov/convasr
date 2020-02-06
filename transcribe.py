@@ -52,7 +52,7 @@ def main(args):
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window)
 	labels = dataset.Labels(importlib.import_module(checkpoint['args']['lang']), name = 'char')
 	model = getattr(models, checkpoint['args']['model'])(args.num_input_features, [len(labels)], frontend = frontend, dict = lambda logits, log_probs, output_lengths, **kwargs: (logits[0], output_lengths[0]))
-	model.load_state_dict(checkpoint['model_state_dict'], strict = False) #TODO: figure out problems with frontend
+	model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 	model = model.to(args.device)
 	model.eval()
 	model.fuse_conv_bn_eval()
@@ -66,26 +66,17 @@ def main(args):
 	for audio_path in audio_paths[:1]:
 		batch, cutpoints, audio = [], [], []
 		ref_path, transcript_path = audio_path + '.txt', audio_path + '.json'
-
-		#if os.path.exists(transcript_path) and args.align:
-		#	signal_normalized, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = True, dtype = torch.float32)
-		#	transcript = json.load(open(transcript_path))
-		#	for b, e, channel, ref in [map(r.get, ['begin', 'end', 'channel', 'ref']) for r in transcript]:
-		#		cutpoints.append((b, e, channel))
-		#		batch.append(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)))
-		#else:
 		
 		signal, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = False, dtype = torch.int16)
 
 		signal_normalized = models.normalize_signal(signal, dim = 0)
 		ref = labels.postprocess_transcript2(labels.normalize_text(open(ref_path).read())) if os.path.exists(ref_path) else ''
-		speech = []
+		speech = vad.detect_speech(signal, sample_rate, args.window_size, aggressiveness = args.vad)
+
 		for channel, signal_ in enumerate(signal.t()):
-			speech.append(vad.detect_speech(signal_, sample_rate, args.window_size, aggressiveness = args.vad))
 			audio.append(dataset.write_audio(io.BytesIO(), sample_rate, signal_))
-			b, e = 0, len(signal) / sample_rate
-			cutpoints.append((b, e, channel))
-			batch.append(example(audio_path, signal_normalized, b, e, sample_rate, channel, *labels.encode(ref)))
+			cutpoints.append((0, len(signal) / sample_rate, channel))
+			batch.append(example(audio_path, signal_normalized, 0, len(signal), 1, channel, *labels.encode(ref)))
 
 		tic = time.time()
 		_, _, ref, x, xlen, y, ylen = batch_collater(batch)
@@ -93,10 +84,14 @@ def main(args):
 		x, y, ylen = x.squeeze(1), y.squeeze(1), ylen.squeeze(1)
 		log_probs, output_lengths = model(x, xlen)
 	
+		speech = F.interpolate(speech.t()[:, None, :].float(), (log_probs.shape[-1], )).squeeze(1).t().round().bool()
+
 		speech = torch.stack([s.reshape(-1, 160).min(dim = -1).values for s in speech])
 		speech = F.pad(speech_, [0, log_probs.shape[-1] - speech.shape[-1]]).to(log_probs.device)
-		log_probs.masked_fill_(models.silence_space_mask(log_probs, speech, space_idx = labels.space_idx, blank_idx = labels.blank_idx), float('-inf'))
+		
 
+
+		log_probs.masked_fill_(models.silence_space_mask(log_probs, speech, space_idx = labels.space_idx, blank_idx = labels.blank_idx), float('-inf'))
 		decoded = decoder.decode(log_probs, output_lengths)
 		
 		print(args.checkpoint, os.path.basename(audio_path))
@@ -107,9 +102,6 @@ def main(args):
 		
 		begin_end = lambda rh: (min(w['begin'] for w in rh), max(w['end'] for w in rh)) if len(rh) > 0 else (0, 0) #TODO: add i, j
 	
-		#cut = lambda d, b, e, duration = len(signal) / sample_rate: d[int(len(d) * b / duration):(1 + int(len(d) * e / duration))]
-		#segments = [[c, r, h] for c, r, h in [[c, [], labels.decode(cut(d, b, e), cut(ts, b, e), channel = c, replace_blank = True, replace_repeat = True, replace_space = False) ] for c, (cutpoints, d, r) in enumerate(zip(speech, decoded, ref)) for b, e in cutpoints] if h]
-		
 		segments = [[c, r, labels.decode(d, ts, channel = c, replace_blank = True, replace_repeat = True, replace_space = False)] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
 
 		ref = ' '.join(ref)
@@ -140,15 +132,12 @@ def main(args):
 			fmt_words = lambda rh: rh if isinstance(rh, str) else ' '.join(fmt_link(**w) for w in rh) if len(rh) > 0 and isinstance(rh[0], dict) else ' '.join(rh)
 			fmt_begin_end = 'data-begin="{}" data-end="{}"'.format
 
-			html.write('<html><head><meta charset="UTF-8"><style>.m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
-			html.write(f'<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>')
-	
-			if len(audio) > 0:
-				html.write('<figure class="m0"><figcaption>both channels</figcaption><audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio></figure>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode()))
-			
+			html.write(f'''<html><head><meta charset="UTF-8"><style>.m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>
+			<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>''')
+			html.write('<figure class="m0"><figcaption>both channels</figcaption><audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio></figure>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode()) if len(audio) > 1 else '')
 			html.write(''.join('<figure class="m0"><figcaption>channel #{c}:</figcaption><audio id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio></figure>'.format(c = c, encoded = base64.b64encode(buf.getvalue()).decode()) for c, buf in enumerate(audio)))
-			html.write(f'<pre class="channel"><h3 class="channel0 channel">hyp #0:<span></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span></span></h3></pre><hr/>')
-			html.write('<table style="width:100%"><thead><th>begin</th><th>end</th><th style="width:50%">hyp</th><th style="width:50%">ref</th><th>begin</th><th>end</th></tr></thead><tbody>')
+			html.write(f'''<pre class="channel"><h3 class="channel0 channel">hyp #0:<span></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span></span></h3></pre><hr/>
+			<table style="width:100%"><thead><th>begin</th><th>end</th><th style="width:50%">hyp</th><th style="width:50%">ref</th><th>begin</th><th>end</th></tr></thead><tbody>''')
 			html.write(''.join(f'<tr class="channel{c}"><td class="top">{fmt_link(0, c, *begin_end(h))}</td><td class="top">{fmt_link(1, c, *begin_end(h))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(*begin_end(h))}>{fmt_words(h)}</td>' + (f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(*begin_end(r))}>{fmt_words(r)}</td><td class="top">{fmt_link(0,c, *begin_end(r))}</td><td class="top">{fmt_link(1, c, *begin_end(r))}</td>' if r else '<td></td>' * 3) + f'</tr>' for c, r, h in segments))
 			html.write('''</tbody></table><script>
 				function play(channel, begin, end)
@@ -159,7 +148,7 @@ def main(args):
 					audio.dataset.endTime = end;
 					audio.play();
 					return false;
-				};
+				}
 
 				Array.from(document.querySelectorAll('audio')).map(audio => 
 				{
