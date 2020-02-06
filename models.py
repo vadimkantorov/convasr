@@ -118,7 +118,6 @@ class JasperNet(nn.Module):
 
 	def forward(self, x, xlen = None, y = None, ylen = None):
 		x = self.frontend(x.squeeze(1))
-		print('in model', x.shape)
 		residual = []
 		for i, subblock in enumerate(self.backbone):
 			x = subblock(x, residual = residual, lengths_fraction = xlen)
@@ -404,5 +403,5 @@ def data_parallel(model, optimizer = None, opt_level = None, **kwargs):
 
 def silence_space_mask(log_probs, speech, blank_idx, space_idx):
 	greedy_decoded = log_probs.max(dim = 1).indices
-	silence = ~speech & (greedy_decoded == blank_idx)
+	silence = ~speech.t() & (greedy_decoded == blank_idx)
 	return silence[:, None, :] * (~F.one_hot(torch.tensor(space_idx), log_probs.shape[1]).to(device = silence.device, dtype = silence.dtype))[None, :, None]

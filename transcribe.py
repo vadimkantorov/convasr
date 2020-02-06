@@ -29,18 +29,7 @@ import metrics
 import decoders
 import ctc
 import vad
-
-def resegment(c, r, h, rh, max_segment_seconds):
-	rh_ = lambda rh, i, w, first, last: [(k, u) for k, u in enumerate(rh) if (first or i is None or u['begin'] >= rh[i]['end']) and (last or u['end'] <= w['end'])]
-	rhk = [r, h].index(rh)
-	i = [None, None]
-	for j, w in enumerate(rh):
-		if j == len(rh) - 1 or w['end'] - rh[i[rhk] or 0]['end'] > max_segment_seconds:
-			first_last = dict(first = i[rhk] is None, last = j == len(rh) - 1)
-			r_ = rh_(r, i[0], rh[j], **first_last); rk, r_ = zip(*r_) if r_ else ([i[0]], [])
-			h_ = rh_(h, i[1], rh[j], **first_last); hk, h_ = zip(*h_) if h_ else ([i[1]], [])
-			i = (rk[-1], hk[-1])
-			yield [c, list(r_), list(h_)]
+import segment
 
 @torch.no_grad()
 def main(args):
@@ -63,7 +52,7 @@ def main(args):
 	example = lambda audio_path, signal, b, e, sample_rate, channel, ref_normalized, targets: (os.path.basename(os.path.dirname(audio_path)), audio_path, ref_normalized, signal[None, int(b * sample_rate):int(e * sample_rate), channel], targets)	
 
 	audio_paths = [args.data_path] if os.path.isfile(args.data_path) else [os.path.join(args.data_path, f) for f in os.listdir(args.data_path) if any(map(f.endswith, args.ext))]
-	for audio_path in audio_paths[:1]:
+	forimport segment audio_path in audio_paths[:1]:
 		batch, cutpoints, audio = [], [], []
 		ref_path, transcript_path = audio_path + '.txt', audio_path + '.json'
 		
@@ -84,13 +73,7 @@ def main(args):
 		x, y, ylen = x.squeeze(1), y.squeeze(1), ylen.squeeze(1)
 		log_probs, output_lengths = model(x, xlen)
 	
-		speech = F.interpolate(speech.t()[:, None, :].float(), (log_probs.shape[-1], )).squeeze(1).t().round().bool()
-
-		speech = torch.stack([s.reshape(-1, 160).min(dim = -1).values for s in speech])
-		speech = F.pad(speech_, [0, log_probs.shape[-1] - speech.shape[-1]]).to(log_probs.device)
-		
-
-
+		speech = F.interpolate(speech.t()[:, None, :].float(), (log_probs.shape[-1], )).squeeze(1).t().round().bool().to(log_probs.device)
 		log_probs.masked_fill_(models.silence_space_mask(log_probs, speech, space_idx = labels.space_idx, blank_idx = labels.blank_idx), float('-inf'))
 		decoded = decoder.decode(log_probs, output_lengths)
 		
@@ -123,7 +106,7 @@ def main(args):
 			for i in range(len(y)):
 				segments[i][-2] = []
 		
-		segments = sum([list(resegment(*s, rh = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
+		segments = sum([list(segment.resegment(*s, rh = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
 		segments = list(sorted(segments, key = lambda s: begin_end(s[-1] + s[-2]) + (s[0],)))
 
 		html_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.html')
@@ -132,8 +115,8 @@ def main(args):
 			fmt_words = lambda rh: rh if isinstance(rh, str) else ' '.join(fmt_link(**w) for w in rh) if len(rh) > 0 and isinstance(rh[0], dict) else ' '.join(rh)
 			fmt_begin_end = 'data-begin="{}" data-end="{}"'.format
 
-			html.write(f'''<html><head><meta charset="UTF-8"><style>.m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>
-			<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>''')
+			html.write('<html><head><meta charset="UTF-8"><style>.m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
+			html.write(f'<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>')
 			html.write('<figure class="m0"><figcaption>both channels</figcaption><audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio></figure>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode()) if len(audio) > 1 else '')
 			html.write(''.join('<figure class="m0"><figcaption>channel #{c}:</figcaption><audio id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio></figure>'.format(c = c, encoded = base64.b64encode(buf.getvalue()).decode()) for c, buf in enumerate(audio)))
 			html.write(f'''<pre class="channel"><h3 class="channel0 channel">hyp #0:<span></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span></span></h3></pre><hr/>
@@ -176,8 +159,8 @@ def main(args):
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--checkpoint', required = True)
-	parser.add_argument('-i', '--data-path', required = True)
-	parser.add_argument('-o', '--output-path', required = True)
+	parser.add_argument('--data-path', '-i', required = True)
+	parser.add_argument('--output-path', '-o', required = True)
 	parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
 	parser.add_argument('--max-segment-seconds', type = float, default = 2)
 	parser.add_argument('--num-workers', type = int, default = 32)
