@@ -35,10 +35,7 @@ def resegment(c, r, h, rh, max_segment_seconds):
 	rhk = [r, h].index(rh)
 	i = [None, None]
 	for j, w in enumerate(rh):
-		#if c == 0:
-		#	print(rh[i[rhk] or 0]['end'], w['end'])
 		if j == len(rh) - 1 or w['end'] - rh[i[rhk] or 0]['end'] > max_segment_seconds:
-		#	print('cut')
 			first_last = dict(first = i[rhk] is None, last = j == len(rh) - 1)
 			r_ = rh_(r, i[0], rh[j], **first_last); rk, r_ = zip(*r_) if r_ else ([i[0]], [])
 			h_ = rh_(h, i[1], rh[j], **first_last); hk, h_ = zip(*h_) if h_ else ([i[1]], [])
@@ -96,10 +93,9 @@ def main(args):
 		x, y, ylen = x.squeeze(1), y.squeeze(1), ylen.squeeze(1)
 		log_probs, output_lengths = model(x, xlen)
 	
-
-		speech_ = torch.stack([s.reshape(-1, 160).min(dim = -1).values for s in speech])
-		speech_ = F.pad(speech_, [0, log_probs.shape[-1] - speech_.shape[-1]]).to(log_probs.device)
-		log_probs.masked_fill_(models.silence_space_mask(log_probs, speech_, space_idx = labels.space_idx, blank_idx = labels.blank_idx), float('-inf'))
+		speech = torch.stack([s.reshape(-1, 160).min(dim = -1).values for s in speech])
+		speech = F.pad(speech_, [0, log_probs.shape[-1] - speech.shape[-1]]).to(log_probs.device)
+		log_probs.masked_fill_(models.silence_space_mask(log_probs, speech, space_idx = labels.space_idx, blank_idx = labels.blank_idx), float('-inf'))
 
 		decoded = decoder.decode(log_probs, output_lengths)
 		
@@ -111,8 +107,7 @@ def main(args):
 		
 		begin_end = lambda rh: (min(w['begin'] for w in rh), max(w['end'] for w in rh)) if len(rh) > 0 else (0, 0) #TODO: add i, j
 	
-		cut = lambda d, b, e, duration = len(signal) / sample_rate: d[int(len(d) * b / duration):(1 + int(len(d) * e / duration))]
-		
+		#cut = lambda d, b, e, duration = len(signal) / sample_rate: d[int(len(d) * b / duration):(1 + int(len(d) * e / duration))]
 		#segments = [[c, r, h] for c, r, h in [[c, [], labels.decode(cut(d, b, e), cut(ts, b, e), channel = c, replace_blank = True, replace_repeat = True, replace_space = False) ] for c, (cutpoints, d, r) in enumerate(zip(speech, decoded, ref)) for b, e in cutpoints] if h]
 		
 		segments = [[c, r, labels.decode(d, ts, channel = c, replace_blank = True, replace_repeat = True, replace_space = False)] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
