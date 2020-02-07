@@ -401,7 +401,8 @@ def data_parallel(model, optimizer = None, opt_level = None, **kwargs):
 	model.forward = lambda *args, old_fwd = model.forward, input_caster = lambda tensor: tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_type']) if tensor.is_floating_point() else tensor, output_caster = lambda tensor: (tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_outputs'] if apex.amp._amp_state.opt_properties.options.get('cast_model_outputs') is not None else torch.float32)) if tensor.is_floating_point() else tensor, **kwargs: apex.amp._initialize.applier(old_fwd(*apex.amp._initialize.applier(args, input_caster), **apex.amp._initialize.applier(kwargs, input_caster)), output_caster)
 	return model, optimizer
 
-def silence_space_mask(log_probs, speech, blank_idx, space_idx):
+def silence_space_mask(log_probs, speech, blank_idx, space_idx, kernel_size = 101):
+	# major dilation
 	greedy_decoded = log_probs.max(dim = 1).indices
 	silence = ~speech & (greedy_decoded == blank_idx)
 	return silence[:, None, :] * (~F.one_hot(torch.tensor(space_idx), log_probs.shape[1]).to(device = silence.device, dtype = silence.dtype))[None, :, None]

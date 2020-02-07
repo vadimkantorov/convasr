@@ -5,32 +5,31 @@ import webrtcvad
 #goals:
 # augmenting decoding
 # batching
-# cuts for dataset creation
+# cuts for model-less dataset creation
 # diarization?
 
-def detect_speech(signal, sample_rate, window_size, aggressiveness):
+def detect_speech(signal, sample_rate, window_size, aggressiveness, postproc = lambda speech: speech):
 	vad = webrtcvad.Vad(aggressiveness)
 	frame_len = int(window_size * sample_rate)
-	return torch.as_tensor([[len(chunk) == frame_len and vad.is_speech(bytearray(chunk.numpy()), sample_rate) for chunk in channel.split(frame_len)] for channel in signal]).repeat_interleave(frame_len, dim = -1)[:, :signal.shape[1]]
-	
-# does not filter anything out, can only merge
-def segment(speech, max_duration = None):
-	_notspeech_ = ~F.pad(speech, [1, 1])
-	(begin,), (end,) = (speech & _notspeech_[:-2]).nonzero(as_tuple = True), (speech & _notspeech_[2:]).nonzero(as_tuple = True)
-	
-	#sec = lambda k: k / len(idx) * (e - b)
-	#i = 0
-	#for j in range(1, 1 + len(idx)):
-	#	if j == len(idx) or (idx[j] == labels.space_idx and sec(j - 1) - sec(i) > max_segment_seconds):
-	#		yield (b + sec(i), b + sec(j - 1), labels.postprocess_transcript(labels.decode(idx[i:j])[0]))
-	#		i = j + 1
-	
-	return [dict(i = i, j = j) for i, j in zip(begin.tolist(), end.tolist())]
+	speech = torch.as_tensor([[len(chunk) == frame_len and vad.is_speech(bytearray(chunk.numpy()), sample_rate) for chunk in channel.split(frame_len)] for channel in signal])
+	speech = postproc(speech)
+	return speech.repeat_interleave(frame_len, dim = -1)[:, :signal.shape[1]]
 
-	#begin_end_ = ((frame_len * torch.IntTensor(begin_end)).float() / sample_rate).tolist()
+def postprocess_cut(speech):
+	#  expand a bit, 
 	
 	# 1. merge if gap < 1 sec
 	# 2. remove if len < 0.5 sec
 	# 3. filter by energy
 	# 4. cut sends by energy
 	
+	pass
+
+def postprocess_batching(speech):
+	# expand a lot
+	# cut by max length
+	pass
+
+def postprocess_decoding(speech):
+	kernel_size = 101
+	return F.max_pool1d(speech.unsqueeze(1).float(), stride = 1, kernel_size = kernel_size, padding = kernel_size // 2).squeeze(1).to(speech.dtype)

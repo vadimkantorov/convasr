@@ -5,6 +5,7 @@ import torch
 import sentencepiece
 import dataset
 import vad
+import segmentation
 
 def bpetrain(input_path, output_prefix, vocab_size, model_type, max_sentencepiece_length):
 	sentencepiece.SentencePieceTrainer.Train(f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size} --model_type={model_type}' + (f' --max_sentencepiece_length={max_sentencepiece_length}' if max_sentencepiece_length else ''))
@@ -26,11 +27,9 @@ def cut(input_path, output_path, sample_rate, window_size, aggressiveness, min_d
 
 	# ensure can expand and half-expand
 	for c, channel in enumerate(signal):
-		segments = vad.segment(speech[c], max_duration = max_duration)
+		segments = segmentation.segment(speech[c], sample_rate = sample_rate)
 		for s in segments:
-			begin, end = s['i'] / sample_rate, s['j'] / sample_rate
-			duration = end - begin
-			if min_duration <= duration <= max_duration:
+			if min_duration <= s['end'] - s['begin'] <= max_duration:
 				output_file_name = os.path.basename(input_path) + f'.{c}-{begin:.06f}-{end:.06f}.wav'
 				dataset.write_audio(os.path.join(output_path, output_file_name), channel[s['i'] : 1 + s['j']], sample_rate)
 		

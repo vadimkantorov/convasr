@@ -11,8 +11,6 @@
 # mix vad output for filtering full output
 # filter vad output
 
-#segments = [[c, b_, e_, r, t_] for (b, e, c), d, r in zip(cutpoints, decoded, ref) for b_, e_, t_ in segment_transcript(labels, d, b, e, args.max_segment_seconds)] if args.vad is not False else [[c, b, e, r, labels.postprocess_transcript(labels.decode(d)[0])] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
-
 import os
 import io
 import time
@@ -28,7 +26,7 @@ import metrics
 import decoders
 import ctc
 import vad
-import segment
+import segmentation
 
 @torch.no_grad()
 def main(args):
@@ -57,13 +55,18 @@ def main(args):
 		
 		signal, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = False, dtype = torch.int16)
 		signal_normalized = models.normalize_signal(signal, dim = -1)
-		ref = labels.postprocess_transcript2(labels.normalize_text(open(ref_path).read())) if os.path.exists(ref_path) else ''
+		ref = labels.normalize_text(open(ref_path).read()) if os.path.exists(ref_path) else ''
 		speech = vad.detect_speech(signal, sample_rate, args.window_size, aggressiveness = args.vad)
 
+		# TODO: batch using VAD
+
 		for c, channel in enumerate(signal):
-			audio.append(dataset.write_audio(io.BytesIO(), channel, sample_rate))
+			audio.append(dataset.write_audio(io.BytesIO(), channel, sample_rate).getvalue())
 			cutpoints.append((0, signal.shape[1] / sample_rate, c))
 			batch.append(example(audio_path, signal_normalized, 0, signal.shape[1], c, 1, *labels.encode(ref)))
+
+		if len(signal) > 1:
+			audio.append(dataset.write_audio(io.BytesIO(), signal, sample_rate).getvalue())
 
 		tic = time.time()
 		_, _, ref, x, xlen, y, ylen = batch_collater(batch)
@@ -78,11 +81,7 @@ def main(args):
 		print(args.checkpoint, os.path.basename(audio_path))
 		print('Time: audio {audio:.02f} sec | voice {voice:.02f} sec | processing {processing:.02f} sec'.format(audio = signal.numel() / sample_rate, voice = sum(e - b for b, e, c in cutpoints), processing = time.time() - tic))
 
-		
 		ts = torch.linspace(0, 1, steps = log_probs.shape[-1]) * (x.shape[-1] / sample_rate)
-		
-		begin_end = lambda rh: (min(w['begin'] for w in rh), max(w['end'] for w in rh)) if len(rh) > 0 else (0, 0) #TODO: add i, j
-	
 		segments = [[c, r, labels.decode(d, ts, channel = c, replace_blank = True, replace_repeat = True, replace_space = False)] for (b, e, c), d, r in zip(cutpoints, decoded, ref)]
 
 		ref = ' '.join(ref)
@@ -104,22 +103,21 @@ def main(args):
 			for i in range(len(y)):
 				segments[i][-2] = []
 		
-		segments = sum([list(segment.resegment(*s, rh = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
-		segments = list(sorted(segments, key = lambda s: begin_end(s[-1] + s[-2]) + (s[0],)))
+		segments = sum([list(segmentation.resegment(*s, ws = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
+		segments = segmentation.sort(segments)
 
 		html_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.html')
 		with open(html_path, 'w') as html:
-			fmt_link = lambda word, channel, begin, end, i = '', j = '': f'<a onclick="return play({channel},{begin},{end})" title="#{channel}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + (word if isinstance(word, str) else f'{begin:.02f}' if word == 0 else f'{end:.02f}') + '</a>'
+			fmt_link = lambda word, channel, begin, end, i = '', j = '': f'<a onclick="return play({channel},{begin},{end})" title="#{channel}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + (word if isinstance(word, str) else f'{begin:.02f}' if word == 0 else f'{end:.02f}' if word == 1 else f'{end - begin:.02f}') + '</a>'
 			fmt_words = lambda rh: rh if isinstance(rh, str) else ' '.join(fmt_link(**w) for w in rh) if len(rh) > 0 and isinstance(rh[0], dict) else ' '.join(rh)
-			fmt_begin_end = 'data-begin="{}" data-end="{}"'.format
+			fmt_begin_end = 'data-begin="{begin}" data-end="{end}"'.format
 
 			html.write('<html><head><meta charset="UTF-8"><style>.m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
 			html.write(f'<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>')
-			html.write('<figure class="m0"><figcaption>both channels</figcaption><audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio></figure>'.format(encoded = base64.b64encode(open(audio_path, 'rb').read()).decode()) if len(audio) > 1 else '')
-			html.write(''.join('<figure class="m0"><figcaption>channel #{c}:</figcaption><audio id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio></figure>'.format(c = c, encoded = base64.b64encode(buf.getvalue()).decode()) for c, buf in enumerate(audio)))
+			html.writelines(f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{base64.b64encode(wav).decode()}"></audio></figure>' for c, wav in enumerate(audio))
 			html.write(f'''<pre class="channel"><h3 class="channel0 channel">hyp #0:<span></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span></span></h3></pre><hr/>
-			<table style="width:100%"><thead><th>begin</th><th>end</th><th style="width:50%">hyp</th><th style="width:50%">ref</th><th>begin</th><th>end</th></tr></thead><tbody>''')
-			html.write(''.join(f'<tr class="channel{c}"><td class="top">{fmt_link(0, c, *begin_end(h))}</td><td class="top">{fmt_link(1, c, *begin_end(h))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(*begin_end(h))}>{fmt_words(h)}</td>' + (f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(*begin_end(r))}>{fmt_words(r)}</td><td class="top">{fmt_link(0,c, *begin_end(r))}</td><td class="top">{fmt_link(1, c, *begin_end(r))}</td>' if r else '<td></td>' * 3) + f'</tr>' for c, r, h in segments))
+			<table style="width:100%"><thead><th>begin</th><th>end</th><th>dur</th><th style="width:50%">hyp</th><th style="width:50%">ref</th><th>begin</th><th>end</th><th>dur</th></tr></thead><tbody>''')
+			html.writelines(f'<tr class="channel{c}"><td class="top">{fmt_link(0, c, **segmentation.summary(h))}</td><td class="top">{fmt_link(1, c, **segmentation.summary(h))}</td><td class="top">{fmt_link(2, c, **segmentation.summary(h))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(**segmentation.summary(h))}>{fmt_words(h)}</td>' + (f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(**segmentation.summary(r))}>{fmt_words(r)}</td><td class="top">{fmt_link(0,c, **segmentation.summary(r))}</td><td class="top">{fmt_link(1, c, **segmentation.summary(r))}</td><td class="top">{fmt_link(2, c, **segmentation.summary(r))}</td>' if r else '<td></td>' * 4) + f'</tr>' for c, r, h in segments)
 			html.write('''</tbody></table><script>
 				function play(channel, begin, end)
 				{
@@ -130,6 +128,11 @@ def main(args):
 					audio.play();
 					return false;
 				}
+				
+				function subtitle(segments, time, channel)
+				{
+					return (segments.find(([rh, c, b, e]) => c == channel && b <= time && time <= e ) || ['', channel, null, null])[0];
+				}
 
 				Array.from(document.querySelectorAll('audio')).map(audio => 
 				{
@@ -137,15 +140,11 @@ def main(args):
 					{
 						const time = evt.target.currentTime, endtime = evt.target.dataset.endTime;
 						if(time > endtime)
-						{
-							evt.target.pause();
-							return;
-						}
+							return evt.target.pause();
 
 						document.querySelector('h5').innerText = time.toString();
-						const find = (segments, time, channel) => (segments.find(([rh, c, b, e]) => c == channel && b <= time && time <= e) || ['', channel, null, null])[0];
 						const [spanhyp0, spanref0, spanhyp1, spanref1] = document.querySelectorAll('span');
-						[spanhyp0.innerText, spanref0.innerText, spanhyp1.innerText, spanref1.innerText] = [find(hyp_segments, time, 0), find(ref_segments, time, 0), find(hyp_segments, time, 1), find(ref_segments, time, 1)];
+						[spanhyp0.innerText, spanref0.innerText, spanhyp1.innerText, spanref1.innerText] = [subtitle(hyp_segments, time, 0), subtitle(ref_segments, time, 0), subtitle(hyp_segments, time, 1), subtitle(ref_segments, time, 1)];
 					};
 				});
 
