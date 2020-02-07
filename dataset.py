@@ -25,9 +25,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	def __getitem__(self, index):
 		dataset_name, audio_path, ref, duration = self.examples[index]
 		signal, sample_rate = read_audio(audio_path, sample_rate = self.sample_rate, mono = True) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
-		signal = signal.t()
 		# int16 or float?
-		features = self.frontend(signal, waveform_transform_debug = lambda audio_path, sample_rate, signal: write_audio(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), sample_rate, signal) if self.waveform_transform_debug_dir else None).squeeze(0) if self.frontend is not None else signal
+		features = self.frontend(signal, waveform_transform_debug = lambda audio_path, sample_rate, signal: write_audio(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), signal, sample_rate) if self.waveform_transform_debug_dir else None).squeeze(0) if self.frontend is not None else signal
 		ref_normalized = self.labels[0].encode(ref)[0]
 		targets = [labels.encode(ref)[1] for labels in self.labels]
 		return [dataset_name, audio_path, ref_normalized, features] + targets
@@ -192,28 +191,28 @@ class Labels:
 def read_audio(audio_path, sample_rate, normalize = True, mono = True, duration = None, dtype = torch.float32, byte_order = 'little'):
 	if audio_path.endswith('.wav'):
 		sample_rate_, signal = scipy.io.wavfile.read(audio_path) 
-		signal = signal[:, None] if len(signal.shape) == 1 else signal
+		signal = signal[None, :] if len(signal.shape) == 1 else signal.T
 	else:
 		num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path])) if not mono else 1
-		sample_rate_, signal = sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', str(num_channels), '-t', 'raw', '-']), byte_order = byte_order)).reshape(-1, num_channels)
+		sample_rate_, signal = sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', str(num_channels), '-t', 'raw', '-']), byte_order = byte_order)).reshape(-1, num_channels).t()
 
 	signal = torch.as_tensor(signal).to(dtype)
 	
 	if duration is not None:
 		signal = signal[:int(duration * sample_rate_), ...]
 	if mono:
-		signal = signal.float().mean(dim = -1, keepdim = True).to(dtype)
+		signal = signal.float().mean(dim = 0, keepdim = True).to(dtype)
 	if normalize:
-		signal = models.normalize_signal(signal, dim = 0)
+		signal = models.normalize_signal(signal, dim = -1)
 	if dtype is torch.float32 and sample_rate_ != sample_rate:
 		signal, sample_rate_ = resample(signal, sample_rate_, sample_rate)
 
 	assert sample_rate_ == sample_rate, 'Cannot resample non-float tensors because of librosa constraints'
 	return signal, sample_rate_
 
-def write_audio(audio_path, sample_rate, signal):
-	scipy.io.wavfile.write(audio_path, sample_rate, signal.numpy())
+def write_audio(audio_path, signal, sample_rate):
+	scipy.io.wavfile.write(audio_path, sample_rate, signal.t().numpy())
 	return audio_path
 
 def resample(signal, sample_rate_, sample_rate):
-	return torch.from_numpy(librosa.resample(signal.t().numpy(), sample_rate_, sample_rate)).t(), sample_rate
+	return torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate)), sample_rate

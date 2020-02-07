@@ -19,7 +19,6 @@ import time
 import json
 import base64
 import argparse
-import webrtcvad
 import importlib
 import torch
 import torch.nn.functional as F
@@ -49,23 +48,22 @@ def main(args):
 
 	decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 	
-	example = lambda audio_path, signal, b, e, sample_rate, channel, ref_normalized, targets: (os.path.basename(os.path.dirname(audio_path)), audio_path, ref_normalized, signal[None, int(b * sample_rate):int(e * sample_rate), channel], targets)	
+	example = lambda audio_path, signal, b, e, c, sample_rate, ref_normalized, targets: (os.path.basename(os.path.dirname(audio_path)), audio_path, ref_normalized, signal[None, c, int(b * sample_rate):int(e * sample_rate)], targets)	
 
 	audio_paths = [args.data_path] if os.path.isfile(args.data_path) else [os.path.join(args.data_path, f) for f in os.listdir(args.data_path) if any(map(f.endswith, args.ext))]
-	forimport segment audio_path in audio_paths[:1]:
+	for audio_path in audio_paths[:1]:
 		batch, cutpoints, audio = [], [], []
 		ref_path, transcript_path = audio_path + '.txt', audio_path + '.json'
 		
 		signal, sample_rate = dataset.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = False, dtype = torch.int16)
-
-		signal_normalized = models.normalize_signal(signal, dim = 0)
+		signal_normalized = models.normalize_signal(signal, dim = -1)
 		ref = labels.postprocess_transcript2(labels.normalize_text(open(ref_path).read())) if os.path.exists(ref_path) else ''
 		speech = vad.detect_speech(signal, sample_rate, args.window_size, aggressiveness = args.vad)
 
-		for channel, signal_ in enumerate(signal.t()):
-			audio.append(dataset.write_audio(io.BytesIO(), sample_rate, signal_))
-			cutpoints.append((0, len(signal) / sample_rate, channel))
-			batch.append(example(audio_path, signal_normalized, 0, len(signal), 1, channel, *labels.encode(ref)))
+		for c, channel in enumerate(signal):
+			audio.append(dataset.write_audio(io.BytesIO(), channel, sample_rate))
+			cutpoints.append((0, signal.shape[1] / sample_rate, c))
+			batch.append(example(audio_path, signal_normalized, 0, signal.shape[1], c, 1, *labels.encode(ref)))
 
 		tic = time.time()
 		_, _, ref, x, xlen, y, ylen = batch_collater(batch)
@@ -73,7 +71,7 @@ def main(args):
 		x, y, ylen = x.squeeze(1), y.squeeze(1), ylen.squeeze(1)
 		log_probs, output_lengths = model(x, xlen)
 	
-		speech = F.interpolate(speech.t()[:, None, :].float(), (log_probs.shape[-1], )).squeeze(1).t().round().bool().to(log_probs.device)
+		speech = F.interpolate(speech[:, None, :].float(), (log_probs.shape[-1], )).squeeze(1).round().bool().to(log_probs.device)
 		log_probs.masked_fill_(models.silence_space_mask(log_probs, speech, space_idx = labels.space_idx, blank_idx = labels.blank_idx), float('-inf'))
 		decoded = decoder.decode(log_probs, output_lengths)
 		
