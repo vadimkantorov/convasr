@@ -11,7 +11,7 @@ import webrtcvad
 def detect_speech(signal, sample_rate, window_size, aggressiveness):
 	vad = webrtcvad.Vad(aggressiveness)
 	frame_len = int(window_size * sample_rate)
-	return torch.as_tensor([[len(chunk) == frame_len and vad.is_speech(bytearray(chunk.numpy()), sample_rate) for chunk in channel.split(frame_len)] for channel in signal.t()]).t().repeat_interleave(frame_len, dim = 0)[:len(signal)]
+	return torch.as_tensor([[len(chunk) == frame_len and vad.is_speech(bytearray(chunk.numpy()), sample_rate) for chunk in channel.split(frame_len)] for channel in signal]).repeat_interleave(frame_len, dim = -1)[:, :signal.shape[1]]
 	
 # does not filter anything out, can only merge
 def segment(speech, max_duration = None):

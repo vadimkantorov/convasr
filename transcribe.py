@@ -71,7 +71,7 @@ def main(args):
 		x, y, ylen = x.squeeze(1), y.squeeze(1), ylen.squeeze(1)
 		log_probs, output_lengths = model(x, xlen)
 	
-		speech = F.interpolate(speech[:, None, :].float(), (log_probs.shape[-1], )).squeeze(1).round().bool().to(log_probs.device)
+		speech = F.interpolate(speech[:, None, :].to(device = log_probs.device, dtype = torch.float32), (log_probs.shape[-1],)).squeeze(1).round().bool()
 		log_probs.masked_fill_(models.silence_space_mask(log_probs, speech, space_idx = labels.space_idx, blank_idx = labels.blank_idx), float('-inf'))
 		decoded = decoder.decode(log_probs, output_lengths)
 		
