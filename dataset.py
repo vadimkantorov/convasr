@@ -24,12 +24,23 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 	def __getitem__(self, index):
 		dataset_name, audio_path, ref, duration = self.examples[index]
-		signal, sample_rate = read_audio(audio_path, sample_rate = self.sample_rate, mono = True) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
-		# int16 or float?
+		signal, sample_rate = read_audio(audio_path, sample_rate = self.sample_rate, mono = True, dtype = torch.float32) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
 		features = self.frontend(signal, waveform_transform_debug = lambda audio_path, sample_rate, signal: write_audio(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), signal, sample_rate) if self.waveform_transform_debug_dir else None).squeeze(0) if self.frontend is not None else signal
 		ref_normalized = self.labels[0].encode(ref)[0]
 		targets = [labels.encode(ref)[1] for labels in self.labels]
 		return [dataset_name, audio_path, ref_normalized, features] + targets
+
+	def __len__(self):
+		return len(self.examples)
+
+class SegmentedAudioTextDataset(torch.utils.data.Dataset):
+	def __init__(self, source_paths, labels, sample_rate, frontend = None):
+		self.labels = labels
+		self.frontend = frontend
+		self.sample_rate = sample_rate
+
+	def __iter__(self):
+		pass
 
 	def __len__(self):
 		return len(self.examples)
@@ -187,6 +198,8 @@ class Labels:
 	
 	def __contains__(self, chr):
 		return chr.lower() in self.alphabet
+
+
 
 def read_audio(audio_path, sample_rate, normalize = True, mono = True, duration = None, dtype = torch.float32, byte_order = 'little'):
 	if audio_path.endswith('.wav'):

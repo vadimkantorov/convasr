@@ -8,11 +8,15 @@ import webrtcvad
 # cuts for model-less dataset creation
 # diarization?
 
-def detect_speech(signal, sample_rate, window_size, aggressiveness, postproc = lambda speech: speech):
+def detect_speech(signal, sample_rate, window_size, aggressiveness, window_size_dilate = None):
 	vad = webrtcvad.Vad(aggressiveness)
 	frame_len = int(window_size * sample_rate)
 	speech = torch.as_tensor([[len(chunk) == frame_len and vad.is_speech(bytearray(chunk.numpy()), sample_rate) for chunk in channel.split(frame_len)] for channel in signal])
-	speech = postproc(speech)
+	
+	if window_size_dilate is not None:
+		kernel_size = int(window_size_dilate / window_size)
+		speech = F.max_pool1d(speech.unsqueeze(1).float(), stride = 1, kernel_size = kernel_size, padding = kernel_size // 2).squeeze(1).to(speech.dtype)
+	
 	return speech.repeat_interleave(frame_len, dim = -1)[:, :signal.shape[1]]
 
 def postprocess_cut(speech):
@@ -30,6 +34,5 @@ def postprocess_batching(speech):
 	# cut by max length
 	pass
 
-def postprocess_decoding(speech):
-	kernel_size = 101
-	return F.max_pool1d(speech.unsqueeze(1).float(), stride = 1, kernel_size = kernel_size, padding = kernel_size // 2).squeeze(1).to(speech.dtype)
+def upsample(speech, log_probs):
+	return F.interpolate(speech[:, None, :].to(device = log_probs.device, dtype = torch.float32), (log_probs.shape[-1],)).squeeze(1).round().bool()
