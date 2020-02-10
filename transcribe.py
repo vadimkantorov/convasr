@@ -49,26 +49,37 @@ def main(args):
 	
 	audio_paths = [p for f in args.data_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f]) if os.path.isfile(p) and any(map(p.endswith, args.ext))]
 
-	val_data_loader = torch.utils.data.DataLoader(datasets.SegmentedAudioTextDataset(audio_paths, [labels], args.sample_rate, frontend = None, vad_options = dict(window_size = args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)), batch_size = None, collate_fn = batch_collater)
+	val_data_loader = torch.utils.data.DataLoader(datasets.AudioTextDataset(audio_paths, [labels], args.sample_rate, frontend = None, segmented = True, vad_options = dict(window_size = args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)), batch_size = None, collate_fn = batch_collater)
 
 	for meta, x, xlen, y, ylen in val_data_loader:
 		audio_path = meta[0]['audio_path']
 		
-		signal, sample_rate = audio.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = False, dtype = torch.int16)
-		
 		tic = time.time()
 		log_probs, output_lengths = model(x.to(args.device), xlen.to(args.device), y = y.to(args.device), ylen = ylen.to(args.device))
 
-		speech = vad.detect_speech(signal, sample_rate, args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)
+		#signal, sample_rate = audio.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = False, dtype = torch.int16); x = signal.unsqueeze(1)
+		#import webrtcvad
+		#vad = webrtcvad.Vad(args.vad)
+		#frame_len = int(args.window_size * args.sample_rate)
+		#for channel in x.squeeze(1):
+		#	for i, chunk in enumerate(channel.split(frame_len)):
+		#		try:
+		#			len(chunk) == frame_len and vad.is_speech(bytearray(chunk.numpy()), args.sample_rate)
+		#		except:
+		#			import IPython; IPython.embed()
+
+		#print('OK'); import sys; sys.exit(0)
+		
+		speech = vad.detect_speech(x.squeeze(1), args.sample_rate, args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)
 		speech = vad.upsample(speech, log_probs)
 		
 		log_probs.masked_fill_(models.silence_space_mask(log_probs, speech, space_idx = labels.space_idx, blank_idx = labels.blank_idx), float('-inf'))
 		decoded = decoder.decode(log_probs, output_lengths)
 		
-		print(args.checkpoint, os.path.basename(audio_path))
-		print('Time: audio {audio:.02f} sec | voice {voice:.02f} sec | processing {processing:.02f} sec'.format(audio = signal.numel() / sample_rate, voice = sum(t['end'] - t['begin'] for t in meta), processing = time.time() - tic))
+		print(os.path.basename(audio_path))
+		print('Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(audio = sum(t['duration'] for t in meta), processing = time.time() - tic))
 
-		ts = torch.linspace(0, 1, steps = log_probs.shape[-1]) * (x.shape[-1] / sample_rate)
+		ts = torch.linspace(0, 1, steps = log_probs.shape[-1]) * (x.shape[-1] / args.sample_rate)
 		segments = [[t['channel'], t.get('ref', ''), labels.decode(d, ts, channel = t['channel'], replace_blank = True, replace_repeat = True, replace_space = False)] for t, d in zip(meta, decoded)]
 
 		ref_path = audio_path + '.txt'
@@ -95,11 +106,11 @@ def main(args):
 		segments = sum([list(segmentation.resegment(*s, ws = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
 		segments = segmentation.sort(segments)
 		html_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.html')
-		html_report(html_path, segments, audio_path, signal, sample_rate)
+		html_report(html_path, segments, audio_path, args.sample_rate)
 		print(html_path)
 
-def html_report(html_path, segments, audio_path, signal, sample_rate):
-	audio = [audio.write_audio(io.BytesIO(), signal[channel], sample_rate).getvalue() for channel in ([0, 1] if len(signal) == 2 else []) + [...]]
+def html_report(html_path, segments, audio_path, sample_rate):
+	signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = False, dtype = torch.int16, normalize = False)
 	with open(html_path, 'w') as html:
 		fmt_link = lambda word, channel, begin, end, i = '', j = '': f'<a onclick="return play({channel},{begin},{end})" title="#{channel}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + (word if isinstance(word, str) else f'{begin:.02f}' if word == 0 else f'{end:.02f}' if word == 1 else f'{end - begin:.02f}') + '</a>'
 		fmt_words = lambda rh: rh if isinstance(rh, str) else ' '.join(fmt_link(**w) for w in rh) if len(rh) > 0 and isinstance(rh[0], dict) else ' '.join(rh)
@@ -107,7 +118,7 @@ def html_report(html_path, segments, audio_path, signal, sample_rate):
 
 		html.write('<html><head><meta charset="UTF-8"><style>.m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
 		html.write(f'<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>')
-		html.writelines(f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="ontimeupdate(event)" id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{base64.b64encode(wav).decode()}"></audio></figure>' for c, wav in enumerate(audio))
+		html.writelines(f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="ontimeupdate(event)" id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{base64.b64encode(wav).decode()}"></audio></figure>' for c, wav in enumerate(audio.write_audio(io.BytesIO(), signal[channel], sample_rate).getvalue() for channel in ([0, 1] if len(signal) == 2 else []) + [...]))
 		html.write(f'''<pre class="channel"><h3 class="channel0 channel">hyp #0:<span></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span></span></h3></pre><hr/>
 		<table style="width:100%"><thead><th>begin</th><th>end</th><th>dur</th><th style="width:50%">hyp</th><th style="width:50%">ref</th><th>begin</th><th>end</th><th>dur</th></tr></thead><tbody>''')
 		html.writelines(f'<tr class="channel{c}"><td class="top">{fmt_link(0, c, **segmentation.summary(h))}</td><td class="top">{fmt_link(1, c, **segmentation.summary(h))}</td><td class="top">{fmt_link(2, c, **segmentation.summary(h))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(**segmentation.summary(h))}>{fmt_words(h)}</td>' + (f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(**segmentation.summary(r))}>{fmt_words(r)}</td><td class="top">{fmt_link(0,c, **segmentation.summary(r))}</td><td class="top">{fmt_link(1, c, **segmentation.summary(r))}</td><td class="top">{fmt_link(2, c, **segmentation.summary(r))}</td>' if r else '<td></td>' * 4) + f'</tr>' for c, r, h in segments)

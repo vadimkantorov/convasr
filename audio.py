@@ -1,3 +1,5 @@
+import subprocess
+import scipy.io.wavfile
 import librosa
 import torch
 import models

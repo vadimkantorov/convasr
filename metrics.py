@@ -286,7 +286,9 @@ def analyze(ref, hyp, labels, phonetic_replace_groups = [], vocab = set(), full 
 			k = None
 			for i in range(1 + len(r)):
 				if i == len(r) or r[i] == ' ':
-					yield r[k : i], h[k : i]
+					r_, h_ = r[k : i], h[k : i]
+					if r_:
+						yield r_, h_
 					k = i + 1 #None
 				#elif r[i] != '|' and r[i] != ' ' and k is None:
 				#	k = i
@@ -298,7 +300,7 @@ def analyze(ref, hyp, labels, phonetic_replace_groups = [], vocab = set(), full 
 		words = list(words())
 		words_ = [dict(hyp = h_, ref = r_, type = t) for r_, h_ in words for t, e in [error_type(h_, r_)]]
 		errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in words_ if r['type'] == t] for t in error_types}
-		
+	
 		a.update(dict(
 			spaces = dict(
 				delete = sum(r[i] == ' ' and h[i] != ' ' for i in range(len(r))),

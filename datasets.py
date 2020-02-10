@@ -5,7 +5,7 @@ import time
 import math
 import json
 import random
-import subprocess
+import functools
 import itertools
 import numpy as np
 import torch.utils.data
@@ -14,45 +14,46 @@ import vad
 import audio
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, max_duration = None, delimiter = ','):
+	def __init__(self, source_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, max_duration = None, delimiter = ',', segmented = False, vad_options = {}):
 		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
 		self.waveform_transform_debug_dir = waveform_transform_debug_dir
-		self.examples = sum([list(sorted(((os.path.basename(data_or_path), row[0], row[1] if not row[1].endswith('.txt') else open(row[1]).read(), float(row[2]) if True and len(row) > 2 else -1) for line in (gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if '"' not in line for row in [line.split(delimiter)] if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1])) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])], [])
-
-	def __getitem__(self, index):
-		dataset_name, audio_path, ref, duration = self.examples[index]
-		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = True, dtype = torch.float32) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
-		features = self.frontend(signal, waveform_transform_debug = lambda audio_path, sample_rate, signal: audio.write_audio(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), signal, sample_rate) if self.waveform_transform_debug_dir else None).squeeze(0) if self.frontend is not None else signal
-		ref_normalized = self.labels[0].encode(ref)[0]
-		targets = [labels.encode(ref)[1] for labels in self.labels]
-		return [dict(dataset_name = dataset_name, audio_path = audio_path, ref = ref, ref_normalized = ref_normalized, duration = duration, begin = 0, end = duration), features] + targets
-
-	def __len__(self):
-		return len(self.examples)
-
-class SegmentedAudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, labels, sample_rate, frontend = None, vad_options = {}):
-		self.labels = labels
-		self.frontend = frontend
-		self.sample_rate = sample_rate
 		self.vad_options = vad_options
-		self.examples = [(audio_path, os.path.exists(transcript_path) and json.load(open(transcript_path))) for audio_path in source_paths for transcript_path in [audio_path + '.json']]
+		self.segmented = segmented
+
+		if not self.segmented:
+			self.examples = sum([list(sorted(((row[0], os.path.basename(data_or_path), dict(ref = row[1] if not row[1].endswith('.txt') else open(row[1]).read(), duration  = float(row[2]) if True and len(row) > 2 else -1) ) for line in (gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if '"' not in line for row in [line.split(delimiter)] if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1]['duration'] )) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])], [])
+
+		else:
+			self.examples = [(audio_path, os.path.basename(audio_path), os.path.exists(transcript_path) and json.load(open(transcript_path))) for audio_path in source_paths for transcript_path in [audio_path + '.json']]
+			
 
 	def __getitem__(self, index):
-		audio_path, transcript = self.examples[index]
-		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = False, normalize = False, dtype = torch.int16)
+		audio_path, dataset_name, transcript = self.examples[index]
+		waveform_transform_debug = (lambda audio_path, sample_rate, signal: audio.write_audio(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), signal, sample_rate)) if self.waveform_transform_debug_dir else None
 		
-		if True:#not transcript:
-			# TODO: batch using VAD
-			speech = vad.detect_speech(signal, sample_rate, **self.vad_options)
-			transcript = [dict(begin = 0, end = signal.shape[1] / sample_rate, channel = c, i = 0, j = signal.shape[1] - 1, audio_path = audio_path, ref = '') for c in range(len(signal))]
+		if not self.segmented:
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = True, dtype = torch.float32, normalize = True) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
+			
+			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else signal
+			targets = [labels.encode(transcript['ref']) for labels in self.labels]
+			ref_normalized, targets = zip(*targets)
+			transcript = dict(**transcript, **dict(audio_path = audio_path, ref_normalized = ref_normalized[0], begin = 0.0, end = transcript['duration']))
 
-		features = [self.frontend(segment).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], t['i'] : (1 + t['j'])]]]
-		targets = [ [self.labels[0].encode(t.get('ref', ''))[1] for t in transcript] ]
-		
-		return [transcript, features] + targets
+		else:
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = False, dtype = torch.int16, normalize = False)
+			
+			if True:#not transcript:
+				# TODO: batch using VAD
+				speech = vad.detect_speech(signal, sample_rate, **self.vad_options)
+				transcript = [dict(begin = 0, end = signal.shape[1] / sample_rate, duration = signal.shape[1] / sample_rate, channel = c, i = 0, j = signal.shape[1] - 1, audio_path = audio_path, ref = '') for c in range(len(signal))]
+
+			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], t['i'] : (1 + t['j'])]]]
+			targets = [[labels.encode(t.get('ref', ''))[1] for t in transcript] for labels in self.labels]
+			
+		return [transcript, features] + list(targets)
+			
 
 	def __len__(self):
 		return len(self.examples)
@@ -68,7 +69,7 @@ class BatchCollater:
 
 		meta, sample_x, *sample_y = batch[0]
 		xmax_len, ymax_len = [int(math.ceil(max(b[k].shape[-1] for b in batch) / self.time_padding_multiple)) * self.time_padding_multiple for k in range(1, len(batch[0]))]
-		x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = torch.float32)
+		x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = sample_x.dtype)
 		y = torch.zeros(len(batch), len(sample_y), ymax_len, dtype = torch.long)
 		xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.long)
 		for k, (meta, input, *targets) in enumerate(batch):
@@ -158,7 +159,7 @@ class Labels:
 		return normalized, torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
 	def decode(self, idx : list, ts = None, I = None, channel = 0, replace_blank = True, replace_space = False, replace_repeat = True):
-		decode_ = lambda i, j: self.postprocess_transcript2(''.join(self[idx[ij]] for ij in range(i, j + 1) if replace_repeat is False or ij == 0 or idx[ij] != idx[ij - 1]), replace_blank = replace_blank, replace_space = replace_space, replace_repeat = replace_repeat)
+		decode_ = lambda i, j: self.postprocess_transcript(''.join(self[idx[ij]] for ij in range(i, j + 1) if replace_repeat is False or ij == 0 or idx[ij] != idx[ij - 1]), replace_blank = replace_blank, replace_space = replace_space, replace_repeat = replace_repeat)
 		
 		if ts is None:
 			return decode_(0, len(idx) - 1)
@@ -182,9 +183,7 @@ class Labels:
 	def split_candidates(self, text):
 		return text.split(self.candidate_sep)
 
-	#TODO: merge postprocess_transcript
-
-	def postprocess_transcript2(self, word, replace_blank = True, replace_space = False, replace_repeat = True):
+	def postprocess_transcript(self, word, replace_blank = True, replace_space = False, replace_repeat = True, phonetic_replace_groups = []):
 		if replace_blank is not False:
 			word = word.replace(self.blank, '' if replace_blank is True else replace_blank)
 		if replace_space is not False:
@@ -193,7 +192,7 @@ class Labels:
 			word = ''.join(c if i == 0 or c != self.repeat else word[i - 1] for i, c in enumerate(word))
 		return word
 
-	#def postprocess_transcript(self, text, phonetic_replace_groups = []):
+	#def postprocess_transcript(self, text, phonetic_replace_groups = [], replace_blank = True, replace_space = False, replace_repeat = True):
 	#	replaceblank = lambda s: s.replace(self.blank * 10, ' ').replace(self.blank, '')
 	#	replace2 = lambda s: ''.join(c if i == 0 or c != self.repeat else s[i - 1] for i, c in enumerate(s))
 	#	replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
