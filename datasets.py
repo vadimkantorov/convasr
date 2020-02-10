@@ -3,16 +3,15 @@ import re
 import gzip
 import time
 import math
+import json
 import random
 import subprocess
-import numpy as np
-import functools
-import torch.utils.data
-import scipy.io.wavfile
-import librosa
-import sentencepiece
-import models
 import itertools
+import numpy as np
+import torch.utils.data
+import sentencepiece
+import vad
+import audio
 
 class AudioTextDataset(torch.utils.data.Dataset):
 	def __init__(self, source_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, max_duration = None, delimiter = ','):
@@ -24,44 +23,62 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 	def __getitem__(self, index):
 		dataset_name, audio_path, ref, duration = self.examples[index]
-		signal, sample_rate = read_audio(audio_path, sample_rate = self.sample_rate, mono = True, dtype = torch.float32) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
-		features = self.frontend(signal, waveform_transform_debug = lambda audio_path, sample_rate, signal: write_audio(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), signal, sample_rate) if self.waveform_transform_debug_dir else None).squeeze(0) if self.frontend is not None else signal
+		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = True, dtype = torch.float32) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
+		features = self.frontend(signal, waveform_transform_debug = lambda audio_path, sample_rate, signal: audio.write_audio(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), signal, sample_rate) if self.waveform_transform_debug_dir else None).squeeze(0) if self.frontend is not None else signal
 		ref_normalized = self.labels[0].encode(ref)[0]
 		targets = [labels.encode(ref)[1] for labels in self.labels]
-		return [dataset_name, audio_path, ref_normalized, features] + targets
+		return [dict(dataset_name = dataset_name, audio_path = audio_path, ref = ref, ref_normalized = ref_normalized, duration = duration, begin = 0, end = duration), features] + targets
 
 	def __len__(self):
 		return len(self.examples)
 
 class SegmentedAudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, labels, sample_rate, frontend = None):
+	def __init__(self, source_paths, labels, sample_rate, frontend = None, vad_options = {}):
 		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
+		self.vad_options = vad_options
+		self.examples = [(audio_path, os.path.exists(transcript_path) and json.load(open(transcript_path))) for audio_path in source_paths for transcript_path in [audio_path + '.json']]
 
-	def __iter__(self):
-		pass
+	def __getitem__(self, index):
+		audio_path, transcript = self.examples[index]
+		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = False, normalize = False, dtype = torch.int16)
+		
+		if True:#not transcript:
+			# TODO: batch using VAD
+			speech = vad.detect_speech(signal, sample_rate, **self.vad_options)
+			transcript = [dict(begin = 0, end = signal.shape[1] / sample_rate, channel = c, i = 0, j = signal.shape[1] - 1, audio_path = audio_path, ref = '') for c in range(len(signal))]
+
+		features = [self.frontend(segment).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], t['i'] : (1 + t['j'])]]]
+		targets = [ [self.labels[0].encode(t.get('ref', ''))[1] for t in transcript] ]
+		
+		return [transcript, features] + targets
 
 	def __len__(self):
 		return len(self.examples)
 
 class BatchCollater:
-	def __init__(self, time_padding_multiple = 1):
+	def __init__(self, time_padding_multiple = 1, transpose = False):
 		self.time_padding_multiple = time_padding_multiple
+		self.transpose = transpose
 
 	def __call__(self, batch):
-		dataset_name, audio_path, ref, sample_x, *sample_y = batch[0]
-		xmax_len, ymax_len = [int(math.ceil(max(b[k].shape[-1] for b in batch) / self.time_padding_multiple)) * self.time_padding_multiple for k in [3, 4]]
+		if self.transpose:
+			batch = list(zip(*batch))
+
+		meta, sample_x, *sample_y = batch[0]
+		xmax_len, ymax_len = [int(math.ceil(max(b[k].shape[-1] for b in batch) / self.time_padding_multiple)) * self.time_padding_multiple for k in range(1, len(batch[0]))]
 		x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = torch.float32)
 		y = torch.zeros(len(batch), len(sample_y), ymax_len, dtype = torch.long)
 		xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.long)
-		for k, (dataset_name, audio_path, ref, input, *targets) in enumerate(batch):
+		for k, (meta, input, *targets) in enumerate(batch):
 			xlen[k] = input.shape[-1] / x.shape[-1]
 			x[k, ..., :input.shape[-1]] = input
 			for j, t in enumerate(targets):
 				y[k, j, :t.shape[-1]] = t
 				ylen[k, j] = len(t)
-		return tuple(zip(*batch))[:3] + (x, xlen, y, ylen)
+		
+		return tuple(zip(*batch))[:1] + (x, xlen, y, ylen)
 
 class BucketingBatchSampler(torch.utils.data.Sampler):
 	def __init__(self, dataset, bucket, batch_size = 1, mixing = None):
@@ -198,34 +215,3 @@ class Labels:
 	
 	def __contains__(self, chr):
 		return chr.lower() in self.alphabet
-
-
-
-def read_audio(audio_path, sample_rate, normalize = True, mono = True, duration = None, dtype = torch.float32, byte_order = 'little'):
-	if audio_path.endswith('.wav'):
-		sample_rate_, signal = scipy.io.wavfile.read(audio_path) 
-		signal = signal[None, :] if len(signal.shape) == 1 else signal.T
-	else:
-		num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path])) if not mono else 1
-		sample_rate_, signal = sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', str(num_channels), '-t', 'raw', '-']), byte_order = byte_order)).reshape(-1, num_channels).t()
-
-	signal = torch.as_tensor(signal).to(dtype)
-	
-	if duration is not None:
-		signal = signal[:int(duration * sample_rate_), ...]
-	if mono:
-		signal = signal.float().mean(dim = 0, keepdim = True).to(dtype)
-	if normalize:
-		signal = models.normalize_signal(signal, dim = -1)
-	if dtype is torch.float32 and sample_rate_ != sample_rate:
-		signal, sample_rate_ = resample(signal, sample_rate_, sample_rate)
-
-	assert sample_rate_ == sample_rate, 'Cannot resample non-float tensors because of librosa constraints'
-	return signal, sample_rate_
-
-def write_audio(audio_path, signal, sample_rate):
-	scipy.io.wavfile.write(audio_path, sample_rate, signal.t().numpy())
-	return audio_path
-
-def resample(signal, sample_rate_, sample_rate):
-	return torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate)), sample_rate

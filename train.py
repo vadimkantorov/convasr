@@ -14,7 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import apex
 import onnxruntime
-import dataset
+import datasets
 import transforms
 import decoders
 import metrics
@@ -49,7 +49,7 @@ def main(args):
 		torch.backends.cudnn.benchmark = True
 
 	lang = importlib.import_module(args.lang)
-	labels = [dataset.Labels(lang, name = 'char')] + [dataset.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
+	labels = [datasets.Labels(lang, name = 'char')] + [datasets.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, stft_mode = 'conv' if args.onnx else None)
 	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, frontend = frontend if args.onnx or args.frontend_in_model else None, **(dict(inplace = False, dict = lambda logits, log_probs, output_lengths, **kwargs: logits[0]) if args.onnx else {}))
 
@@ -78,9 +78,9 @@ def main(args):
 		args.val_waveform_transform_debug_dir = os.path.join(args.val_waveform_transform_debug_dir, str(val_waveform_transform) if isinstance(val_waveform_transform, transforms.RandomCompose) else val_waveform_transform.__class__.__name__)
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
 
-	batch_collater = dataset.BatchCollater(args.batch_time_padding_multiple)
+	batch_collater = datasets.BatchCollater(args.batch_time_padding_multiple)
 	val_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob), feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob))
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(dataset.AudioTextDataset(val_data_path, labels, args.sample_rate, frontend = val_frontend if not args.frontend_in_model else None, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir), num_workers = args.num_workers, collate_fn = batch_collater, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(datasets.AudioTextDataset(val_data_path, labels, args.sample_rate, frontend = val_frontend if not args.frontend_in_model else None, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir), num_workers = args.num_workers, collate_fn = batch_collater, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path}
 	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.GreedyNoBlankDecoder() if args.decoder == 'GreedyNoBlankDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
 	vocab = set(map(str.strip, open(args.vocab))) if args.vocab else set()
@@ -180,9 +180,9 @@ def main(args):
 	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder)
 
 	train_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob), feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob))
-	train_dataset = dataset.AudioTextDataset(args.train_data_path, labels, args.sample_rate, frontend = train_frontend if not args.frontend_in_model else None, max_duration = args.max_duration)
+	train_dataset = datasets.AudioTextDataset(args.train_data_path, labels, args.sample_rate, frontend = train_frontend if not args.frontend_in_model else None, max_duration = args.max_duration)
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
-	sampler = dataset.BucketingBatchSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing, bucket = lambda example: int(math.ceil((example[-1] / args.window_stride + 1) / args.batch_time_padding_multiple))) #+1 mean bug fix with bucket sizing
+	sampler = datasets.BucketingBatchSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing, bucket = lambda example: int(math.ceil((example[-1] / args.window_stride + 1) / args.batch_time_padding_multiple))) #+1 mean bug fix with bucket sizing
 	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = batch_collater, pin_memory = True, batch_sampler = sampler, worker_init_fn = set_random_seed, timeout = args.timeout)
 	optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else apex.optimizers.FusedNovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'FusedNovoGrad' else None
 	
