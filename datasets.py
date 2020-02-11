@@ -14,13 +14,14 @@ import vad
 import audio
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, max_duration = None, delimiter = ',', segmented = False, vad_options = {}):
+	def __init__(self, source_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, max_duration = None, delimiter = ',', segmented = False, vad_options = {}, time_padding_multiple = 1):
 		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
 		self.waveform_transform_debug_dir = waveform_transform_debug_dir
 		self.vad_options = vad_options
 		self.segmented = segmented
+		self.time_padding_multiple = time_padding_multiple
 
 		if not self.segmented:
 			self.examples = sum([list(sorted(((row[0], os.path.basename(data_or_path), dict(ref = row[1] if not row[1].endswith('.txt') else open(row[1]).read(), duration  = float(row[2]) if True and len(row) > 2 else -1) ) for line in (gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if '"' not in line for row in [line.split(delimiter)] if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1]['duration'] )) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])], [])
@@ -54,17 +55,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			
 		return [transcript, features] + list(targets)
 			
-
 	def __len__(self):
 		return len(self.examples)
 
-class BatchCollater:
-	def __init__(self, time_padding_multiple = 1, transpose = False):
-		self.time_padding_multiple = time_padding_multiple
-		self.transpose = transpose
-
-	def __call__(self, batch):
-		if self.transpose:
+	def collate_fn(self, batch):
+		if self.segmented:
 			batch = list(zip(*batch))
 
 		meta, sample_x, *sample_y = batch[0]

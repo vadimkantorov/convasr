@@ -31,11 +31,11 @@ import audio
 
 @torch.no_grad()
 def main(args):
-	os.makedirs(args.output_path, exist_ok = True)
+	if args.output_path:
+		os.makedirs(args.output_path, exist_ok = True)
 	
 	checkpoint = torch.load(args.checkpoint, map_location = 'cpu')
 	args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
-	batch_collater = datasets.BatchCollater(args.batch_time_padding_multiple, transpose = True)
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window)
 	labels = datasets.Labels(importlib.import_module(checkpoint['args']['lang']), name = 'char')
 	model = getattr(models, checkpoint['args']['model'])(args.num_input_features, [len(labels)], frontend = frontend, dict = lambda logits, log_probs, output_lengths, **kwargs: (logits[0], output_lengths[0]))
@@ -49,27 +49,17 @@ def main(args):
 	
 	audio_paths = [p for f in args.data_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f]) if os.path.isfile(p) and any(map(p.endswith, args.ext))]
 
-	val_data_loader = torch.utils.data.DataLoader(datasets.AudioTextDataset(audio_paths, [labels], args.sample_rate, frontend = None, segmented = True, vad_options = dict(window_size = args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)), batch_size = None, collate_fn = batch_collater)
+	val_dataset = datasets.AudioTextDataset(audio_paths, [labels], args.sample_rate, frontend = None, segmented = True, time_padding_multiple = args.batch_time_padding_multiple, vad_options = dict(window_size = args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate))
+	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn)
 
 	for meta, x, xlen, y, ylen in val_data_loader:
 		audio_path = meta[0]['audio_path']
+		ref_path = audio_path + '.txt'
+		ref = labels.normalize_text(open(ref_path).read()) if os.path.exists(ref_path) else ''
 		
 		tic = time.time()
 		log_probs, output_lengths = model(x.to(args.device), xlen.to(args.device), y = y.to(args.device), ylen = ylen.to(args.device))
 
-		#signal, sample_rate = audio.read_audio(audio_path, sample_rate = args.sample_rate, mono = False, normalize = False, dtype = torch.int16); x = signal.unsqueeze(1)
-		#import webrtcvad
-		#vad = webrtcvad.Vad(args.vad)
-		#frame_len = int(args.window_size * args.sample_rate)
-		#for channel in x.squeeze(1):
-		#	for i, chunk in enumerate(channel.split(frame_len)):
-		#		try:
-		#			len(chunk) == frame_len and vad.is_speech(bytearray(chunk.numpy()), args.sample_rate)
-		#		except:
-		#			import IPython; IPython.embed()
-
-		#print('OK'); import sys; sys.exit(0)
-		
 		speech = vad.detect_speech(x.squeeze(1), args.sample_rate, args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)
 		speech = vad.upsample(speech, log_probs)
 		
@@ -77,37 +67,29 @@ def main(args):
 		decoded = decoder.decode(log_probs, output_lengths)
 		
 		print(os.path.basename(audio_path))
+		print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
 		print('Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(audio = sum(t['duration'] for t in meta), processing = time.time() - tic))
 
 		ts = torch.linspace(0, 1, steps = log_probs.shape[-1]) * (x.shape[-1] / args.sample_rate)
-		segments = [[t['channel'], t.get('ref', ''), labels.decode(d, ts, channel = t['channel'], replace_blank = True, replace_repeat = True, replace_space = False)] for t, d in zip(meta, decoded)]
-
-		ref_path = audio_path + '.txt'
-		ref = labels.normalize_text(open(ref_path).read()) if os.path.exists(ref_path) else ''
-		ref = ' '.join(ref)
+		segments = [[t['channel'], [], labels.decode(d, ts + t['begin'], channel = t['channel'], replace_blank = True, replace_repeat = True, replace_space = False)] for t, d in zip(meta, decoded)]
 		hyp = ' '.join(w['word'] for c, r, h in segments for w in h)
-		open(os.path.join(args.output_path, os.path.basename(audio_path) + '.txt'), 'w').write(hyp)
+		if args.output_path:
+			open(os.path.join(args.output_path, os.path.basename(audio_path) + '.txt'), 'w').write(hyp)
 		if args.verbose:
 			print('HYP:', hyp)
-		
+
 		if ref and args.align:
-			cer = metrics.cer(hyp, ref)#, edit_distance = metrics.levenshtein)
-			print('Input time steps:', log_probs.shape[-1], '| Target time steps:', y.shape[-1])
+			print('CER: {cer:.02%}'.format(cer = metrics.cer(hyp, ref)))
 			tic = time.time()
+			#TODO: collapse log_probs, y and ts
 			alignment = ctc.ctc_loss_(log_probs.permute(2, 0, 1), y.long(), output_lengths, ylen, blank = labels.blank_idx, alignment = True)
 			print('Alignment time: {:.02f} sec'.format(time.time() - tic))
 			for i in range(len(y)):
 				segments[i][-2] = labels.decode(y[i, :ylen[i]].tolist(), ts, alignment[i])
-			print(f'CER: {cer:.02%}')
-		else:
-			for i in range(len(y)):
-				segments[i][-2] = []
 		
 		segments = sum([list(segmentation.resegment(*s, ws = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
 		segments = segmentation.sort(segments)
-		html_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.html')
-		html_report(html_path, segments, audio_path, args.sample_rate)
-		print(html_path)
+		print(html_report(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), segments, audio_path, args.sample_rate))
 
 def html_report(html_path, segments, audio_path, sample_rate):
 	signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = False, dtype = torch.int16, normalize = False)
@@ -152,12 +134,13 @@ def html_report(html_path, segments, audio_path, sample_rate):
 			const make_segment = td => [td.innerText, td.dataset.channel, td.dataset.begin, td.dataset.end];
 			const hyp_segments = Array.from(document.querySelectorAll('.hyp')).map(make_segment), ref_segments = Array.from(document.querySelectorAll('.ref')).map(make_segment);
 		</script></body></html>''')
+	return html_path
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--checkpoint', required = True)
 	parser.add_argument('--data-path', '-i', nargs = '+')
-	parser.add_argument('--output-path', '-o', required = True)
+	parser.add_argument('--output-path', '-o')
 	parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
 	parser.add_argument('--max-segment-seconds', type = float, default = 2)
 	parser.add_argument('--num-workers', type = int, default = 32)
