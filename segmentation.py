@@ -20,7 +20,7 @@ def segment(speech, sample_rate = 1):
 
 	#begin_end_ = ((frame_len * torch.IntTensor(begin_end)).float() / sample_rate).tolist()
 
-def resegment(c, r, h, ws, max_segment_seconds):
+def resegment(r, h, ws, max_segment_seconds):
 	def filter_words(ws, i, w, first, last):
 		res = [(k, u) for k, u in enumerate(ws) if (first or i is None or ws[i]['j'] < u['i']) and (last or u['j'] < w['i'])]
 		if not res:
@@ -35,10 +35,10 @@ def resegment(c, r, h, ws, max_segment_seconds):
 		if first_last['last'] or w['end'] - ws[last_flushed_ind[k] + 1]['begin'] > max_segment_seconds:
 			last_flushed_ind[0], r_ = filter_words(r, last_flushed_ind[0], w, **first_last)
 			last_flushed_ind[1], h_ = filter_words(h, last_flushed_ind[1], w, **first_last)
-			yield [c, r_, h_]
+			yield [r_, h_]
 
 def summary(ws):
 	return dict(begin = min(w['begin'] for w in ws), end = max(w['end'] for w in ws), i = min(w['i'] for w in ws), j = max(w['j'] for w in ws)) if len(ws) > 0 else dict(begin = 0, end = 0, i = 0, j = 0)
 
 def sort(segments):
-	return list(sorted(segments, key = lambda s: tuple(map(summary(s[-1] + s[-2]).get, ['begin', 'end'])) + (s[0],)))
+	return list(sorted(segments, key = lambda s: tuple(map(summary(s[-1] + s[-2]).get, ['begin', 'end', 'channel']))))
