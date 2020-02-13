@@ -263,8 +263,8 @@ def align(hyp, ref):
 def analyze(ref, hyp, labels, phonetic_replace_groups = [], vocab = set(), full = False):
 	hyp_orig = hyp
 	hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
-	hyp, ref = map(labels.postprocess_transcript, [hyp, ref])
-	hyp_phonetic, ref_phonetic = [labels.postprocess_transcript(s, phonetic_replace_groups = phonetic_replace_groups) for s in [hyp, ref]]
+	hyp, ref = map(labels.postprocess_transcript_, [hyp, ref])
+	hyp_phonetic, ref_phonetic = [labels.postprocess_transcript_(s, phonetic_replace_groups = phonetic_replace_groups) for s in [hyp, ref]]
 	
 	a = dict(hyp_orig = hyp_orig, ref = ref, hyp = hyp, cer = cer(hyp, ref), wer = wer(hyp, ref), per = cer(hyp_phonetic, ref_phonetic), phonetic = dict(ref = ref_phonetic, hyp = hyp_phonetic), der = sum(w in vocab for w in hyp.split()) / (1 + hyp.count(' ')) )
 	

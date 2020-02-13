@@ -14,7 +14,7 @@ import vad
 import audio
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, max_duration = None, delimiter = ',', segmented = False, vad_options = {}, time_padding_multiple = 1):
+	def __init__(self, source_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, max_duration = None, mono = True, delimiter = ',', segmented = False, vad_options = {}, time_padding_multiple = 1):
 		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
@@ -22,37 +22,37 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.vad_options = vad_options
 		self.segmented = segmented
 		self.time_padding_multiple = time_padding_multiple
+		self.mono = mono
 
 		if not self.segmented:
 			self.examples = sum([list(sorted(((row[0], os.path.basename(data_or_path), dict(ref = row[1] if not row[1].endswith('.txt') else open(row[1]).read(), duration  = float(row[2]) if True and len(row) > 2 else -1) ) for line in (gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if '"' not in line for row in [line.split(delimiter)] if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1]['duration'] )) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])], [])
-
 		else:
-			self.examples = [(audio_path, os.path.basename(audio_path), os.path.exists(transcript_path) and json.load(open(transcript_path))) for audio_path in source_paths for transcript_path in [audio_path + '.json']]
-			
+			self.examples = [(audio_path, os.path.basename(audio_path), json.load(open(transcript_path)) if os.path.exists(transcript_path) else open(ref_path).read() if os.path.exists(ref_path) else None) for audio_path in source_paths for transcript_path, ref_path in [(audio_path + '.json', audio_path + '.txt')]]
 
 	def __getitem__(self, index):
 		audio_path, dataset_name, transcript = self.examples[index]
 		waveform_transform_debug = (lambda audio_path, sample_rate, signal: audio.write_audio(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), signal, sample_rate)) if self.waveform_transform_debug_dir else None
 		
 		if not self.segmented:
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = True, dtype = torch.float32, normalize = True) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, dtype = torch.float32, normalize = True) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
 			
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
 			ref_normalized, targets = zip(*targets)
-			transcript = dict(**transcript, **dict(audio_path = audio_path, ref_normalized = ref_normalized[0], begin = 0.0, end = transcript['duration']))
-
+			transcript = dict(audio_path = audio_path, dataset_name = dataset_name, ref_normalized = ref_normalized[0], begin = 0.0, end = transcript['duration'], **transcript)
 		else:
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = False, dtype = torch.int16, normalize = False)
-			
-			if True:#not transcript:
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, dtype = torch.int16, normalize = False)
+			ref_full, ref_full_normalized = transcript if isinstance(transcript, str) else '', self.labels[0].normalize_text(transcript) if isinstance(transcript, str) else ''
+			missing_transcript = not transcript or isinstance(transcript, str)
+			if missing_transcript: # True:
 				# TODO: batch using VAD
-				speech = vad.detect_speech(signal, sample_rate, **self.vad_options)
-				transcript = [dict(begin = 0, end = signal.shape[1] / sample_rate, duration = signal.shape[1] / sample_rate, channel = c, i = 0, j = signal.shape[1] - 1, audio_path = audio_path, ref = '') for c in range(len(signal))]
-
-			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], t['i'] : (1 + t['j'])]]]
-			targets = [[labels.encode(t.get('ref', ''))[1] for t in transcript] for labels in self.labels]
+				#speech = vad.detect_speech(signal, sample_rate, **self.vad_options)
+				transcript = [dict(begin = 0, end = signal.shape[1] / sample_rate, channel = c, ref = ref_full if len(signal) == 1 else '') for c in range(len(signal))]
 			
+			transcript = [dict(ref_normalized = self.labels[0].normalize_text(t['ref']) if t.get('ref') else '', ref_full = ref_full, ref_full_normalized = ref_full_normalized, audio_path = audio_path, dataset_name = dataset_name, duration = t['end'] - t['begin'], i = int(t['begin'] * sample_rate), j = int(t['end'] * sample_rate), **t) for t in sorted(transcript, key = lambda t: (t['begin'] , t['end'], t['channel']))]
+			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], t['i'] : 1 + int(t['j'])]]]
+			targets = [[labels.encode(t.get('ref', ''))[1] for t in transcript] for labels in self.labels]
+
 		return [transcript, features] + list(targets)
 			
 	def __len__(self):
@@ -144,14 +144,13 @@ class Labels:
 		return list(filter(bool, (''.join(c for c in self.preprocess_word(w) if c in self).strip() for w in words)))
 
 	def normalize_text(self, text):
-		return self.candidate_sep.join(' '.join(self.find_words(part)).lower().strip() for part in self.split_candidates(text)) or '*' 
-		#return ' '.join(f'{w[:-1]}{w[-1].upper()}' for w in self.find_words(text.lower())) or '*' 
+		return self.candidate_sep.join(' '.join(self.find_words(part)).lower().strip() for part in self.split_candidates(text))# or '*' 
 
 	def encode(self, text):
 		normalized = self.normalize_text(text)
 		chars = normalized.split(';')[0]
 		chr2idx = {l: i for i, l in enumerate(str(self))}
-		return normalized, torch.IntTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
+		return normalized, torch.LongTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
 	def decode(self, idx : list, ts = None, I = None, channel = 0, replace_blank = True, replace_space = False, replace_repeat = True):
 		decode_ = lambda i, j: self.postprocess_transcript(''.join(self[idx[ij]] for ij in range(i, j + 1) if replace_repeat is False or ij == 0 or idx[ij] != idx[ij - 1]), replace_blank = replace_blank, replace_space = replace_space, replace_repeat = replace_repeat)
@@ -187,16 +186,16 @@ class Labels:
 			word = ''.join(c if i == 0 or c != self.repeat else word[i - 1] for i, c in enumerate(word))
 		return word
 
-	#def postprocess_transcript(self, text, phonetic_replace_groups = [], replace_blank = True, replace_space = False, replace_repeat = True):
-	#	replaceblank = lambda s: s.replace(self.blank * 10, ' ').replace(self.blank, '')
-	#	replace2 = lambda s: ''.join(c if i == 0 or c != self.repeat else s[i - 1] for i, c in enumerate(s))
-	#	replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
-	#	replacestar = lambda s: s.replace('*', '')
-	#	replacespace = lambda s, sentencepiece_space = '\u2581', sentencepiece_unk = '<unk>': s.replace(sentencepiece_space, ' ')
-	#	replacecap = lambda s: ''.join(c + ' ' if c.isupper() else c for c in s)
-	#	replacephonetic = lambda s: s.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g.lower()})
-	#	replacepunkt = lambda s: s.replace(',', '').replace('.', '')
-	#	return functools.reduce(lambda text, func: func(text), [replacepunkt, replacespace, replacecap, replaceblank, replace2, replace22, replacestar, replacephonetic, str.strip], text)
+	def postprocess_transcript_(self, text, phonetic_replace_groups = [], replace_blank = True, replace_space = False, replace_repeat = True):
+		replaceblank = lambda s: s.replace(self.blank * 10, ' ').replace(self.blank, '')
+		replace2 = lambda s: ''.join(c if i == 0 or c != self.repeat else s[i - 1] for i, c in enumerate(s))
+		replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
+		replacestar = lambda s: s.replace('*', '')
+		replacespace = lambda s, sentencepiece_space = '\u2581', sentencepiece_unk = '<unk>': s.replace(sentencepiece_space, ' ')
+		replacecap = lambda s: ''.join(c + ' ' if c.isupper() else c for c in s)
+		replacephonetic = lambda s: s.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g.lower()})
+		replacepunkt = lambda s: s.replace(',', '').replace('.', '')
+		return functools.reduce(lambda text, func: func(text), [replacepunkt, replacespace, replacecap, replaceblank, replace2, replace22, replacestar, replacephonetic, str.strip], text)
 
 	def __getitem__(self, idx):
 		return {self.blank_idx : self.blank, self.repeat_idx : self.repeat, self.space_idx : self.space}.get(idx) or (self.alphabet[idx] if self.bpe is None else self.bpe.IdToPiece(idx))

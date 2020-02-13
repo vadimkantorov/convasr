@@ -51,7 +51,7 @@ def main(args):
 	lang = importlib.import_module(args.lang)
 	labels = [datasets.Labels(lang, name = 'char')] + [datasets.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, stft_mode = 'conv' if args.onnx else None)
-	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, frontend = frontend if args.onnx or args.frontend_in_model else None, **(dict(inplace = False, dict = lambda logits, log_probs, output_lengths, **kwargs: logits[0]) if args.onnx else {}))
+	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, frontend = frontend if args.onnx or args.frontend_in_model else None, **(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx else {}))
 
 	print(' Model capacity:', int(models.compute_capacity(model, scale = 1e6)), 'million parameters\n')
 
@@ -89,11 +89,11 @@ def main(args):
 		for meta, x, xlen, y, ylen in data_loader:
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
 			with torch.no_grad():
-				logits, log_probs, output_lengths, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'output_lengths', 'loss'])
+				logits, log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'olen', 'loss'])
 	
-			entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, output_lengths))
-			decoded = [list(map(l.decode, d.decode(lp, o))) for l, d, lp, o in zip(labels, decoder, log_probs, output_lengths)]
-			logits = list(map(models.unpad, logits, output_lengths))
+			entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, olen))
+			decoded = [list(map(l.decode, d.decode(lp, o))) for l, d, lp, o in zip(labels, decoder, log_probs, olen)]
+			logits = list(map(models.unpad, logits, olen))
 			y = list(map(models.unpad, y, ylen))
 			yield meta, loss.cpu(), entropy_char.cpu(), decoded, logits, y
 
@@ -230,10 +230,10 @@ def main(args):
 			lr = optimizer.param_groups[0]['lr']; lr_avg = moving_avg(lr_avg, lr, max = 1)
 			
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
-			log_probs, output_lengths, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'output_lengths', 'loss'])
+			log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'olen', 'loss'])
 			example_weights = ylen[:, 0]
 			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, float(loss.mean())
-			entropy = float(models.entropy(log_probs[0], output_lengths[0], dim = 1).mean()) 
+			entropy = float(models.entropy(log_probs[0], olen[0], dim = 1).mean()) 
 			toc_fwd = time.time()
 			if not (torch.isinf(loss) or torch.isnan(loss)):
 				if args.fp16:

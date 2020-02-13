@@ -27,7 +27,17 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 	tick_params = lambda ax, labelsize = 2.5, length = 0, **kwargs: ax.tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length, **kwargs) or [ax.set_linewidth(0) for ax in ax.spines.values()]
 	logits_path = logits + '.html'
 	html = open(logits_path, 'w')
-	html.write('<html><meta charset="utf-8"/><body>')
+	html.write('''<html><meta charset="utf-8"/><body><script>
+		function onclick_(evt)
+		{
+			const img = evt.target;
+			const dim = img.getBoundingClientRect();
+			const t = (evt.clientX - dim.left) / dim.width;
+			const audio = img.nextSibling;
+			audio.currentTime = t * audio.duration;
+			audio.play();
+		}
+	</script>''')
 	for r in torch.load(logits)[:5]:
 		logits = r['logits']
 		if good_audio_file_name and r['audio_file_name'] not in good_audio_file_name:
@@ -91,20 +101,8 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 		
 		html.write('<h4>{audio_file_name} | cer: {cer:.02f}</h4>'.format(**r))
 		html.write(colorize_alignment(r))
-		html.write('<img style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(encoded = base64.b64encode(buf.getvalue()).decode()))	
+		html.write('<img onclick="onclick_(event)" style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(encoded = base64.b64encode(buf.getvalue()).decode()))	
 		html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio><hr/>'.format(encoded = base64.b64encode(open(r['audio_path'], 'rb').read()).decode()))
-	html.write('''<script>
-		Array.from(document.querySelectorAll('img')).map(img => {
-			img.onclick = (evt) => {
-				const img = evt.target;
-				const dim = img.getBoundingClientRect();
-				const t = (evt.clientX - dim.left) / dim.width;
-				const audio = img.nextSibling;
-				audio.currentTime = t * audio.duration;
-				audio.play();
-			};
-		});
-	</script>''')
 	html.write('</body></html>')
 	print('\n', logits_path)
 

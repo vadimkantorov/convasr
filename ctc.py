@@ -30,9 +30,9 @@ def ctc_loss_(log_probs, targets, input_lengths, target_lengths, blank : int = 0
 	for t, indices in reversed(list(enumerate(path))[1:]):
 		path[t - 1] += indices - log_alpha_[t].gather(-1, indices.unsqueeze(-1)).squeeze(-1)
 	
-	res1 = torch.zeros_like(log_alpha_, dtype = torch.uint8, device = 'cpu').scatter_(-1, path.cpu().unsqueeze(-1), 1)[..., (zero_padding + 1)::2].contiguous().argmax(dim = 0)
-	res2 = torch.zeros_like(targets_, dtype = torch.long).scatter_(-1, path.t(), torch.arange(len(path), device = log_alpha.device).expand(len(B), -1))[:, (zero_padding + 1)::2]
-	return res2
+	res1 = torch.zeros_like(log_alpha_, dtype = torch.uint8, device = 'cpu').scatter_(-1, path.cpu().unsqueeze(-1), 1)[..., (zero_padding + 1)::2].contiguous().max(dim = 0).indices
+	#res2 = torch.zeros_like(targets_, dtype = torch.long).scatter_(-1, path.t(), torch.arange(len(path), device = log_alpha.device).expand(len(B), -1))[:, (zero_padding + 1)::2]
+	return res1
 
 
 #@torch.jit.script

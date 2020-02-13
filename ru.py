@@ -5,7 +5,7 @@ PHONETIC_REPLACE_GROUPS = ['ОАЯ', 'ПБ', 'СЗЦ', 'ВФ', 'КГХ', 'ТД',
 VOWELS = 'аоийеёэыуюяАОИЙЕЁЭЫУЮЯ'
 
 def preprocess_text(text):		
-	return text.replace('*', ' ').replace('+', ' ').replace('%', 'процент*').replace('ё', 'е').replace('Ё', 'Е')
+	return text.replace('*', ' ').replace('+', ' ').replace('%', 'процент').replace('ё', 'е').replace('Ё', 'Е')
 
 def preprocess_word(w):
 	if w in LATINS_2_NUM:
@@ -28,8 +28,8 @@ LATINS_2_NUM = {x: i for i, x in enumerate(LATINS, start = 2)}
 
 CARDINALS = {
 	0: 'НОЛЬ',
-	1: 'ОДИН*',
-	2: 'ДВА*',
+	1: 'ОДИН',
+	2: 'ДВА',
 	3: 'ТРИ',
 	4: 'ЧЕТЫРЕ',
 	5: 'ПЯТЬ',
@@ -64,7 +64,7 @@ CARDINALS = {
 	700: 'СЕМЬСОТ',
 	800: 'ВОСЕМЬСОТ',
 	900: 'ДЕВЯТЬСОТ',
-	1000: 'ТЫСЯЧА*',
+	1000: 'ТЫСЯЧА',
 	1000000: 'МИЛЛИОН',
 	1000000000: 'МИЛЛИАРД',
 }

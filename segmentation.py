@@ -22,7 +22,7 @@ def segment(speech, sample_rate = 1):
 
 def resegment(r, h, ws, max_segment_seconds):
 	def filter_words(ws, i, w, first, last):
-		res = [(k, u) for k, u in enumerate(ws) if (first or i is None or ws[i]['j'] < u['i']) and (last or u['j'] < w['i'])]
+		res = [(k, u) for k, u in enumerate(ws) if (first or i < 0 or ws[i]['j'] < u['i']) and (last or u['j'] < w['i'])]
 		if not res:
 			return i, []
 		i, ws = zip(*res)
@@ -33,12 +33,18 @@ def resegment(r, h, ws, max_segment_seconds):
 	for j, w in enumerate(ws):
 		first_last = dict(first = last_flushed_ind[k] == -1, last = j == len(ws) - 1)
 		if first_last['last'] or w['end'] - ws[last_flushed_ind[k] + 1]['begin'] > max_segment_seconds:
-			last_flushed_ind[0], r_ = filter_words(r, last_flushed_ind[0], w, **first_last)
-			last_flushed_ind[1], h_ = filter_words(h, last_flushed_ind[1], w, **first_last)
-			yield [r_, h_]
+			last_flushed_ind_ = [None, None]
+			last_flushed_ind_[0], r_ = filter_words(r, last_flushed_ind[0], w, **first_last)
+			last_flushed_ind_[1], h_ = filter_words(h, last_flushed_ind[1], w, **first_last)
+			#TODO: fix
+			if r_ + h_:
+				yield [r_, h_]
+			#else:
+			#	import IPython; IPython.embed()
+			last_flushed_ind = last_flushed_ind_
 
 def summary(ws):
-	return dict(begin = min(w['begin'] for w in ws), end = max(w['end'] for w in ws), i = min(w['i'] for w in ws), j = max(w['j'] for w in ws)) if len(ws) > 0 else dict(begin = 0, end = 0, i = 0, j = 0)
+	return dict(begin = min(w['begin'] for w in ws), end = max(w['end'] for w in ws), i = min([w['i'] for w in ws if 'i' in w] or [0]), j = max([w['j'] for w in ws if 'j' in w] or [0])) if len(ws) > 0 else dict(begin = 0, end = 0, i = 0, j = 0)
 
 def sort(segments):
-	return list(sorted(segments, key = lambda s: tuple(map(summary(s[-1] + s[-2]).get, ['begin', 'end', 'channel']))))
+	return sorted(segments, key = lambda s: tuple(map(summary(s[-1] + s[-2]).get, ['begin', 'end', 'channel'])))

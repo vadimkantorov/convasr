@@ -27,6 +27,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   sox \
   libsox-dev \
   libsox-fmt-all \
+  ffmpeg \
   vim unzip \
   sudo \
   wget \

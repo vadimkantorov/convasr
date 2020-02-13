@@ -128,14 +128,14 @@ class JasperNet(nn.Module):
 
 		logits = self.decoder(x)
 		log_probs = [F.log_softmax(l, dim = 1).float() for l in logits]
-		output_lengths = [compute_output_lengths(l, xlen) for l in logits]
+		olen = [compute_output_lengths(l, xlen) for l in logits]
 		aux = {}
 
 		if y is not None and ylen is not None:
-			loss = [F.ctc_loss(l.permute(2, 0, 1), y[:, i], output_lengths[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') / ylen[:, 0] for i, l in enumerate(log_probs)]
+			loss = [F.ctc_loss(l.permute(2, 0, 1), y[:, i], olen[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') / ylen[:, 0] for i, l in enumerate(log_probs)]
 			aux = dict(loss = sum(loss))
 
-		return self.dict(logits = logits, log_probs = log_probs, output_lengths = output_lengths, **aux)
+		return self.dict(logits = logits, log_probs = log_probs, olen = olen, **aux)
 
 	def freeze(self, backbone = 0, decoder0 = False):
 		for m in (list(self.backbone[:backbone]) if backbone else []) + (list(self.decoder)[:1] if decoder0 else []):
