@@ -39,15 +39,17 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
 			ref_normalized, targets = zip(*targets)
-			transcript = dict(audio_path = audio_path, dataset_name = dataset_name, ref_normalized = ref_normalized[0], begin = 0.0, end = transcript['duration'], **transcript)
+			transcript = dict(audio_path = audio_path, dataset_name = dataset_name, ref_normalized = ref_normalized[0], begin = 0.0, end = transcript['duration'], type = 'channel' if len(signal) > 1 else 'mono', **transcript)
 		else:
+			#TODO: support forced mono even if transcript is given
+
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, dtype = torch.int16, normalize = False)
 			ref_full, ref_full_normalized = transcript if isinstance(transcript, str) else '', self.labels[0].normalize_text(transcript) if isinstance(transcript, str) else ''
 			missing_transcript = not transcript or isinstance(transcript, str)
 			if missing_transcript: # True:
 				# TODO: batch using VAD
 				#speech = vad.detect_speech(signal, sample_rate, **self.vad_options)
-				transcript = [dict(begin = 0, end = signal.shape[1] / sample_rate, channel = c, ref = ref_full if len(signal) == 1 else '') for c in range(len(signal))]
+				transcript = [dict(begin = 0, end = signal.shape[1] / sample_rate, channel = c, ref = ref_full if len(signal) == 1 else '', type = 'channel' if len(signal) > 1 else 'mono') for c in range(len(signal))]
 			
 			transcript = [dict(ref_normalized = self.labels[0].normalize_text(t['ref']) if t.get('ref') else '', ref_full = ref_full, ref_full_normalized = ref_full_normalized, audio_path = audio_path, dataset_name = dataset_name, duration = t['end'] - t['begin'], i = int(t['begin'] * sample_rate), j = int(t['end'] * sample_rate), **t) for t in sorted(transcript, key = lambda t: (t['begin'] , t['end'], t['channel']))]
 			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], t['i'] : 1 + int(t['j'])]]]
@@ -167,7 +169,7 @@ class Labels:
 					j -= 1
 				
 				i_, j_ = int(i if I is None else I[i]), int(j if I is None else I[j])
-				words.append(dict(word = decode_(i, j), begin = float(ts[i_]), end = float(ts[j_]), i = i_, j = j_, channel = channel))
+				words.append(dict(word = decode_(i, j), begin = float(ts[i_]), end = float(ts[j_]), i = i_, j = j_, channel = channel if isinstance(channel, int) else int(channel[i_])))
 
 				i = None
 			elif k not in [self.space_idx, self.blank_idx] and i is None:

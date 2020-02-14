@@ -20,7 +20,7 @@ def segment(speech, sample_rate = 1):
 
 	#begin_end_ = ((frame_len * torch.IntTensor(begin_end)).float() / sample_rate).tolist()
 
-def resegment(r, h, ws, max_segment_seconds):
+def resegment(segments, max_segment_seconds):
 	def filter_words(ws, i, w, first, last):
 		res = [(k, u) for k, u in enumerate(ws) if (first or i < 0 or ws[i]['j'] < u['i']) and (last or u['j'] < w['i'])]
 		if not res:
@@ -28,23 +28,22 @@ def resegment(r, h, ws, max_segment_seconds):
 		i, ws = zip(*res)
 		return i[-1], list(ws)
 	
-	k = [r, h].index(ws)
-	last_flushed_ind = [-1, -1]
-	for j, w in enumerate(ws):
-		first_last = dict(first = last_flushed_ind[k] == -1, last = j == len(ws) - 1)
-		if first_last['last'] or w['end'] - ws[last_flushed_ind[k] + 1]['begin'] > max_segment_seconds:
-			last_flushed_ind_ = [None, None]
-			last_flushed_ind_[0], r_ = filter_words(r, last_flushed_ind[0], w, **first_last)
-			last_flushed_ind_[1], h_ = filter_words(h, last_flushed_ind[1], w, **first_last)
-			#TODO: fix
-			if r_ + h_:
-				yield [r_, h_]
-			#else:
-			#	import IPython; IPython.embed()
-			last_flushed_ind = last_flushed_ind_
+	for r, h in segments:
+		k, ws = (0, r) if r else (1, h)
+		last_flushed_ind = [-1, -1]
+		for j, w in enumerate(ws):
+			first, last = last_flushed_ind[k] == -1, j == len(ws) - 1
+			if last or (w['end'] - ws[last_flushed_ind[k] + 1]['begin'] > max_segment_seconds):
+				last_flushed_ind[0], r_ = filter_words(r, last_flushed_ind[0], w, first, last)
+				last_flushed_ind[1], h_ = filter_words(h, last_flushed_ind[1], w, first, last)
+				if r_ or h_:
+					yield [r_, h_]
 
 def summary(ws):
 	return dict(begin = min(w['begin'] for w in ws), end = max(w['end'] for w in ws), i = min([w['i'] for w in ws if 'i' in w] or [0]), j = max([w['j'] for w in ws if 'j' in w] or [0])) if len(ws) > 0 else dict(begin = 0, end = 0, i = 0, j = 0)
 
 def sort(segments):
 	return sorted(segments, key = lambda s: tuple(map(summary(s[-1] + s[-2]).get, ['begin', 'end', 'channel'])))
+
+def filter(segments):
+	pass

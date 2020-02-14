@@ -68,6 +68,7 @@ def main(args):
 
 		ts = (x.shape[-1] / args.sample_rate) * torch.linspace(0, 1, steps = log_probs.shape[-1]).unsqueeze(0) + torch.FloatTensor([t['begin'] for t in meta]).unsqueeze(1)
 		segments = [([dict(channel = meta[i]['channel'], begin = meta[i]['begin'], end = meta[i]['end'], word = labels.decode(y[i, 0, :ylen[i]].tolist()))], labels.decode(decoded[i], ts[i], channel = meta[i]['channel'], replace_blank = True, replace_repeat = True, replace_space = False)) for i in range(len(decoded))]
+		channel = [t['channel'] for t in meta]
 		
 		ref_full, y_full = labels.encode(meta[0]['ref_full'])
 		ref, hyp = ' '.join(t['word'] for r, h in segments for t in r).strip(), ' '.join(t['word'] for r, h in segments for t in h).strip()
@@ -78,26 +79,27 @@ def main(args):
 
 		tic = time.time()
 		if args.align:
-			if ref:
-				# if transcript exists and has no channel info, force pseudo-mono
-				alignment = ctc.ctc_loss_(log_probs.permute(2, 0, 1), y.squeeze(1), olen, ylen.squeeze(1), blank = labels.blank_idx, alignment = True)
-				segments = [(labels.decode(y[i, 0, :ylen[i]].tolist(), ts[i], alignment[i], channel = meta[i]['channel']), h) for i, (r, h) in enumerate(segments)]
-			elif ref_full:
-				#TODO: check that two-channel full audio doesn't slip in
-				#TODO: preserve channel when concating log_probs
-				ts, log_probs, y = ts.reshape(1, -1), log_probs.transpose(0, 1).unsqueeze(0).flatten(start_dim = -2), y_full.unsqueeze(0)
-				olen, ylen = [torch.tensor([t.shape[-1]], device = log_probs.device, dtype = torch.long) for t in [log_probs, y]]
-				alignment = ctc.ctc_loss_(log_probs.permute(2, 0, 1), y, olen, ylen, blank = labels.blank_idx, alignment = True)
-				segments = [(labels.decode(y[0, :ylen[0]].tolist(), ts[0], alignment[0]), sum([h for r, h in segments], []))]
+			if ref_full and not ref:
+				#assert len(set(t['channel'] for t in meta)) == 1 or all(t['type'] != 'channel' for t in meta)
+				channel = torch.ByteTensor(channel).repeat_interleave(log_probs.shape[-1]).reshape(1, -1)
+				ts = ts.reshape(1, -1)
+				log_probs = log_probs.transpose(0, 1).unsqueeze(0).flatten(start_dim = -2)
+				olen = torch.tensor([log_probs.shape[-1]], device = log_probs.device, dtype = torch.long)
+				y = y_full[None, None, :].to(y.device)
+				ylen = torch.tensor([[y.shape[-1]]], device = log_probs.device, dtype = torch.long)
+				segments = [([], sum([h for r, h in segments], []))]
+				
+			alignment = ctc.ctc_loss_(log_probs.permute(2, 0, 1), y.squeeze(1), olen, ylen.squeeze(1), blank = labels.blank_idx, alignment = True)
+			segments = [(labels.decode(y[i, 0, :ylen[i]].tolist(), ts[i], alignment[i], channel = channel[i]), h) for i, (r, h) in enumerate(segments)]
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic))
 		
-		# fix r or h
-		segments = sum([list(segmentation.resegment(*s, ws = s[-2] or s[-1], max_segment_seconds = args.max_segment_seconds)) for s in segments], [])
-		#import IPython; IPython.embed()
-		print(html_report(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), segmentation.sort(segments), audio_path, args.sample_rate))
+		if not all(t['type'] == 'provided' for t in meta):
+			segments = segmentation.resegment(segments, max_segment_seconds = args.max_segment_seconds)
+		
+		print(html_report(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), segmentation.sort(segments), audio_path, args.sample_rate, args.mono))
 
-def html_report(html_path, segments, audio_path, sample_rate):
-	signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = False, dtype = torch.int16, normalize = False)
+def html_report(html_path, segments, audio_path, sample_rate, mono):
+	signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = mono, dtype = torch.int16, normalize = False)
 	with open(html_path, 'w') as html:
 		fmt_link = lambda word, channel, begin, end, i = '', j = '': f'<a onclick="return play({channel},{begin},{end})" title="#{channel}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + (word if isinstance(word, str) else f'{begin:.02f}' if word == 0 else f'{end:.02f}' if word == 1 else f'{end - begin:.02f}') + '</a>'
 		fmt_words = lambda rh: ' '.join(fmt_link(**w) for w in rh)
