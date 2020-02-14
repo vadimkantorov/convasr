@@ -1,6 +1,9 @@
 # convasr - Work In Progress
 Baseline convolutional ASR system in PyTorch
 
+# License
+MIT
+
 # Dependencies
 aria2 (for downloading **ru_open_stt** via torrent), PyTorch, NumPy, SciPy (for wav loading), librosa (for audio resampling), NVidia Apex (for fp16 training), tensorboard==1.14.0, future (PyTorch nightlies don't install future), spotty (for AWS Spot Instances training)
 ```shell
