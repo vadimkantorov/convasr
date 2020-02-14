@@ -1,13 +1,10 @@
 #TODO:
 
 # batch by vad
-# if given transcript, always align
-# support stereo inputs with or without vad, with or without alignment
-# fix up timestamps by segment begin point
 # figure out stft shift
 # disable repeat deduplication
-# mix vad output for filtering full output
-# filter vad output
+# upstream ctc changes
+# gpu levenshtein, needleman/hirschberg
 
 import os
 import io
@@ -79,8 +76,9 @@ def main(args):
 
 		tic = time.time()
 		if args.align:
-			if ref_full and not ref:
+			if ref_full:# and not ref:
 				#assert len(set(t['channel'] for t in meta)) == 1 or all(t['type'] != 'channel' for t in meta)
+				#TODO: add space at the end
 				channel = torch.ByteTensor(channel).repeat_interleave(log_probs.shape[-1]).reshape(1, -1)
 				ts = ts.reshape(1, -1)
 				log_probs = log_probs.transpose(0, 1).unsqueeze(0).flatten(start_dim = -2)
@@ -89,11 +87,11 @@ def main(args):
 				ylen = torch.tensor([[y.shape[-1]]], device = log_probs.device, dtype = torch.long)
 				segments = [([], sum([h for r, h in segments], []))]
 				
-			alignment = ctc.ctc_loss_(log_probs.permute(2, 0, 1), y.squeeze(1), olen, ylen.squeeze(1), blank = labels.blank_idx, alignment = True)
+			alignment = ctc.alignment(log_probs.permute(2, 0, 1), y.squeeze(1), olen, ylen.squeeze(1), blank = labels.blank_idx)
 			segments = [(labels.decode(y[i, 0, :ylen[i]].tolist(), ts[i], alignment[i], channel = channel[i]), h) for i, (r, h) in enumerate(segments)]
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic))
 		
-		if not all(t['type'] == 'provided' for t in meta):
+		if args.max_segment_seconds:
 			segments = segmentation.resegment(segments, max_segment_seconds = args.max_segment_seconds)
 		
 		print(html_report(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), segmentation.sort(segments), audio_path, args.sample_rate, args.mono))
