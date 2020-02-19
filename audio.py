@@ -4,7 +4,7 @@ import librosa
 import torch
 import models
 
-def read_audio(audio_path, sample_rate, normalize = True, mono = True, duration = None, dtype = torch.float32, byte_order = 'little'):
+def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize = True, mono = True, dtype = torch.float32, byte_order = 'little'):
 	if audio_path.endswith('.wav'):
 		sample_rate_, signal = scipy.io.wavfile.read(audio_path) 
 		signal = signal[None, :] if len(signal.shape) == 1 else signal.T
@@ -14,8 +14,8 @@ def read_audio(audio_path, sample_rate, normalize = True, mono = True, duration 
 
 	signal = torch.as_tensor(signal).to(dtype)
 	
-	if duration is not None:
-		signal = signal[:int(duration * sample_rate_), ...]
+	if offset or duration is not None:
+		signal = signal[..., slice(int(offset * sample_rate_) if offset else None, int((offset + duration) * sample_rate_) if duration is not None else None)]
 	if mono:
 		signal = signal.float().mean(dim = 0, keepdim = True).to(dtype)
 	if normalize:

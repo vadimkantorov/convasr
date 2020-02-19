@@ -78,9 +78,8 @@ def main(args):
 		args.val_waveform_transform_debug_dir = os.path.join(args.val_waveform_transform_debug_dir, str(val_waveform_transform) if isinstance(val_waveform_transform, transforms.RandomCompose) else val_waveform_transform.__class__.__name__)
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
 
-	batch_collater = datasets.BatchCollater(args.batch_time_padding_multiple)
 	val_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob), feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob))
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = val_dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path for val_dataset in [datasets.AudioTextDataset(val_data_path, labels, args.sample_rate, frontend = val_frontend if not args.frontend_in_model else None, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir)]}
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = val_dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path for val_dataset in [datasets.AudioTextDataset(val_data_path, labels, args.sample_rate, frontend = val_frontend if not args.frontend_in_model else None, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, min_duration = args.min_duration)]}
 	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.GreedyNoBlankDecoder() if args.decoder == 'GreedyNoBlankDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
 	vocab = set(map(str.strip, open(args.vocab))) if args.vocab else set()
@@ -141,7 +140,7 @@ def main(args):
 				print('cer', metrics.quantiles(cer))
 				print('loss', metrics.quantiles(loss))
 				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} [{cer_easy_avg:.02%} - {cer_hard_avg:.02%} - {cer_missing_avg:.02%}]  MER: {mer_avg:.02%} DER: {der_avg:.02%}\n'.format(**stats))
-				columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_file_name', 'cer', 'mer', 'alignment')] + [(r['audio_file_name'], r['cer'], r['mer'], vis.colorize_alignment(r)) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
+				columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_file_name', 'cer', 'mer', 'alignment')] + [(r['audio_file_name'], r['cer'], r['mer'], vis.colorize_alignment(r['words'])) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
 				if training:
 					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + labels_name, dict(wer_avg = stats['wer_avg'] * 100.0, cer_avg = stats['cer_avg'] * 100.0, loss_avg = stats['loss_avg']), iteration) 
 					tensorboard.flush()
@@ -180,7 +179,7 @@ def main(args):
 	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder)
 
 	train_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob), feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob))
-	train_dataset = datasets.AudioTextDataset(args.train_data_path, labels, args.sample_rate, frontend = train_frontend if not args.frontend_in_model else None, max_duration = args.max_duration, time_padding_multiple = args.batch_time_padding_multiple)
+	train_dataset = datasets.AudioTextDataset(args.train_data_path, labels, args.sample_rate, frontend = train_frontend if not args.frontend_in_model else None, min_duration = args.min_duration, max_duration = args.max_duration, time_padding_multiple = args.batch_time_padding_multiple)
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
 	sampler = datasets.BucketingBatchSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing, bucket = lambda example: int(math.ceil((example[-1] / args.window_stride + 1) / args.batch_time_padding_multiple))) #+1 mean bug fix with bucket sizing
 	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = train_dataset.collate_fn, pin_memory = True, batch_sampler = sampler, worker_init_fn = set_random_seed, timeout = args.timeout)
@@ -354,6 +353,7 @@ if __name__ == '__main__':
 	parser.add_argument('--bpe', nargs = '*', help = 'path to SentencePiece subword model', default = [])
 	parser.add_argument('--timeout', type = float, default = 0, help = 'crash after specified timeout spent in DataLoader')
 	parser.add_argument('--max-duration', type = float, default = 10, help = 'in seconds; drop in DataLoader all utterances longer than this value')
+	parser.add_argument('--min-duration', type = float, default = 0.1, help = 'in seconds; drop in DataLoader all utterances smaller than this value')
 	parser.add_argument('--exphtml', default = '../stt_results')
 	parser.add_argument('--freeze-backbone', type = int, default = 0, help = 'freeze number of backbone layers')
 	parser.add_argument('--freeze-decoder', action = 'store_true', help = 'freeze decoder0')

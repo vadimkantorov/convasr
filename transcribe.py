@@ -21,8 +21,9 @@ import metrics
 import decoders
 import ctc
 import vad
-import segmentation
+import transcripts
 import audio
+import vis
 
 @torch.no_grad()
 def main(args):
@@ -48,6 +49,7 @@ def main(args):
 
 	for meta, x, xlen, y, ylen in val_data_loader:
 		audio_path = meta[0]['audio_path']
+		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
 
 		tic = time.time()
 		y, ylen = y.to(args.device), ylen.to(args.device)
@@ -68,7 +70,9 @@ def main(args):
 		channel = [t['channel'] for t in meta]
 		
 		ref_full, y_full = labels.encode(meta[0]['ref_full'])
-		ref, hyp = ' '.join(t['word'] for r, h in segments for t in r).strip(), ' '.join(t['word'] for r, h in segments for t in h).strip()
+		join_segment = lambda ws: ' '.join(t['word'] for t in ws).strip()
+
+		ref, hyp = ' '.join(join_segment(r) for r, h in segments).strip(), ' '.join(join_segment(h) for r, h in segments).strip()
 
 		if args.verbose:
 			print('HYP:', hyp)
@@ -92,54 +96,17 @@ def main(args):
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic))
 		
 		if args.max_segment_seconds:
-			segments = segmentation.resegment(segments, max_segment_seconds = args.max_segment_seconds)
+			# can't resegment large txt because of slow needleman
+			segments = list(transcripts.resegment(segments, max_segment_seconds = args.max_segment_seconds))
 		
-		print(html_report(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), segmentation.sort(segments), audio_path, args.sample_rate, args.mono))
-
-def html_report(html_path, segments, audio_path, sample_rate, mono):
-	signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = mono, dtype = torch.int16, normalize = False)
-	with open(html_path, 'w') as html:
-		fmt_link = lambda word, channel, begin, end, i = '', j = '': f'<a onclick="return play({channel},{begin},{end})" title="#{channel}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + (word if isinstance(word, str) else f'{begin:.02f}' if word == 0 else f'{end:.02f}' if word == 1 else f'{end - begin:.02f}') + '</a>'
-		fmt_words = lambda rh: ' '.join(fmt_link(**w) for w in rh)
-		fmt_begin_end = 'data-begin="{begin}" data-end="{end}"'.format
-
-		html.write('<html><head><meta charset="UTF-8"><style>.m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
-		html.write(f'<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>')
-		html.writelines(f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="ontimeupdate_(event)" id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{base64.b64encode(wav).decode()}"></audio></figure>' for c, wav in enumerate(audio.write_audio(io.BytesIO(), signal[channel], sample_rate).getvalue() for channel in ([0, 1] if len(signal) == 2 else []) + [...]))
-		html.write(f'''<pre class="channel"><h3 class="channel0 channel">hyp #0:<span></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span></span></h3></pre><hr/>
-		<table style="width:100%"><thead><th>begin</th><th>end</th><th>dur</th><th style="width:50%">hyp</th><th style="width:50%">ref</th><th>begin</th><th>end</th><th>dur</th></tr></thead><tbody>''')
-		html.writelines(f'<tr class="channel{c}"><td class="top">{fmt_link(0, c, **segmentation.summary(h))}</td><td class="top">{fmt_link(1, c, **segmentation.summary(h))}</td><td class="top">{fmt_link(2, c, **segmentation.summary(h))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(**segmentation.summary(h))}>{fmt_words(h)}</td>' + (f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(**segmentation.summary(r))}>{fmt_words(r)}</td><td class="top">{fmt_link(0,c, **segmentation.summary(r))}</td><td class="top">{fmt_link(1, c, **segmentation.summary(r))}</td><td class="top">{fmt_link(2, c, **segmentation.summary(r))}</td>' if r else '<td></td>' * 4) + f'</tr>' for r, h in segments for c in [(r + h)[0]['channel']])
-		html.write('''</tbody></table><script>
-			function play(channel, begin, end)
-			{
-				Array.from(document.querySelectorAll('audio')).map(audio => audio.pause());
-				const audio = document.querySelector(`#audio${channel}`);
-				audio.currentTime = begin;
-				audio.dataset.endTime = end;
-				audio.play();
-				return false;
-			}
-			
-			function subtitle(segments, time, channel)
-			{
-				return (segments.find(([rh, c, b, e]) => c == channel && b <= time && time <= e ) || ['', channel, null, null])[0];
-			}
-
-			function ontimeupdate_(evt)
-			{
-				const time = evt.target.currentTime, endtime = evt.target.dataset.endTime;
-				if(time > endtime)
-					return evt.target.pause();
-
-				document.querySelector('h5').innerText = time.toString();
-				const [spanhyp0, spanref0, spanhyp1, spanref1] = document.querySelectorAll('span');
-				[spanhyp0.innerText, spanref0.innerText, spanhyp1.innerText, spanref1.innerText] = [subtitle(hyp_segments, time, 0), subtitle(ref_segments, time, 0), subtitle(hyp_segments, time, 1), subtitle(ref_segments, time, 1)];
-			}
-
-			const make_segment = td => [td.innerText, td.dataset.channel, td.dataset.begin, td.dataset.end];
-			const hyp_segments = Array.from(document.querySelectorAll('.hyp')).map(make_segment), ref_segments = Array.from(document.querySelectorAll('.ref')).map(make_segment);
-		</script></body></html>''')
-	return html_path
+		transcript = [dict(audio_path = audio_path, ref = ref_, hyp = hyp_, cer = metrics.cer(hyp_, ref_), words = metrics.align_words(hyp_, ref_)[-1], alignment = dict(ref = ref, hyp = hyp), **transcripts.summary(hyp)) for ref, hyp in segments for ref_, hyp_ in [(join_segment(ref), join_segment(hyp))]]
+		
+		transcript = list(transcripts.filter(transcript, min_duration = args.min_duration, max_duration = args.max_duration, min_cer = args.min_cer, max_cer = args.max_cer, time_gap = args.gap, align_boundary_words = args.align_boundary_words))
+		json.dump(transcripts.strip(transcript, args.strip), open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+		print('Filtered', len(transcript), 'segments')
+		print(transcript_path)
+		if args.html:
+			print(vis.transcript(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), args.sample_rate, args.mono, transcript))
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -162,7 +129,14 @@ if __name__ == '__main__':
 	parser.add_argument('--verbose', action = 'store_true')
 	parser.add_argument('--window-size-dilate', type = float, default = 1.0)
 	parser.add_argument('--mono', action = 'store_true')
+	parser.add_argument('--html', action = 'store_true')
+	parser.add_argument('--min-cer', type = float)
+	parser.add_argument('--max-cer', type = float)
+	parser.add_argument('--min-duration', type = float)
+	parser.add_argument('--max-duration', type = float)
+	parser.add_argument('--gap', type = float)
+	parser.add_argument('--align-boundary-words', action = 'store_true')
+	parser.add_argument('--strip', nargs = '*', default = ['alignment'])
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
-	
 	main(args)

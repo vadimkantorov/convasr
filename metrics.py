@@ -4,6 +4,145 @@ import Levenshtein
 import torch
 import json
 
+def align(hyp, ref):
+	ref, hyp = Needleman().align(list(ref), list(hyp))
+	r, h = '', ''
+	i = 0
+	while i < len(ref):
+		if i + 1 < len(hyp) and ref[i] == '|' and hyp[i + 1] == '|':
+			r += ref[i + 1]
+			h += hyp[i]
+			i += 2
+		elif i + 1 < len(ref) and ref[i + 1] == '|' and hyp[i] == '|':
+			r += ref[i]
+			h += hyp[i + 1]
+			i += 2
+		else:
+			r += ref[i]
+			h += hyp[i]
+			i += 1
+	return h, r
+
+def align_words(hyp, ref):
+	h, r = map(list, align(hyp, ref))
+	for i in range(len(r)):
+		if r[i] != '|':
+			break
+		if h[i] == ' ':
+			r[i] = ' '
+	for i in reversed(range(len(r))):
+		if r[i] != '|':
+			break
+		if h[i] == ' ':
+			r[i] = ' '
+	h, r = ''.join(h), ''.join(r)
+
+	def words_():
+		k = None
+		for i in range(1 + len(r)):
+			if i == len(r) or r[i] == ' ':
+				r_, h_ = r[k : i], h[k : i]
+				if r_:
+					yield r_, h_
+				k = i + 1 #None
+			#elif r[i] != '|' and r[i] != ' ' and k is None:
+			#	k = i
+	words = list(words_())
+	errors = [dict(hyp = h_, ref = r_, type = t) for r_, h_ in words for t, e in [error_type(h_, r_)]]
+	return h, r, words, errors
+
+def analyze(ref, hyp, labels, phonetic_replace_groups = [], vocab = set(), full = False):
+	hyp_orig = hyp
+	hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
+	hyp, ref = map(labels.postprocess_transcript_, [hyp, ref])
+	hyp_phonetic, ref_phonetic = [labels.postprocess_transcript_(s, phonetic_replace_groups = phonetic_replace_groups) for s in [hyp, ref]]
+	
+	a = dict(hyp_orig = hyp_orig, ref = ref, hyp = hyp, cer = cer(hyp, ref), wer = wer(hyp, ref), per = cer(hyp_phonetic, ref_phonetic), phonetic = dict(ref = ref_phonetic, hyp = hyp_phonetic), der = sum(w in vocab for w in hyp.split()) / (1 + hyp.count(' ')) )
+	
+	if full:
+		h, r, words, words_ = align_words(hyp, ref)
+		phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
+		hypref_pseudo = {t : (' '.join((r_ if error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'])[t] else h_).replace('|', '') for r_, h_ in words), r.replace('|', '')) for t in error_types}
+
+		errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in words_ if r['type'] == t] for t in error_types}
+	
+		a.update(dict(
+			alignment = dict(ref = r, hyp = h),
+			words = words_,
+			error_stats = dict(
+				spaces = dict(
+					delete = sum(r[i] == ' ' and h[i] != ' ' for i in range(len(r))),
+					insert = sum(h[i] == ' ' and r[i] != ' ' for i in range(len(r))),
+					total =  sum(r[i] == ' ' for i in range(len(r)))
+				),
+				chars = dict(
+					ok = sum(r[i] == h[i] for i in range(len(r))), 
+					replace = sum(r[i] != '|' and r[i] != h[i] and h[i] != '|' for i in range(len(r))),
+					replace_phonetic = sum(r[i] != '|' and r[i] != h[i] and h[i] != '|' and phonetic_group(r[i]) == phonetic_group(h[i]) for i in range(len(r))), 
+					delete = sum(r[i] != '|' and r[i] != h[i] and h[i] == '|' for i in range(len(r))),
+					insert = sum(r[i] == '|' and h[i] != '|' for i in range(len(r))),
+					total = len(r)
+				),
+				words = dict(
+					missing_prefix = sum(h_[0] in ' |' for r_, h_ in words),
+					missing_suffix = sum(h_[-1] in ' |' for r_, h_ in words),
+					ok_prefix_suffix = sum(h_[0] not in ' |' and h_[-1] not in ' |' for r_, h_ in words),
+					delete = sum(h_.count('|') > len(r_) // 2 for r_, h_ in words),
+					total = len(words),
+					errors = errors,
+				),
+			),
+			mer = len(errors['missing']) / len(words),
+			cer_easy = cer(*hypref_pseudo['typo_easy']),
+			cer_hard = cer(*hypref_pseudo['typo_hard']),
+			cer_missing = cer(*hypref_pseudo['missing'])
+		))
+
+	return a
+
+def aggregate(analyzed, p = 0.5):
+	mean_safe = lambda k: float(torch.FloatTensor([r[k] for r in analyzed if k in r and not math.isinf(r[k]) and not math.isnan(r[k])] or [-1.0]).mean())
+	stats = dict(
+		loss_avg = mean_safe('loss'),
+		entropy_avg = mean_safe('entropy'),
+		cer_avg = mean_safe('cer'),
+		wer_avg = mean_safe('wer'),
+		mer_avg = mean_safe('mer'),
+		cer_easy_avg = mean_safe('cer_easy'),
+		cer_hard_avg = mean_safe('cer_hard'),
+		cer_missing_avg = mean_safe('cer_missing'),
+		der_avg = mean_safe('der')
+	)
+
+	errs = collections.defaultdict(int)
+	errs_words = {t : [] for t in error_types}
+	for a in analyzed:
+		if 'words' in a: 
+			for hyp, ref in map(lambda b: (b['hyp'], b['ref']), sum(a['error_stats']['words']['errors'].values(), [])):
+				t, e = error_type(hyp, ref)
+				e = e if t == 'typo_easy' else -1 if t == 'typo_hard' else -2
+				errs[e] += 1
+				errs_words[t].append(dict(ref = ref, hyp = hyp))
+	stats['errors_distribution'] = dict(collections.OrderedDict(sorted(errs.items())))
+	stats.update(errs_words)
+			
+	return stats
+
+def error_type(hyp, ref, p = 0.5, E = 3, L = 4):
+	e = sum(ch != cr for ch, cr in zip(hyp, ref))
+	ref_ = ref.replace('|', '')
+	is_typo = e > 0 and ((hyp.count('|') < p * len(ref) and ref.count('|') < p * len(ref)))
+	
+	if hyp == ref:
+		return 'ok', e
+	elif is_typo:
+		easy = e <= E and len(ref_) >= L
+		return 'typo_' + ('easy' if easy else 'hard'), e
+	else:
+		return 'missing', e
+
+error_types = ['typo_easy', 'typo_hard', 'missing']
+
 def quantiles(tensor):
 	tensor = tensor.sort().values
 	return {k : '{:.2f}'.format(float(tensor[int(len(tensor) * k / 100)])) for k in range(0, 100, 10)}
@@ -240,142 +379,6 @@ class Needleman:
 		self.init_matrix()
 		self.compute_matrix()
 		return self.backtrack()
-
-def align(hyp, ref):
-	ref, hyp = Needleman().align(list(ref), list(hyp))
-	r, h = '', ''
-	i = 0
-	while i < len(ref):
-		if i + 1 < len(hyp) and ref[i] == '|' and hyp[i + 1] == '|':
-			r += ref[i + 1]
-			h += hyp[i]
-			i += 2
-		elif i + 1 < len(ref) and ref[i + 1] == '|' and hyp[i] == '|':
-			r += ref[i]
-			h += hyp[i + 1]
-			i += 2
-		else:
-			r += ref[i]
-			h += hyp[i]
-			i += 1
-	return h, r
-
-def analyze(ref, hyp, labels, phonetic_replace_groups = [], vocab = set(), full = False):
-	hyp_orig = hyp
-	hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
-	hyp, ref = map(labels.postprocess_transcript_, [hyp, ref])
-	hyp_phonetic, ref_phonetic = [labels.postprocess_transcript_(s, phonetic_replace_groups = phonetic_replace_groups) for s in [hyp, ref]]
-	
-	a = dict(hyp_orig = hyp_orig, ref = ref, hyp = hyp, cer = cer(hyp, ref), wer = wer(hyp, ref), per = cer(hyp_phonetic, ref_phonetic), phonetic = dict(ref = ref_phonetic, hyp = hyp_phonetic), der = sum(w in vocab for w in hyp.split()) / (1 + hyp.count(' ')) )
-	
-	if full:
-		h, r = map(list, align(hyp, ref))
-		for i in range(len(r)):
-			if r[i] != '|':
-				break
-			if h[i] == ' ':
-				r[i] = ' '
-		for i in reversed(range(len(r))):
-			if r[i] != '|':
-				break
-			if h[i] == ' ':
-				r[i] = ' '
-		h, r = ''.join(h), ''.join(r)
-
-		def words():
-			k = None
-			for i in range(1 + len(r)):
-				if i == len(r) or r[i] == ' ':
-					r_, h_ = r[k : i], h[k : i]
-					if r_:
-						yield r_, h_
-					k = i + 1 #None
-				#elif r[i] != '|' and r[i] != ' ' and k is None:
-				#	k = i
-
-		assert len(r) == len(h)
-		phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
-		hypref_pseudo = {t : (' '.join((r_ if error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'])[t] else h_).replace('|', '') for r_, h_ in words()), r.replace('|', '')) for t in error_types}
-
-		words = list(words())
-		words_ = [dict(hyp = h_, ref = r_, type = t) for r_, h_ in words for t, e in [error_type(h_, r_)]]
-		errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in words_ if r['type'] == t] for t in error_types}
-	
-		a.update(dict(
-			spaces = dict(
-				delete = sum(r[i] == ' ' and h[i] != ' ' for i in range(len(r))),
-				insert = sum(h[i] == ' ' and r[i] != ' ' for i in range(len(r))),
-				total =  sum(r[i] == ' ' for i in range(len(r)))
-			),
-			alignment = dict(ref = r, hyp = h),
-			chars = dict(
-				ok = sum(r[i] == h[i] for i in range(len(r))), 
-				replace = sum(r[i] != '|' and r[i] != h[i] and h[i] != '|' for i in range(len(r))),
-				replace_phonetic = sum(r[i] != '|' and r[i] != h[i] and h[i] != '|' and phonetic_group(r[i]) == phonetic_group(h[i]) for i in range(len(r))), 
-				delete = sum(r[i] != '|' and r[i] != h[i] and h[i] == '|' for i in range(len(r))),
-				insert = sum(r[i] == '|' and h[i] != '|' for i in range(len(r))),
-				total = len(r)
-			),
-			words = dict(
-				missing_prefix = sum(h_[0] in ' |' for r_, h_ in words),
-				missing_suffix = sum(h_[-1] in ' |' for r_, h_ in words),
-				ok_prefix_suffix = sum(h_[0] not in ' |' and h_[-1] not in ' |' for r_, h_ in words),
-				delete = sum(h_.count('|') > len(r_) // 2 for r_, h_ in words),
-				total = len(words),
-				errors = errors,
-				all = words_
-			),
-			mer = len(errors['missing']) / len(words),
-
-			cer_easy = cer(*hypref_pseudo['typo_easy']),
-			cer_hard = cer(*hypref_pseudo['typo_hard']),
-			cer_missing = cer(*hypref_pseudo['missing'])
-		))
-
-	return a
-
-def aggregate(analyzed, p = 0.5):
-	mean_safe = lambda k: float(torch.FloatTensor([r[k] for r in analyzed if k in r and not math.isinf(r[k]) and not math.isnan(r[k])] or [-1.0]).mean())
-	stats = dict(
-		loss_avg = mean_safe('loss'),
-		entropy_avg = mean_safe('entropy'),
-		cer_avg = mean_safe('cer'),
-		wer_avg = mean_safe('wer'),
-		mer_avg = mean_safe('mer'),
-		cer_easy_avg = mean_safe('cer_easy'),
-		cer_hard_avg = mean_safe('cer_hard'),
-		cer_missing_avg = mean_safe('cer_missing'),
-		der_avg = mean_safe('der')
-	)
-
-	errs = collections.defaultdict(int)
-	errs_words = {t : [] for t in error_types}
-	for a in analyzed:
-		if 'words' in a: 
-			for hyp, ref in map(lambda b: (b['hyp'], b['ref']), sum(a['words']['errors'].values(), [])):
-				t, e = error_type(hyp, ref)
-				e = e if t == 'typo_easy' else -1 if t == 'typo_hard' else -2
-				errs[e] += 1
-				errs_words[t].append(dict(ref = ref, hyp = hyp))
-	stats['errors_distribution'] = dict(collections.OrderedDict(sorted(errs.items())))
-	stats.update(errs_words)
-			
-	return stats
-
-def error_type(hyp, ref, p = 0.5, E = 3, L = 4):
-	e = sum(ch != cr for ch, cr in zip(hyp, ref))
-	ref_ = ref.replace('|', '')
-	is_typo = e > 0 and ((hyp.count('|') < p * len(ref) and ref.count('|') < p * len(ref)))
-	
-	if hyp == ref:
-		return 'ok', e
-	elif is_typo:
-		easy = e <= E and len(ref_) >= L
-		return 'typo_' + ('easy' if easy else 'hard'), e
-	else:
-		return 'missing', e
-
-error_types = ['typo_easy', 'typo_hard', 'missing']
 
 if __name__ == '__main__':
 	import argparse

@@ -3,9 +3,7 @@ import json
 import argparse
 import torch
 import sentencepiece
-import dataset
-import vad
-import segmentation
+import audio
 
 def bpetrain(input_path, output_prefix, vocab_size, model_type, max_sentencepiece_length):
 	sentencepiece.SentencePieceTrainer.Train(f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size} --model_type={model_type}' + (f' --max_sentencepiece_length={max_sentencepiece_length}' if max_sentencepiece_length else ''))
@@ -20,19 +18,26 @@ def subset(input_path, output_path, audio_file_name, arg, min, max):
 		open(output_path, 'w').write('\n'.join(r['audio_file_name'] for r in json.load(open(input_path)) if (min <= r[arg] if min is not None else True) and (r[arg] < max if max is not None else True)))
 	print(output_path)
 
-def cut(input_path, output_path, sample_rate, window_size, aggressiveness, min_duration, max_duration):
+def cut(input_path, output_path, sample_rate, min_duration, max_duration):
+	transcript = json.load(open(input_path))
 	os.makedirs(output_path, exist_ok = True)
-	signal, sample_rate = dataset.read_audio(input_path, sample_rate, normalize = False, dtype = torch.int16)
-	speech = vad.detect_speech(signal, sample_rate, window_size, aggressiveness)
+	signal = {}
 
-	# ensure can expand and half-expand
-	for c, channel in enumerate(signal):
-		segments = segmentation.segment(speech[c], sample_rate = sample_rate)
-		for s in segments:
-			if min_duration <= s['end'] - s['begin'] <= max_duration:
-				output_file_name = os.path.basename(input_path) + f'.{c}-{begin:.06f}-{end:.06f}.wav'
-				dataset.write_audio(os.path.join(output_path, output_file_name), channel[s['i'] : 1 + s['j']], sample_rate)
-		
+	for t in transcript:
+		audio_path = t['audio_path']
+		#TODO: cannot resample wav files because of torch.int16 - better off using sox/ffmpeg directly
+		signal[audio_path] = signal[audio_path] if audio_path in signal else audio.read_audio(audio_path, sample_rate, normalize = False, dtype = torch.int16)[0]
+		duration = t['end'] - t['begin']
+		if (min_duration is None or min_duration <= duration) and (max_duration is None or duration <= max_duration):
+			segment_path = os.path.join(output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t))
+			audio.write_audio(segment_path, signal[audio_path][t['channel'], int(t['begin'] * sample_rate) : int(t['end'] * sample_rate)], sample_rate)
+			t = dict(audio_path = segment_path, begin = 0.0, end = t['end'] - t['begin'], ref = t['ref'], meta = t)
+			json.dump(t, open(segment_path + '.json', 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	
+def cat(input_path, output_path):
+	transcript = [json.load(open(os.path.join(input_path, transcript_name))) for transcript_name in os.listdir(input_path) if transcript_name.endswith('.json')]
+	json.dump(transcript, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -55,13 +60,16 @@ if __name__ == '__main__':
 	
 	cmd = subparsers.add_parser('cut')
 	cmd.add_argument('--input-path', '-i', required = True)
-	cmd.add_argument('--output-path', '-o', required = True)
-	cmd.add_argument('--aggressiveness', type = int, choices = [0, 1, 2, 3], default = 3)
-	cmd.add_argument('--window-size', type = float, choices = [0.01, 0.02, 0.03], default = 0.02)
-	cmd.add_argument('--max-duration', type = float, default = 5.0)
-	cmd.add_argument('--min-duration', type = float, default = 2.0)
+	cmd.add_argument('--output-path', '-o', default = 'data/cut')
+	cmd.add_argument('--max-duration', type = float)
+	cmd.add_argument('--min-duration', type = float, default = 0.1)
 	cmd.add_argument('--sample-rate', '-r', type = int, default = 8_000, choices = [8_000, 16_000, 32_000, 48_000])
 	cmd.set_defaults(func = cut)
+	
+	cmd = subparsers.add_parser('cat')
+	cmd.add_argument('--input-path', '-i', required = True)
+	cmd.add_argument('--output-path', '-o', default = 'data/cat.json')
+	cmd.set_defaults(func = cat)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')

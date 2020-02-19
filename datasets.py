@@ -10,11 +10,12 @@ import itertools
 import numpy as np
 import torch.utils.data
 import sentencepiece
-import vad
 import audio
+import vad
+import transcripts
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, max_duration = None, mono = True, delimiter = ',', segmented = False, vad_options = {}, time_padding_multiple = 1):
+	def __init__(self, source_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, delimiter = ',', segmented = False, vad_options = {}, time_padding_multiple = 1):
 		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
@@ -24,8 +25,13 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.time_padding_multiple = time_padding_multiple
 		self.mono = mono
 
+		duration = lambda example: example[-1]['end'] - example[-1]['begin']
+		source_paths = source_paths if isinstance(source_paths, list) else [source_paths]
 		if not self.segmented:
-			self.examples = sum([list(sorted(((row[0], os.path.basename(data_or_path), dict(ref = row[1] if not row[1].endswith('.txt') else open(row[1]).read(), duration  = float(row[2]) if True and len(row) > 2 else -1) ) for line in (gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if '"' not in line for row in [line.split(delimiter)] if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1]['duration'] )) for data_or_path in (source_paths if isinstance(source_paths, list) else [source_paths])], [])
+			#self.examples = sum([list(sorted(((row[0], os.path.basename(data_or_path), dict(ref = row[1] if not row[1].endswith('.txt') else open(row[1]).read(), duration  = float(row[2]) if True and len(row) > 2 else -1) ) for line in (gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if '"' not in line for row in [line.split(delimiter)] if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1]['duration'] )) for data_or_path in source_paths], [])
+			self.examples = [(transcript['audio_path'], os.path.basename(data_path), transcript) for data_path in source_paths for transcript in json.load(open(data_path) if data_path.endswith('.json') else gzip.open(data_path, 'rt'))][:10]
+			self.examples = list(sorted(self.examples, key = duration))
+			self.examples = list(filter(lambda example: (min_duration is None or min_duration <= duration(example)) and (max_duration is None or duration(example) <= max_duration), self.examples))
 		else:
 			self.examples = [(audio_path, os.path.basename(audio_path), json.load(open(transcript_path)) if os.path.exists(transcript_path) else open(ref_path).read() if os.path.exists(ref_path) else None) for audio_path in source_paths for transcript_path, ref_path in [(audio_path + '.json', audio_path + '.txt')]]
 
@@ -34,25 +40,26 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		waveform_transform_debug = (lambda audio_path, sample_rate, signal: audio.write_audio(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), signal, sample_rate)) if self.waveform_transform_debug_dir else None
 		
 		if not self.segmented:
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, dtype = torch.float32, normalize = True) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, offset = transcript['begin'], duration = transcript['end'] - transcript['begin'], mono = self.mono, dtype = torch.float32, normalize = True) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
 			
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
 			ref_normalized, targets = zip(*targets)
-			transcript = dict(audio_path = audio_path, dataset_name = dataset_name, ref_normalized = ref_normalized[0], begin = 0.0, end = transcript['duration'], type = 'channel' if len(signal) > 1 else 'mono', **transcript)
+			transcript = dict(dataset_name = dataset_name, ref_normalized = ref_normalized[0], type = 'channel' if len(signal) > 1 else 'mono', **transcript)
 		else:
 			#TODO: support forced mono even if transcript is given
 
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, dtype = torch.int16, normalize = False)
 			ref_full, ref_full_normalized = transcript if isinstance(transcript, str) else '', self.labels[0].normalize_text(transcript) if isinstance(transcript, str) else ''
 			missing_transcript = not transcript or isinstance(transcript, str)
-			if missing_transcript: # True:
-				# TODO: batch using VAD
-				#speech = vad.detect_speech(signal, sample_rate, **self.vad_options)
+			if True: # missing_transcript: # 
+			#	speech = vad.detect_speech(signal, sample_rate, **self.vad_options)
+			#	transcript = transcripts.segment(speech, sample_rate = sample_rate)
+				# if no vad options
 				transcript = [dict(begin = 0, end = signal.shape[1] / sample_rate, channel = c, ref = ref_full if len(signal) == 1 else '', type = 'channel' if len(signal) > 1 else 'mono') for c in range(len(signal))]
 			
-			transcript = [dict(ref_normalized = self.labels[0].normalize_text(t['ref']) if t.get('ref') else '', ref_full = ref_full, ref_full_normalized = ref_full_normalized, audio_path = audio_path, dataset_name = dataset_name, duration = t['end'] - t['begin'], i = int(t['begin'] * sample_rate), j = int(t['end'] * sample_rate), **t) for t in sorted(transcript, key = lambda t: (t['begin'] , t['end'], t['channel']))]
-			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], t['i'] : 1 + int(t['j'])]]]
+			transcript = [dict(ref_normalized = self.labels[0].normalize_text(t['ref']) if t.get('ref') else '', ref_full = ref_full, ref_full_normalized = ref_full_normalized, audio_path = audio_path, dataset_name = dataset_name, duration = t['end'] - t['begin'], **t) for t in sorted(transcript, key = transcripts.sort_key)]
+			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], int(t['begin'] * sample_rate) : 1 + int(t['end'] * sample_rate)]]]
 			targets = [[labels.encode(t.get('ref', ''))[1] for t in transcript] for labels in self.labels]
 
 		return [transcript, features] + list(targets)

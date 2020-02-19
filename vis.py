@@ -15,11 +15,71 @@ import seaborn
 import altair
 import torch
 import torch.nn.functional as F
+import audio
 import datasets
 import ru
 import metrics
 import models
 import ctc
+import transcripts
+
+def transcript(html_path, sample_rate, mono, transcript):
+	if isinstance(transcript, str):
+		transcript = json.load(open(transcript))
+
+	has_hyp = True
+	has_ref = any(t['alignment']['ref'] for t in transcript)
+
+	audio_path = transcript[0]['audio_path']
+	signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = mono, dtype = torch.int16, normalize = False)
+	
+	fmt_link = lambda word, channel, begin, end, i = '', j = '': f'<a onclick="return play({channel},{begin},{end})" title="#{channel}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + (word if isinstance(word, str) else f'{begin:.02f}' if word == 0 else f'{end:.02f}' if word == 1 else f'{end - begin:.02f}') + '</a>'
+	fmt_words = lambda rh: ' '.join(fmt_link(**w) for w in rh)
+	fmt_begin_end = 'data-begin="{begin}" data-end="{end}"'.format
+
+	html = open(html_path, 'w')
+	html.write('<html><head><meta charset="UTF-8"><style>.m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue;' + ('display:none' if len(signal) == 1 else '') + '} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
+	html.write(f'<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>')
+	html.writelines(f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="ontimeupdate_(event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{base64.b64encode(wav).decode()}"></audio></figure>' for c, wav in enumerate(audio.write_audio(io.BytesIO(), signal[channel], sample_rate).getvalue() for channel in ([0, 1] if len(signal) == 2 else []) + [...]))
+	html.write(f'<pre class="channel"><h3 class="channel0 channel">hyp #0:<span class="subtitle"></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span class="subtitle"></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span class="subtitle"></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span class="subtitle"></span></h3></pre><hr/><table style="width:100%">')
+	html.write('<tr>' + ('<th>begin</th><th>end</th><th>dur</th><th style="width:50%">hyp</th>' if has_hyp else '') + ('<th style="width:50%">ref</th><th>begin</th><th>end</th><th>dur</th>' if has_ref else '') + '</tr>')
+	html.writelines(f'<tr class="channel{c}">'+ (f'<td class="top">{fmt_link(0, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(hyp, ij = True))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}<template>{colorize_alignment(t["words"], tag = "", hyp = True)}</template></td>' if has_hyp else '') + (f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}<template>{colorize_alignment(t["words"], tag = "", ref = True)}</template></td><td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td>' if ref else ('<td></td>' * 4 if has_ref else '')) + f'</tr>' for t in transcripts.sort(transcript) for c, ref, hyp in [(t['channel'], t['alignment']['ref'], t['alignment']['hyp'])] )
+	html.write('''</tbody></table><script>
+		function play(channel, begin, end)
+		{
+			Array.from(document.querySelectorAll('audio')).map(audio => audio.pause());
+			const audio = document.querySelector(`#audio${channel}`);
+			audio.currentTime = begin;
+			audio.dataset.endTime = end;
+			audio.play();
+			return false;
+		}
+		
+		function subtitle(segments, time, channel)
+		{
+			return (segments.find(([rh, c, b, e]) => c == channel && b <= time && time <= e ) || ['', channel, null, null])[0];
+		}
+
+		function onpause_(evt)
+		{
+			evt.target.dataset.endTime = null;
+		}
+
+		function ontimeupdate_(evt)
+		{
+			const time = evt.target.currentTime, endtime = evt.target.dataset.endTime;
+			if(endtime && time > endtime)
+				return evt.target.pause();
+
+			document.querySelector('h5').innerText = time.toString();
+			const [spanhyp0, spanref0, spanhyp1, spanref1] = document.querySelectorAll('span.subtitle');
+			[spanhyp0.innerHTML, spanref0.innerHTML, spanhyp1.innerHTML, spanref1.innerHTML] = [subtitle(hyp_segments, time, 0), subtitle(ref_segments, time, 0), subtitle(hyp_segments, time, 1), subtitle(ref_segments, time, 1)];
+		}
+
+		const make_segment = td => [td.querySelector('template').innerHTML, td.dataset.channel, td.dataset.begin, td.dataset.end];
+		const hyp_segments = Array.from(document.querySelectorAll('.hyp')).map(make_segment), ref_segments = Array.from(document.querySelectorAll('.ref')).map(make_segment);
+	</script></body></html>''')
+	return html_path
 
 def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
@@ -100,7 +160,7 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 		plt.close()
 		
 		html.write('<h4>{audio_file_name} | cer: {cer:.02f}</h4>'.format(**r))
-		html.write(colorize_alignment(r))
+		html.write(colorize_alignment(r['words']))
 		html.write('<img onclick="onclick_(event)" style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(encoded = base64.b64encode(buf.getvalue()).decode()))	
 		html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio><hr/>'.format(encoded = base64.b64encode(open(r['audio_path'], 'rb').read()).decode()))
 	html.write('</body></html>')
@@ -108,11 +168,11 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 
 def errors(ours, theirs = None, audio_file_name = None, audio = False, output_file_name = None):
 	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
-	read_refhyp = lambda path: list(filter(lambda r: not good_audio_file_name or r['audio_file_name'] in good_audio_file_name, json.load(open(path)))) if path is not None else []
-	ours_, theirs_ = read_refhyp(ours), {r['audio_file_name'] : r for r in read_refhyp(theirs)}
+	read_transcript = lambda path: list(filter(lambda r: not good_audio_file_name or r['audio_file_name'] in good_audio_file_name, json.load(open(path)))) if path is not None else []
+	ours_, theirs_ = read_transcript(ours), {r['audio_file_name'] : r for r in read_transcript(theirs)}
 	# https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
 	output_file_name = output_file_name or (ours + (audio_file_name.split('subset')[-1] if audio_file_name else '') + '.html')
-	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} td {border-top: 1px solid black} .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th>audio</th><th></th><th>cer</th><th>mer</th><th></th></tr>' + '\n'.join(f'<tr><td>' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"></audio>' if audio and i == 0 else '') + f'<div class="nowrap">{r["audio_file_name"] if i == 0 else ""}</div></td>' + f'<td>{ours if i == 0 else theirs}</td><td>{r_["cer"]:.02%}</td><td class="br">{r_["mer"]:.02%}</td><td>{colorize_alignment(r_)}</td>' + '</tr>' for r in ours_ for i, r_ in enumerate(filter(None, [r, theirs_.get(r['audio_file_name'])]))) + '</table></body></html>')
+	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} td {border-top: 1px solid black} .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th>audio</th><th></th><th>cer</th><th>mer</th><th></th></tr>' + '\n'.join(f'<tr><td>' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"></audio>' if audio and i == 0 else '') + f'<div class="nowrap">{r["audio_file_name"] if i == 0 else ""}</div></td>' + f'<td>{ours if i == 0 else theirs}</td><td>{r_["cer"]:.02%}</td><td class="br">{r_["mer"]:.02%}</td><td>{colorize_alignment(r_["words"])}</td>' + '</tr>' for r in ours_ for i, r_ in enumerate(filter(None, [r, theirs_.get(r['audio_file_name'])]))) + '</table></body></html>')
 	print(output_file_name)
 
 def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe, der):
@@ -233,13 +293,24 @@ def histc_vega(tensor, min, max, bins):
 	hist = tensor.histc(min = bins.min(), max = bins.max(), bins = len(bins)).int()
 	return altair.Chart(altair.Data(values = [dict(x = b, y = v) for b, v in zip(bins.tolist(), hist.tolist())])).mark_bar().encode(x = altair.X('x:Q'), y = altair.Y('y:Q')).to_dict()
 
-def colorize_alignment(r):
+def colorize_alignment(r, ref = None, hyp = None, tag = '<pre>'):
 	span = lambda word, t = None: '<span style="{style}">{word}</span>'.format(word = word, style = 'background-color:' + dict(ok = 'green', missing = 'red', typo_easy = 'lightgreen', typo_hard = 'pink')[t] if t is not None else '')
-	return '<pre>ref: {ref}\nhyp: {hyp}</pre>'.format(ref = ' '.join(span(w['ref'], w['type'] if w['type'] == 'ok' else None) for w in r['words']['all']), hyp = ' '.join(span(w['hyp'], w['type']) for w in r['words']['all']))
+	
+	hyp_ = ' '.join(span(w['ref'], w['type'] if w['type'] == 'ok' else None) for w in r)
+	ref_ = ' '.join(span(w['hyp'], w['type']) for w in r)
+	contents = hyp_ if hyp is True else ref_ if ref is True else f'ref: {ref_}\nhyp: {hyp_}'
+	return tag + contents + tag.replace('<', '</')
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
+
+	cmd = subparsers.add_parser('transcript')
+	cmd.add_argument('--transcript', '-i')
+	cmd.add_argument('--mono', action = 'store_true')
+	cmd.add_argument('--sample-rate', type = int, default = 8_000)
+	cmd.add_argument('--html-path', '-o')
+	cmd.set_defaults(func = transcript)
 
 	cmd = subparsers.add_parser('errors')
 	cmd.add_argument('ours', default = 'data/transcripts.json')
