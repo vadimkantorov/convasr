@@ -1,3 +1,4 @@
+import re
 import os
 import json
 import argparse
@@ -19,8 +20,8 @@ def subset(input_path, output_path, audio_file_name, arg, min, max):
 	print(output_path)
 
 def cut(input_path, output_path, sample_rate, min_duration, max_duration):
-	transcript = json.load(open(input_path))
 	os.makedirs(output_path, exist_ok = True)
+	transcript = json.load(open(input_path))
 	signal = {}
 
 	for t in transcript:
@@ -37,6 +38,17 @@ def cut(input_path, output_path, sample_rate, min_duration, max_duration):
 def cat(input_path, output_path):
 	transcript = [json.load(open(os.path.join(input_path, transcript_name))) for transcript_name in os.listdir(input_path) if transcript_name.endswith('.json')]
 	json.dump(transcript, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+
+def fromsrt(input_path, output_path):
+	os.makedirs(output_path, exist_ok = True)
+
+	def timestamp2sec(ts):
+		hh, mm, ss, msec = map(int, ts.replace(',', ':').split(':'))
+		return hh * 60 * 60 + mm * 60 + ss + msec * 1e-3
+	transcript = [dict(begin = timestamp2sec(begin), end = timestamp2sec(end), ref = ref) for begin, end, ref in re.findall(r'(\d+:\d+:\d+,\d+) --> (\d+:\d+:\d+,\d+)\s+(.+)', open(input_path).read())]
+	transcript_path = os.path.join(output_path, os.path.basename(input_path) + '.json')
+	json.dump(transcript, open(transcript_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	print(transcript_path)
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -70,6 +82,11 @@ if __name__ == '__main__':
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o', default = 'data/cat.json')
 	cmd.set_defaults(func = cat)
+
+	cmd = subparsers.add_parser('fromsrt')
+	cmd.add_argument('--input-path', '-i', required = True)
+	cmd.add_argument('--output-path', '-o', default = 'data/fromsrt')
+	cmd.set_defaults(func = fromsrt)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')
