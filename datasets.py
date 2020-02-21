@@ -29,7 +29,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		source_paths = source_paths if isinstance(source_paths, list) else [source_paths]
 		if not self.segmented:
 			#self.examples = sum([list(sorted(((row[0], os.path.basename(data_or_path), dict(ref = row[1] if not row[1].endswith('.txt') else open(row[1]).read(), duration  = float(row[2]) if True and len(row) > 2 else -1) ) for line in (gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if '"' not in line for row in [line.split(delimiter)] if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1]['duration'] )) for data_or_path in source_paths], [])
-			self.examples = [(transcript['audio_path'], os.path.basename(data_path), transcript) for data_path in source_paths for transcript in json.load(open(data_path) if data_path.endswith('.json') else gzip.open(data_path, 'rt'))][:10]
+			self.examples = [(transcript['audio_path'], os.path.basename(data_path), transcript) for data_path in source_paths for transcript in json.load(open(data_path) if data_path.endswith('.json') else gzip.open(data_path, 'rt'))]
 			self.examples = list(sorted(self.examples, key = duration))
 			self.examples = list(filter(lambda example: (min_duration is None or min_duration <= duration(example)) and (max_duration is None or duration(example) <= max_duration), self.examples))
 		else:
