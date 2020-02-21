@@ -1,24 +1,13 @@
-# Download the dataset
-```shell
-apt-get update && apt-get install -y aria2
-aria2c https://academictorrents.com/download/a7929f1d8108a2a6ba2785f67d722423f088e6ba.torrent --seed-time=0
-
-cd ru_open_stt_wav
-
-for f in asr_calls_2_val.tar.gz buriy_audiobooks_2_val.tar.gz public_youtube700_val.tar.gz asr_public_stories_1.tar.gz asr_public_stories_2.tar.gz public_lecture_1.tar.gz public_series_1.tar.gz public_youtube1120.tar.gz ru_ru.tar.gz public_youtube1120_hq.tar.gz russian_single.tar.gz voxforge_ru.tar.gz asr_public_phone_calls_1.tar.gz; do
-  tar -xf $f
-  rm $f
-done
-
-for f in audiobooks_2.tar.gz_ public_youtube700.tar.gz_ asr_public_phone_calls_2.tar.gz_ tts_russian_addresses_rhvoice_4voices.tar_; do
-  cat $f* > tmp.tar.gz
-  rm $f*
-  tar -xf tmp.tar.gz
-  rm tmp.tar.gz
-done
-
-```
 # Download the exclude files
+The gzipped versions are available at https://github.com/vadimkantorov/convasr/releases/tag/openstt_benchmark_files_backup
+
+```shell
+wget https://github.com/vadimkantorov/convasr/releases/download/openstt_benchmark_files_backup/benchmark_v05_public.csv.gz https://github.com/vadimkantorov/convasr/releases/download/openstt_benchmark_files_backup/clean_thresholds_cer.json https://github.com/vadimkantorov/convasr/releases/download/openstt_benchmark_files_backup/exclude_df_youtube_1120.csv.gz https://github.com/vadimkantorov/convasr/releases/download/openstt_benchmark_files_backup/public_exclude_file_v5.csv.gz https://github.com/vadimkantorov/convasr/releases/download/openstt_benchmark_files_backup/public_meta_data_v04_fx.csv.gz
+
+python3 openstt.py
+```
+
+# Original exclude files
 ```shell
 wget https://ru-open-stt.ams3.digitaloceanspaces.com/public_meta_data_v04_fx.csv
 
@@ -38,6 +27,27 @@ zcat benchmark_v05_public.csv.zip > benchmark_v05_public.csv
 
 rm public_exclude_file_v5.z01.zip public_exclude_file_v5.z02.zip public_exclude_file_v5.z03.zip public_exclude_file_v5.zip public_exclude_file_v5_.zip exclude_df_youtube_1120.zip benchmark_v05_public.csv.zip
 
+gzip *.csv
+```
+
+# Download the dataset
+```shell
+apt-get update && apt-get install -y aria2
+aria2c https://academictorrents.com/download/a7929f1d8108a2a6ba2785f67d722423f088e6ba.torrent --seed-time=0
+
+cd ru_open_stt_wav
+
+for f in asr_calls_2_val.tar.gz buriy_audiobooks_2_val.tar.gz public_youtube700_val.tar.gz asr_public_stories_1.tar.gz asr_public_stories_2.tar.gz public_lecture_1.tar.gz public_series_1.tar.gz public_youtube1120.tar.gz ru_ru.tar.gz public_youtube1120_hq.tar.gz russian_single.tar.gz voxforge_ru.tar.gz asr_public_phone_calls_1.tar.gz; do
+  tar -xf $f
+  rm $f
+done
+
+for f in audiobooks_2.tar.gz_ public_youtube700.tar.gz_ asr_public_phone_calls_2.tar.gz_ tts_russian_addresses_rhvoice_4voices.tar_; do
+  cat $f* > tmp.tar.gz
+  rm $f*
+  tar -xf tmp.tar.gz
+  rm tmp.tar.gz
+done
 ```
 
 ```

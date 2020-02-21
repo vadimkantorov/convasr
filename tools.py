@@ -1,6 +1,7 @@
 import re
 import os
 import json
+import gzip
 import argparse
 import torch
 import sentencepiece
@@ -54,6 +55,13 @@ def du(input_path):
 	transcript = json.load(open(input_path))
 	print(input_path, int(os.path.getsize(input_path) // 1e6), 'Mb',  '|', len(transcript) // 1000, 'K utt |', int(sum(t['end'] - t['begin'] for t in transcript) / (60 * 60)), 'hours')
 
+def csv2json(input_path, gz, group):
+	gzopen = lambda file_path, mode = 'r': gzip.open(file_path, mode + 't') if file_path.endswith('.gz') else open(file_path, mode)
+	transcript = [dict(audio_path = s[0], ref = s[1], begin = 0.0, end = float(s[2]), **(dict(group = s[0].split('/')[group]) if group >= 0 else {})) for i, l in enumerate(gzopen(input_path)) for s in [l.strip().split(',')]]
+	output_path = input_path + '.json' + ('.gz' if gz else '')
+	json.dump(transcript, gzopen(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	print(output_path)
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -91,6 +99,12 @@ if __name__ == '__main__':
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o', default = 'data/fromsrt')
 	cmd.set_defaults(func = fromsrt)
+
+	cmd = subparsers.add_parser('csv2json')
+	cmd.add_argument('input_path')
+	cmd.add_argument('--gzip', dest = 'gz', action = 'store_true')
+	cmd.add_argument('--group', type = int, default = 1)
+	cmd.set_defaults(func = csv2json)
 	
 	cmd = subparsers.add_parser('du')
 	cmd.add_argument('input_path')
