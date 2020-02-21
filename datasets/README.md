@@ -1,4 +1,3 @@
-TODO: use https://gist.github.com/vadimkantorov/37518ff88808af840884355c845049ea to pass in CER cutoffs
 # Download the dataset
 ```shell
 apt-get update && apt-get install -y aria2

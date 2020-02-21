@@ -10,6 +10,7 @@ import itertools
 import argparse
 import base64
 import subprocess
+import random
 import matplotlib.pyplot as plt
 import seaborn
 import altair
@@ -174,6 +175,30 @@ def errors(ours, theirs = None, audio_file_name = None, audio = False, output_fi
 	output_file_name = output_file_name or (ours + (audio_file_name.split('subset')[-1] if audio_file_name else '') + '.html')
 	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} td {border-top: 1px solid black} .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th>audio</th><th></th><th>cer</th><th>mer</th><th></th></tr>' + '\n'.join(f'<tr><td>' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"></audio>' if audio and i == 0 else '') + f'<div class="nowrap">{r["audio_file_name"] if i == 0 else ""}</div></td>' + f'<td>{ours if i == 0 else theirs}</td><td>{r_["cer"]:.02%}</td><td class="br">{r_["mer"]:.02%}</td><td>{colorize_alignment(r_["words"])}</td>' + '</tr>' for r in ours_ for i, r_ in enumerate(filter(None, [r, theirs_.get(r['audio_file_name'])]))) + '</table></body></html>')
 	print(output_file_name)
+
+def audiosample(input_path, output_path, K):
+	transcript = json.load(open(input_path))
+
+	dataset_name = lambda t: t.get('dataset_name', 'dataset_name not found')
+	by_dataset_name = {k : list(g) for k, g in itertools.groupby(sorted(transcript, key = dataset_name), key = dataset_name)}
+	
+	f = open(output_path, 'w')
+	f.write('<html><meta charset="UTF-8"><body>')
+	for dataset_name, transcript in sorted(by_dataset_name.items()):
+		f.write(f'<h1>{dataset_name}</h1>')
+		f.write('<table>')
+		random.seed(1)
+		random.shuffle(transcript)
+		for t in transcript[:K]:
+			try:
+				encoded = base64.b64encode(open(t['audio_path'], 'rb').read()).decode()
+			except:
+				f.write('<tr><td>file not found: {audio_path}</td></tr>'.format(**t))
+				continue
+			f.write('<tr><td>{audio_path}</td><td><audio controls src="data:audio/wav;base64,{encoded}"/></td><td>{ref}</td></tr>\n'.format(encoded = encoded, **t))
+		f.write('</table>')
+
+	print(os.path.abspath(output_path))
 
 def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe, der):
 	labels = dataset.Labels(ru)
@@ -351,6 +376,12 @@ if __name__ == '__main__':
 	cmd.add_argument('logits')
 	cmd.add_argument('--audio-file-name')
 	cmd.set_defaults(func = logits)
+
+	cmd = subparsers.add_parser('audiosample')
+	cmd.add_argument('--input-path', '-i', required = True)
+	cmd.add_argument('--output-path', '-o', required = True)
+	cmd.add_argument('-K', type = int, default = 10)
+	cmd.set_defaults(func = audiosample)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')

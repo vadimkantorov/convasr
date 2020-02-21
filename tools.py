@@ -50,6 +50,10 @@ def fromsrt(input_path, output_path):
 	json.dump(transcript, open(transcript_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(transcript_path)
 
+def du(input_path):
+	transcript = json.load(open(input_path))
+	print(input_path, int(os.path.getsize(input_path) // 1e6), 'Mb',  '|', len(transcript) // 1000, 'K utt |', int(sum(t['end'] - t['begin'] for t in transcript) / (60 * 60)), 'hours')
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -87,6 +91,10 @@ if __name__ == '__main__':
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o', default = 'data/fromsrt')
 	cmd.set_defaults(func = fromsrt)
+	
+	cmd = subparsers.add_parser('du')
+	cmd.add_argument('input_path')
+	cmd.set_defaults(func = du)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')
