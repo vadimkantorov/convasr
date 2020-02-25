@@ -62,6 +62,24 @@ def csv2json(input_path, gz, group):
 	json.dump(transcript, gzopen(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
+def rmoldcheckpoints(experiments_dir, experiment_id, keepfirstperepoch, remove):
+	assert keepfirstperepoch
+	experiment_dir = os.path.join(experiments_dir, experiment_id)
+
+	def parse(ckpt_name):
+		epoch = ckpt_name.split('epoch')[1].split('_')[0]
+		iteration = ckpt_name.split('iter')[1].split('.')[0]
+		return int(epoch), int(iteration), ckpt_name
+	ckpts = list(sorted(parse(ckpt_name) for ckpt_name in os.listdir(experiment_dir) if 'checkpoint_' in ckpt_name and ckpt_name.endswith('.pt')))
+	
+	if keepfirstperepoch:
+		keep = [ckpt_name for i, (epoch, iteration, ckpt_name) in enumerate(ckpts) if i == 0 or epoch != ckpts[i - 1][0] or epoch == ckpts[-1][0]]
+	rm = list(sorted(set(ckpt[-1] for ckpt in ckpts) - set(keep)))
+	print('\n'.join(rm))
+
+	for ckpt_name in (rm if remove else []):
+		os.remove(os.path.join(experiment_dir, ckpt_name))
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -105,7 +123,14 @@ if __name__ == '__main__':
 	cmd.add_argument('--gzip', dest = 'gz', action = 'store_true')
 	cmd.add_argument('--group', type = int, default = 1)
 	cmd.set_defaults(func = csv2json)
-	
+
+	cmd = subparsers.add_parser('rmoldcheckpoints')
+	cmd.add_argument('experiment_id')
+	cmd.add_argument('--experiments-dir', default = 'data/experiments')
+	cmd.add_argument('--keepfirstperepoch', action = 'store_true')
+	cmd.add_argument('--remove', action = 'store_true')
+	cmd.set_defaults(func = rmoldcheckpoints)
+
 	cmd = subparsers.add_parser('du')
 	cmd.add_argument('input_path')
 	cmd.set_defaults(func = du)
