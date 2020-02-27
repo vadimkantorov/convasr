@@ -84,7 +84,7 @@ def transcript(html_path, sample_rate, mono, transcript):
 
 def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
-	labels = dataset.Labels(ru)
+	labels = datasets.Labels(ru)
 	tick_params = lambda ax, labelsize = 2.5, length = 0, **kwargs: ax.tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length, **kwargs) or [ax.set_linewidth(0) for ax in ax.spines.values()]
 	logits_path = logits + '.html'
 	html = open(logits_path, 'w')
@@ -201,12 +201,12 @@ def audiosample(input_path, output_path, K):
 	print(os.path.abspath(output_path))
 
 def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe, der):
-	labels = dataset.Labels(ru)
+	labels = datasets.Labels(ru)
 	if experiment_id.endswith('.json'):
 		reftra = json.load(open(experiment_id))
 		for reftra_ in reftra:
-			hyp = labels.postprocess_transcript(labels.normalize_text(reftra_.get('hyp', ref_tra_.get('transcript'))     ))
-			ref = labels.postprocess_transcript(labels.normalize_text(reftra_.get('ref', ref_tra_.get('reference'))      ))
+			hyp = labels.postprocess_transcript_(labels.normalize_text(reftra_.get('hyp', ref_tra_.get('transcript'))     ))
+			ref = labels.postprocess_transcript_(labels.normalize_text(reftra_.get('ref', ref_tra_.get('reference'))      ))
 			reftra_['cer'] = metrics.cer(hyp, ref)
 			reftra_['wer'] = metrics.wer(hyp, ref)
 
