@@ -25,15 +25,17 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.time_padding_multiple = time_padding_multiple
 		self.mono = mono
 
-		duration = lambda example: example[-1]['end'] - example[-1]['begin']
+		gzopen = lambda data_path: open(data_path) if data_path.endswith('.json') else gzip.open(data_path, 'rt')
+		duration = lambda example: example[-1]['end'] - example[-1]['begin'] if example[-1] else None
 		source_paths = source_paths if isinstance(source_paths, list) else [source_paths]
+		
 		if not self.segmented:
-			#self.examples = sum([list(sorted(((row[0], os.path.basename(data_or_path), dict(ref = row[1] if not row[1].endswith('.txt') else open(row[1]).read(), duration  = float(row[2]) if True and len(row) > 2 else -1) ) for line in (gzip.open(data_or_path, 'rt') if data_or_path.endswith('.gz') else open(data_or_path)) if '"' not in line for row in [line.split(delimiter)] if len(row) <= 2 or (max_duration is None or float(row[2]) < max_duration)), key = lambda t: t[-1]['duration'] )) for data_or_path in source_paths], [])
-			self.examples = [(transcript['audio_path'], os.path.basename(data_path), transcript) for data_path in source_paths for transcript in json.load(open(data_path) if data_path.endswith('.json') else gzip.open(data_path, 'rt'))]
-			self.examples = list(sorted(self.examples, key = duration))
-			self.examples = list(filter(lambda example: (min_duration is None or min_duration <= duration(example)) and (max_duration is None or duration(example) <= max_duration), self.examples))
+			self.examples = [(transcript['audio_path'], os.path.basename(data_path), transcript) for data_path in source_paths for transcript in json.load(gzopen(data_path))]
 		else:
 			self.examples = [(audio_path, os.path.basename(audio_path), json.load(open(transcript_path)) if os.path.exists(transcript_path) else open(ref_path).read() if os.path.exists(ref_path) else None) for audio_path in source_paths for transcript_path, ref_path in [(audio_path + '.json', audio_path + '.txt')]]
+		
+		self.examples = list(sorted(self.examples, key = duration))
+		self.examples = list(filter(lambda example: (min_duration is None or min_duration <= duration(example)) and (max_duration is None or duration(example) <= max_duration), self.examples))
 
 	def __getitem__(self, index):
 		audio_path, group, transcript = self.examples[index]
@@ -45,18 +47,18 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
 			ref_normalized, targets = zip(*targets)
-			transcript = dict(group = group, ref_normalized = ref_normalized[0], type = 'channel' if len(signal) > 1 else 'mono', **transcript)
+			transcript = dict(group = group, ref_normalized = ref_normalized[0], **transcript)
 		else:
 			#TODO: support forced mono even if transcript is given
 
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, dtype = torch.int16, normalize = False)
 			ref_full, ref_full_normalized = transcript if isinstance(transcript, str) else '', self.labels[0].normalize_text(transcript) if isinstance(transcript, str) else ''
-			missing_transcript = False #not transcript or isinstance(transcript, str)
+			missing_transcript = not transcript or isinstance(transcript, str)
 			if missing_transcript: # 
 			#	speech = vad.detect_speech(signal, sample_rate, **self.vad_options)
 			#	transcript = transcripts.segment(speech, sample_rate = sample_rate)
 				# if no vad options
-				transcript = [dict(begin = 0, end = signal.shape[1] / sample_rate, channel = c, ref = ref_full if len(signal) == 1 else '', type = 'channel' if len(signal) > 1 else 'mono') for c in range(len(signal))]
+				transcript = [dict(begin = 0, end = signal.shape[1] / sample_rate, channel = c, ref = ref_full if len(signal) == 1 else '', audio_path = audio_path) for c in range(len(signal))]
 			
 			transcript = [dict(ref_normalized = self.labels[0].normalize_text(t['ref']) if t.get('ref') else '', ref_full = ref_full, ref_full_normalized = ref_full_normalized, **t) for t in sorted(transcript, key = transcripts.sort_key)]
 			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], int(t['begin'] * sample_rate) : 1 + int(t['end'] * sample_rate)]]]
@@ -72,14 +74,14 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			batch = list(zip(*batch))
 
 		meta, sample_x, *sample_y = batch[0]
-		xmax_len, ymax_len = [int(math.ceil(max(b[k].shape[-1] for b in batch) / self.time_padding_multiple)) * self.time_padding_multiple for k in range(1, len(batch[0]))]
+		xmax_len, *ymax_len = [int(math.ceil(max(b[k].shape[-1] for b in batch) / self.time_padding_multiple)) * self.time_padding_multiple for k in range(1, len(batch[0]))]
 		x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = sample_x.dtype)
-		y = torch.zeros(len(batch), len(sample_y), ymax_len, dtype = torch.long)
+		y = torch.zeros(len(batch), len(sample_y), max(ymax_len), dtype = torch.long)
 		xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.long)
-		for k, (meta, input, *targets) in enumerate(batch):
-			xlen[k] = input.shape[-1] / x.shape[-1]
-			x[k, ..., :input.shape[-1]] = input
-			for j, t in enumerate(targets):
+		for k, (meta, sample_x, *sample_y) in enumerate(batch):
+			xlen[k] = sample_x.shape[-1] / x.shape[-1]
+			x[k, ..., :sample_x.shape[-1]] = sample_x
+			for j, t in enumerate(sample_y):
 				y[k, j, :t.shape[-1]] = t
 				ylen[k, j] = len(t)
 		
@@ -169,19 +171,19 @@ class Labels:
 
 		pad = [self.space_idx] if replace_blank is False else [self.space_idx, self.blank_idx]
 		
-		words, i = [], None
+		transcript, i = [], None
 		for j, k in enumerate(idx + [self.space_idx]):
 			if k == self.space_idx and i is not None:
 				while j == len(idx) or (j > 0 and idx[j] in pad):
 					j -= 1
 				
 				i_, j_ = int(i if I is None else I[i]), int(j if I is None else I[j])
-				words.append(dict(word = decode_(i, j), begin = float(ts[i_]), end = float(ts[j_]), i = i_, j = j_, channel = channel if isinstance(channel, int) else int(channel[i_])))
+				transcript.append(dict(hyp = decode_(i, j), begin = float(ts[i_]), end = float(ts[j_]), i = i_, j = j_, channel = channel if isinstance(channel, int) else int(channel[i_])))
 
 				i = None
 			elif k not in [self.space_idx, self.blank_idx] and i is None:
 				i = j
-		return words
+		return transcript
 
 	def split_candidates(self, text):
 		return text.split(self.candidate_sep)

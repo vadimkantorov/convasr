@@ -15,13 +15,17 @@ def segment(speech, sample_rate = 1):
 	channel_i_channel_j = torch.cat([(speech & _notspeech_[..., :-2]).nonzero(), (speech & _notspeech_[..., 2:]).nonzero()], dim = -1)
 	return [dict(begin = i / sample_rate, end = j / sample_rate, channel = channel) for channel, i, _, j in channel_i_channel_j.tolist()]
 
+def join(ref = [], hyp = []):
+	return ' '.join(t['ref'] for t in ref).strip() + ' '.join(t['hyp'] for t in hyp).strip()
+
 def resegment(segments, max_segment_seconds):
 	def filter_words(ws, i, w, first, last):
-		res = [(k, u) for k, u in enumerate(ws) if (first or i < 0 or ws[i]['j'] < u['i']) and (last or u['j'] < w['i'])]
+		res = [(k, u) for k, u in enumerate(ws) if (first or i < 0 or ws[i]['end'] < u['begin']) and (last or u['end'] < w['begin'])]
 		i, ws = zip(*res) if res else ([i], [])
 		return i[-1], list(ws)
 	
 	for r, h in segments:
+		r, h = (r if join(ref = r) else []), (h if join(hyp = h) else [])
 		k, ws = (0, r) if r else (1, h)
 		last_flushed_ind = [-1, -1]
 		for j, w in enumerate(ws):

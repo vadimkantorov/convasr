@@ -51,14 +51,13 @@ def main(args):
 		audio_path = meta[0]['audio_path']
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
 
-
 		tic = time.time()
 		y, ylen = y.to(args.device), ylen.to(args.device)
 		log_probs, olen = model(x.to(args.device), xlen.to(args.device))
 
-		speech = vad.detect_speech(x.squeeze(1), args.sample_rate, args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)
-		speech = vad.upsample(speech, log_probs)
-		log_probs.masked_fill_(models.silence_space_mask(log_probs, speech, space_idx = labels.space_idx, blank_idx = labels.blank_idx), float('-inf'))
+		#speech = vad.detect_speech(x.squeeze(1), args.sample_rate, args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)
+		#speech = vad.upsample(speech, log_probs)
+		#log_probs.masked_fill_(models.silence_space_mask(log_probs, speech, space_idx = labels.space_idx, blank_idx = labels.blank_idx), float('-inf'))
 		
 		decoded = decoder.decode(log_probs, olen)
 		
@@ -67,13 +66,12 @@ def main(args):
 		print('Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(audio = sum(t['end'] - t['begin'] for t in meta), processing = time.time() - tic))
 
 		ts = (x.shape[-1] / args.sample_rate) * torch.linspace(0, 1, steps = log_probs.shape[-1]).unsqueeze(0) + torch.FloatTensor([t['begin'] for t in meta]).unsqueeze(1)
-		segments = [([dict(channel = meta[i]['channel'], begin = meta[i]['begin'], end = meta[i]['end'], word = labels.decode(y[i, 0, :ylen[i]].tolist()))], labels.decode(decoded[i], ts[i], channel = meta[i]['channel'], replace_blank = True, replace_repeat = True, replace_space = False)) for i in range(len(decoded))]
+		segments = [([dict(channel = meta[i]['channel'], begin = meta[i]['begin'], end = meta[i]['end'], ref = labels.decode(y[i, 0, :ylen[i]].tolist()))], labels.decode(decoded[i], ts[i], channel = meta[i]['channel'], replace_blank = True, replace_repeat = True, replace_space = False)) for i in range(len(decoded))]
 		channel = [t['channel'] for t in meta]
 		
 		ref_full, y_full = labels.encode(meta[0]['ref_full'])
-		join_segment = lambda ws: ' '.join(t['word'] for t in ws).strip()
 
-		ref, hyp = ' '.join(join_segment(r) for r, h in segments).strip(), ' '.join(join_segment(h) for r, h in segments).strip()
+		ref, hyp = ' '.join(transcripts.join(ref = r) for r, h in segments).strip(), ' '.join(transcripts.join(hyp = h) for r, h in segments).strip()
 
 		if args.verbose:
 			print('HYP:', hyp)
@@ -100,14 +98,14 @@ def main(args):
 			# can't resegment large txt because of slow needleman
 			segments = list(transcripts.resegment(segments, max_segment_seconds = args.max_segment_seconds))
 		
-		transcript = [dict(audio_path = audio_path, ref = ref_, hyp = hyp_, cer = metrics.cer(hyp_, ref_), words = metrics.align_words(hyp_, ref_)[-1], alignment = dict(ref = ref, hyp = hyp), **transcripts.summary(hyp)) for ref, hyp in segments for ref_, hyp_ in [(join_segment(ref), join_segment(hyp))]]
+		transcript = [dict(audio_path = audio_path, ref = ref_, hyp = hyp_, cer = metrics.cer(hyp_, ref_), words = metrics.align_words(hyp_, ref_)[-1], alignment = dict(ref = ref, hyp = hyp), **transcripts.summary(hyp)) for ref, hyp in segments for ref_, hyp_ in [(transcripts.join(ref = ref), transcripts.join(hyp = hyp))]]
 		
-		transcript = list(transcripts.filter(transcript, min_duration = args.min_duration, max_duration = args.max_duration, min_cer = args.min_cer, max_cer = args.max_cer, time_gap = args.gap, align_boundary_words = args.align_boundary_words))
-		json.dump(transcripts.strip(transcript, args.strip), open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
-		print('Filtered', len(transcript), 'segments')
+		filtered_transcript = list(transcripts.filter(transcript, min_duration = args.min_duration, max_duration = args.max_duration, min_cer = args.min_cer, max_cer = args.max_cer, time_gap = args.gap, align_boundary_words = args.align_boundary_words))
+		json.dump(transcripts.strip(filtered_transcript, args.strip), open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+		print('Filtered segments:', len(filtered_transcript), 'out of', len(transcript))
 		print(transcript_path)
 		if args.html:
-			print(vis.transcript(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), args.sample_rate, args.mono, transcript))
+			print(vis.transcript(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), args.sample_rate, args.mono, transcript, filtered_transcript))	
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()

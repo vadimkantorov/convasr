@@ -1,3 +1,12 @@
+#youtube dataset
+```shell
+# list all videos from a channel / playlist
+bash youtube.sh LIST https://youtu.be/...
+
+# download audio and srt subtitles
+bash youtube.sh RETR https://youtu.be/...
+```
+
 # echomsk dataset
 ```shell
 python3 echomsk.py ../echomsk/personalno_20000101_20191231.txt.json.gz --sample 10 --name sample10
