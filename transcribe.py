@@ -51,6 +51,7 @@ def main(args):
 		audio_path = meta[0]['audio_path']
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
 
+
 		tic = time.time()
 		y, ylen = y.to(args.device), ylen.to(args.device)
 		log_probs, olen = model(x.to(args.device), xlen.to(args.device))
@@ -63,7 +64,7 @@ def main(args):
 		
 		print(os.path.basename(audio_path))
 		print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
-		print('Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(audio = sum(t['duration'] for t in meta), processing = time.time() - tic))
+		print('Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(audio = sum(t['end'] - t['begin'] for t in meta), processing = time.time() - tic))
 
 		ts = (x.shape[-1] / args.sample_rate) * torch.linspace(0, 1, steps = log_probs.shape[-1]).unsqueeze(0) + torch.FloatTensor([t['begin'] for t in meta]).unsqueeze(1)
 		segments = [([dict(channel = meta[i]['channel'], begin = meta[i]['begin'], end = meta[i]['end'], word = labels.decode(y[i, 0, :ylen[i]].tolist()))], labels.decode(decoded[i], ts[i], channel = meta[i]['channel'], replace_blank = True, replace_repeat = True, replace_space = False)) for i in range(len(decoded))]

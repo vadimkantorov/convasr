@@ -36,7 +36,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			self.examples = [(audio_path, os.path.basename(audio_path), json.load(open(transcript_path)) if os.path.exists(transcript_path) else open(ref_path).read() if os.path.exists(ref_path) else None) for audio_path in source_paths for transcript_path, ref_path in [(audio_path + '.json', audio_path + '.txt')]]
 
 	def __getitem__(self, index):
-		audio_path, dataset_name, transcript = self.examples[index]
+		audio_path, group, transcript = self.examples[index]
 		waveform_transform_debug = (lambda audio_path, sample_rate, signal: audio.write_audio(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), signal, sample_rate)) if self.waveform_transform_debug_dir else None
 		
 		if not self.segmented:
@@ -45,20 +45,20 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
 			ref_normalized, targets = zip(*targets)
-			transcript = dict(dataset_name = dataset_name, ref_normalized = ref_normalized[0], type = 'channel' if len(signal) > 1 else 'mono', **transcript)
+			transcript = dict(group = group, ref_normalized = ref_normalized[0], type = 'channel' if len(signal) > 1 else 'mono', **transcript)
 		else:
 			#TODO: support forced mono even if transcript is given
 
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, dtype = torch.int16, normalize = False)
 			ref_full, ref_full_normalized = transcript if isinstance(transcript, str) else '', self.labels[0].normalize_text(transcript) if isinstance(transcript, str) else ''
-			missing_transcript = not transcript or isinstance(transcript, str)
-			if True: # missing_transcript: # 
+			missing_transcript = False #not transcript or isinstance(transcript, str)
+			if missing_transcript: # 
 			#	speech = vad.detect_speech(signal, sample_rate, **self.vad_options)
 			#	transcript = transcripts.segment(speech, sample_rate = sample_rate)
 				# if no vad options
 				transcript = [dict(begin = 0, end = signal.shape[1] / sample_rate, channel = c, ref = ref_full if len(signal) == 1 else '', type = 'channel' if len(signal) > 1 else 'mono') for c in range(len(signal))]
 			
-			transcript = [dict(ref_normalized = self.labels[0].normalize_text(t['ref']) if t.get('ref') else '', ref_full = ref_full, ref_full_normalized = ref_full_normalized, audio_path = audio_path, dataset_name = dataset_name, duration = t['end'] - t['begin'], **t) for t in sorted(transcript, key = transcripts.sort_key)]
+			transcript = [dict(ref_normalized = self.labels[0].normalize_text(t['ref']) if t.get('ref') else '', ref_full = ref_full, ref_full_normalized = ref_full_normalized, **t) for t in sorted(transcript, key = transcripts.sort_key)]
 			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], int(t['begin'] * sample_rate) : 1 + int(t['end'] * sample_rate)]]]
 			targets = [[labels.encode(t.get('ref', ''))[1] for t in transcript] for labels in self.labels]
 

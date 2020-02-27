@@ -57,7 +57,7 @@ def du(input_path):
 
 def csv2json(input_path, gz, group):
 	gzopen = lambda file_path, mode = 'r': gzip.open(file_path, mode + 't') if file_path.endswith('.gz') else open(file_path, mode)
-	transcript = [dict(audio_path = s[0], ref = s[1], begin = 0.0, end = float(s[2]), **(dict(group = s[0].split('/')[group]) if group >= 0 else {})) for i, l in enumerate(gzopen(input_path)) for s in [l.strip().split(',')]]
+	transcript = [dict(audio_path = s[0], ref = s[1], begin = 0.0, end = float(s[2]), **(dict(group = s[0].split('/')[group]) if group >= 0 else {})) for l in gzopen(input_path) if '"' not in l for s in [l.strip().split(',')]]
 	output_path = input_path + '.json' + ('.gz' if gz else '')
 	json.dump(transcript, gzopen(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)

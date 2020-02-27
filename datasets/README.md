@@ -1,3 +1,10 @@
+# echomsk dataset
+```shell
+python3 echomsk.py ../echomsk/personalno_20000101_20191231.txt.json.gz --sample 10 --name sample10
+
+wget -i sample10/sample10.txt -P sample10
+```
+
 # Download the exclude files
 The gzipped versions are available at https://github.com/vadimkantorov/convasr/releases/tag/openstt_benchmark_files_backup
 
