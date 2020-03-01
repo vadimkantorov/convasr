@@ -166,16 +166,16 @@ class Labels:
 			word = ''.join(c if i == 0 or c != self.repeat else word[i - 1] for i, c in enumerate(word))
 		return word
 
-	#def postprocess_transcript(self, text, phonetic_replace_groups = []):
-	#	replaceblank = lambda s: s.replace(self.blank * 10, ' ').replace(self.blank, '')
-	#	replace2 = lambda s: ''.join(c if i == 0 or c != self.repeat else s[i - 1] for i, c in enumerate(s))
-	#	replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
-	#	replacestar = lambda s: s.replace('*', '')
-	#	replacespace = lambda s, sentencepiece_space = '\u2581', sentencepiece_unk = '<unk>': s.replace(sentencepiece_space, ' ')
-	#	replacecap = lambda s: ''.join(c + ' ' if c.isupper() else c for c in s)
-	#	replacephonetic = lambda s: s.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g.lower()})
-	#	replacepunkt = lambda s: s.replace(',', '').replace('.', '')
-	#	return functools.reduce(lambda text, func: func(text), [replacepunkt, replacespace, replacecap, replaceblank, replace2, replace22, replacestar, replacephonetic, str.strip], text)
+	def postprocess_transcript(self, text, phonetic_replace_groups = []):
+		replaceblank = lambda s: s.replace(self.blank * 10, ' ').replace(self.blank, '')
+		replace2 = lambda s: ''.join(c if i == 0 or c != self.repeat else s[i - 1] for i, c in enumerate(s))
+		replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
+		replacestar = lambda s: s.replace('*', '')
+		replacespace = lambda s, sentencepiece_space = '\u2581', sentencepiece_unk = '<unk>': s.replace(sentencepiece_space, ' ')
+		replacecap = lambda s: ''.join(c + ' ' if c.isupper() else c for c in s)
+		replacephonetic = lambda s: s.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g.lower()})
+		replacepunkt = lambda s: s.replace(',', '').replace('.', '')
+		return functools.reduce(lambda text, func: func(text), [replacepunkt, replacespace, replacecap, replaceblank, replace2, replace22, replacestar, replacephonetic, str.strip], text)
 
 	def __getitem__(self, idx):
 		return {self.blank_idx : self.blank, self.repeat_idx : self.repeat, self.space_idx : self.space}.get(idx) or (self.alphabet[idx] if self.bpe is None else self.bpe.IdToPiece(idx))

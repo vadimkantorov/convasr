@@ -9,6 +9,7 @@ python3 train.py $@ \
   --train-data-path data/mixed_train.csv \
   --analyze kontur_calls_micro.csv \
   --val-iteration-interval 2500 \
+  --fp16 O2 \
   --epochs 10 --name debug --checkpoint-skip --exphtml= #\
 
 #  --val-data-path data/mixed_val.csv data/clean_val.csv kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv \
