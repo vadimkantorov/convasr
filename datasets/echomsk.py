@@ -22,9 +22,9 @@ episodes = episodes[:args.sample]
 os.makedirs(args.name, exist_ok = True)
 
 for e in episodes:
-	t = dict(audio_path = os.path.join(args.name, os.path.basename(e['sound'][0])), ref = ' '.join(t['ref'] for t in e['transcript']), begin = 0, end = e['sound_seconds'], channel = 0)
-	transcript_path = t['audio_path'] + '.json'
-	json.dump([t], open(transcript_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	transcript = [dict(audio_path = os.path.join(args.name, os.path.basename(e['sound'][0])), ref = t['ref'], speaker = t['speaker']) for t in e['transcript']]
+	transcript_path = transcript[0]['audio_path'] + '.json'
+	json.dump(transcript, open(transcript_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 
 transcript_path = os.path.join(args.name, args.name + '.txt')
 open(transcript_path, 'w').write('\n'.join(e['sound'][0] for e in episodes))

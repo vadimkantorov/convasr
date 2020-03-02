@@ -18,23 +18,26 @@ def segment(speech, sample_rate = 1):
 def join(ref = [], hyp = []):
 	return ' '.join(t['ref'] for t in ref).strip() + ' '.join(t['hyp'] for t in hyp).strip()
 
-def resegment(segments, max_segment_seconds):
-	def filter_words(ws, i, w, first, last):
-		res = [(k, u) for k, u in enumerate(ws) if (first or i < 0 or ws[i]['end'] < u['begin']) and (last or u['end'] < w['begin'])]
-		i, ws = zip(*res) if res else ([i], [])
-		return i[-1], list(ws)
+def take_between(transcript, ind_last_taken, t, first, last):
+	res = [(k, u) for k, u in enumerate(transcript) if (first or ind_last_taken < 0 or transcript[ind_last_taken]['end'] < u['begin']) and (last or u['end'] < t['begin'])]
+	ind_last_taken, transcript = zip(*res) if res else ([ind_last_taken], [])
+	return ind_last_taken[-1], list(transcript)
+
+def resegment(transcript, max_segment_seconds):
+	ind_last_taken = -1
+	if isinstance(max_segment_seconds, list):
+		for j in range(len(max_segment_seconds)):
+			first, last = ind_last_taken == -1, j == len(max_segment_seconds) - 1
+			ind_last_taken, transcript_segment = take_between(transcript, ind_last_taken, max_segment_seconds[j + 1][0] if not last else None, first, last)
+			yield transcript_segment
+	else:
+		for j, t in enumerate(transcript):
+			first, last = ind_last_taken == -1, j == len(transcript) - 1
+			if last or (t['end'] - transcript[ind_last_taken + 1]['begin'] > max_segment_seconds):
+				ind_last_taken, transcript_segment = take_between(transcript, ind_last_taken, t, first, last)
+				if transcript_segment:
+					yield transcript_segment
 	
-	for r, h in segments:
-		r, h = (r if join(ref = r) else []), (h if join(hyp = h) else [])
-		k, ws = (0, r) if r else (1, h)
-		last_flushed_ind = [-1, -1]
-		for j, w in enumerate(ws):
-			first, last = last_flushed_ind[k] == -1, j == len(ws) - 1
-			if last or (w['end'] - ws[last_flushed_ind[k] + 1]['begin'] > max_segment_seconds):
-				last_flushed_ind[0], r_ = filter_words(r, last_flushed_ind[0], w, first, last)
-				last_flushed_ind[1], h_ = filter_words(h, last_flushed_ind[1], w, first, last)
-				if r_ or h_:
-					yield [r_, h_]
 
 def summary(transcript, ij = False):
 	res = dict(channel = list(set(t['channel'] for t in transcript))[0], begin = min(w['begin'] for w in transcript), end = max(w['end'] for w in transcript), i = min([w['i'] for w in transcript if 'i' in w] or [0]), j = max([w['j'] for w in transcript if 'j' in w] or [0])) if len(transcript) > 0 else dict(begin = 0, end = 0, i = 0, j = 0, channel = 0)

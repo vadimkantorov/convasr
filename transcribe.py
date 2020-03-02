@@ -52,8 +52,10 @@ def main(args):
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
 
 		tic = time.time()
+		import IPython; IPython.embed()
 		y, ylen = y.to(args.device), ylen.to(args.device)
 		log_probs, olen = model(x.to(args.device), xlen.to(args.device))
+
 
 		#speech = vad.detect_speech(x.squeeze(1), args.sample_rate, args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)
 		#speech = vad.upsample(speech, log_probs)
@@ -79,26 +81,33 @@ def main(args):
 
 		tic = time.time()
 		if args.align:
-			if ref_full:# and not ref:
-				#assert len(set(t['channel'] for t in meta)) == 1 or all(t['type'] != 'channel' for t in meta)
-				#TODO: add space at the end
-				channel = torch.ByteTensor(channel).repeat_interleave(log_probs.shape[-1]).reshape(1, -1)
-				ts = ts.reshape(1, -1)
-				log_probs = log_probs.transpose(0, 1).unsqueeze(0).flatten(start_dim = -2)
-				olen = torch.tensor([log_probs.shape[-1]], device = log_probs.device, dtype = torch.long)
-				y = y_full[None, None, :].to(y.device)
-				ylen = torch.tensor([[y.shape[-1]]], device = log_probs.device, dtype = torch.long)
-				segments = [([], sum([h for r, h in segments], []))]
+			#if ref_full:# and not ref:
+			#	#assert len(set(t['channel'] for t in meta)) == 1 or all(t['type'] != 'channel' for t in meta)
+			#	#TODO: add space at the end
+			#	channel = torch.ByteTensor(channel).repeat_interleave(log_probs.shape[-1]).reshape(1, -1)
+			#	ts = ts.reshape(1, -1)
+			#	log_probs = log_probs.transpose(0, 1).unsqueeze(0).flatten(start_dim = -2)
+			#	olen = torch.tensor([log_probs.shape[-1]], device = log_probs.device, dtype = torch.long)
+			#	y = y_full[None, None, :].to(y.device)
+			#	ylen = torch.tensor([[y.shape[-1]]], device = log_probs.device, dtype = torch.long)
+			#	segments = [([], sum([h for r, h in segments], []))]
 				
 			alignment = ctc.alignment(log_probs.permute(2, 0, 1), y.squeeze(1), olen, ylen.squeeze(1), blank = labels.blank_idx)
-			segments = [(labels.decode(y[i, 0, :ylen[i]].tolist(), ts[i], alignment[i], channel = channel[i]), h) for i, (r, h) in enumerate(segments)]
+			segments = [(labels.decode(y[i, 0, :ylen[i]].tolist(), ts[i], alignment[i], channel = channel[i], speaker = speaker[i], key = 'ref'), h) for i, (r, h) in enumerate(segments)]
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic))
+		
+		ref_segments, hyp_segments = zip(*segments)
+		ref_segments, hyp_segments = sum(ref_segments, []), sum(hyp_segments, [])
 		
 		if args.max_segment_seconds:
 			# can't resegment large txt because of slow needleman
-			segments = list(transcripts.resegment(segments, max_segment_seconds = args.max_segment_seconds))
-		
-		transcript = [dict(audio_path = audio_path, ref = ref_, hyp = hyp_, cer = metrics.cer(hyp_, ref_), words = metrics.align_words(hyp_, ref_)[-1], alignment = dict(ref = ref, hyp = hyp), **transcripts.summary(hyp)) for ref, hyp in segments for ref_, hyp_ in [(transcripts.join(ref = ref), transcripts.join(hyp = hyp))]]
+			if ref_segments:
+				ref_segments = list(transcripts.resegment(ref_segments, args.max_segment_seconds))
+				hyp_segments = list(transcripts.resegment(hyp_segments, ref_segments))
+			else:
+				hyp_segments = transcripts.resegment(hyp_segments, args.max_segment_seconds)
+
+		transcript = [dict(audio_path = audio_path, ref = ref_, hyp = hyp_, cer = metrics.cer(hyp_, ref_), words = metrics.align_words(hyp_, ref_)[-1], alignment = dict(ref = ref, hyp = hyp), **transcripts.summary(hyp)) for ref, hyp in zip(ref_segments, hyp_segments) for ref_, hyp_ in [(transcripts.join(ref = ref), transcripts.join(hyp = hyp))]]
 		
 		filtered_transcript = list(transcripts.filter(transcript, min_duration = args.min_duration, max_duration = args.max_duration, min_cer = args.min_cer, max_cer = args.max_cer, time_gap = args.gap, align_boundary_words = args.align_boundary_words))
 		json.dump(transcripts.strip(filtered_transcript, args.strip), open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
