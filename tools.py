@@ -29,17 +29,20 @@ def cut(input_path, output_path, sample_rate, dilate):
 	os.makedirs(output_path, exist_ok = True)
 	
 	transcript = json.load(open(input_path))
-	signal = {}
+	signal = None
+	prev_audio_path = None
 
 	for t in transcript:
 		audio_path = t['audio_path']
 
 		#TODO: cannot resample wav files because of torch.int16 - better off using sox/ffmpeg directly
-		signal[audio_path] = signal[audio_path] if audio_path in signal else audio.read_audio(audio_path, sample_rate, normalize = False, dtype = torch.int16)[0]
+		signal = audio.read_audio(audio_path, sample_rate, normalize = False, dtype = torch.int16)[0] if audio_path != prev_audio_path else signal
+		
 		segment_path = os.path.join(output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t))
 		audio.write_audio(segment_path, signal[audio_path][t['channel'], int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)], sample_rate)
 		t = dict(audio_path = segment_path, begin = 0.0, end = t['end'] - t['begin'] + 2 * dilate, ref = t['ref'], meta = t)
 		json.dump(t, open(segment_path + '.json', 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+		prev_audio_path = audio_path
 	print(output_path)
 
 def cat(input_path, output_path):
