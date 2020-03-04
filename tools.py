@@ -8,9 +8,10 @@ import sentencepiece
 import audio
 import transcripts
 
-def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, num_speakers, strip):
-	os.makedirs(output_path, exist_ok = True)
-
+def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, num_speakers):
+	cat = output_path.endswith('.json')
+	transcript_cat = []
+	
 	for transcript_name in os.listdir(input_path):
 		if not transcript_name.endswith('.json'):
 			continue
@@ -20,29 +21,35 @@ def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, 
 
 		#(input_path + '.subset_{arg}_min{min}_max{max}.json'.format(arg = arg[0][0] if arg else '', min = arg[0][1][0] if arg else '', max = arg[0][1][1] if arg else ''))
 		transcript = list(transcripts.filter(transcript, audio_name = audio_name, align_boundary_words = align_boundary_words, cer = cer, wer = wer, duration = duration, gap = gap, num_speakers = num_speakers))
-	
-		transcript_path = os.path.join(output_path, transcript_name)
-		json.dump(transcripts.strip(transcript, strip), open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+		transcript_cat.extend(transcript)
+
+		if not cat:
+			os.makedirs(output_path, exist_ok = True)
+			json.dump(transcript, open(os.path.join(output_path, transcript_name), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+	if cat:
+		json.dump(transcript_cat, open(output_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 	print(output_path)
 
-def cut(input_path, output_path, sample_rate, dilate):
+def cut(input_path, output_path, sample_rate, dilate, strip):
 	os.makedirs(output_path, exist_ok = True)
+	transcript_cat = []
 	
 	transcript = json.load(open(input_path))
-	signal = None
-	prev_audio_path = None
+	prev_audio_path, signal = None, None
 
 	for t in transcript:
 		audio_path = t['audio_path']
-
 		#TODO: cannot resample wav files because of torch.int16 - better off using sox/ffmpeg directly
 		signal = audio.read_audio(audio_path, sample_rate, normalize = False, dtype = torch.int16)[0] if audio_path != prev_audio_path else signal
 		
 		segment_path = os.path.join(output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t))
-		audio.write_audio(segment_path, signal[audio_path][t['channel'], int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)], sample_rate)
-		t = dict(audio_path = segment_path, begin = 0.0, end = t['end'] - t['begin'] + 2 * dilate, ref = t['ref'], meta = t)
-		json.dump(t, open(segment_path + '.json', 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+		audio.write_audio(segment_path, signal[t['channel'], int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)], sample_rate)
+
+		t = dict(audio_path = segment_path, begin = 0.0, end = t['end'] - t['begin'] + 2 * dilate, channel = 0, ref = t.pop('ref'), hyp = t.pop('hyp', None), cer = t.pop('cer', None), alignment = t.pop('alignment', {}), words = t.pop('words', {}), meta = t)
 		prev_audio_path = audio_path
+		transcript_cat.append(t)
+
+	json.dump(transcripts.strip(transcript_cat, strip),open(os.path.join(output_path, os.path.basename(output_path) + '.json'), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 	print(output_path)
 
 def cat(input_path, output_path):
@@ -97,17 +104,15 @@ if __name__ == '__main__':
 	cmd.set_defaults(func = bpetrain)
 	
 	cmd = subparsers.add_parser('subset')
-	float_tuple = lambda s: tuple(map(lambda ip: float(ip[1] if ip[1] else ['-inf', 'inf'][ip[0]]) , enumerate(s.split('-'))))
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o')
 	cmd.add_argument('--audio-name')
-	cmd.add_argument('--wer', type = float_tuple)
-	cmd.add_argument('--cer', type = float_tuple)
-	cmd.add_argument('--duration', type = float_tuple)
-	cmd.add_argument('--num-speakers', type = float_tuple)
-	cmd.add_argument('--gap', type = float_tuple)
+	cmd.add_argument('--wer', type = transcripts.float_tuple)
+	cmd.add_argument('--cer', type = transcripts.float_tuple)
+	cmd.add_argument('--duration', type = transcripts.float_tuple)
+	cmd.add_argument('--num-speakers', type = transcripts.float_tuple)
+	cmd.add_argument('--gap', type = transcripts.float_tuple)
 	cmd.add_argument('--align-boundary-words', action = 'store_true')
-	cmd.add_argument('--strip', nargs = '*', default = ['alignment', 'words'])
 	cmd.set_defaults(func = subset)
 	
 	cmd = subparsers.add_parser('cut')
@@ -115,6 +120,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--output-path', '-o')
 	cmd.add_argument('--dilate', type = float, default = 0.0)
 	cmd.add_argument('--sample-rate', '-r', type = int, default = 8_000, choices = [8_000, 16_000, 32_000, 48_000])
+	cmd.add_argument('--strip', nargs = '*', default = ['alignment', 'words'])
 	cmd.set_defaults(func = cut)
 	
 	cmd = subparsers.add_parser('cat')

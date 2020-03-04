@@ -8,16 +8,18 @@ DATASET=sample10
 DATASET_TRANSCRIBE=transcribe.$DATASET
 DATASET_SUBSET=subset.$DATASET
 DATASET_CUT=cut.$DATASET
-SUBSET='--align-boundary-words --num-speakers 1- --gap 0.1- --cer 0.1-0.4 --duration 2.0-4.0'
-CUT='--dilate 0.02'
+TRANSCRIBE='--mono --align --max-segment-duration 4.0 --html'
+SUBSET='--align-boundary-words --num-speakers 1 --gap 0.1- --cer 0.1-0.4 --duration 2.0-4.0'
+CUT='--dilate 0.02 --strip='
+SAMPLE_RATE=8000
 
-python3 datasets/echomsk.py "$ECHOMSK" --name $DATASET --sample $SAMPLE
-wget --no-clobber -i "$DATASET/$DATASET.txt" -P "$DATASET"
+#python3 datasets/echomsk.py "$ECHOMSK" --name $DATASET --sample $SAMPLE
+#wget --no-clobber -i "$DATASET/$DATASET.txt" -P "$DATASET"
 
-python3 transcribe.py --checkpoint "$CHECKPOINT" -i "$DATASET" -o "$DATASET_TRANSCRIBE" --mono --align
+#python3 transcribe.py --checkpoint "$CHECKPOINT" -i "$DATASET" -o "$DATASET_TRANSCRIBE" $TRANSCRIBE
 
-python3 tools.py subset -i $DATASET_TRANSCRIBE -o $DATASET_SUBSET $SUBSET
-python3 tools.py cat -i $DATASET_SUBSET -o $DATASET_SUBSET.json
+python3 tools.py subset -i $DATASET_TRANSCRIBE -o $DATASET_SUBSET.json $SUBSET
 
 python3 tools.py cut -i $DATASET_SUBSET.json -o $DATASET_CUT $CUT
-python3 tools.py cat -i $DATASET_CUT -o $DATASET_CUT.json
+
+python3 vis.py transcript -i $DATASET_CUT/$DATASET_CUT.json --mono --sample-rate $SAMPLE_RATE -o $DATASET_CUT.json.html 

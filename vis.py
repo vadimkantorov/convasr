@@ -80,7 +80,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 		const make_segment = td => [td.querySelector('template').innerHTML, td.dataset.channel, td.dataset.begin, td.dataset.end];
 		const hyp_segments = Array.from(document.querySelectorAll('.hyp')).map(make_segment), ref_segments = Array.from(document.querySelectorAll('.ref')).map(make_segment);
 	</script></body></html>''')
-	return html_path
+	print(html_path)
 
 def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])

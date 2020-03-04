@@ -76,6 +76,7 @@ def main(args):
 			print('HYP:', hyp)
 		print('CER: {cer:.02%}'.format(cer = metrics.cer(hyp, ref)))
 
+
 		tic = time.time()
 		if args.align:
 			#if ref_full:# and not ref:
@@ -94,13 +95,13 @@ def main(args):
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic))
 		
 		
-		if args.max_segment_seconds:
+		if args.max_segment_duration:
 			ref_transcript, hyp_transcript = sum(ref_segments, []), sum(hyp_segments, [])
 			if ref_transcript:
-				ref_segments = list(transcripts.segment(ref_transcript, args.max_segment_seconds))
+				ref_segments = list(transcripts.segment(ref_transcript, args.max_segment_duration))
 				hyp_segments = list(transcripts.segment(hyp_transcript, ref_segments))
 			else:
-				hyp_segments = list(transcripts.segment(hyp_transcript, args.max_segment_seconds))
+				hyp_segments = list(transcripts.segment(hyp_transcript, args.max_segment_duration))
 				ref_segments = [[] for _ in hyp_segments]
 
 		transcript = [dict(audio_path = audio_path, ref = ref, hyp = hyp, speaker = transcripts.speaker(ref = ref_transcript, hyp = hyp_transcript), cer = metrics.cer(hyp, ref), words = metrics.align_words(hyp, ref)[-1], alignment = dict(ref = ref_transcript, hyp = hyp_transcript), **transcripts.summary(hyp_transcript)) for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments) for ref, hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]]
@@ -110,17 +111,16 @@ def main(args):
 		print('Filtered segments:', len(filtered_transcript), 'out of', len(transcript))
 		print(transcript_path)
 		if args.html:
-			print(vis.transcript(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), args.sample_rate, args.mono, transcript, filtered_transcript))	
+			vis.transcript(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), args.sample_rate, args.mono, transcript, filtered_transcript)
 		print('Done.\n')
 
 if __name__ == '__main__':
-	float_tuple = lambda s: tuple(map(lambda ip: float(ip[1] if ip[1] else ['-inf', 'inf'][ip[0]]) , enumerate(s.split('-'))))
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--checkpoint', required = True)
 	parser.add_argument('--data-path', '-i', nargs = '+')
 	parser.add_argument('--output-path', '-o', default = 'data/transcribe')
 	parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
-	parser.add_argument('--max-segment-seconds', type = float, default = 2)
+	parser.add_argument('--max-segment-duration', type = float, default = 2)
 	parser.add_argument('--num-workers', type = int, default = 0)
 	parser.add_argument('--ext', default = ['wav', 'mp3'])
 	parser.add_argument('--decoder', default = 'GreedyDecoder', choices = ['GreedyDecoder', 'BeamSearchDecoder'])
@@ -136,10 +136,10 @@ if __name__ == '__main__':
 	parser.add_argument('--window-size-dilate', type = float, default = 1.0)
 	parser.add_argument('--mono', action = 'store_true')
 	parser.add_argument('--html', action = 'store_true')
-	parser.add_argument('--cer', type = float_tuple)
-	parser.add_argument('--duration', type = float_tuple)
-	parser.add_argument('--num-speakers', type = float_tuple)
-	parser.add_argument('--gap', type = float_tuple)
+	parser.add_argument('--cer', type = transcripts.float_tuple)
+	parser.add_argument('--duration', type = transcripts.float_tuple)
+	parser.add_argument('--num-speakers', type = transcripts.float_tuple)
+	parser.add_argument('--gap', type = transcripts.float_tuple)
 	parser.add_argument('--align-boundary-words', action = 'store_true')
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3

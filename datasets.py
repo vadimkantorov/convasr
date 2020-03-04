@@ -46,6 +46,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		waveform_transform_debug = (lambda audio_path, sample_rate, signal: audio.write_audio(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), signal, sample_rate)) if self.waveform_transform_debug_dir else None
 		
 		if not self.segmented:
+			transcript = transcript[0]
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, offset = transcript['begin'], duration = transcript['end'] - transcript['begin'], mono = self.mono, dtype = torch.float32, normalize = True) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
 			
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else signal
@@ -133,7 +134,7 @@ class Labels:
 	word_end = '>'
 	candidate_sep = ';'
 
-	def __init__(self, lang, bpe = None, name = ''):
+	def __init__(self, lang, bpe = None, name = '', candidate_sep = ''):
 		self.lang = lang
 		self.name = name
 		self.preprocess_text = lang.preprocess_text
@@ -148,6 +149,8 @@ class Labels:
 		self.repeat_idx = self.blank_idx - 2
 		self.word_start_idx = self.alphabet.index(self.word_start) if self.word_start in self.alphabet else -1
 		self.word_end_idx = self.alphabet.index(self.word_end) if self.word_end in self.alphabet else -1
+		self.candidate_sep = candidate_sep
+		self.chr2idx = {l: i for i, l in enumerate(str(self))}
 
 	def find_words(self, text):
 		text = re.sub(r'([^\W\d]+)2', r'\1', text)
@@ -155,14 +158,16 @@ class Labels:
 		words = re.findall(r'-?\d+|-?\d+-\w+|\w+', text)
 		return list(filter(bool, (''.join(c for c in self.preprocess_word(w) if c in self).strip() for w in words)))
 
+	def split_candidates(self, text):
+		return text.split(self.candidate_sep) if self.candidate_sep else [text]
+	
 	def normalize_text(self, text):
 		return self.candidate_sep.join(' '.join(self.find_words(part)).lower().strip() for part in self.split_candidates(text))# or '*' 
 
 	def encode(self, text):
 		normalized = self.normalize_text(text)
-		chars = normalized.split(';')[0]
-		chr2idx = {l: i for i, l in enumerate(str(self))}
-		return normalized, torch.LongTensor([chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
+		chars = self.split_candidates(normalized)[0]
+		return normalized, torch.LongTensor([self.chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
 	def decode(self, idx : list, ts = None, I = None, speaker = None, channel = 0, speakers = None, replace_blank = True, replace_space = False, replace_repeat = True, key = 'hyp'):
 		decode_ = lambda i, j: self.postprocess_transcript(''.join(self[idx[ij]] for ij in range(i, j + 1) if replace_repeat is False or ij == 0 or idx[ij] != idx[ij - 1]), replace_blank = replace_blank, replace_space = replace_space, replace_repeat = replace_repeat)
@@ -187,9 +192,6 @@ class Labels:
 			elif k not in [self.space_idx, self.blank_idx] and i is None:
 				i = j
 		return transcript
-
-	def split_candidates(self, text):
-		return text.split(self.candidate_sep)
 
 	def postprocess_transcript(self, word, replace_blank = True, replace_space = False, replace_repeat = True, phonetic_replace_groups = []):
 		if replace_blank is not False:
