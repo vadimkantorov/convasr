@@ -6,50 +6,49 @@ import argparse
 import torch
 import sentencepiece
 import audio
+import transcripts
 
-def bpetrain(input_path, output_prefix, vocab_size, model_type, max_sentencepiece_length):
-	sentencepiece.SentencePieceTrainer.Train(f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size} --model_type={model_type}' + (f' --max_sentencepiece_length={max_sentencepiece_length}' if max_sentencepiece_length else ''))
+def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, num_speakers, strip):
+	os.makedirs(output_path, exist_ok = True)
 
-def subset(input_path, output_path, audio_file_name, arg, min, max):
-	if input_path.endswith('.csv'):
-		output_path = output_path or (input_path + (audio_file_name.split('subset')[-1] if audio_file_name else '') + '.csv')
-		good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
-		open(output_path,'w').writelines(line for line in open(input_path) if os.path.basename(line.split(',')[0]) in good_audio_file_name)
-	elif input_path.endswith('.json'):
-		output_path = output_path or (input_path + f'.subset_{arg}_min{min}_max{max}.txt')
-		open(output_path, 'w').write('\n'.join(r['audio_file_name'] for r in json.load(open(input_path)) if (min <= r[arg] if min is not None else True) and (r[arg] < max if max is not None else True)))
+	for transcript_name in os.listdir(input_path):
+		if not transcript_name.endswith('.json'):
+			continue
+		transcript = json.load(open(os.path.join(input_path, transcript_name)))
+		
+		arg = [(k, v) for k, v in dict(cer = cer, wer = wer).items() if v]
+
+		#(input_path + '.subset_{arg}_min{min}_max{max}.json'.format(arg = arg[0][0] if arg else '', min = arg[0][1][0] if arg else '', max = arg[0][1][1] if arg else ''))
+		transcript = list(transcripts.filter(transcript, audio_name = audio_name, align_boundary_words = align_boundary_words, cer = cer, wer = wer, duration = duration, gap = gap, num_speakers = num_speakers))
+	
+		transcript_path = os.path.join(output_path, transcript_name)
+		json.dump(transcripts.strip(transcript, strip), open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 	print(output_path)
 
-def cut(input_path, output_path, sample_rate, min_duration, max_duration):
+def cut(input_path, output_path, sample_rate, dilate):
 	os.makedirs(output_path, exist_ok = True)
+	
 	transcript = json.load(open(input_path))
 	signal = {}
 
 	for t in transcript:
 		audio_path = t['audio_path']
+
 		#TODO: cannot resample wav files because of torch.int16 - better off using sox/ffmpeg directly
 		signal[audio_path] = signal[audio_path] if audio_path in signal else audio.read_audio(audio_path, sample_rate, normalize = False, dtype = torch.int16)[0]
-		duration = t['end'] - t['begin']
-		if (min_duration is None or min_duration <= duration) and (max_duration is None or duration <= max_duration):
-			segment_path = os.path.join(output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t))
-			audio.write_audio(segment_path, signal[audio_path][t['channel'], int(t['begin'] * sample_rate) : int(t['end'] * sample_rate)], sample_rate)
-			t = dict(audio_path = segment_path, begin = 0.0, end = t['end'] - t['begin'], ref = t['ref'], meta = t)
-			json.dump(t, open(segment_path + '.json', 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
-	
+		segment_path = os.path.join(output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t))
+		audio.write_audio(segment_path, signal[audio_path][t['channel'], int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)], sample_rate)
+		t = dict(audio_path = segment_path, begin = 0.0, end = t['end'] - t['begin'] + 2 * dilate, ref = t['ref'], meta = t)
+		json.dump(t, open(segment_path + '.json', 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	print(output_path)
+
 def cat(input_path, output_path):
-	transcript = [json.load(open(os.path.join(input_path, transcript_name))) for transcript_name in os.listdir(input_path) if transcript_name.endswith('.json')]
+	output_path = output_path or input_path + '.json' 
+	array = lambda o: [o] if isinstance(o, dict) else o
+	segments = [array(json.load(open(os.path.join(input_path, transcript_name)))) for transcript_name in os.listdir(input_path) if transcript_name.endswith('.json')]
+	transcript = sum(segments, [])
 	json.dump(transcript, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
-
-def fromsrt(input_path, output_path):
-	os.makedirs(output_path, exist_ok = True)
-
-	def timestamp2sec(ts):
-		hh, mm, ss, msec = map(int, ts.replace(',', ':').split(':'))
-		return hh * 60 * 60 + mm * 60 + ss + msec * 1e-3
-	transcript = [dict(begin = timestamp2sec(begin), end = timestamp2sec(end), ref = ref) for begin, end, ref in re.findall(r'(\d+:\d+:\d+,\d+) --> (\d+:\d+:\d+,\d+)\s+(.+)', open(input_path).read())]
-	transcript_path = os.path.join(output_path, os.path.basename(input_path) + '.json')
-	json.dump(transcript, open(transcript_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
-	print(transcript_path)
+	print(output_path)
 
 def du(input_path):
 	transcript = json.load(open(input_path))
@@ -80,6 +79,9 @@ def rmoldcheckpoints(experiments_dir, experiment_id, keepfirstperepoch, remove):
 	for ckpt_name in (rm if remove else []):
 		os.remove(os.path.join(experiment_dir, ckpt_name))
 
+def bpetrain(input_path, output_prefix, vocab_size, model_type, max_sentencepiece_length):
+	sentencepiece.SentencePieceTrainer.Train(f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size} --model_type={model_type}' + (f' --max_sentencepiece_length={max_sentencepiece_length}' if max_sentencepiece_length else ''))
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -92,31 +94,30 @@ if __name__ == '__main__':
 	cmd.set_defaults(func = bpetrain)
 	
 	cmd = subparsers.add_parser('subset')
+	float_tuple = lambda s: tuple(map(lambda ip: float(ip[1] if ip[1] else ['-inf', 'inf'][ip[0]]) , enumerate(s.split('-'))))
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o')
-	cmd.add_argument('--audio-file-name')
-	cmd.add_argument('--arg', choices = ['cer', 'mer', 'der', 'wer'])
-	cmd.add_argument('--min', type = float)
-	cmd.add_argument('--max', type = float)
+	cmd.add_argument('--audio-name')
+	cmd.add_argument('--wer', type = float_tuple)
+	cmd.add_argument('--cer', type = float_tuple)
+	cmd.add_argument('--duration', type = float_tuple)
+	cmd.add_argument('--num-speakers', type = float_tuple)
+	cmd.add_argument('--gap', type = float_tuple)
+	cmd.add_argument('--align-boundary-words', action = 'store_true')
+	cmd.add_argument('--strip', nargs = '*', default = ['alignment', 'words'])
 	cmd.set_defaults(func = subset)
 	
 	cmd = subparsers.add_parser('cut')
 	cmd.add_argument('--input-path', '-i', required = True)
-	cmd.add_argument('--output-path', '-o', default = 'data/cut')
-	cmd.add_argument('--max-duration', type = float)
-	cmd.add_argument('--min-duration', type = float, default = 0.1)
+	cmd.add_argument('--output-path', '-o')
+	cmd.add_argument('--dilate', type = float, default = 0.0)
 	cmd.add_argument('--sample-rate', '-r', type = int, default = 8_000, choices = [8_000, 16_000, 32_000, 48_000])
 	cmd.set_defaults(func = cut)
 	
 	cmd = subparsers.add_parser('cat')
 	cmd.add_argument('--input-path', '-i', required = True)
-	cmd.add_argument('--output-path', '-o', default = 'data/cat.json')
+	cmd.add_argument('--output-path', '-o')
 	cmd.set_defaults(func = cat)
-
-	cmd = subparsers.add_parser('fromsrt')
-	cmd.add_argument('--input-path', '-i', required = True)
-	cmd.add_argument('--output-path', '-o', default = 'data/fromsrt')
-	cmd.set_defaults(func = fromsrt)
 
 	cmd = subparsers.add_parser('csv2json')
 	cmd.add_argument('input_path')

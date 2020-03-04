@@ -1,3 +1,17 @@
+# echomsk dataset
+```shell
+DATASET=sample10
+DATASET_TRANSCRIBE=$DATASET_transcribe
+python3 datasets/echomsk.py --name $DATASET data/personalno_20000101_20191231.txt.json.gz --sample 10
+wget -i "$DATASET/$DATASET.txt" -P $DATASET
+
+CHECKPOINT=data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs256____fp16O2/checkpoint_epoch05_iter0040000.pt
+python3 transcribe.py --checkpoint "$CHECKPOINT" -i "$DATASET" -o "$DATASET_TRANSCRIBE" --mono --align 
+
+python3 tools.py subset -i $DATASET_TRANSCRIBE -o $DATASET_TRANSCRIBE.json --align-boundary-words --num-speakers 1- --gap 0.1- --cer 0.1-0.4 --duration 2.0-4.0
+#python3 tools.py cut -i $DATASET_TRANSCRIBE.json --dilate 0.02
+```
+
 #youtube dataset
 ```shell
 # list all videos from a channel / playlist
@@ -5,13 +19,6 @@ bash youtube.sh LIST https://youtu.be/...
 
 # download audio and srt subtitles
 bash youtube.sh RETR https://youtu.be/...
-```
-
-# echomsk dataset
-```shell
-python3 echomsk.py ../echomsk/personalno_20000101_20191231.txt.json.gz --sample 10 --name sample10
-
-wget -i sample10/sample10.txt -P sample10
 ```
 
 # Download the exclude files

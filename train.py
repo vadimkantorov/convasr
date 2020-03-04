@@ -97,7 +97,7 @@ def main(args):
 			yield meta, loss.cpu(), entropy_char.cpu(), decoded, logits, y
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None, adapt_bn = False):
-		evaluate_transcript = lambda analyze, labels, hyp, loss, entropy, meta: dict(labels = labels.name, audio_file_name = os.path.basename(meta['audio_path']), audio_path = meta['audio_path'], entropy = entropy, loss = loss, **metrics.analyze(meta['ref_normalized'], hyp, labels, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab))
+		evaluate_transcript = lambda analyze, labels, hyp, loss, entropy, meta: dict(labels = labels.name, audio_file_name = os.path.basename(meta['audio_path']), audio_path = meta['audio_path'], entropy = entropy, loss = loss, **metrics.analyze(labels[0].normalize_text(meta['ref']), hyp, labels, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab))
 		
 		training = epoch is not None and iteration is not None
 		columns = {}
