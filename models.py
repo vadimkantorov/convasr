@@ -128,7 +128,7 @@ class JasperNet(nn.Module):
 
 		logits = self.decoder(x)
 		log_probs = [F.log_softmax(l, dim = 1).float() for l in logits]
-		olen = [compute_output_lengths(l, xlen) for l in logits]
+		olen = [compute_output_lengths(l, xlen.float()) for l in logits]
 		aux = {}
 
 		if y is not None and ylen is not None:
@@ -315,35 +315,37 @@ class LogFilterBankFrontend(nn.Module):
 		self.win_length = int(window_size * sample_rate)
 		self.hop_length = int(window_stride * sample_rate)
 		self.nfft = 2 ** math.ceil(math.log2(self.win_length))
+		self.freq_cutoff = self.nfft // 2 + 1
 		
 		self.register_buffer('window', getattr(torch, window)(self.win_length, periodic = window_periodic).float())
 		#mel_basis = torchaudio.functional.create_fb_matrix(n_fft, n_mels = num_input_features, fmin = 0, fmax = int(sample_rate/2)).t() # when https://github.com/pytorch/audio/issues/287 is fixed
-		self.register_buffer('mel_basis', torch.from_numpy(librosa.filters.mel(sample_rate, self.nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2))).float().unsqueeze(-1))
-		self.register_buffer('eps', torch.tensor(eps, dtype = torch.float).expand(out_channels) if eps else None)
-	
-		if stft_mode:
-			self.freq_cutoff = self.nfft // 2 + 1
+		mel_basis = torch.as_tensor(librosa.filters.mel(sample_rate, self.nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2)))
+		self.mel = nn.Conv1d(mel_basis.shape[1], mel_basis.shape[0], 1)
+		self.mel.weight.copy_(mel_basis[..., None]).requires_grad_(False)
+		self.mel.bias.fill_(eps).requires_grad_(False)
+
+		if stft_mode == 'conv':
 			fourier_basis = torch.rfft(torch.eye(self.nfft), signal_ndim = 1, onesided = False)
 			forward_basis = fourier_basis[:self.freq_cutoff].permute(2, 0, 1).reshape(-1, 1, fourier_basis.shape[1])
-			forward_basis = forward_basis * torch.as_tensor(librosa.util.pad_center(self.window, self.nfft)).float()
-			self.register_buffer('forward_basis', forward_basis)
+			forward_basis = forward_basis * torch.as_tensor(librosa.util.pad_center(self.window, self.nfft), dtype = forward_basis.dtype)
+			self.stft = nn.Conv1d(forward_basis.shape[1], forward_basis.shape[0], 1, bias = False, stride = self.hop_length)
+			self.stft.weigth.copy_(forward_basis).requires_grad_(False)
 
 	def stft_magnitude_squared(self, signal):
-		if self.stft_mode:
-			signal = F.pad(signal[:, None, None, :], (self.nfft // 2, self.nfft // 2, 0, 0), mode = 'reflect').squeeze(1)
-			forward_transform_squared = F.conv1d(signal, self.forward_basis, stride = self.hop_length).pow(2)
-			real_squared = forward_transform_squared[:, :self.freq_cutoff, :]
-			imag_squared = forward_transform_squared[:, self.freq_cutoff:, :]
-			return real_squared + imag_squared
+		if self.stft_mode == 'conv':
+			signal = F.pad(signal[:, None, None, :], (self.freq_cutoff - 1, self.freq_cutoff - 1, 0, 0), mode = 'reflect').squeeze(1)
+			forward_transform_squared = self.stft(signal).pow(2)
+			real_squared, imag_squared = forward_transform_squared[:, :self.freq_cutoff, :], forward_transform_squared[:, self.freq_cutoff:, :]
 		else:
-			return signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = True, pad_mode = 'reflect').pow(2).sum(dim = -1)
+			real_squared, imag_squared = signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = True, pad_mode = 'reflect').pow(2).unbind(dim = -1)
+		return real_squared + imag_squared
 
 	def forward(self, signal):
 		signal = normalize_signal(signal) if self.normalize_signal else signal
 		signal = torch.cat([signal[..., :1], signal[..., 1:] - self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
 		signal = signal + self.dither * torch.randn_like(signal) if self.dither > 0 else signal
 		power_spectrum = self.stft_magnitude_squared(signal)
-		features = F.conv1d(power_spectrum, self.mel_basis, self.eps).log()
+		features = self.mel(power_spectrum.type_as(self.mel.weight)).log()
 		return normalize_features(features) if self.normalize_features else features 
 	
 	@property

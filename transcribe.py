@@ -31,14 +31,15 @@ def main(args):
 	
 	checkpoint = torch.load(args.checkpoint, map_location = 'cpu')
 	args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
-	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window)
+	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, eps = 1e-6)
 	labels = datasets.Labels(importlib.import_module(checkpoint['args']['lang']), name = 'char')
 	model = getattr(models, checkpoint['args']['model'])(args.num_input_features, [len(labels)], frontend = frontend, dict = lambda logits, log_probs, olen, **kwargs: (logits[0], olen[0]))
 	model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 	model = model.to(args.device)
+	frontend = frontend.to(args.device)
 	model.eval()
 	model.fuse_conv_bn_eval()
-	#model = models.data_parallel(model)
+	model, *_ = models.data_parallel(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 
 	decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 	
@@ -76,8 +77,7 @@ def main(args):
 			print('HYP:', hyp)
 		print('CER: {cer:.02%}'.format(cer = metrics.cer(hyp, ref)))
 
-
-		tic = time.time()
+		tic_alignment = time.time()
 		if args.align:
 			#if ref_full:# and not ref:
 			#	#assert len(set(t['channel'] for t in meta)) == 1 or all(t['type'] != 'channel' for t in meta)
@@ -89,11 +89,10 @@ def main(args):
 			#	y = y_full[None, None, :].to(y.device)
 			#	ylen = torch.tensor([[y.shape[-1]]], device = log_probs.device, dtype = torch.long)
 			#	segments = [([], sum([h for r, h in segments], []))]
-				
+			
 			alignment = ctc.alignment(log_probs.permute(2, 0, 1), y.squeeze(1), olen, ylen.squeeze(1), blank = labels.blank_idx)
 			ref_segments = [labels.decode(y[i, 0, :ylen[i]].tolist(), ts[i], alignment[i], channel = channel[i], speaker = speaker[i], key = 'ref', speakers = speakers) for i in range(len(decoded))]
-		print('Alignment time: {:.02f} sec'.format(time.time() - tic))
-		
+		print('Alignment time: {:.02f} sec'.format(time.time() - tic_alignment))
 		
 		if args.max_segment_duration:
 			ref_transcript, hyp_transcript = sum(ref_segments, []), sum(hyp_segments, [])
@@ -112,7 +111,7 @@ def main(args):
 		print(transcript_path)
 		if args.html:
 			vis.transcript(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), args.sample_rate, args.mono, transcript, filtered_transcript)
-		print('Done.\n')
+		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -120,6 +119,8 @@ if __name__ == '__main__':
 	parser.add_argument('--data-path', '-i', nargs = '+')
 	parser.add_argument('--output-path', '-o', default = 'data/transcribe')
 	parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
+	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
+	parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
 	parser.add_argument('--max-segment-duration', type = float, default = 2)
 	parser.add_argument('--num-workers', type = int, default = 0)
 	parser.add_argument('--ext', default = ['wav', 'mp3'])

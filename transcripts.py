@@ -54,7 +54,7 @@ def sort(transcript):
 def sort_key(t):
 	return t.get('begin'), t.get('end'), t.get('channel')
 
-float_tuple = lambda s: tuple(map(lambda ip: float(ip[1] if ip[1] else ['-inf', 'inf'][ip[0]]) , enumerate((s if '-' in s else s + '-' + s).split('-'))))
+float_tuple = lambda s: tuple(map(lambda ip: (float(ip[1]) if '.' in ip[1] else int(ip[1])) if ip[1] else float(['-inf', 'inf'][ip[0]]), enumerate((s if '-' in s else s + '-' + s).split('-'))))
 
 def filter(transcript, align_boundary_words = False, cer = None, wer = None, duration = None, gap = None, num_speakers = None, audio_name = None):
 	is_aligned = lambda w: w['type'] == 'ok'
