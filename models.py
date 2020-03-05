@@ -379,7 +379,7 @@ def normalize_features(features, dim = -1, eps = 1e-20):
 def unpad(x, lens):
 	return [e[..., :l] for e, l in zip(x, lens)]
 
-def reset_bn_running_stats(model):
+def reset_bn_running_stats_(model):
 	for bn in [module for module in self.model.modules() if isinstance(module, nn.modules.batchnorm._BatchNorm)]:
 		bn.running_mean = torch.zeros_like(bn.running_mean)
 		bn.running_var = torch.ones_like(bn.running_var)
@@ -400,3 +400,11 @@ def silence_space_mask(log_probs, speech, blank_idx, space_idx, kernel_size = 10
 	greedy_decoded = log_probs.max(dim = 1).indices
 	silence = ~speech & (greedy_decoded == blank_idx)
 	return silence[:, None, :] * (~F.one_hot(torch.tensor(space_idx), log_probs.shape[1]).to(device = silence.device, dtype = silence.dtype))[None, :, None]
+
+def save_topk(x, k, dim = -1, largest = True, indices_dtype = None, values_dtype = None, fill_value = 0.0):
+	topk = x.topk(k, dim = dim, largest = largest)
+	return dict(k = k, dim = dim, largest = largest, shape = x.shape, dtype = x.dtype, device = x.device, fill_value = fill_value, indices = topk.indices.to(dtype = indices_dtype), values = topk.values.to(dtype = values_dtype))
+
+def load_topk(saved, device = None):
+	device = device or saved['device']
+	return torch.full(saved['shape'], saved['fill_value'], dtype = saved['dtype'], device = device).scatter_(saved['dim'], saved['indices'].to(dtype = torch.int64, device = device), saved['values'].to(dtype = saved['dtype'], device = device))

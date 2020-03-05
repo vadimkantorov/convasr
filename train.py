@@ -108,7 +108,7 @@ def main(args):
 
 			model.eval()
 			if adapt_bn:
-				for _ in apply_model(val_data_loader, models.reset_bn_running_stats(model)):
+				for _ in apply_model(val_data_loader, models.reset_bn_running_stats_(model)):
 					pass
 			model.eval()
 			cpu_list = lambda l: [[t.cpu() for t in t_] for t_ in l]
