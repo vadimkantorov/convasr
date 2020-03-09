@@ -11,16 +11,16 @@ bash_template = """
     --verbose --lang ru \
     --model JasperNetBig \
     --train-batch-size 256 --val-batch-size 256 \
-    --scheduler MultiStepLR --decay-milestones 40000 \
+    --scheduler MultiStepLR --decay-milestones 100000 150000 \
     --lr 1e-2 \
     --optimizer NovoGrad \
-    --train-data-path data/domain_splits/{train_set}.csv \
-    --val-data-path data/domain_splits/mixed_val.csv data/domain_splits/clean_val.csv  kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv data/valset_by_rec22122019.0.csv data/valset_by_rec22122019.1.csv data/valset_by_rec22122019.csv \
+    --train-data-path data/splits/combinations/{train_set}.csv \
+    --val-data-path data/splits/combinations/mixed_val.csv data/splits/combinations/clean_val.csv  kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv data/kfold_splits/valset_kfold_05022020_fold_1.csv data/kfold_splits/valset_kfold_05022020.0_fold_1.csv  data/kfold_splits/valset_kfold_05022020.1_fold_1.csv   \
     --analyze kontur_calls_micro.csv \
-    --val-iteration-interval 2500 \
+    --val-iteration-interval 5000 \
     --fp16 O2 \
-    --experiment-name domain_comp_{train_set} \
-    --epochs 45 
+    --experiment-name domain_comb_max_qual_{train_set} \
+    --epochs {epochs} --exphtml=  
 """
 
 def get_process_to_gpu_mapping():
@@ -33,7 +33,16 @@ def get_process_to_gpu_mapping():
 
 
 def run_task(worker_id, args):
-    bashcmd = bash_template.format(train_set=args)
+    epochs = {
+        'radio_train': 95,
+        'books_train': 70,
+        'books_radio_train': 41,
+        'books_youtube_train': 30,
+        'youtube_train': 50,
+        'books_youtube_radio_train': 25,
+        'youtube_radio_train': 34
+    }
+    bashcmd = bash_template.format(train_set=args, epochs=epochs[args])
     print(bashcmd)
 
     with open(f'data/experiments/experiment_{args}_output.txt', 'a+') as out:
@@ -63,14 +72,15 @@ def worker_loop(queue):
 def main():
     queue = Queue()
 
-    for v in ['radio_normalized_train',
-	'books_normalized_train',
-	'clean_train',
-	'books_radio_normalized_train',
-	'books_youtube_normalized_train',  
-	'youtube_normalized_train',
-	'books_youtube_radio_normalized_train',
-	'youtube_radio_normalized_train']:
+    for v in [
+	'youtube_train',
+	'youtube_radio_train',
+	'books_youtube_radio_train',
+        'radio_train',
+	'books_radio_train',
+	'books_youtube_train',  
+	'books_train',
+        ]:
         queue.put(v)
 
     pool = Pool(4, worker_loop, (queue,))
