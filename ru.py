@@ -1,3 +1,5 @@
+import re
+
 LABELS = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ* "
 
 PHONETIC_REPLACE_GROUPS = ['ОАЯ', 'ПБ', 'СЗЦ', 'ВФ', 'КГХ', 'ТД', 'ЧЖШЩ', 'ЕЫЭИЙ', 'ЛР', 'УЮ', 'ЬЪ', 'НМ']
@@ -18,6 +20,16 @@ def preprocess_word(w):
 		if w1.isdigit() and not w2.isdigit():
 			return num2words(w1, ordinal = True) + w2
 	return w
+
+def find_words(text):
+	text = re.sub(r'([^\W\d]+)2', r'\1', text)
+	text = preprocess_text(text)
+	words = re.findall(r'-?\d+|-?\d+-\w+|\w+', text)
+	self = LABELS.lower() + '|2'
+	return list(filter(bool, (''.join(c for c in preprocess_word(w) if c in self).strip() for w in words)))
+
+def normalize_text(text):
+	return ' '.join(find_words(text)).lower().strip()
 
 LATINS = """II III IV V VI VII VIII IX X
 XI XII XIII XIV XV XVI XVII XVIII XIX XX
@@ -120,23 +132,23 @@ ORDINALS = {
 	1000000000: 'МИЛЛИАРДНЫЙ',
 }
 
-def num1000(num):
-	parts = []
-	if num >= 100:
-		parts.append(num - num % 100)
-		num = num % 100
-	if num == 0:
-		return parts
-	if num % 100 < 20:
-		parts.append(num)
-	else:
-		parts.append(num - num % 10)
-		num = num % 10
-		if num:
-			parts.append(num)
-	return parts
-
 def num_parts(num):
+	def num1000(num):
+		parts = []
+		if num >= 100:
+			parts.append(num - num % 100)
+			num = num % 100
+		if num == 0:
+			return parts
+		if num % 100 < 20:
+			parts.append(num)
+		else:
+			parts.append(num - num % 10)
+			num = num % 10
+			if num:
+				parts.append(num)
+		return parts
+	
 	if num < 0:
 		num = -num
 	num = int(num)

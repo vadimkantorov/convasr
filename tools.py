@@ -67,6 +67,14 @@ def csv2json(input_path, gz, group):
 	json.dump(transcript, gzopen(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
+def diff(ours, theirs, key, output_path):
+	transcript_ours = {t['audio_file_name'] : t for t in json.load(open(ours))}
+	transcript_theirs = {t['audio_file_name'] : t for t in json.load(open(theirs))}
+	
+	d = list(sorted([dict(audio_name = audio_name, diff = ours[key] - theirs[key], ref = ours['ref'], hyp_ours = ours['hyp'], hyp_thrs = theirs['hyp'])  for audio_name in transcript_ours for ours, theirs in [(transcript_ours[audio_name], transcript_theirs[audio_name])]], key = lambda d: d['diff'], reverse = True))
+	json.dump(d, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	print(output_path)
+
 def rmoldcheckpoints(experiments_dir, experiment_id, keepfirstperepoch, remove):
 	assert keepfirstperepoch
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
@@ -127,8 +135,15 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('csv2json')
 	cmd.add_argument('input_path')
 	cmd.add_argument('--gzip', dest = 'gz', action = 'store_true')
-	cmd.add_argument('--group', type = int, default = 1)
+	cmd.add_argument('--group', type = int, default = 0)
 	cmd.set_defaults(func = csv2json)
+
+	cmd = subparsers.add_parser('diff')
+	cmd.add_argument('--ours', required = True)
+	cmd.add_argument('--theirs', required = True)
+	cmd.add_argument('--key', default = 'cer')
+	cmd.add_argument('--output-path', '-o', default = 'data/diff.json')
+	cmd.set_defaults(func = diff)
 
 	cmd = subparsers.add_parser('rmoldcheckpoints')
 	cmd.add_argument('experiment_id')

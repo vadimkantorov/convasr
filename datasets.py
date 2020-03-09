@@ -130,20 +130,23 @@ class Labels:
 	blank = '|'
 	space = ' '
 	repeat = '2'
+	unk = '*'
 	word_start = '<'
 	word_end = '>'
 	candidate_sep = ';'
+	
+	space_sentencepiece = '\u2581'
+	unk_sentencepiece = '<unk>'
 
 	def __init__(self, lang, bpe = None, name = '', candidate_sep = ''):
 		self.lang = lang
 		self.name = name
-		self.preprocess_text = lang.preprocess_text
-		self.preprocess_word = lang.preprocess_word
 		self.bpe = None
 		if bpe:
 			self.bpe = sentencepiece.SentencePieceProcessor()
 			self.bpe.Load(bpe)
-		self.alphabet = self.lang.LABELS.lower()# + self.lang.LABELS[:-1].upper()
+		
+		self.alphabet = self.lang.LABELS.lower()
 		self.blank_idx = len(self) - 1
 		self.space_idx = self.blank_idx - 1
 		self.repeat_idx = self.blank_idx - 2
@@ -152,17 +155,11 @@ class Labels:
 		self.candidate_sep = candidate_sep
 		self.chr2idx = {l: i for i, l in enumerate(str(self))}
 
-	def find_words(self, text):
-		text = re.sub(r'([^\W\d]+)2', r'\1', text)
-		text = self.preprocess_text(text)
-		words = re.findall(r'-?\d+|-?\d+-\w+|\w+', text)
-		return list(filter(bool, (''.join(c for c in self.preprocess_word(w) if c in self).strip() for w in words)))
-
 	def split_candidates(self, text):
 		return text.split(self.candidate_sep) if self.candidate_sep else [text]
 	
 	def normalize_text(self, text):
-		return self.candidate_sep.join(' '.join(self.find_words(part)).lower().strip() for part in self.split_candidates(text))# or '*' 
+		return self.candidate_sep.join(self.lang.normalize_text(candidate) for candidate in self.split_candidates(text))# or self.unk 
 
 	def encode(self, text):
 		normalized = self.normalize_text(text)
@@ -193,9 +190,11 @@ class Labels:
 				i = j
 		return transcript
 
-	def postprocess_transcript(self, word, replace_blank = True, replace_space = False, replace_repeat = True, phonetic_replace_groups = []):
+	def postprocess_transcript(self, word, replace_blank = True, replace_space = False, replace_repeat = True, replace_unk = True, phonetic_replace_groups = []):
 		if replace_blank is not False:
 			word = word.replace(self.blank, '' if replace_blank is True else replace_blank)
+		if replace_unk is True:
+			word = word.replace(self.unk, '' if replace_unk is True else replace_unk)
 		if replace_space is not False:
 			word = word.replace(self.space, replace_space)
 		if replace_repeat is True:
@@ -207,14 +206,13 @@ class Labels:
 		replace2 = lambda s: ''.join(c if i == 0 or c != self.repeat else s[i - 1] for i, c in enumerate(s))
 		replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
 		replacestar = lambda s: s.replace('*', '')
-		replacespace = lambda s, sentencepiece_space = '\u2581', sentencepiece_unk = '<unk>': s.replace(sentencepiece_space, ' ')
 		replacecap = lambda s: ''.join(c + ' ' if c.isupper() else c for c in s)
 		replacephonetic = lambda s: s.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g.lower()})
 		replacepunkt = lambda s: s.replace(',', '').replace('.', '')
-		return functools.reduce(lambda text, func: func(text), [replacepunkt, replacespace, replacecap, replaceblank, replace2, replace22, replacestar, replacephonetic, str.strip], text)
+		return functools.reduce(lambda text, func: func(text), [replacepunkt, replacecap, replaceblank, replace2, replace22, replacestar, replacephonetic, str.strip], text)
 
 	def __getitem__(self, idx):
-		return {self.blank_idx : self.blank, self.repeat_idx : self.repeat, self.space_idx : self.space}.get(idx) or (self.alphabet[idx] if self.bpe is None else self.bpe.IdToPiece(idx))
+		return {self.blank_idx : self.blank, self.repeat_idx : self.repeat, self.space_idx : self.space}.get(idx) or (self.alphabet[idx] if self.bpe is None else self.bpe.IdToPiece(idx).replace(self.space_sentencepiece, self.space).replace(self.unk_sentencepiece, self.unk))
 
 	def __len__(self):
 		return len(self.alphabet if self.bpe is None else self.bpe) + len([self.repeat, self.space, self.blank])

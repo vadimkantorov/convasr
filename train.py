@@ -49,7 +49,9 @@ def main(args):
 		torch.backends.cudnn.benchmark = True
 
 	lang = importlib.import_module(args.lang)
+	#TODO: , candidate_sep = datasets.Labels.candidate_sep
 	labels = [datasets.Labels(lang, name = 'char')] + [datasets.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
+	
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, stft_mode = 'conv' if args.onnx else None)
 	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, frontend = frontend if args.onnx or args.frontend_in_model else None, **(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx else {}))
 
@@ -79,7 +81,7 @@ def main(args):
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
 
 	val_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob), feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob))
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = val_dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path for val_dataset in [datasets.AudioTextDataset(val_data_path, labels, args.sample_rate, frontend = val_frontend if not args.frontend_in_model else None, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, min_duration = args.min_duration, candidate_sep = datasets.Labels.candidate_sep)]}
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = val_dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path for val_dataset in [datasets.AudioTextDataset(val_data_path, labels, args.sample_rate, frontend = val_frontend if not args.frontend_in_model else None, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, min_duration = args.min_duration)]}
 	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.GreedyNoBlankDecoder() if args.decoder == 'GreedyNoBlankDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
 	vocab = set(map(str.strip, open(args.vocab))) if args.vocab else set()
@@ -97,8 +99,7 @@ def main(args):
 			yield meta, loss.cpu(), entropy_char.cpu(), decoded, logits, y
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None, adapt_bn = False):
-		evaluate_transcript = lambda analyze, labels, hyp, loss, entropy, meta: dict(labels = labels.name, audio_file_name = os.path.basename(meta['audio_path']), audio_path = meta['audio_path'], entropy = entropy, loss = loss, **metrics.analyze(labels[0].normalize_text(meta['ref']), hyp, labels, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab))
-		
+		evaluate_transcript = lambda analyze, labels, hyp, loss, entropy, meta: dict(labels = labels.name, audio_file_name = os.path.basename(meta['audio_path']), audio_path = meta['audio_path'], entropy = entropy, loss = loss, **metrics.analyze(labels.normalize_text(meta['ref']), hyp, labels, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab))
 		training = epoch is not None and iteration is not None
 		columns = {}
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
@@ -108,7 +109,8 @@ def main(args):
 
 			model.eval()
 			if adapt_bn:
-				for _ in apply_model(val_data_loader, models.reset_bn_running_stats_(model)):
+				models.reset_bn_running_stats_(model)
+				for _ in apply_model(val_data_loader, model):
 					pass
 			model.eval()
 			cpu_list = lambda l: [[t.cpu() for t in t_] for t_ in l]

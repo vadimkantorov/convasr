@@ -82,8 +82,8 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	</script></body></html>''')
 	print(html_path)
 
-def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
-	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
+def logits(logits, audio_name, MAX_ENTROPY = 1.0):
+	good_audio_name = set(map(str.strip, open(audio_name[0])) if os.path.exists(audio_name[0]) else audio_name)
 	labels = datasets.Labels(ru)
 	tick_params = lambda ax, labelsize = 2.5, length = 0, **kwargs: ax.tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length, **kwargs) or [ax.set_linewidth(0) for ax in ax.spines.values()]
 	logits_path = logits + '.html'
@@ -99,9 +99,9 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 			audio.play();
 		}
 	</script>''')
-	for r in torch.load(logits)[:5]:
+	for r in torch.load(logits):
 		logits = r['logits']
-		if good_audio_file_name and r['audio_file_name'] not in good_audio_file_name:
+		if good_audio_name and r['audio_file_name'] not in good_audio_name:
 			continue
 		
 		ref_aligned, hyp_aligned = r['alignment']['ref'], r['alignment']['hyp']
@@ -113,8 +113,8 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 		margin = models.margin(log_probs, dim = 0)
 		#energy = features.exp().sum(dim = 0)[::2]
 
-		alignment = ctc.ctc_loss(log_probs.unsqueeze(0).permute(2, 0, 1), r['y'].unsqueeze(0).long(), torch.LongTensor([log_probs.shape[-1]]), torch.LongTensor([len(r['y'])]), blank = len(log_probs) - 1, alignment = True)[0, :, :len(r['y'])]
-		
+		alignment = ctc.alignment(log_probs.unsqueeze(0).permute(2, 0, 1), r['y'].unsqueeze(0).long(), torch.LongTensor([log_probs.shape[-1]]), torch.LongTensor([len(r['y'])]), blank = len(log_probs) - 1).squeeze(0)
+
 		plt.figure(figsize = (6, 2))
 		
 		prob_top1, prob_top2 = log_probs.exp().topk(2, dim = 0).values
@@ -137,22 +137,24 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 
 		plt.ylim(0, 3.0)
 		plt.xlim(0, entropy.shape[-1] - 1)
-		xlabels = list(map('\n'.join, zip(*labels.split_candidates(labels.decode(log_probs.topk(5, dim = 0).indices.tolist(), replace_blank = '.', replace_space = '_', replace_repeat = False)))))
+
+		decoded = log_probs.topk(5, dim = 0).indices
+		xlabels = list(map('\n'.join, zip(*[labels.decode(d.tolist(), replace_blank = '.', replace_space = '_', replace_repeat = False) for d in decoded])))
 		#xlabels_ = labels.decode(log_probs.argmax(dim = 0).tolist(), blank = '.', space = '_', replace2 = False)
 		plt.xticks(torch.arange(entropy.shape[-1]), xlabels, fontfamily = 'monospace')
 		tick_params(plt.gca())
 
 		ax = plt.gca().secondary_xaxis('top')
-		ref, ref_ = labels.decode(r['y']), alignment.argmax(dim = 0)
+		ref, ref_ = labels.decode(r['y'].tolist(), replace_blank = '.', replace_space = '_', replace_repeat = False), alignment
 		ax.set_xticklabels(ref)
 		ax.set_xticks(ref_)
 		tick_params(ax, colors = 'red')
 
-		k = 0
-		for i, c in enumerate(ref + ' '):
-			if c == ' ':
-				plt.axvspan(ref_[k] - 1, ref_[i - 1] + 1, facecolor = 'gray', alpha = 0.2)
-				k = i + 1
+		#k = 0
+		#for i, c in enumerate(ref + ' '):
+		#	if c == ' ':
+		#		plt.axvspan(ref_[k] - 1, ref_[i - 1] + 1, facecolor = 'gray', alpha = 0.2)
+		#		k = i + 1
 
 		plt.subplots_adjust(left = 0, right = 1, bottom = 0.12, top = 0.95)
 
@@ -168,8 +170,8 @@ def logits(logits, audio_file_name, MAX_ENTROPY = 1.0):
 	print('\n', logits_path)
 
 def errors(ours, theirs = None, audio_file_name = None, audio = False, output_file_name = None):
-	good_audio_file_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
-	read_transcript = lambda path: list(filter(lambda r: not good_audio_file_name or r['audio_file_name'] in good_audio_file_name, json.load(open(path)))) if path is not None else []
+	good_audio_name = set(map(str.strip, open(audio_file_name)) if audio_file_name is not None else [])
+	read_transcript = lambda path: list(filter(lambda r: not good_audio_name or r['audio_file_name'] in good_audio_name, json.load(open(path)))) if path is not None else []
 	ours_, theirs_ = read_transcript(ours), {r['audio_file_name'] : r for r in read_transcript(theirs)}
 	# https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
 	output_file_name = output_file_name or (ours + (audio_file_name.split('subset')[-1] if audio_file_name else '') + '.html')
@@ -179,13 +181,13 @@ def errors(ours, theirs = None, audio_file_name = None, audio = False, output_fi
 def audiosample(input_path, output_path, K):
 	transcript = json.load(open(input_path))
 
-	dataset_name = lambda t: t.get('dataset_name', 'dataset_name not found')
-	by_dataset_name = {k : list(g) for k, g in itertools.groupby(sorted(transcript, key = dataset_name), key = dataset_name)}
+	group = lambda t: t.get('group', 'group not found')
+	by_group = {k : list(g) for k, g in itertools.groupby(sorted(transcript, key = group), key = group)}
 	
 	f = open(output_path, 'w')
 	f.write('<html><meta charset="UTF-8"><body>')
-	for dataset_name, transcript in sorted(by_dataset_name.items()):
-		f.write(f'<h1>{dataset_name}</h1>')
+	for group, transcript in sorted(by_group.items()):
+		f.write(f'<h1>{group}</h1>')
 		f.write('<table>')
 		random.seed(1)
 		random.shuffle(transcript)
@@ -203,17 +205,17 @@ def audiosample(input_path, output_path, K):
 def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe, der):
 	labels = datasets.Labels(ru)
 	if experiment_id.endswith('.json'):
-		reftra = json.load(open(experiment_id))
-		for reftra_ in reftra:
-			hyp = labels.postprocess_transcript_(labels.normalize_text(reftra_.get('hyp', ref_tra_.get('transcript'))     ))
-			ref = labels.postprocess_transcript_(labels.normalize_text(reftra_.get('ref', ref_tra_.get('reference'))      ))
-			reftra_['cer'] = metrics.cer(hyp, ref)
-			reftra_['wer'] = metrics.wer(hyp, ref)
+		transcript = json.load(open(experiment_id))
+		for t in transcript:
+			hyp = labels.postprocess_transcript(labels.normalize_text(t['hyp']))
+			ref = labels.postprocess_transcript(labels.normalize_text(t['ref']))
+			t['cer'] = metrics.cer(hyp, ref)
+			t['wer'] = metrics.wer(hyp, ref)
 
-		cer_, wer_ = [torch.tensor([r[k] for r in reftra]) for k in ['cer', 'wer']]
+		cer_, wer_ = [torch.tensor([t[k] for t in transcript]) for k in ['cer', 'wer']]
 		cer_avg, wer_avg = float(cer_.mean()), float(wer_.mean())
 		print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')
-		loss_ = torch.tensor([r.get('loss', 0) for r in reftra])
+		loss_ = torch.tensor([t.get('loss', 0) for t in transcript])
 		loss_ = loss_[~(torch.isnan(loss_) | torch.isinf(loss_))]
 		#min, max, steps = 0.0, 2.0, 20
 		#bins = torch.linspace(min, max, steps = steps)
@@ -279,40 +281,6 @@ def words(train_data_path, val_data_path):
 		if c1 > 1 and c2 < 1000:
 			print(w, c1, c2)
 
-def meanstd(logits):
-	cov = lambda m: m @ m.t()
-	L = torch.load(logits, map_location = 'cpu')
-
-	batch_m = [b.mean(dim = -1) for b in L['features']]
-	batch_mean = torch.stack(batch_m).mean(dim = 0)
-	batch_s = [b.std(dim = -1) for b in L['features']]
-	batch_std = torch.stack(batch_s).mean(dim = 0)
-	batch_c = [cov(b - m.unsqueeze(-1)) for b, m in zip(L['features'], batch_m)]
-	batch_cov = torch.stack(batch_c).mean(dim = 0)
-
-	conv1_m = [b.mean(dim = -1) for b in L['conv1']]
-	conv1_mean = torch.stack(conv1_m).mean(dim = 0)
-	conv1_s = [b.std(dim = -1) for b in L['conv1']]
-	conv1_std = torch.stack(conv1_s).mean(dim = 0)
-	conv1_c = [cov(b - m.unsqueeze(-1)) for b, m in zip(L['conv1'], conv1_m)]
-	conv1_cov = torch.stack(conv1_c).mean(dim = 0)
-	
-	plt.subplot(231)
-	plt.imshow(batch_mean[:10].unsqueeze(0), origin = 'lower', aspect = 'auto')
-	plt.subplot(232)
-	plt.imshow(batch_std[:10].unsqueeze(0), origin = 'lower', aspect = 'auto')
-	plt.subplot(233)
-	plt.imshow(batch_cov[:20, :20], origin = 'lower', aspect = 'auto')
-
-	plt.subplot(234)
-	plt.imshow(conv1_mean.unsqueeze(0), origin = 'lower', aspect = 'auto')
-	plt.subplot(235)
-	plt.imshow(conv1_std.unsqueeze(0), origin = 'lower', aspect = 'auto')
-	plt.subplot(236)
-	plt.imshow(conv1_cov, origin = 'lower', aspect = 'auto')
-	plt.subplots_adjust(top = 0.99, bottom=0.01, hspace=0.8, wspace=0.4)
-	plt.savefig(logits + '.jpg', dpi = 150)
-
 def histc_vega(tensor, min, max, bins):
 	bins = torch.linspace(min, max, bins)
 	hist = tensor.histc(min = bins.min(), max = bins.max(), bins = len(bins)).int()
@@ -345,10 +313,6 @@ if __name__ == '__main__':
 	cmd.add_argument('--output-file-name', '-o')
 	cmd.set_defaults(func = errors)
 
-	cmd = subparsers.add_parser('meanstd')
-	cmd.add_argument('--logits', default = 'data/logits.pt')
-	cmd.set_defaults(func = meanstd)
-
 	cmd = subparsers.add_parser('cer')
 	cmd.add_argument('experiment_id')
 	cmd.add_argument('--experiments-dir', default = 'data/experiments')
@@ -374,7 +338,7 @@ if __name__ == '__main__':
 
 	cmd = subparsers.add_parser('logits')
 	cmd.add_argument('logits')
-	cmd.add_argument('--audio-file-name')
+	cmd.add_argument('--audio-name', nargs = '*')
 	cmd.set_defaults(func = logits)
 
 	cmd = subparsers.add_parser('audiosample')

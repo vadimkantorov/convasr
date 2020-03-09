@@ -121,6 +121,7 @@ class JasperNet(nn.Module):
 		residual = []
 		for i, subblock in enumerate(self.backbone):
 			x = subblock(x, residual = residual, lengths_fraction = xlen)
+			#torch.cuda.empty_cache()
 			if self.residual != 'dense':
 				residual.clear()
 			if self.residual:
@@ -321,15 +322,15 @@ class LogFilterBankFrontend(nn.Module):
 		#mel_basis = torchaudio.functional.create_fb_matrix(n_fft, n_mels = num_input_features, fmin = 0, fmax = int(sample_rate/2)).t() # when https://github.com/pytorch/audio/issues/287 is fixed
 		mel_basis = torch.as_tensor(librosa.filters.mel(sample_rate, self.nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2)))
 		self.mel = nn.Conv1d(mel_basis.shape[1], mel_basis.shape[0], 1)
-		self.mel.weight.copy_(mel_basis[..., None]).requires_grad_(False)
-		self.mel.bias.fill_(eps).requires_grad_(False)
+		self.mel.weight.requires_grad_(False).copy_(mel_basis[..., None])
+		self.mel.bias.requires_grad_(False).fill_(eps)
 
 		if stft_mode == 'conv':
 			fourier_basis = torch.rfft(torch.eye(self.nfft), signal_ndim = 1, onesided = False)
 			forward_basis = fourier_basis[:self.freq_cutoff].permute(2, 0, 1).reshape(-1, 1, fourier_basis.shape[1])
 			forward_basis = forward_basis * torch.as_tensor(librosa.util.pad_center(self.window, self.nfft), dtype = forward_basis.dtype)
 			self.stft = nn.Conv1d(forward_basis.shape[1], forward_basis.shape[0], 1, bias = False, stride = self.hop_length)
-			self.stft.weigth.copy_(forward_basis).requires_grad_(False)
+			self.stft.weight.requires_grad_(False).copy_(forward_basis)
 
 	def stft_magnitude_squared(self, signal):
 		if self.stft_mode == 'conv':

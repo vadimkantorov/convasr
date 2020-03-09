@@ -33,7 +33,7 @@ def main(args):
 	args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, eps = 1e-6)
 	labels = datasets.Labels(importlib.import_module(checkpoint['args']['lang']), name = 'char')
-	model = getattr(models, checkpoint['args']['model'])(args.num_input_features, [len(labels)], frontend = frontend, dict = lambda logits, log_probs, olen, **kwargs: (logits[0], olen[0]))
+	model = getattr(models, args.model or checkpoint['args']['model'])(args.num_input_features, [len(labels)], frontend = frontend, dict = lambda logits, log_probs, olen, **kwargs: (logits[0], olen[0]))
 	model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 	model = model.to(args.device)
 	frontend = frontend.to(args.device)
@@ -116,6 +116,7 @@ def main(args):
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--checkpoint', required = True)
+	parser.add_argument('--model')
 	parser.add_argument('--data-path', '-i', nargs = '+')
 	parser.add_argument('--output-path', '-o', default = 'data/transcribe')
 	parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
