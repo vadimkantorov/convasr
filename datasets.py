@@ -190,7 +190,7 @@ class Labels:
 				i = j
 		return transcript
 
-	def postprocess_transcript(self, word, replace_blank = True, replace_space = False, replace_repeat = True, replace_unk = True, phonetic_replace_groups = []):
+	def postprocess_transcript(self, word, replace_blank = True, replace_space = False, replace_repeat = True, replace_unk = True, collapse_repeat = False, phonetic_replace_groups = []):
 		if replace_blank is not False:
 			word = word.replace(self.blank, '' if replace_blank is True else replace_blank)
 		if replace_unk is True:
@@ -199,17 +199,10 @@ class Labels:
 			word = word.replace(self.space, replace_space)
 		if replace_repeat is True:
 			word = ''.join(c if i == 0 or c != self.repeat else word[i - 1] for i, c in enumerate(word))
+		
+		if collapse_repeat:
+			word = ''.join(c if i == 0 or c != word[i - 1] else '' for i, c in enumerate(word))
 		return word
-
-	def postprocess_transcript_(self, text, phonetic_replace_groups = [], replace_blank = True, replace_space = False, replace_repeat = True):
-		replaceblank = lambda s: s.replace(self.blank * 10, ' ').replace(self.blank, '')
-		replace2 = lambda s: ''.join(c if i == 0 or c != self.repeat else s[i - 1] for i, c in enumerate(s))
-		replace22 = lambda s: ''.join(c if i == 0 or c != s[i - 1] else '' for i, c in enumerate(s))
-		replacestar = lambda s: s.replace('*', '')
-		replacecap = lambda s: ''.join(c + ' ' if c.isupper() else c for c in s)
-		replacephonetic = lambda s: s.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g.lower()})
-		replacepunkt = lambda s: s.replace(',', '').replace('.', '')
-		return functools.reduce(lambda text, func: func(text), [replacepunkt, replacecap, replaceblank, replace2, replace22, replacestar, replacephonetic, str.strip], text)
 
 	def __getitem__(self, idx):
 		return {self.blank_idx : self.blank, self.repeat_idx : self.repeat, self.space_idx : self.space}.get(idx) or (self.alphabet[idx] if self.bpe is None else self.bpe.IdToPiece(idx).replace(self.space_sentencepiece, self.space).replace(self.unk_sentencepiece, self.unk))
