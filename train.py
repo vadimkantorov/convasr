@@ -93,10 +93,10 @@ def main(args):
 				logits, log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'olen', 'loss'])
 	
 			entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, olen))
-			decoded = [list(map(l.decode, d.decode(lp, o))) for l, d, lp, o in zip(labels, decoder, log_probs, olen)]
+			hyp = [list(map(l.decode, d.decode(lp, o))) for l, d, lp, o in zip(labels, decoder, log_probs, olen)]
 			logits = list(map(models.unpad, logits, olen))
 			y = list(map(models.unpad, y, ylen))
-			yield meta, loss.cpu(), entropy_char.cpu(), decoded, logits, y
+			yield meta, loss.cpu(), entropy_char.cpu(), hyp, logits, y
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None, adapt_bn = False):
 		evaluate_transcript = lambda analyze, labels, hyp, loss, entropy, meta: dict(labels = labels.name, audio_file_name = os.path.basename(meta['audio_path']), audio_path = meta['audio_path'], entropy = entropy, loss = loss, **metrics.analyze(labels.normalize_text(meta['ref']), hyp, labels, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab))
@@ -114,10 +114,10 @@ def main(args):
 					pass
 			model.eval()
 			cpu_list = lambda l: [[t.cpu() for t in t_] for t_ in l]
-			for batch_idx, (meta, loss, entropy, decoded, logits, y) in enumerate(apply_model(val_data_loader, model)):
+			for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(val_data_loader, model)):
 				logits_.extend(zip(*cpu_list(logits)) if not training and args.logits else [])
 				y_.extend(cpu_list(y))
-				stats = [[evaluate_transcript(analyze, l, t, *zipped[:3]) for l, t in zip(labels, zipped[3:])] for zipped in zip(loss.tolist(), entropy.tolist(), meta, *decoded)]
+				stats = [[evaluate_transcript(analyze, l, t, *zipped[:3]) for l, t in zip(labels, zipped[3:])] for zipped in zip(loss.tolist(), entropy.tolist(), meta, *hyp)]
 				for r in sum(stats, []) if args.verbose else []:
 					print(f'{val_dataset_name}@{iteration}:', batch_idx , '/', len(val_data_loader), '|', args.experiment_id)
 					print('REF: {labels} "{ref_}"'.format(ref_ = r['alignment']['ref'] if analyze else r['ref'], **r))

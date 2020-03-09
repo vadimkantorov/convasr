@@ -146,7 +146,7 @@ class Labels:
 			self.bpe = sentencepiece.SentencePieceProcessor()
 			self.bpe.Load(bpe)
 		
-		self.alphabet = self.lang.LABELS.lower()
+		self.alphabet = self.lang.ALPHABET
 		self.blank_idx = len(self) - 1
 		self.space_idx = self.blank_idx - 1
 		self.repeat_idx = self.blank_idx - 2

@@ -1,186 +1,118 @@
 import re
 
-LABELS = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ* "
+ALPHABET = 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя* '
 
-PHONETIC_REPLACE_GROUPS = ['ОАЯ', 'ПБ', 'СЗЦ', 'ВФ', 'КГХ', 'ТД', 'ЧЖШЩ', 'ЕЫЭИЙ', 'ЛР', 'УЮ', 'ЬЪ', 'НМ']
+PHONETIC_REPLACE_GROUPS = ['оая', 'пб', 'сзц', 'вф', 'кгх', 'тд', 'чжшщ', 'еыэий', 'лр', 'ую', 'ьъ', 'нм']
+VOWELS = 'аоийеёэыуюя'
 
-VOWELS = 'аоийеёэыуюяАОИЙЕЁЭЫУЮЯ'
+ORDINALCARIDNAL2TEXT = {
+	0: ('ноль', 		'нулевой'),
+	1: ('один', 		'первый'),
+	2: ('два', 			'второй'),
+	3: ('три', 			'третий'),
+	4: ('четыре', 		'четвертый'),
+	5: ('пять', 		'пятый'),
+	6: ('шесть', 		'шестой'),
+	7: ('семь', 		'седьмой'),
+	8: ('восемь', 		'восьмой'),
+	9: ('девять', 		'девятый'),
+	10: ('десять', 		'десятый'),
+	11: ('одиннадцать',	'одиннадцатый'),
+	12: ('двенадцать',	'двенадцатый'),
+	13: ('тринадцать',	'тринадцатый'),
+	14: ('четырнадцать','четырнадцатый'),
+	15: ('пятнадцать',	'пятнадцатый'),
+	16: ('шестнадцать',	'шестнадцатый'),
+	17: ('семнадцать',	'семнадцатый'),
+	18: ('восемнадцать','восемнадцатый'),
+	19: ('девятнадцать','девятнадцатsq'),
+	20: ('двадцать',	'двадцатый'),
+	30: ('тридцать',	'тридцатый'),
+	40: ('сорок',		'сороковой'),
+	50: ('пятьдесят',	'пятьдесятый'),
+	60: ('шестьдесят',	'шестьдесятый'),
+	70: ('семьдесят',	'семидесятый'),
+	80: ('восемьдесят',	'восемьдесятый'),
+	90: ('девяносто',	'девяностый'),
+	100: ('сто',		'сотый'),
+	200: ('двести',		'двухсотый'),
+	300: ('триста',		'трехсотый'),
+	400: ('четыреста',	'четырехсотый'),
+	500: ('пятьсот',	'пятисотый'),
+	600: ('шестьсот',	'шестисотый'),
+	700: ('семьсот',	'семисотый'),
+	800: ('восемьсот',	'восьмисотый'),
+	900: ('девятьсот',	'десятисотый'),
+	1000: ('тысяча',	'тысячный'),
+	1000000: ('миллион','миллионный'),
+	1000000000: ('миллиард', 'миллиардный'),
+}
 
-def preprocess_text(text):		
-	return text.replace('*', ' ').replace('+', ' ').replace('%', 'процент').replace('ё', 'е').replace('Ё', 'Е')
+ARABIC2ROMAN = {1000 : 'M', 900 : 'CM', 500 : 'D', 400 : 'CD', 100 : 'C', 90 : 'XC', 50 : 'L', 40 : 'XL', 10 : 'X', 9: 'IX', 5 : 'V', 4 : 'IV', 1 : 'I'}
+
+def roman2arabic(x):
+	res = ''
+	for a, r in sorted(ARABIC2ROMAN.items(), reverse = True):
+		cnt = int(x / a)
+		res += r * cnt
+		x -= a * cnt
+	return res
+
+ROMAN2ARABIC = {roman2arabic(i) : i for i in range(1, 31)}
+
+MINUS = 'минус'
+PERCENT = 'процент'
+
+def arabic2text(num, ordinal = False):
+	num = int(num)
+	res = []
+	if num < 0:
+		res.append((MINUS, MINUS))
+		num *= -1
+
+	for a, r, in sorted(ORDINALCARIDNAL2TEXT.items(), reverse = True):
+		if num >= a:
+			div = num // a if a > 0 else 0 
+			if div > 1:
+				res.extend(arabic2text(div, ordinal = None))
+			res.append(r)
+			num -= div * a
+			if num == 0:
+				break
+
+	return res if ordinal is None else ' '.join(tuple(zip(*res))[0] if not ordinal else list(tuple(zip(*res))[0])[:-1] + [res[-1][1]])
 
 def preprocess_word(w):
-	if w in LATINS_2_NUM:
-		return str(LATINS_2_NUM[w])
-	if w.isdigit():
-		return num2words(w, ordinal = False)
-	elif '-' in w:
-		# 123-я
-		w1, w2 = w.split('-', 1)
-		if w1.isdigit() and not w2.isdigit():
-			return num2words(w1, ordinal = True) + w2
+	if w in ROMAN2ARABIC:
+		w = str(ROMAN2ARABIC[w])
+	
+	w0, (w1, w2) = w[0], (w[1:].split('-', 1) + [''])[:2]
+
+	is_num = (w0 == '-' or w0.isdigit()) and (not w1 or w1.isdigit())
+	is_ordinal = w2 and not w2.isdigit()
+	if is_num:
+		w = arabic2text(w0 + w1, ordinal = w2)
+
 	return w
 
-def find_words(text):
-	text = re.sub(r'([^\W\d]+)2', r'\1', text)
-	text = preprocess_text(text)
-	words = re.findall(r'-?\d+|-?\d+-\w+|\w+', text)
-	self = LABELS.lower() + '|2'
-	return list(filter(bool, (''.join(c for c in preprocess_word(w) if c in self).strip() for w in words)))
-
 def normalize_text(text):
-	return ' '.join(find_words(text)).lower().strip()
-
-LATINS = """II III IV V VI VII VIII IX X
-XI XII XIII XIV XV XVI XVII XVIII XIX XX
-XXI XXII XXIII XXIV XXV XXVI XXVII XXVIII XXIX XXX
-XXXI XXXII XXXIII XXXIV XXXV XXXVI XXXVII XXXVIII XXXIX XXXX
-""".split()
-LATINS_2_NUM = {x: i for i, x in enumerate(LATINS, start = 2)}
-
-CARDINALS = {
-	0: 'НОЛЬ',
-	1: 'ОДИН',
-	2: 'ДВА',
-	3: 'ТРИ',
-	4: 'ЧЕТЫРЕ',
-	5: 'ПЯТЬ',
-	6: 'ШЕСТЬ',
-	7: 'СЕМЬ',
-	8: 'ВОСЕМЬ',
-	9: 'ДЕВЯТЬ',
-	10: 'ДЕСЯТЬ',
-	11: 'ОДИННАДЦАТЬ',
-	12: 'ДВЕНАДЦАТЬ',
-	13: 'ТРИНАДЦАТЬ',
-	14: 'ЧЕТЫРНАДЦАТЬ',
-	15: 'ПЯТНАДЦАТЬ',
-	16: 'ШЕСТНАДЦАТЬ',
-	17: 'СЕМНАДЦАТЬ',
-	18: 'ВОСЕМНАДЦАТЬ',
-	19: 'ДЕВЯТНАДЦАТЬ',
-	20: 'ДВАДЦАТЬ',
-	30: 'ТРИДЦАТЬ',
-	40: 'СОРОК',
-	50: 'ПЯТЬДЕСЯТ',
-	60: 'ШЕСТЬДЕСЯТ',
-	70: 'СЕМЬДЕСЯТ',
-	80: 'ВОСЕМЬДЕСЯТ',
-	90: 'ДЕВЯНОСТО',
-	100: 'СТО',
-	200: 'ДВЕСТИ',
-	300: 'ТРИСТА',
-	400: 'ЧЕТЫРЕСТА',
-	500: 'ПЯТЬСОТ',
-	600: 'ШЕСТЬСОТ',
-	700: 'СЕМЬСОТ',
-	800: 'ВОСЕМЬСОТ',
-	900: 'ДЕВЯТЬСОТ',
-	1000: 'ТЫСЯЧА',
-	1000000: 'МИЛЛИОН',
-	1000000000: 'МИЛЛИАРД',
-}
-
-ORDINALS = {
-	0: 'НУЛЕВОЙ',
-	1: 'ПЕРВЫЙ',
-	2: 'ВТОРОЙ',
-	3: 'ТРЕТИЙ',
-	4: 'ЧЕТВЁРТЫЙ',
-	5: 'ПЯТЫЙ',
-	6: 'ШЕСТОЙ',
-	7: 'СЕДЬМОЙ',
-	8: 'ВОСЬМОЙ',
-	9: 'ДЕВЯТЫЙ',
-	10: 'ДЕСЯТЫЙ',
-	11: 'ОДИННАДЦАТЫЙ',
-	12: 'ДВЕНАДЦАТЫЙ',
-	13: 'ТРИНАДЦАТЫЙ',
-	14: 'ЧЕТЫРНАДЦАТЫЙ',
-	15: 'ПЯТНАДЦАТЫЙ',
-	16: 'ШЕСТНАДЦАТЫЙ',
-	17: 'СЕМНАДЦАТЫЙ',
-	18: 'ВОСЕМНАДЦАТЫЙ',
-	19: 'ДЕВЯТНАДЦАТЫЙ',
-	20: 'ДВАДЦАТЫЙ',
-	30: 'ТРИДЦАТЫЙ',
-	40: 'СОРОКОВОЙ',
-	50: 'ПЯТЬДЕСЯТЫЙ',
-	60: 'ШЕСТЬДЕСЯТЫЙ',
-	70: 'СЕМЬДЕСЯТЫЙ',
-	80: 'ВОСЕМЬДЕСЯТЫЙ',
-	90: 'ДЕВЯНОСТЫЙ',
-	100: 'СОТЫЙ',
-	200: 'ДВУХСОТЫЙ',
-	300: 'ТРЕХСОТЫЙ',
-	400: 'ЧЕТЫРЕХСОТЫЙ',
-	500: 'ПЯТИСОТЫЙ',
-	600: 'ШЕСТИСОТЫЙ',
-	700: 'СЕМИСОТЫЙ',
-	800: 'ВОСЬМИСОТЫЙ',
-	900: 'ДЕВЯТИСОТЫЙ',
-	1000: 'ТЫСЯЧНЫЙ',
-	2000: 'ДВУХТЫСЯЧНЫЙ',
-	3000: 'ТРЕХТЫСЯЧНЫЙ',
-	4000: 'ЧЕТЫРЕХТЫСЯЧНЫЙ',
-	5000: 'ПЯТИТЫСЯЧНЫЙ',
-	6000: 'ШЕСТИТЫСЯЧНЫЙ',
-	7000: 'СЕМИТЫСЯЧНЫЙ',
-	8000: 'ВОСЬМИТЫСЯЧНЫЙ',
-	9000: 'ДЕВЯТИТЫСЯЧНЫЙ',
-	1000000: 'МИЛЛИОННЫЙ',
-	1000000000: 'МИЛЛИАРДНЫЙ',
-}
-
-def num_parts(num):
-	def num1000(num):
-		parts = []
-		if num >= 100:
-			parts.append(num - num % 100)
-			num = num % 100
-		if num == 0:
-			return parts
-		if num % 100 < 20:
-			parts.append(num)
-		else:
-			parts.append(num - num % 10)
-			num = num % 10
-			if num:
-				parts.append(num)
-		return parts
+	# percent isnt preserved
+	text = text.replace('*', '')
+	text = text.replace('%', f' {PERCENT}*')
 	
-	if num < 0:
-		num = -num
-	num = int(num)
-	if num == 0:
-		return [0]
-	parts = []
-	if len(str(num)) > 7 and str(num)[-3:] != '000':  # weird, try letter-by-letter spelling
-		return [int(digit) for digit in str(num)]
-	if num >= 1000000000:
-		parts += num1000(num // 1000000000)
-		parts.append(1000000000)
-		num = num % 1000000000
-	if num >= 1000000:
-		parts += num1000(num // 1000000)
-		parts.append(1000000)
-		num = num % 1000000
-	if num >= 1000:
-		parts += num1000(num // 1000)
-		parts.append(1000)
-		num = num % 1000
-	parts += num1000(num)
-	return parts
+	# ignores punct
+	# extract words, numbers, ordinal numbers
+	words = re.findall(r'-?\d+-\w+|-?\d+\.?\d*|[\w*]+', text)
+	text = ' '.join(map(preprocess_word, words))
 
-def num2words(num, ordinal=False):
-	num = int(num)
-	words = []
-	if num < 0:
-		words.append('МИНУС')
-		num = -num
-	parts = num_parts(num)
-	words += [CARDINALS[p] for p in parts]
-	if ordinal:
-		words[-1] = ORDINALS[parts[-1]]
-	result = ' '.join(words)
-	return result
+	text = text.lower()
+	
+	# replace unk characters by star
+	text = re.sub(f'[^{ALPHABET} ]', '*', text)
+
+	return text
+
+if __name__ == '__main__':
+	text = '1-й Здорово http://echomsk.ru/programs/-echo 2.5 оу 1ого 100% XIX век XX-й век -4'
+	print(text)
+	print(normalize_text(text))
