@@ -202,53 +202,53 @@ def audiosample(input_path, output_path, K):
 
 	print(os.path.abspath(output_path))
 
-def cer(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe, der):
+def summary(input_path):
+	transcript = json.load(open(input_path))
+	for t in transcript:
+		hyp = labels.postprocess_transcript(labels.normalize_text(t['hyp']))
+		ref = labels.postprocess_transcript(labels.normalize_text(t['ref']))
+		t['cer'] = metrics.cer(hyp, ref)
+		t['wer'] = metrics.wer(hyp, ref)
+
+	cer_, wer_ = [torch.tensor([t[k] for t in transcript]) for k in ['cer', 'wer']]
+	cer_avg, wer_avg = float(cer_.mean()), float(wer_.mean())
+	print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')
+	loss_ = torch.tensor([t.get('loss', 0) for t in transcript])
+	loss_ = loss_[~(torch.isnan(loss_) | torch.isinf(loss_))]
+	#min, max, steps = 0.0, 2.0, 20
+	#bins = torch.linspace(min, max, steps = steps)
+	#hist = torch.histc(loss_, bins = steps, min = min, max = max)
+	#for b, h in zip(bins.tolist(), hist.tolist()):
+	#	print(f'{b:.02f}\t{h:.0f}')
+
+	plt.figure(figsize = (8, 4))
+	plt.suptitle(os.path.basename(experiment_id))
+	plt.subplot(211)
+	plt.title('cer PDF')
+	#plt.hist(cer_, range = (0.0, 1.2), bins = 20, density = True)
+	seaborn.distplot(cer_, bins = 20, hist = True)
+	plt.xlim(0, 1)
+	plt.subplot(212)
+	plt.title('cer CDF')
+	plt.hist(cer_, bins = 20, density = True, cumulative = True)
+	plt.xlim(0, 1)
+	plt.xticks(torch.arange(0, 1.01, 0.1))
+	plt.grid(True)
+
+	#plt.subplot(223)
+	#plt.title('loss PDF')
+	#plt.hist(loss_, range = (0.0, 2.0), bins = 20, density = True)
+	#seaborn.distplot(loss_, bins = 20, hist = True)
+	#plt.xlim(0, 3)
+	#plt.subplot(224)
+	#plt.title('loss CDF')
+	#plt.hist(loss_, bins = 20, density = True, cumulative = True)
+	#plt.grid(True)
+	plt.subplots_adjust(hspace = 0.4)
+	plt.savefig(experiment_id + '.png', dpi = 150)
+
+def tabulate(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe, der):
 	labels = datasets.Labels(ru)
-	if experiment_id.endswith('.json'):
-		transcript = json.load(open(experiment_id))
-		for t in transcript:
-			hyp = labels.postprocess_transcript(labels.normalize_text(t['hyp']))
-			ref = labels.postprocess_transcript(labels.normalize_text(t['ref']))
-			t['cer'] = metrics.cer(hyp, ref)
-			t['wer'] = metrics.wer(hyp, ref)
-
-		cer_, wer_ = [torch.tensor([t[k] for t in transcript]) for k in ['cer', 'wer']]
-		cer_avg, wer_avg = float(cer_.mean()), float(wer_.mean())
-		print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')
-		loss_ = torch.tensor([t.get('loss', 0) for t in transcript])
-		loss_ = loss_[~(torch.isnan(loss_) | torch.isinf(loss_))]
-		#min, max, steps = 0.0, 2.0, 20
-		#bins = torch.linspace(min, max, steps = steps)
-		#hist = torch.histc(loss_, bins = steps, min = min, max = max)
-		#for b, h in zip(bins.tolist(), hist.tolist()):
-		#	print(f'{b:.02f}\t{h:.0f}')
-
-		plt.figure(figsize = (8, 4))
-		plt.suptitle(os.path.basename(experiment_id))
-		plt.subplot(211)
-		plt.title('cer PDF')
-		#plt.hist(cer_, range = (0.0, 1.2), bins = 20, density = True)
-		seaborn.distplot(cer_, bins = 20, hist = True)
-		plt.xlim(0, 1)
-		plt.subplot(212)
-		plt.title('cer CDF')
-		plt.hist(cer_, bins = 20, density = True, cumulative = True)
-		plt.xlim(0, 1)
-		plt.xticks(torch.arange(0, 1.01, 0.1))
-		plt.grid(True)
-
-		#plt.subplot(223)
-		#plt.title('loss PDF')
-		#plt.hist(loss_, range = (0.0, 2.0), bins = 20, density = True)
-		#seaborn.distplot(loss_, bins = 20, hist = True)
-		#plt.xlim(0, 3)
-		#plt.subplot(224)
-		#plt.title('loss CDF')
-		#plt.hist(loss_, bins = 20, density = True, cumulative = True)
-		#plt.grid(True)
-		plt.subplots_adjust(hspace = 0.4)
-		plt.savefig(experiment_id + '.png', dpi = 150)
-		return
 
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
@@ -313,7 +313,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--output-file-name', '-o')
 	cmd.set_defaults(func = errors)
 
-	cmd = subparsers.add_parser('cer')
+	cmd = subparsers.add_parser('tabulate')
 	cmd.add_argument('experiment_id')
 	cmd.add_argument('--experiments-dir', default = 'data/experiments')
 	cmd.add_argument('--entropy', action = 'store_true')
@@ -329,7 +329,11 @@ if __name__ == '__main__':
 	cmd.add_argument('--json', dest = "json_", action = 'store_true')
 	cmd.add_argument('--bpe', default = 'char')
 	cmd.add_argument('--der', action = 'store_true')
-	cmd.set_defaults(func = cer)
+	cmd.set_defaults(func = tabulate)
+
+	cmd = subparsers.add_parser('summary')
+	cmd.add_argument('input_path')
+	cmd.set_defaults(func = summary)
 
 	cmd = subparsers.add_parser('words')
 	cmd.add_argument('train_data_path')

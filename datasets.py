@@ -212,6 +212,3 @@ class Labels:
 
 	def __str__(self):
 		return self.alphabet + ''.join([self.repeat, self.space, self.blank])
-	
-	def __contains__(self, chr):
-		return chr.lower() in self.alphabet
