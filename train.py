@@ -99,7 +99,6 @@ def main(args):
 			yield meta, loss.cpu(), entropy_char.cpu(), hyp, logits, y
 
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None, adapt_bn = False):
-		evaluate_transcript = lambda analyze, labels, hyp, loss, entropy, meta: dict(labels = labels.name, audio_file_name = os.path.basename(meta['audio_path']), audio_path = meta['audio_path'], entropy = entropy, loss = loss, **metrics.analyze(labels.normalize_text(meta['ref']), hyp, labels, phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab))
 		training = epoch is not None and iteration is not None
 		columns = {}
 		for val_dataset_name, val_data_loader in val_data_loaders.items():
@@ -117,7 +116,7 @@ def main(args):
 			for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(val_data_loader, model)):
 				logits_.extend(zip(*cpu_list(logits)) if not training and args.logits else [])
 				y_.extend(cpu_list(y))
-				stats = [[evaluate_transcript(analyze, l, t, *zipped[:3]) for l, t in zip(labels, zipped[3:])] for zipped in zip(loss.tolist(), entropy.tolist(), meta, *hyp)]
+				stats = [[metrics.analyze(l.normalize_text(zipped[2]['ref']), h, l, zipped[2]['audio_path'], phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab, loss = zipped[0], entropy = zipped[1]) for l, h in zip(labels, zipped[3:])] for zipped in zip(loss.tolist(), entropy.tolist(), meta, *hyp)]
 				for r in sum(stats, []) if args.verbose else []:
 					print(f'{val_dataset_name}@{iteration}:', batch_idx , '/', len(val_data_loader), '|', args.experiment_id)
 					print('REF: {labels} "{ref_}"'.format(ref_ = r['alignment']['ref'] if analyze else r['ref'], **r))
@@ -142,7 +141,7 @@ def main(args):
 				print('cer', metrics.quantiles(cer))
 				print('loss', metrics.quantiles(loss))
 				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} [{cer_easy_avg:.02%} - {cer_hard_avg:.02%} - {cer_missing_avg:.02%}]  MER: {mer_avg:.02%} DER: {der_avg:.02%}\n'.format(**stats))
-				columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_file_name', 'cer', 'mer', 'alignment')] + [(r['audio_file_name'], r['cer'], r['mer'], vis.colorize_alignment(r['words'])) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
+				columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_name', 'cer', 'mer', 'alignment')] + [(r['audio_name'], r['cer'], r['mer'], vis.colorize_alignment(r['words'])) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
 				if training:
 					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + labels_name, dict(wer_avg = stats['wer_avg'] * 100.0, cer_avg = stats['cer_avg'] * 100.0, loss_avg = stats['loss_avg']), iteration) 
 					tensorboard.flush()
