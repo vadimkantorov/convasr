@@ -127,9 +127,9 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 		self.batch_idx = state_dict['batch_idx']
 
 class Labels:
-	blank = '|'
-	space = ' '
 	repeat = '2'
+	space = ' '
+	blank = '|'
 	unk = '*'
 	word_start = '<'
 	word_end = '>'

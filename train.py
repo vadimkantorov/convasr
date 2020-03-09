@@ -63,8 +63,8 @@ def main(args):
 	if args.onnx:
 		torch.set_grad_enabled(False)
 		model.eval()
-		model.fuse_conv_bn_eval()
 		model.to(args.device)
+		model.fuse_conv_bn_eval()
 		waveform_input = torch.rand(args.onnx_sample_batch_size, args.onnx_sample_time, device = args.device)
 		logits = model(waveform_input)
 		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B', 1 : 'T'}, logits = {0 : 'B', 2: 't'}))
