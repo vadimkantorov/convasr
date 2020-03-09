@@ -2,7 +2,6 @@
 
 # batch by vad
 # figure out stft shift
-# disable repeat deduplication
 # upstream ctc changes
 # gpu levenshtein, needleman/hirschberg
 

@@ -1,8 +1,8 @@
 import torch
 
 class GreedyDecoder:
-	def decode(self, log_probs, output_lengths, K = 1):
-		return [l[:o] for o, l in zip(torch.as_tensor(output_lengths).tolist(), log_probs.max(dim = 1).indices.tolist())]#, [1.0] * len(log_probs)
+	def decode(self, log_probs, output_lengths = None, K = 1):
+		return [l[... if K > 1 else 0, :o].tolist() for o, l in zip(torch.as_tensor(output_lengths if output_lengths is not None else [log_probs.shape[-1]] * len(log_probs)).tolist(), log_probs.topk(K, dim = 1).indices)]
 
 class BeamSearchDecoder:
 	def __init__(self, labels, lm_path, beam_width, beam_alpha = 0, beam_beta = 0, cutoff_top_n = 40, cutoff_prob = 1.0, num_workers = 1, topk = 1):

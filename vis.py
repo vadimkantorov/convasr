@@ -18,11 +18,12 @@ import torch
 import torch.nn.functional as F
 import audio
 import datasets
-import ru
+import decoders
 import metrics
 import models
 import ctc
 import transcripts
+import ru
 
 def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = []):
 	if isinstance(transcript, str):
@@ -85,6 +86,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 def logits(logits, audio_name, MAX_ENTROPY = 1.0):
 	good_audio_name = set(map(str.strip, open(audio_name[0])) if os.path.exists(audio_name[0]) else audio_name)
 	labels = datasets.Labels(ru)
+	decoder = decoders.GreedyDecoder()
 	tick_params = lambda ax, labelsize = 2.5, length = 0, **kwargs: ax.tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length, **kwargs) or [ax.set_linewidth(0) for ax in ax.spines.values()]
 	logits_path = logits + '.html'
 	html = open(logits_path, 'w')
@@ -138,8 +140,8 @@ def logits(logits, audio_name, MAX_ENTROPY = 1.0):
 		plt.ylim(0, 3.0)
 		plt.xlim(0, entropy.shape[-1] - 1)
 
-		decoded = log_probs.topk(5, dim = 0).indices
-		xlabels = list(map('\n'.join, zip(*[labels.decode(d.tolist(), replace_blank = '.', replace_space = '_', replace_repeat = False) for d in decoded])))
+		decoded = decoder.decode(log_probs.unsqueeze(0), K = 5)[0]
+		xlabels = list(map('\n'.join, zip(*[labels.decode(d, replace_blank = '.', replace_space = '_', replace_repeat = False) for d in decoded])))
 		#xlabels_ = labels.decode(log_probs.argmax(dim = 0).tolist(), blank = '.', space = '_', replace2 = False)
 		plt.xticks(torch.arange(entropy.shape[-1]), xlabels, fontfamily = 'monospace')
 		tick_params(plt.gca())
