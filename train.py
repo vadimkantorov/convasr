@@ -81,7 +81,7 @@ def main(args):
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
 
 	val_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob), feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob))
-	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = val_dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path for val_dataset in [datasets.AudioTextDataset(val_data_path, labels, args.sample_rate, frontend = val_frontend if not args.frontend_in_model else None, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, min_duration = args.min_duration)]}
+	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = val_dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path for val_dataset in [datasets.AudioTextDataset(val_data_path, labels, args.sample_rate, frontend = val_frontend if not args.frontend_in_model else None, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, min_duration = args.min_duration, time_padding_multiple = args.batch_time_padding_multiple)]}
 	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.GreedyNoBlankDecoder() if args.decoder == 'GreedyNoBlankDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
 	vocab = set(map(str.strip, open(args.vocab))) if args.vocab else set()
@@ -193,11 +193,9 @@ def main(args):
 			optimizers.reset_options(optimizer)
 	
 	scheduler = optimizers.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr) if args.scheduler == 'PolynomialDecayLR' else optimizers.NoopLR(optimizer) 
-	#TODO: check what happens after loading state of optimizer. what happens with passed defaults?
 	epoch, iteration = 0, 0
 	if checkpoint:
 		epoch, iteration = checkpoint['epoch'], checkpoint['iteration']
-		# load sampler state if training continues on the same dataset
 		if args.train_data_path == checkpoint['args']['train_data_path']:
 			sampler.load_state_dict(checkpoint['sampler_state_dict'])
 		else:

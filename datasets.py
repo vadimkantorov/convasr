@@ -47,7 +47,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		
 		if not self.segmented:
 			transcript = transcript[0]
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, offset = transcript['begin'], duration = transcript['end'] - transcript['begin'], mono = self.mono, dtype = torch.float32, normalize = True) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, dtype = torch.float32, normalize = True) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
 			
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]

@@ -60,9 +60,13 @@ def du(input_path):
 	transcript = json.load(open(input_path))
 	print(input_path, int(os.path.getsize(input_path) // 1e6), 'Mb',  '|', len(transcript) // 1000, 'K utt |', int(sum(t['end'] - t['begin'] for t in transcript) / (60 * 60)), 'hours')
 
-def csv2json(input_path, gz, group):
+def csv2json(input_path, gz, group, reset_duration):
 	gzopen = lambda file_path, mode = 'r': gzip.open(file_path, mode + 't') if file_path.endswith('.gz') else open(file_path, mode)
-	transcript = [dict(audio_path = s[0], ref = s[1], begin = 0.0, end = float(s[2]), **(dict(group = s[0].split('/')[group]) if group >= 0 else {})) for l in gzopen(input_path) if '"' not in l for s in [l.strip().split(',')]]
+	def duration(audio_name):
+		begin, end = map(float, os.path.splitext(audio_name)[0].split('_')[-2:])
+		return end - begin
+	
+	transcript = [dict(audio_path = s[0], ref = s[1], begin = 0.0, end = float(s[2]) if not reset_duration else duration(os.path.basename(s[0])), **(dict(group = s[0].split('/')[group]) if group >= 0 else {})) for l in gzopen(input_path) if '"' not in l for s in [l.strip().split(',')]]
 	output_path = input_path + '.json' + ('.gz' if gz else '')
 	json.dump(transcript, gzopen(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
@@ -136,6 +140,7 @@ if __name__ == '__main__':
 	cmd.add_argument('input_path')
 	cmd.add_argument('--gzip', dest = 'gz', action = 'store_true')
 	cmd.add_argument('--group', type = int, default = 0)
+	cmd.add_argument('--reset-duration', action = 'store_true')
 	cmd.set_defaults(func = csv2json)
 
 	cmd = subparsers.add_parser('diff')
