@@ -26,7 +26,7 @@ def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, 
 		json.dump(transcript_cat, open(output_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 	print(output_path)
 
-def cut(input_path, output_path, sample_rate, dilate, strip):
+def cut(input_path, output_path, sample_rate, dilate, strip, mono):
 	os.makedirs(output_path, exist_ok = True)
 	transcript_cat = []
 	
@@ -36,8 +36,8 @@ def cut(input_path, output_path, sample_rate, dilate, strip):
 	for t in transcript:
 		audio_path = t['audio_path']
 		#TODO: cannot resample wav files because of torch.int16 - better off using sox/ffmpeg directly
-		signal = audio.read_audio(audio_path, sample_rate, normalize = False, dtype = torch.int16)[0] if audio_path != prev_audio_path else signal
-		
+		signal = audio.read_audio(audio_path, sample_rate, mono = mono, normalize = False, dtype = torch.int16)[0] if audio_path != prev_audio_path else signal
+		t['channel'] = 0
 		segment_path = os.path.join(output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t))
 		audio.write_audio(segment_path, signal[t['channel'], int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)], sample_rate)
 
@@ -129,6 +129,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--dilate', type = float, default = 0.0)
 	cmd.add_argument('--sample-rate', '-r', type = int, default = 8_000, choices = [8_000, 16_000, 32_000, 48_000])
 	cmd.add_argument('--strip', nargs = '*', default = ['alignment', 'words'])
+	cmd.add_argument('--mono', action = 'store_true')
 	cmd.set_defaults(func = cut)
 	
 	cmd = subparsers.add_parser('cat')
