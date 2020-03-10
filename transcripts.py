@@ -52,7 +52,10 @@ def sort(transcript):
 	return sorted(transcript, key = lambda t: sort_key(summary(t['alignment']['ref'] + t['alignment']['hyp'])))
 
 def sort_key(t):
-	return t.get('begin'), t.get('end'), t.get('channel')
+	return (t.get('audio_path'), t.get('begin'), t.get('end'), t.get('channel'))
+
+def group_key(t):
+	return t.get('audio_path')
 
 float_tuple = lambda s: tuple(map(lambda ip: (float(ip[1]) if '.' in ip[1] else int(ip[1])) if ip[1] else float(['-inf', 'inf'][ip[0]]), enumerate((s if '-' in s else s + '-' + s).split('-'))))
 

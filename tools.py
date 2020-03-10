@@ -26,22 +26,23 @@ def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, 
 		json.dump(transcript_cat, open(output_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 	print(output_path)
 
-def cut(input_path, output_path, sample_rate, dilate, strip, mono):
+def cut(input_path, output_path, sample_rate, mono, dilate, strip):
 	os.makedirs(output_path, exist_ok = True)
 	transcript_cat = []
 	
 	transcript = json.load(open(input_path))
 	prev_audio_path, signal = None, None
 
-	for t in transcript:
+	for t in sorted(transcript, key = lambda t: t['audio_path']):
 		audio_path = t['audio_path']
 		#TODO: cannot resample wav files because of torch.int16 - better off using sox/ffmpeg directly
 		signal = audio.read_audio(audio_path, sample_rate, mono = mono, normalize = False, dtype = torch.int16)[0] if audio_path != prev_audio_path else signal
-		t['channel'] = 0
+		t['channel'] = None if mono else t.get('channel')
+		segment = signal[t['channel'] if t['channel'] is not None else ..., int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)]
 		segment_path = os.path.join(output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t))
-		audio.write_audio(segment_path, signal[t['channel'], int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)], sample_rate)
+		audio.write_audio(segment_path, segment, sample_rate)
 
-		t = dict(audio_path = segment_path, begin = 0.0, end = t['end'] - t['begin'] + 2 * dilate, channel = 0, speaker = t.pop('speaker', None), ref = t.pop('ref'), hyp = t.pop('hyp', None), cer = t.pop('cer', None), alignment = t.pop('alignment', {}), words = t.pop('words', {}), meta = t)
+		t = dict(audio_path = segment_path, channel = 0 if len(signal) == 1 else None, begin = 0.0, end = segment.shape[-1] / sample_rate, speaker = t.pop('speaker', None), ref = t.pop('ref'), hyp = t.pop('hyp', None), cer = t.pop('cer', None), alignment = t.pop('alignment', {}), words = t.pop('words', {}), meta = t)
 		prev_audio_path = audio_path
 		transcript_cat.append(t)
 

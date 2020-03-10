@@ -202,7 +202,7 @@ def audiosample(input_path, output_path, K):
 			f.write('<tr><td>{audio_path}</td><td><audio controls src="data:audio/wav;base64,{encoded}"/></td><td>{ref}</td></tr>\n'.format(encoded = encoded, **t))
 		f.write('</table>')
 
-	print(os.path.abspath(output_path))
+	print(output_path)
 
 def summary(input_path):
 	transcript = json.load(open(input_path))

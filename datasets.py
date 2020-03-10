@@ -17,7 +17,7 @@ import vad
 import transcripts
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, source_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, delimiter = ',', segmented = False, vad_options = {}, time_padding_multiple = 1):
+	def __init__(self, data_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, delimiter = ',', segmented = False, vad_options = {}, time_padding_multiple = 1):
 		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
@@ -29,12 +29,27 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 		gzopen = lambda data_path: open(data_path) if data_path.endswith('.json') else gzip.open(data_path, 'rt')
 		duration = lambda example: sum(t.get('end', 0) - t.get('begin', 0) for t in example[-1]) if isinstance(example[-1], list) else len(example[-1])
-		source_paths = source_paths if isinstance(source_paths, list) else [source_paths]
-		
-		if not self.segmented:
-			self.examples = [[t] for data_path in source_paths for t in json.load(gzopen(data_path))]
-		else:
-			self.examples = [json.load(open(transcript_path) if os.path.exists(transcript_path) else [dict(audio_path = audio_path)]) for audio_path in source_paths for transcript_path in [audio_path + '.json']]
+		data_paths = data_paths if isinstance(data_paths, list) else [data_paths]
+
+		self.examples = []
+		for data_path in data_paths:
+			if any(map(data_path.endswith, ['.json', '.json.gz'])):
+				transcript_path = data_path
+				transcript = json.load(gzopen(transcript_path))
+				if not segmented:
+					self.examples.extend([t] for t in transcript)
+				else:
+					self.examples.extend(list(g) for k, g in itertools.groupby(sorted(transcript, key = transcripts.sort_key), key = transcripts.group_key))
+			else:
+				transcript_path = data_path + '.json'
+				transcript = json.load(gzopen(transcript_path)) if os.path.exists(transcript_path) else [dict(audio_path = data_path)]
+				self.examples.append(transcript)
+
+
+		#if not self.segmented:
+		#	self.examples = [[t] for data_path in data_paths for t in json.load(gzopen(data_path))]
+		#else:
+		#	self.examples = [json.load(open(transcript_path) if os.path.exists(transcript_path) else [dict(audio_path = audio_path)]) for audio_path in source_paths for transcript_path in [audio_path + '.json']]
 		
 		self.examples = list(sorted(self.examples, key = duration))
 		self.examples = list(filter(lambda example: (min_duration is None or min_duration <= duration(example)) and (max_duration is None or duration(example) <= max_duration), self.examples))
