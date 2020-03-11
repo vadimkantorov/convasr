@@ -334,6 +334,7 @@ class LogFilterBankFrontend(nn.Module):
 
 	def stft_magnitude_squared(self, signal):
 		if self.stft_mode == 'conv':
+			print('F.pad')
 			signal = F.pad(signal[:, None, None, :], (self.freq_cutoff - 1, self.freq_cutoff - 1, 0, 0), mode = 'reflect').squeeze(1)
 			forward_transform_squared = self.stft(signal).pow(2)
 			real_squared, imag_squared = forward_transform_squared[:, :self.freq_cutoff, :], forward_transform_squared[:, self.freq_cutoff:, :]
@@ -374,7 +375,7 @@ def compute_capacity(model, scale = 1):
 
 def normalize_signal(signal, dim = -1, eps = 1e-5):
 	signal = signal.to(torch.float32)
-	return signal / (signal.abs().max(dim = dim, keepdim = True).values + eps)
+	return signal / (signal.abs().max(dim = dim, keepdim = True).values + eps) if signal.numel() > 0 else signal
 
 def normalize_features(features, dim = -1, eps = 1e-20):
 	return (features - features.mean(dim = dim, keepdim = True)) / (features.std(dim = dim, keepdim = True) + eps)

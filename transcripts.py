@@ -19,7 +19,7 @@ def join(ref = [], hyp = []):
 	return ' '.join(t['ref'] for t in ref).strip() + ' '.join(t['hyp'] for t in hyp).strip()
 
 def speaker(ref = None, hyp = None):
-	return ', '.join(sorted(set(t['speaker'] or 'NA' for t in (ref if ref is not None else hyp if hyp is not None else []))))
+	return ', '.join(sorted(set(t.get('speaker') or 'NA' for t in (ref if ref is not None else hyp if hyp is not None else []))))
 
 def take_between(transcript, ind_last_taken, t, first, last):
 	res = [(k, u) for k, u in enumerate(transcript) if (first or ind_last_taken < 0 or transcript[ind_last_taken]['end'] < u['begin']) and (last or u['end'] < t['begin'])]

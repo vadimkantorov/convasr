@@ -31,26 +31,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		duration = lambda example: sum(t.get('end', 0) - t.get('begin', 0) for t in example[-1]) if isinstance(example[-1], list) else len(example[-1])
 		data_paths = data_paths if isinstance(data_paths, list) else [data_paths]
 
-		self.examples = []
-		for data_path in data_paths:
-			if any(map(data_path.endswith, ['.json', '.json.gz'])):
-				transcript_path = data_path
-				transcript = json.load(gzopen(transcript_path))
-				if not segmented:
-					self.examples.extend([t] for t in transcript)
-				else:
-					self.examples.extend(list(g) for k, g in itertools.groupby(sorted(transcript, key = transcripts.sort_key), key = transcripts.group_key))
-			else:
-				transcript_path = data_path + '.json'
-				transcript = json.load(gzopen(transcript_path)) if os.path.exists(transcript_path) else [dict(audio_path = data_path)]
-				self.examples.append(transcript)
-
-
-		#if not self.segmented:
-		#	self.examples = [[t] for data_path in data_paths for t in json.load(gzopen(data_path))]
-		#else:
-		#	self.examples = [json.load(open(transcript_path) if os.path.exists(transcript_path) else [dict(audio_path = audio_path)]) for audio_path in source_paths for transcript_path in [audio_path + '.json']]
+		def read_transcript(data_path):
+			transcript_path = data_path + '.json' if '.json' not in data_path else data_path
+			return json.load(gzopen(transcript_path)) if os.path.exists(transcript_path) else [dict(audio_path = data_path)]
 		
+		self.examples = [list(g) for data_path in data_paths for k, g in itertools.groupby(sorted(read_transcript(data_path), key = transcripts.sort_key), key = transcripts.group_key)]
 		self.examples = list(sorted(self.examples, key = duration))
 		self.examples = list(filter(lambda example: (min_duration is None or min_duration <= duration(example)) and (max_duration is None or duration(example) <= max_duration), self.examples))
 
@@ -69,15 +54,16 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			ref_normalized, targets = zip(*targets)
 		else:
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, dtype = torch.int16, normalize = False)
-			missing_transcript = not transcript or any(t.get('begin') is None and t.get('end') is None for t in transcript)
-			if missing_transcript:
+			replace_transcript = not transcript or any(t.get('begin') is None and t.get('end') is None for t in transcript) and all(t.get('ref') is not None for t in transcript)
+			
+			if replace_transcript:
 				assert len(signal) == 1
 				ref_full = [self.labels[0].normalize_text(t['ref']) for t in transcript]
-				speakers = [None] + list(sorted(set(t['speaker'] for t in transcript)))
-				speaker = torch.cat([torch.full((len(ref) + 1, ), speakers.index(t['speaker']), dtype = torch.uint8).scatter_(0, torch.tensor(len(ref)), 0) for t, ref in zip(transcript, ref_full)])[:-1]
-				transcript = [dict(channel = 0, begin = 0, end = signal.shape[1] / sample_rate, audio_path = audio_path, speaker = speaker, speakers = speakers, ref = ' '.join(ref_full))]
+				speakers = [None] + list(sorted(set(t['speaker'] for t in transcript if 'speaker' is not None)))
+				speaker = torch.cat([torch.full((len(ref) + 1,), speakers.index(t.get('speaker')), dtype = torch.uint8).scatter_(0, torch.tensor(len(ref)), 0) for t, ref in zip(transcript, ref_full)])[:-1]
+				transcript = [dict(speaker = speaker, speakers = speakers, ref = ' '.join(ref_full))]
 			
-			transcript = [dict(dict(channel = 0, speaker = None), **t) for t in sorted(transcript, key = transcripts.sort_key)]
+			transcript = [dict(dict(channel = 0, speaker = None, begin = 0, end = signal.shape[1] / sample_rate), **t) for t in sorted(transcript, key = transcripts.sort_key)]
 			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], int(t['begin'] * sample_rate) : 1 + int(t['end'] * sample_rate)]]]
 			targets = [[labels.encode(t.get('ref', ''))[1] for t in transcript] for labels in self.labels]
 
@@ -96,7 +82,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		y = torch.zeros(len(batch), len(sample_y), max(ymax_len), dtype = torch.long)
 		xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.long)
 		for k, (meta, sample_x, *sample_y) in enumerate(batch):
-			xlen[k] = sample_x.shape[-1] / x.shape[-1]
+			xlen[k] = sample_x.shape[-1] / x.shape[-1] if x.shape[-1] > 0 else 1.0
 			x[k, ..., :sample_x.shape[-1]] = sample_x
 			for j, t in enumerate(sample_y):
 				y[k, j, :t.shape[-1]] = t

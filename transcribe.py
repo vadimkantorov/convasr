@@ -51,6 +51,10 @@ def main(args):
 		audio_path, speakers = map(meta[0].get, ['audio_path', 'speakers'])
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
 
+		if x.numel() == 0:
+			print(f'Empty signal in [{audio_path}]. Skipping.')
+			continue
+
 		tic = time.time()
 		y, ylen = y.to(args.device), ylen.to(args.device)
 		log_probs, olen = model(x.to(args.device), xlen.to(args.device))
@@ -77,7 +81,7 @@ def main(args):
 		print('CER: {cer:.02%}'.format(cer = metrics.cer(hyp, ref)))
 
 		tic_alignment = time.time()
-		if args.align:
+		if args.align and y.numel() > 0:
 			#if ref_full:# and not ref:
 			#	#assert len(set(t['channel'] for t in meta)) == 1 or all(t['type'] != 'channel' for t in meta)
 			#	#TODO: add space at the end
@@ -95,7 +99,7 @@ def main(args):
 		
 		if args.max_segment_duration:
 			ref_transcript, hyp_transcript = sum(ref_segments, []), sum(hyp_segments, [])
-			if ref_transcript:
+			if ref:
 				ref_segments = list(transcripts.segment(ref_transcript, args.max_segment_duration))
 				hyp_segments = list(transcripts.segment(hyp_transcript, ref_segments))
 			else:

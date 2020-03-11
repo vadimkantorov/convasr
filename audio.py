@@ -5,12 +5,16 @@ import torch
 import models
 
 def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize = True, mono = True, dtype = torch.float32, byte_order = 'little'):
-	if audio_path.endswith('.wav'):
-		sample_rate_, signal = scipy.io.wavfile.read(audio_path) 
-		signal = signal[None, :] if len(signal.shape) == 1 else signal.T
-	else:
-		num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path])) if not mono else 1
-		sample_rate_, signal = sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', str(num_channels), '-t', 'raw', '-']), byte_order = byte_order)).reshape(-1, num_channels).t()
+	try:
+		if audio_path.endswith('.wav'):
+			sample_rate_, signal = scipy.io.wavfile.read(audio_path) 
+			signal = signal[None, :] if len(signal.shape) == 1 else signal.T
+		else:
+			num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path])) if not mono else 1
+			sample_rate_, signal = sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', str(num_channels), '-t', 'raw', '-']), byte_order = byte_order)).reshape(-1, num_channels).t()
+	except:
+		print(f'Error when reading [{audio_path}]')
+		sample_rate_, signal = sample_rate, torch.tensor([[]], dtype = dtype)
 
 	signal = torch.as_tensor(signal).to(dtype)
 	
