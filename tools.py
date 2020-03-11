@@ -121,7 +121,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--duration', type = transcripts.number_tuple)
 	cmd.add_argument('--num-speakers', type = transcripts.number_tuple)
 	cmd.add_argument('--gap', type = transcripts.number_tuple)
-	parser.add_argument('--unk', type = transcripts.number_tuple)
+	cmd.add_argument('--unk', type = transcripts.number_tuple)
 	cmd.add_argument('--align-boundary-words', action = 'store_true')
 	cmd.set_defaults(func = subset)
 	

@@ -205,6 +205,7 @@ def audiosample(input_path, output_path, K):
 	print(output_path)
 
 def summary(input_path):
+	labels = datasets.Labels(ru)
 	transcript = json.load(open(input_path))
 	for t in transcript:
 		hyp = labels.postprocess_transcript(labels.normalize_text(t['hyp']))
@@ -224,7 +225,7 @@ def summary(input_path):
 	#	print(f'{b:.02f}\t{h:.0f}')
 
 	plt.figure(figsize = (8, 4))
-	plt.suptitle(os.path.basename(experiment_id))
+	plt.suptitle(os.path.basename(input_path))
 	plt.subplot(211)
 	plt.title('cer PDF')
 	#plt.hist(cer_, range = (0.0, 1.2), bins = 20, density = True)
@@ -247,7 +248,7 @@ def summary(input_path):
 	#plt.hist(loss_, bins = 20, density = True, cumulative = True)
 	#plt.grid(True)
 	plt.subplots_adjust(hspace = 0.4)
-	plt.savefig(experiment_id + '.png', dpi = 150)
+	plt.savefig(input_path + '.png', dpi = 150)
 
 def tabulate(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe, der):
 	labels = datasets.Labels(ru)
