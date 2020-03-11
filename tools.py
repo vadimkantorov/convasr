@@ -8,9 +8,9 @@ import sentencepiece
 import audio
 import transcripts
 
-def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, num_speakers):
+def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, unk, num_speakers):
 	cat = output_path.endswith('.json')
-	meta = dict(align_boundary_words = align_boundary_words, cer = cer, wer = wer, duration = duration, gap = gap, num_speakers = num_speakers)
+	meta = dict(align_boundary_words = align_boundary_words, cer = cer, wer = wer, duration = duration, gap = gap, unk = unk, num_speakers = num_speakers)
 	transcript_cat = []
 	for transcript_name in os.listdir(input_path):
 		if not transcript_name.endswith('.json'):
@@ -116,11 +116,12 @@ if __name__ == '__main__':
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o')
 	cmd.add_argument('--audio-name')
-	cmd.add_argument('--wer', type = transcripts.float_tuple)
-	cmd.add_argument('--cer', type = transcripts.float_tuple)
-	cmd.add_argument('--duration', type = transcripts.float_tuple)
-	cmd.add_argument('--num-speakers', type = transcripts.float_tuple)
-	cmd.add_argument('--gap', type = transcripts.float_tuple)
+	cmd.add_argument('--wer', type = transcripts.number_tuple)
+	cmd.add_argument('--cer', type = transcripts.number_tuple)
+	cmd.add_argument('--duration', type = transcripts.number_tuple)
+	cmd.add_argument('--num-speakers', type = transcripts.number_tuple)
+	cmd.add_argument('--gap', type = transcripts.number_tuple)
+	parser.add_argument('--unk', type = transcripts.number_tuple)
 	cmd.add_argument('--align-boundary-words', action = 'store_true')
 	cmd.set_defaults(func = subset)
 	

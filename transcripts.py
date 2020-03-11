@@ -1,12 +1,6 @@
 import torch
 import torch.nn.functional as F
 
-# filter for display
-
-# filter for dataset creation by min/max duration, cer, good first/last word alignment
-
-# does not filter anything out, can only merge
-
 def strip(transcript, keys = []):
 	return [{k : v for k, v in t.items() if k not in keys} for t in transcript]
 
@@ -57,18 +51,19 @@ def sort_key(t):
 def group_key(t):
 	return t.get('audio_path')
 
-float_tuple = lambda s: tuple(map(lambda ip: (float(ip[1]) if '.' in ip[1] else int(ip[1])) if ip[1] else float(['-inf', 'inf'][ip[0]]), enumerate((s if '-' in s else s + '-' + s).split('-'))))
+number_tuple = lambda s: tuple(map(lambda ip: (float(ip[1]) if '.' in ip[1] else int(ip[1])) if ip[1] else float(['-inf', 'inf'][ip[0]]), enumerate((s if '-' in s else s + '-' + s).split('-'))))
 
-def filter(transcript, align_boundary_words = False, cer = None, wer = None, duration = None, gap = None, num_speakers = None, audio_name = None):
+def filter(transcript, align_boundary_words = False, cer = None, wer = None, duration = None, gap = None, num_speakers = None, audio_name = None, unk = None):
 	is_aligned = lambda w: w['type'] == 'ok'
 	duration_check = lambda t: duration is None or duration[0] <= t['end'] - t['begin'] <= duration[1]
 	cer_check = lambda t: cer is None or cer[0] <= t['cer'] <= cer[1]
 	boundary_check = lambda t: ((not t['words']) or (not align_boundary_words) or (is_aligned(t['words'][0]) and is_aligned(t['words'][-1])))
 	gap_check = lambda t, prev: prev is None or gap is None or gap[0] <= t['begin'] - prev['end'] <= gap[1]
+	unk_check = lambda t: unk is None or unk[0] <= t.get('ref', '').count('*') <= unk[1]
 	speakers_check = lambda t: num_speakers is None or num_speakers[0] <= t.get('speaker', '').count(',') + 1 <= num_speakers[1]
 
 	prev = None
 	for t in transcript:
-		if duration_check(t) and cer_check(t) and boundary_check(t) and gap_check(t, prev) and speakers_check(t):
+		if unk_check(t) and duration_check(t) and cer_check(t) and boundary_check(t) and gap_check(t, prev) and speakers_check(t):
 			prev = t
 			yield t
