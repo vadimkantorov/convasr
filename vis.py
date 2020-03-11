@@ -17,13 +17,14 @@ import altair
 import torch
 import torch.nn.functional as F
 import audio
+import tools
 import datasets
 import decoders
 import metrics
 import models
 import ctc
 import transcripts
-import ru
+import ru as lang
 
 def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = []):
 	if isinstance(transcript, str):
@@ -205,17 +206,11 @@ def audiosample(input_path, output_path, K):
 	print(output_path)
 
 def summary(input_path):
-	labels = datasets.Labels(ru)
 	transcript = json.load(open(input_path))
-	for t in transcript:
-		hyp = labels.postprocess_transcript(labels.normalize_text(t['hyp']))
-		ref = labels.postprocess_transcript(labels.normalize_text(t['ref']))
-		t['cer'] = metrics.cer(hyp, ref)
-		t['wer'] = metrics.wer(hyp, ref)
-
 	cer_, wer_ = [torch.tensor([t[k] for t in transcript]) for k in ['cer', 'wer']]
 	cer_avg, wer_avg = float(cer_.mean()), float(wer_.mean())
 	print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')
+
 	loss_ = torch.tensor([t.get('loss', 0) for t in transcript])
 	loss_ = loss_[~(torch.isnan(loss_) | torch.isinf(loss_))]
 	#min, max, steps = 0.0, 2.0, 20

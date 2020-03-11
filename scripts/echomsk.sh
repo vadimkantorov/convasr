@@ -8,9 +8,9 @@ SAMPLE_RATE=8000
 
 SAMPLE=10
 DATASET=echomsk10
-DATASET_TRANSCRIBE=transcribe.$DATASET
-DATASET_SUBSET=subset.$DATASET
-DATASET_CUT=cut.$DATASET
+DATASET_TRANSCRIBE=data/transcribe.$DATASET
+DATASET_SUBSET=data/subset.$DATASET
+DATASET_CUT=data/cut.$DATASET
 TRANSCRIBE='--mono --align --max-segment-duration 4.0 --html'
 SUBSET='--align-boundary-words --num-speakers 1 --gap 0.1- --cer 0.1-0.4 --duration 2.0-4.0'
 CUT="--dilate 0.02 --sample-rate $SAMPLE_RATE --mono"
