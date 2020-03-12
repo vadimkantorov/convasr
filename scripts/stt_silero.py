@@ -1,3 +1,4 @@
+import os
 import json
 import argparse
 import base64
@@ -25,6 +26,6 @@ for t in json.load(open(args.input_path)):
 	hyp = requests.post(args.endpoint, json = dict(api_token = args.api_token, channels = 1, lang = args.lang, format = 'raw', sample_rate = sample_rate, payload = base64.b64encode(signal.tobytes()).decode())).json()['transcriptions'][0]['transcript']
 	transcript.append(dict(t, **dict(hyp = hyp)))
 
-transcript_path = os.path.join(args.output_path, os.path.basename(args.input_path) + '.{args.vendor}.json')
+transcript_path = os.path.join(args.output_path, os.path.basename(args.input_path) + f'.{args.vendor}.json')
 json.dump(transcript, open(transcript_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 print(transcript_path)

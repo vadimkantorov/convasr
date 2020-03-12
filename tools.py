@@ -7,6 +7,8 @@ import torch
 import sentencepiece
 import audio
 import transcripts
+import datasets
+import metrics
 import ru as lang
 
 def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, unk, num_speakers):
@@ -103,21 +105,21 @@ def bpetrain(input_path, output_prefix, vocab_size, model_type, max_sentencepiec
 	sentencepiece.SentencePieceTrainer.Train(f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size} --model_type={model_type}' + (f' --max_sentencepiece_length={max_sentencepiece_length}' if max_sentencepiece_length else ''))
 
 def normalize(input_path):
-	with open(input_path) as f:
-		transcript = json.load(f)
-
 	labels = datasets.Labels(lang)
-	for t in transcript:
-		if 'ref' in t:
-			t['ref'] = labels.postprocess_transcript(lang.normalize_text(t['ref']))
-		if 'hyp' in t:
-			t['hyp'] = labels.postprocess_transcript(lang.normalize_text(t['hyp']))
-		
-		if 'ref' in t and 'hyp' in t:
-			t['cer'] = t['cer'] if 'cer' in t else metrics.cer(t['hyp'], t['ref'])
-			t['wer'] = t['wer'] if 'wer' in t else metrics.wer(t['hyp'], t['ref'])
+	for transcript_path in input_path:
+		with open(transcript_path) as f:
+			transcript = json.load(f)
+		for t in transcript:
+			if 'ref' in t:
+				t['ref'] = labels.postprocess_transcript(lang.normalize_text(t['ref']))
+			if 'hyp' in t:
+				t['hyp'] = labels.postprocess_transcript(lang.normalize_text(t['hyp']))
+			
+			if 'ref' in t and 'hyp' in t:
+				t['cer'] = t['cer'] if 'cer' in t else metrics.cer(t['hyp'], t['ref'])
+				t['wer'] = t['wer'] if 'wer' in t else metrics.wer(t['hyp'], t['ref'])
 
-	json.dump(transcript, open(input_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+		json.dump(transcript, open(transcript_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -183,7 +185,7 @@ if __name__ == '__main__':
 	cmd.set_defaults(func = du)
 
 	cmd = subparsers.add_parser('normalize')
-	cmd.add_argument('input_path')
+	cmd.add_argument('input_path', nargs = '+')
 	cmd.set_defaults(func = normalize)
 
 	args = vars(parser.parse_args())
