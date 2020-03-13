@@ -38,12 +38,11 @@ def cut(input_path, output_path, sample_rate, mono, dilate, strip):
 
 	for t in sorted(transcript, key = lambda t: t['audio_path']):
 		audio_path = t['audio_path']
-		#TODO: cannot resample wav files because of torch.int16 - better off using sox/ffmpeg directly
-		signal = audio.read_audio(audio_path, sample_rate, mono = mono, normalize = False, dtype = torch.int16)[0] if audio_path != prev_audio_path else signal
-		t['channel'] = None if mono else t.get('channel')
+		signal = audio.read_audio(audio_path, sample_rate, normalize = False, dtype = torch.float32)[0] if audio_path != prev_audio_path else signal
+		t['channel'] = 0 if len(signal) == 1 else None if mono else t.get('channel')
 		segment = signal[t['channel'] if t['channel'] is not None else ..., int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)]
 		segment_path = os.path.join(output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t))
-		audio.write_audio(segment_path, segment, sample_rate)
+		audio.write_audio(segment_path, segment, sample_rate, mono = True)
 
 		t = dict(audio_path = segment_path, channel = 0 if len(signal) == 1 else None, begin = 0.0, end = segment.shape[-1] / sample_rate, speaker = t.pop('speaker', None), ref = t.pop('ref'), hyp = t.pop('hyp', None), cer = t.pop('cer', None), alignment = t.pop('alignment', {}), words = t.pop('words', {}), meta = t)
 		prev_audio_path = audio_path
@@ -53,10 +52,11 @@ def cut(input_path, output_path, sample_rate, mono, dilate, strip):
 	print(output_path)
 
 def cat(input_path, output_path):
-	output_path = output_path or input_path + '.json' 
+	transcript_paths = [transcript_path for transcript_path in input_path if transcript_path.endswith('.json')] + [os.path.join(transcript_dir, transcript_name) for transcript_dir in input_path if os.path.isdir(transcript_dir) for transcript_name in os.listdir(transcript_dir) if transcript_name.endswith('.json')]
+
 	array = lambda o: [o] if isinstance(o, dict) else o
-	segments = [array(json.load(open(os.path.join(input_path, transcript_name)))) for transcript_name in os.listdir(input_path) if transcript_name.endswith('.json')]
-	transcript = sum(segments, [])
+	transcript = sum([array(json.load(open(transcript_path))) for transcript_path in transcript_paths], [])
+
 	json.dump(transcript, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
@@ -155,7 +155,7 @@ if __name__ == '__main__':
 	cmd.set_defaults(func = cut)
 	
 	cmd = subparsers.add_parser('cat')
-	cmd.add_argument('--input-path', '-i', required = True)
+	cmd.add_argument('--input-path', '-i', nargs = '+')
 	cmd.add_argument('--output-path', '-o')
 	cmd.set_defaults(func = cat)
 

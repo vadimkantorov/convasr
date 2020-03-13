@@ -391,7 +391,7 @@ def reset_bn_running_stats_(model):
 		bn.train()
 	return model
 
-def data_parallel(model, optimizer = None, opt_level = None, **kwargs):
+def data_parallel_and_autocast(model, optimizer = None, opt_level = None, **kwargs):
 	if opt_level is None:
 		return torch.nn.DataParallel(model), optimizer
 	model, optimizer = apex.amp.initialize(nn.Sequential(model), optimizers = optimizer, opt_level = opt_level, **kwargs) if optimizer is not None else (apex.amp.initialize(nn.Sequential(model), opt_level = opt_level, **kwargs), None)

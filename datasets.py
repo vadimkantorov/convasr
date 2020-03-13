@@ -17,7 +17,7 @@ import vad
 import transcripts
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, data_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, delimiter = ',', segmented = False, vad_options = {}, time_padding_multiple = 1):
+	def __init__(self, data_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, delimiter = ',', segmented = False, time_padding_multiple = 1, audio_backend = 'sox', vad_options = {}):
 		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
@@ -26,6 +26,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.segmented = segmented
 		self.time_padding_multiple = time_padding_multiple
 		self.mono = mono
+		self.audio_backend = audio_backend
 
 		gzopen = lambda data_path: open(data_path) if data_path.endswith('.json') else gzip.open(data_path, 'rt')
 		duration = lambda example: sum(t.get('end', 0) - t.get('begin', 0) for t in example[-1]) if isinstance(example[-1], list) else len(example[-1])
@@ -47,23 +48,23 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		
 		if not self.segmented:
 			transcript = transcript[0]
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, dtype = torch.float32, normalize = True) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, dtype = torch.float32, normalize = True, backend = self.audio_backend) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
 			
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
 			ref_normalized, targets = zip(*targets)
 		else:
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, dtype = torch.int16, normalize = False)
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, dtype = torch.int16, normalize = False, backend = self.audio_backend)
 			replace_transcript = not transcript or any(t.get('begin') is None and t.get('end') is None for t in transcript) and all(t.get('ref') is not None for t in transcript)
 			
 			if replace_transcript:
 				assert len(signal) == 1
 				ref_full = [self.labels[0].normalize_text(t['ref']) for t in transcript]
-				speakers = [None] + list(sorted(set(t['speaker'] for t in transcript if 'speaker' is not None)))
+				speakers = [None] + list(sorted(set(t['speaker'] for t in transcript if t.get('speaker') is not None)))
 				speaker = torch.cat([torch.full((len(ref) + 1,), speakers.index(t.get('speaker')), dtype = torch.uint8).scatter_(0, torch.tensor(len(ref)), 0) for t, ref in zip(transcript, ref_full)])[:-1]
 				transcript = [dict(speaker = speaker, speakers = speakers, ref = ' '.join(ref_full))]
 			
-			transcript = [dict(dict(channel = 0, speaker = None, begin = 0, end = signal.shape[1] / sample_rate), **t) for t in sorted(transcript, key = transcripts.sort_key)]
+			transcript = [dict(dict(audio_path = audio_path, channel = 0, speaker = None, begin = 0, end = signal.shape[1] / sample_rate), **t) for t in sorted(transcript, key = transcripts.sort_key)]
 			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], int(t['begin'] * sample_rate) : 1 + int(t['end'] * sample_rate)]]]
 			targets = [[labels.encode(t.get('ref', ''))[1] for t in transcript] for labels in self.labels]
 

@@ -38,13 +38,13 @@ def main(args):
 	frontend = frontend.to(args.device)
 	model.eval()
 	model.fuse_conv_bn_eval()
-	model, *_ = models.data_parallel(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+	model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 
 	decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 	
-	audio_transcript_paths = [p for f in args.data_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f]) if os.path.isfile(p) and any(map(p.endswith, args.ext))] + [p for p in args.data_path if any(map(p.endswith, ['.json', '.json.gz']))]
+	data_paths = [p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f]) if os.path.isfile(p) and any(map(p.endswith, args.ext))] + [p for p in args.input_path if any(map(p.endswith, ['.json', '.json.gz']))]
 
-	val_dataset = datasets.AudioTextDataset(audio_transcript_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, vad_options = dict(window_size = args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate))
+	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend) #, vad_options = dict(window_size = args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate))
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
 
 	for meta, x, xlen, y, ylen in val_data_loader:
@@ -120,7 +120,7 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--checkpoint', required = True)
 	parser.add_argument('--model')
-	parser.add_argument('--data-path', '-i', nargs = '+')
+	parser.add_argument('--input-path', '-i', nargs = '+')
 	parser.add_argument('--output-path', '-o', default = 'data/transcribe')
 	parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
@@ -147,6 +147,7 @@ if __name__ == '__main__':
 	parser.add_argument('--gap', type = transcripts.number_tuple)
 	parser.add_argument('--unk', type = transcripts.number_tuple)
 	parser.add_argument('--align-boundary-words', action = 'store_true')
+	parser.add_argument('--audio-backend', default = 'sox', choices = ['sox', 'ffmpeg'])
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)

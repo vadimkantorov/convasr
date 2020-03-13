@@ -33,7 +33,8 @@ def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize =
 	assert sample_rate_ == sample_rate, 'Cannot resample non-float tensors because of librosa constraints'
 	return signal, sample_rate_
 
-def write_audio(audio_path, signal, sample_rate):
+def write_audio(audio_path, signal, sample_rate, mono = False):
+	signal = signal if not mono else signal.float().mean(dim = 0, keepdim = True).type_as(signal)
 	scipy.io.wavfile.write(audio_path, sample_rate, signal.t().numpy())
 	return audio_path
 

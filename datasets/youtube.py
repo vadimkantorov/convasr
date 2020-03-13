@@ -5,7 +5,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--input-path', '-i', required = True)
 parser.add_argument('--output-path', '-o', required = True)
-parser.add_argument('--strip', nargs = '*', default = ['begin', 'end']]
+parser.add_argument('--strip', nargs = '*', default = ['begin', 'end'])
 args = parser.parse_args()
 
 transcript = []
