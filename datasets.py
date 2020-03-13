@@ -98,7 +98,7 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 		self.dataset = dataset
 		self.batch_size = batch_size
 		#self.mixing = mixing or ([1 / len(self.dataset.examples)] * len(self.dataset.examples))
-		key = lambda example_idx: bucket(self.dataset.examples[example_idx])
+		key = lambda example_idx: bucket(self.dataset.examples[example_idx][0])
 		self.buckets = {k : list(g) for k, g in itertools.groupby(sorted(range(len(self.dataset)), key = key), key = key)}
 		self.batch_idx = 0
 		self.shuffle(epoch = 0)
