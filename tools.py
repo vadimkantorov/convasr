@@ -104,7 +104,7 @@ def rmoldcheckpoints(experiments_dir, experiment_id, keepfirstperepoch, remove):
 def bpetrain(input_path, output_prefix, vocab_size, model_type, max_sentencepiece_length):
 	sentencepiece.SentencePieceTrainer.Train(f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size} --model_type={model_type}' + (f' --max_sentencepiece_length={max_sentencepiece_length}' if max_sentencepiece_length else ''))
 
-def normalize(input_path):
+def normalize(input_path, dry = True):
 	labels = datasets.Labels(lang)
 	for transcript_path in input_path:
 		with open(transcript_path) as f:
@@ -119,7 +119,19 @@ def normalize(input_path):
 				t['cer'] = t['cer'] if 'cer' in t else metrics.cer(t['hyp'], t['ref'])
 				t['wer'] = t['wer'] if 'wer' in t else metrics.wer(t['hyp'], t['ref'])
 
-		json.dump(transcript, open(transcript_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+		if not dry:
+			json.dump(transcript, open(transcript_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+		else:
+			return transcript
+
+def summary(input_path, keys):
+	transcript = normalize([input_path], dry = True)
+	#transcript = json.load(open(input_path))
+	print(input_path)
+	for k in keys:
+		val = torch.FloatTensor([t[k] for t in transcript if t.get(k) is not None])
+		print('{k}: {v:.02f}'.format(k = k, v = float(val.mean())))
+	print()
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -186,7 +198,13 @@ if __name__ == '__main__':
 
 	cmd = subparsers.add_parser('normalize')
 	cmd.add_argument('input_path', nargs = '+')
+	cmd.add_argument('--dry', action = 'store_true')
 	cmd.set_defaults(func = normalize)
+
+	cmd = subparsers.add_parser('summary')
+	cmd.add_argument('input_path')
+	cmd.add_argument('--keys', nargs = '+', default = ['cer', 'wer'])
+	cmd.set_defaults(func = summary)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')

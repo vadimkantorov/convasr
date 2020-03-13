@@ -27,11 +27,11 @@ for t in json.load(open(args.input_path)):
 	sample_rate, signal = scipy.io.wavfile.read(t['audio_path'])
 	assert signal.dtype == 'int16' and sample_rate in [8_000, 16_000]
 	
-	sys.argv = ['recognize.py', t['audio_path'], '--rate', str(sample_rate), '--encoding', 'LINEAR16', '--num_channels', '1']
+	sys.argv = ['recognize.py', t['audio_path'], '--rate', str(sample_rate), '--do_not_perform_vad', '--encoding', 'LINEAR16', '--num_channels', '1']
 	stdout = io.StringIO()
 	with contextlib.redirect_stdout(stdout):
 		recognize.main()
-	hyp = [line.replace('Transcription ', '') for line in stdout.getvalue().splitlines() if line.startswith('Transcription ')][0]
+	hyp = ' '.join(line.replace('Transcription ', '') for line in stdout.getvalue().splitlines() if line.startswith('Transcription '))
 	transcript.append(dict(t, hyp = hyp))
 
 transcript_path = os.path.join(args.output_path, os.path.basename(args.input_path) + f'.{args.vendor}.json')
