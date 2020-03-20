@@ -19,7 +19,7 @@ bash_template = """
     --analyze kontur_calls_micro.csv \
     --val-iteration-interval 5000 \
     --fp16 O2 \
-    --experiment-name domain_comb_max_qual_{train_set} \
+    --experiment-name domain_comb_max_qual2_{train_set} \
     --epochs {epochs} --exphtml=  
 """
 
@@ -34,9 +34,9 @@ def get_process_to_gpu_mapping():
 
 def run_task(worker_id, args):
     epochs = {
-        'radio_train': 95,
-        'books_train': 70,
-        'books_radio_train': 41,
+        'radio_train': 114,
+        'books_train': 80,
+        'books_radio_train': 46,
         'books_youtube_train': 30,
         'youtube_train': 50,
         'books_youtube_radio_train': 25,
@@ -73,17 +73,13 @@ def main():
     queue = Queue()
 
     for v in [
-	'youtube_train',
-	'youtube_radio_train',
-	'books_youtube_radio_train',
         'radio_train',
 	'books_radio_train',
-	'books_youtube_train',  
 	'books_train',
         ]:
         queue.put(v)
 
-    pool = Pool(4, worker_loop, (queue,))
+    pool = Pool(3, worker_loop, (queue,))
     pool.close()
     pool.join()
 
