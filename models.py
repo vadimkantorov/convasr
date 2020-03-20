@@ -405,10 +405,10 @@ def silence_space_mask(log_probs, speech, blank_idx, space_idx, kernel_size = 10
 	silence = ~speech & (greedy_decoded == blank_idx)
 	return silence[:, None, :] * (~F.one_hot(torch.tensor(space_idx), log_probs.shape[1]).to(device = silence.device, dtype = silence.dtype))[None, :, None]
 
-def save_topk(x, k, dim = -1, largest = True, indices_dtype = None, values_dtype = None, fill_value = 0.0):
+def sparse_topk(x, k, dim = -1, largest = True, indices_dtype = None, values_dtype = None, fill_value = 0.0):
 	topk = x.topk(k, dim = dim, largest = largest)
 	return dict(k = k, dim = dim, largest = largest, shape = x.shape, dtype = x.dtype, device = x.device, fill_value = fill_value, indices = topk.indices.to(dtype = indices_dtype), values = topk.values.to(dtype = values_dtype))
 
-def load_topk(saved, device = None):
+def sparse_topk_todense(saved, device = None):
 	device = device or saved['device']
 	return torch.full(saved['shape'], saved['fill_value'], dtype = saved['dtype'], device = device).scatter_(saved['dim'], saved['indices'].to(dtype = torch.int64, device = device), saved['values'].to(dtype = saved['dtype'], device = device))

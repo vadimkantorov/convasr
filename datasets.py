@@ -9,7 +9,6 @@ import json
 import random
 import functools
 import itertools
-import numpy as np
 import torch.utils.data
 import sentencepiece
 import audio
@@ -174,7 +173,10 @@ class Labels:
 		channel_ = lambda i_, j_: channel if isinstance(channel, int) else int(channel[i_])
 
 		if ts is None:
-			return decode_(0, len(idx) - 1)
+			try:
+				return decode_(0, len(idx) - 1)
+			except:
+				import IPython; IPython.embed()
 
 		pad = [self.space_idx] if replace_blank is False else [self.space_idx, self.blank_idx]
 		

@@ -54,12 +54,12 @@ def align_words(hyp, ref):
 	return h, r, words, errors
 
 def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = set(), full = False, **kwargs):
-	hyp_orig = hyp
+	hyp_orig, ref_orig = hyp, ref
 	hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
 	hyp, ref = map(functools.partial(labels.postprocess_transcript, collapse_repeat = True), [hyp, ref])
 	hyp_phonetic, ref_phonetic = map(functools.partial(labels.postprocess_transcript, phonetic_replace_groups = phonetic_replace_groups), [hyp, ref])
 	
-	a = dict(labels = labels.name, audio_path = audio_path, audio_name = os.path.basename(audio_path), hyp_orig = hyp_orig, ref = ref, hyp = hyp, cer = cer(hyp, ref), wer = wer(hyp, ref), per = cer(hyp_phonetic, ref_phonetic), phonetic = dict(ref = ref_phonetic, hyp = hyp_phonetic), der = sum(w in vocab for w in hyp.split()) / (1 + hyp.count(' ')), **kwargs)
+	a = dict(labels_name = labels.name, labels = str(labels), audio_path = audio_path, audio_name = os.path.basename(audio_path), hyp_orig = hyp_orig, ref_orig = ref_orig, ref = ref, hyp = hyp, cer = cer(hyp, ref), wer = wer(hyp, ref), per = cer(hyp_phonetic, ref_phonetic), phonetic = dict(ref = ref_phonetic, hyp = hyp_phonetic), der = sum(w in vocab for w in hyp.split()) / (1 + hyp.count(' ')), **kwargs)
 	
 	if full:
 		h, r, words, words_ = align_words(hyp, ref)

@@ -133,6 +133,19 @@ def summary(input_path, keys):
 		print('{k}: {v:.02f}'.format(k = k, v = float(val.mean())))
 	print()
 
+def transcode(input_path, output_path, cmd):
+	transcript = json.load(open(input_path))
+	os.makedirs(output_path, exist_ok = True)
+	for t in transcript:
+		output_audio_path = os.path.join(output_path, os.path.basename(t['audio_path']))
+		with open(t['audio_path'], 'rb') as stdin, open(output_audio_path, 'wb') as stdout:
+			subprocess.check_call(cmd, stdin = stdin, stdout = stdour)
+		t['audio_path'] = output_audio_path
+
+	output_path = os.path.join(output_path, os.path.basename(output_path) + '.json')
+	json.dump(transcript, open(output_path, 'w'), ensuire_ascii = False, indent = 2, sort_keys = True)
+	print(output_path)
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -195,6 +208,12 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('du')
 	cmd.add_argument('input_path')
 	cmd.set_defaults(func = du)
+	
+	cmd = subparsers.add_parser('transcode')
+	cmd.add_argument('--input-path', '-i', required = True)
+	cmd.add_argument('--output-path', '-o', required = True)
+	cmd.add_argument('cmd', nargs = argparse.REMAINDER)
+	cmd.set_defaults(func = transcode)
 
 	cmd = subparsers.add_parser('normalize')
 	cmd.add_argument('input_path', nargs = '+')

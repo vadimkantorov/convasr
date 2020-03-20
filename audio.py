@@ -7,7 +7,7 @@ import models
 def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize = True, mono = True, dtype = torch.float32, byte_order = 'little', backend = 'sox'):
 	try:
 		if audio_path.endswith('.wav'):
-			sample_rate_, signal = scipy.io.wavfile.read(audio_path) 
+			sample_rate_, signal = scipy.io.wavfile.read(audio_path)
 			signal = signal[None, :] if len(signal.shape) == 1 else signal.T
 		elif backend == 'sox':
 			num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path])) if not mono else 1

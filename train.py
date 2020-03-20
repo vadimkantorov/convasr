@@ -126,7 +126,7 @@ def main(args):
 
 			transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)) if training else args.val_transcripts_format.format(val_dataset_name = val_dataset_name, decoder = args.decoder)
 			for r_ in zip(*transcript):
-				labels_name = r_[0]['labels']
+				labels_name = r_[0]['labels_name']
 				stats = metrics.aggregate(r_)
 				if analyze:
 					with open(f'{transcripts_path}.missing.txt', 'w') as f:
@@ -153,7 +153,7 @@ def main(args):
 			
 			if args.logits:
 				logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
-				torch.save(list(sorted([r_.update(dict(logits = l_, y = y_)) or r_ for r, l, y in zip(transcript, logits_, y_) for r_, l_, y_ in zip(r, l, y)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
+				torch.save(list(sorted([dict(**r_, logits = l_ if not args.logits_topk else models.sparse_topk(l_, args.logits_topk, dim = 0), y = y_, ydecoded = labels_.decode(y_.tolist())) for r, l, y in zip(transcript, logits_, y_) for labels_, r_, l_, y_ in zip(labels, r, l, y)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
 				print('Logits saved:', logits_file_path)
 		
 		checkpoint_path = os.path.join(args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)) if training and not args.checkpoint_skip else None
@@ -182,7 +182,7 @@ def main(args):
 	train_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob), feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob))
 	train_dataset = datasets.AudioTextDataset(args.train_data_path, labels, args.sample_rate, frontend = train_frontend if not args.frontend_in_model else None, min_duration = args.min_duration, max_duration = args.max_duration, time_padding_multiple = args.batch_time_padding_multiple)
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
-	sampler = datasets.BucketingBatchSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing, bucket = lambda example: int(math.ceil((example[-1] / args.window_stride + 1) / args.batch_time_padding_multiple))) #+1 mean bug fix with bucket sizing
+	sampler = datasets.BucketingBatchSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing, bucket = lambda example: int(math.ceil(((example['end'] - example['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple))) #+1 mean bug fix with bucket sizing
 	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = train_dataset.collate_fn, pin_memory = True, batch_sampler = sampler, worker_init_fn = set_random_seed, timeout = args.timeout)
 	optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else apex.optimizers.FusedNovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'FusedNovoGrad' else None
 	
@@ -319,6 +319,7 @@ if __name__ == '__main__':
 	parser.add_argument('--val-transcripts-format', default = 'data/transcripts_{val_dataset_name}_{decoder}.json', help = 'save transcripts at validation')
 	parser.add_argument('--train-transcripts-format', default = 'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json')
 	parser.add_argument('--logits', nargs = '?', const = 'data/logits_{val_dataset_name}.pt', help = 'save logits at validation')
+	parser.add_argument('--logits-topk', type = int)
 	parser.add_argument('--args', default = 'args.json', help = 'save experiment arguments to the experiment dir')
 	parser.add_argument('--model', default = 'JasperNetBig')
 	parser.add_argument('--seed', type = int, default = 1, help = 'reset to this random seed value in the main thread and data loader threads')
