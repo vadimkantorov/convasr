@@ -77,6 +77,9 @@ spotty aws spot-prices -i p3.8xlarge -r us-east-1
 The passed command must read from stdin and write to stdout.
 
 ```shell
+# transcode to MP3
+python3 tools.py transcode -o kontur_calls_micro/kontur_calls_micro.csv.json -o data/kontur_calls_micro_mp3 "sox -V0 -t wav - -r 8k -t mp3 -"
+
 # encode to GSM and back
 bash scripts/augment.sh data/clean_val.csv data/clean_val_gsm "sox -V0 -t wav - -r 8k -c 1 -t gsm - | sox -V0 -r 8k -t gsm - -t wav -b 16 -e signed -r 8k -c 1 -"
 

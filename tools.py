@@ -3,6 +3,7 @@ import os
 import json
 import gzip
 import argparse
+import subprocess
 import torch
 import sentencepiece
 import audio
@@ -133,17 +134,18 @@ def summary(input_path, keys):
 		print('{k}: {v:.02f}'.format(k = k, v = float(val.mean())))
 	print()
 
-def transcode(input_path, output_path, cmd):
+def transcode(input_path, output_path, ext, cmd):
 	transcript = json.load(open(input_path))
 	os.makedirs(output_path, exist_ok = True)
+	print(cmd)
 	for t in transcript:
-		output_audio_path = os.path.join(output_path, os.path.basename(t['audio_path']))
+		output_audio_path = os.path.join(output_path, os.path.basename(t['audio_path'])) + (ext or '')
 		with open(t['audio_path'], 'rb') as stdin, open(output_audio_path, 'wb') as stdout:
-			subprocess.check_call(cmd, stdin = stdin, stdout = stdour)
+			subprocess.check_call(cmd, stdin = stdin, stdout = stdout, shell = True)
 		t['audio_path'] = output_audio_path
 
 	output_path = os.path.join(output_path, os.path.basename(output_path) + '.json')
-	json.dump(transcript, open(output_path, 'w'), ensuire_ascii = False, indent = 2, sort_keys = True)
+	json.dump(transcript, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
 if __name__ == '__main__':
@@ -212,6 +214,7 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('transcode')
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o', required = True)
+	cmd.add_argument('--ext', choices = ['.mp3', '.wav', '.gsm', '.raw', '.m4a', '.ogg'])
 	cmd.add_argument('cmd', nargs = argparse.REMAINDER)
 	cmd.set_defaults(func = transcode)
 
