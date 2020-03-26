@@ -169,14 +169,11 @@ class Labels:
 
 	def decode(self, idx : list, ts = None, I = None, speaker = None, channel = 0, speakers = None, replace_blank = True, replace_space = False, replace_repeat = True, key = 'hyp'):
 		decode_ = lambda i, j: self.postprocess_transcript(''.join(self[idx[ij]] for ij in range(i, j + 1) if replace_repeat is False or ij == 0 or idx[ij] != idx[ij - 1]), replace_blank = replace_blank, replace_space = replace_space, replace_repeat = replace_repeat)
-		speaker_ = lambda i, j: None if speaker is None else int(speaker[i:1 + j].max()) if speakers is None else speakers[int(speaker[i:1 + j].max())]
+		speaker_ = lambda i, j: None if speaker is None else int(speaker[i:1 + j].max()) if speakers else speakers[int(speaker[i:1 + j].max())]
 		channel_ = lambda i_, j_: channel if isinstance(channel, int) else int(channel[i_])
 
 		if ts is None:
-			try:
-				return decode_(0, len(idx) - 1)
-			except:
-				import IPython; IPython.embed()
+			return decode_(0, len(idx) - 1)
 
 		pad = [self.space_idx] if replace_blank is False else [self.space_idx, self.blank_idx]
 		

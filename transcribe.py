@@ -73,7 +73,7 @@ def main(args):
 		channel = [t['channel'] for t in meta]
 		speaker = [t['speaker'] for t in meta]
 		ref_segments = [[dict(channel = channel[i], begin = meta[i]['begin'], end = meta[i]['end'], ref = labels.decode(y[i, 0, :ylen[i]].tolist()))] for i in range(len(decoded))]
-		hyp_segments = [labels.decode(decoded[i], ts[i], channel = channel[i], replace_blank = True, replace_repeat = True, replace_space = False) for i in range(len(decoded))]
+		hyp_segments = [labels.decode(decoded[i], ts[i], channel = channel[i], replace_blank = True, replace_repeat = True, replace_space = False, speakers = args.speakers) for i in range(len(decoded))]
 		
 		ref, hyp = ' '.join(transcripts.join(ref = r) for r in ref_segments).strip(), ' '.join(transcripts.join(hyp = h) for h in hyp_segments).strip()
 		if args.verbose:
@@ -148,6 +148,7 @@ if __name__ == '__main__':
 	parser.add_argument('--unk', type = transcripts.number_tuple)
 	parser.add_argument('--align-boundary-words', action = 'store_true')
 	parser.add_argument('--audio-backend', default = 'sox', choices = ['sox', 'ffmpeg'])
+	parser.add_argument('--speaker', nargs = '*')
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
