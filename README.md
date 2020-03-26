@@ -12,39 +12,18 @@ pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cud
 ```
 Dependencies are also listed in `scripts/Dockerfile`. The **ru_open_stt** dataset download script is also in `scripts/download_ru_open_stt.sh`.
 
-# Data file format
-CSV (comma-separated) with 3 columns without header:
-1. Full path to the audio wav file (mono, 16 Khz)
-2. Transcript
-3. Duration in seconds
-
 # Usage
 ```shell
-# transcribe all .wav in a directory and compute CER with .wav.txt, save transcription in .wav.transcript.txt
 python3 transcribe.py \
   --checkpoint data/experiments/Wav2LetterRu_NovoGrad_lr1e-2_wd1e-3_bs80_augPSSPAMRNB0.5/checkpoint_epoch02_iter0074481.pt \
-  --data-path data_dir
-```
-
-# Tinkoff speech-to-text
-```shell
-# https://voicekit.tinkoff.ru/docs/recognition
-# https://voicekit.tinkoff.ru/docs/usingstt
-# https://github.com/TinkoffCreditSystems/tinkoff-speech-api-examples/blob/master/sh/recognize.sh
-git clone --recursive https://github.com/TinkoffCreditSystems/tinkoff-speech-api-examples.git
-pushd tinkoff-speech-api-examples
-pip install -r requirements.txt
-bash ./sh/generate_protobuf.sh
-popd
-bash scripts/stt_tinkoff.sh ../sample_ok/sample_ok.convasr.csv data/sample_ok.convasr.tinkoff
-python3 vis.py cer data/transcripts_tinkoff_sample_ok.convasr.tinkoff.json
+  -i data_dir
 ```
 
 # BPE pretrained models for Russian
 ```shell
-python dataset.py bpetrain -i data/tts_dataset/tts_dataset.txt -o data/tts_dataset_bpe_1000 --vocab-size 1000
-python dataset.py bpetrain -i data/tts_dataset/tts_dataset.txt -o data/tts_dataset_bpe_5000 --vocab-size 5000
-python dataset.py bpetrain -i data/tts_dataset/tts_dataset.txt -o data/tts_dataset_bpe_10000 --vocab-size 10000
+python tools.py bpetrain -i data/tts_dataset/tts_dataset.txt -o data/tts_dataset_bpe_1000 --vocab-size 1000
+python tools.py bpetrain -i data/tts_dataset/tts_dataset.txt -o data/tts_dataset_bpe_5000 --vocab-size 5000
+python tools.py bpetrain -i data/tts_dataset/tts_dataset.txt -o data/tts_dataset_bpe_10000 --vocab-size 10000
 
 # from https://nlp.h-its.org/bpemb/ru/
 wget https://nlp.h-its.org/bpemb/ru/ru.wiki.bpe.vs5000.vocab -P data
@@ -81,32 +60,30 @@ The passed command must read from stdin and write to stdout.
 python3 tools.py transcode -o kontur_calls_micro/kontur_calls_micro.csv.json -o data/kontur_calls_micro_mp3 --ext .mp3 "sox -V0 -t wav - -r 8k -t mp3 -"
 
 # encode to GSM and back
-bash scripts/augment.sh data/clean_val.csv data/clean_val_gsm "sox -V0 -t wav - -r 8k -c 1 -t gsm - | sox -V0 -r 8k -t gsm - -t wav -b 16 -e signed -r 8k -c 1 -"
+"sox -V0 -t wav - -r 8k -c 1 -t gsm - | sox -V0 -r 8k -t gsm - -t wav -b 16 -e signed -r 8k -c 1 -"
 
 # encode to AMR (NB: narrow-band, 8kHz) and back
-bash scripts/augment.sh data/clean_val.csv data/clean_val_amrnb "sox -V0 -t wav - -r 8k -c 1 -t amr-nb - | sox -V0 -r 8k -t amr-nb - -t wav -b 16 -e signed -r 8k -c 1 -"
+"sox -V0 -t wav - -r 8k -c 1 -t amr-nb - | sox -V0 -r 8k -t amr-nb - -t wav -b 16 -e signed -r 8k -c 1 -"
 
 # denoise with RNNnoise
-LD_LIBRARY_PATH=rnnoise/.libs bash scripts/augment.sh ../sample_ok/sample_ok.convasr.csv data/sample_ok.convasr.rnnoise "sox -t wav - -r 48k --bits 16 --encoding signed-integer --endian little -t raw - | ./rnnoise/examples/rnnoise_demo /dev/stdin /dev/stdout | sox -t raw -r 48k --encoding signed-integer --endian little --bits 16 - -t wav -b 16 -e signed -r 8k -c 1 -"
+export LD_LIBRARY_PATH=rnnoise/.libs
+"sox -t wav - -r 48k --bits 16 --encoding signed-integer --endian little -t raw - | ./rnnoise/examples/rnnoise_demo /dev/stdin /dev/stdout | sox -t raw -r 48k --encoding signed-integer --endian little --bits 16 - -t wav -b 16 -e signed -r 8k -c 1 -"
 
 # denoise with SOX
 sox data/noise/1560751355.653399.wav_1.wav -n noiseprof data/noise.prof
-bash scripts/augment.sh ../sample_ok/sample_ok.convasr.csv data/sample_ok.convasr.noisered "sox -V0 -t wav - -t wav - noisered data/noise.prof 0.5"
+"sox -V0 -t wav - -t wav - noisered data/noise.prof 0.5"
 
 # transcode OGG to WAV
-bash scripts/augment.sh data/speechkit.csv data/speechkit_wav "opusdec - --quiet --force-wav -"
+"opusdec - --quiet --force-wav -"
 
 # convert s16le to f32le
-bash scripts/augment.sh ../sample_ok/sample_ok.convasr.csv data/sample_ok_f32 "sox -V0 -t wav - -r 16k -b 32 -e float -t wav -c 1 -"
+"sox -V0 -t wav - -r 16k -b 32 -e float -t wav -c 1 -"
 
 # denoise with https://github.com/francoisgermain/SpeechDenoisingWithDeepFeatureLosses
 python senet_infer.py -d ../data/sample_ok.convasr.1.sox -m models
 
 # convert f32le to s16le
-bash scripts/augment.sh data/sample_ok_f32.csv data/sample_ok_s16 "sox -V0 -t wav - -r 16k -b 16 -e signed -t wav -c 1 -"
-
-# print total duration of a data file in hours
-bash script/duration.sh data/mixed_train.csv
+"sox -V0 -t wav - -r 16k -b 16 -e signed -t wav -c 1 -"
 
 # print total duration of audio files in a directory
 ls mydir/*.wav | xargs soxi -D | awk '{sum += $1} END {print sum / 60; print "minutes"}'
