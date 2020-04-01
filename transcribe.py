@@ -147,7 +147,7 @@ if __name__ == '__main__':
 	parser.add_argument('--gap', type = transcripts.number_tuple)
 	parser.add_argument('--unk', type = transcripts.number_tuple)
 	parser.add_argument('--align-boundary-words', action = 'store_true')
-	parser.add_argument('--audio-backend', default = 'sox', choices = ['sox', 'ffmpeg'])
+	parser.add_argument('--audio-backend', default = 'ffmpeg', choices = ['sox', 'ffmpeg'])
 	parser.add_argument('--speaker', nargs = '*')
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
