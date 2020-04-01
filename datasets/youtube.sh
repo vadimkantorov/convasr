@@ -21,7 +21,7 @@ case $CMD in
 
 	RETR)
 		mkdir -p "$OUT"
-		BATCH=$([[ "$IN" != http* ]] && echo "--batch-file")
+		BATCH=$([[ "$IN" != http* ]] && echo "--batch-file" || echo "")
 		AUDIOLIST=$(youtube-dl $VERBOSE --write-info-json --sub-lang $SUBLANG --write-sub --write-auto-sub --convert-subs $SUBEXT --extract-audio --audio-format $EXT --prefer-ffmpeg -o "$OUT/%(id)s.%(ext)s" $BATCH "$IN" --exec echo)
 
 		for AUDIO in $AUDIOLIST; do
