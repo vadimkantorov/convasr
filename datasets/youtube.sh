@@ -4,7 +4,9 @@ CMD=$1
 IN=$2
 OUT=${3:-.}
 
-EXT=${EXT:-mp3}
+if [ -z "${EXT+xxx}" ]; then
+	EXT=mp3
+fi
 SUBLANG=${SUBLANG:-ru}
 SUBEXT=srt
 VERBOSE='--quiet --no-warnings'
@@ -22,11 +24,12 @@ case $CMD in
 	RETR)
 		mkdir -p "$OUT"
 		BATCH=$([[ "$IN" != http* ]] && echo "--batch-file" || echo "")
-		AUDIOLIST=$(youtube-dl $VERBOSE --write-info-json --sub-lang $SUBLANG --write-sub --write-auto-sub --convert-subs $SUBEXT --extract-audio --audio-format $EXT --prefer-ffmpeg -o "$OUT/%(id)s.%(ext)s" $BATCH "$IN" --exec echo)
+		AUDIOFORMAT=$([[ "$EXT" ]] && echo "--audio-format $EXT" || echo "")
+		AUDIOLIST=$(youtube-dl $VERBOSE --write-info-json --sub-lang $SUBLANG --write-sub --write-auto-sub --convert-subs $SUBEXT --extract-audio $AUDIOFORMAT --prefer-ffmpeg -o "$OUT/%(id)s.%(ext)s" $BATCH "$IN" --exec echo)
 
 		for AUDIO in $AUDIOLIST; do
-			JSON=${AUDIO//.$EXT/.info.json}
-			SUB=${AUDIO//.$EXT/.$SUBLANG.$SUBEXT}
+			JSON=${AUDIO%.*}.info.json
+			SUB=${AUDIO%.*}.$SUBLANG.$SUBEXT}
 			
 			echo $AUDIO
 			if [ -f "$SUB" ]; then
