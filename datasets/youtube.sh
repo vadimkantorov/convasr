@@ -29,9 +29,8 @@ case $CMD in
 
 		for AUDIO in $AUDIOLIST; do
 			JSON=${AUDIO%.*}.info.json
-			SUB=${AUDIO%.*}.$SUBLANG.$SUBEXT}
-			
-			echo $AUDIO
+			SUB=${AUDIO%.*}.$SUBLANG.$SUBEXT
+
 			if [ -f "$SUB" ]; then
 				python3 -c "import sys, json, re; json.dump(dict(transcript = [dict(ref = ref, **{k : sum(howmany * sec for howmany, sec in zip(map(int, ts.replace(',', ':').split(':')), [60 * 60, 60, 1, 1e-3])) for k, ts in dict(begin = begin, end = end).items()}) for begin, end, ref in re.findall(r'(\d+:\d+:\d+,\d+) --> (\d+:\d+:\d+,\d+)\s+(.+)', open(sys.argv[1]).read())], **json.load(open(sys.argv[2]))), open(sys.argv[3], 'w'), ensure_ascii = False, indent = 2, sort_keys = True)" "$SUB" "$JSON" "$AUDIO.json"
 				rm "$JSON" "$SUB"
