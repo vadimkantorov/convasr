@@ -24,6 +24,7 @@ import transcripts
 import audio
 import vis
 
+<<<<<<< HEAD
 @torch.no_grad()
 def main(args):
 	os.makedirs(args.output_path, exist_ok = True)
@@ -39,6 +40,34 @@ def main(args):
 	model.eval()
 	model.fuse_conv_bn_eval()
 	model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+=======
+parser = argparse.ArgumentParser()
+parser.add_argument('--checkpoint', required = True)
+parser.add_argument('-i', '--data-path', required = True)
+parser.add_argument('-o', '--output-path')
+parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
+parser.add_argument('--max-segment-seconds', type = float, default = 2)
+parser.add_argument('--num-workers', type = int, default = 32)
+parser.add_argument('--ext', default = ['wav', 'mp3'])
+parser.add_argument('--decoder', default = 'GreedyDecoder', choices = ['GreedyDecoder', 'BeamSearchDecoder'])
+parser.add_argument('--decoder-topk', type = int, default = 1)
+parser.add_argument('--beam-width', type = int, default = 5000)
+parser.add_argument('--beam-alpha', type = float, default = 0.3)
+parser.add_argument('--beam-beta', type = float, default = 1.0)
+parser.add_argument('--lm')
+parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
+parser.add_argument('--vad', type = int, choices = [0, 1, 2, 3], default = False, nargs = '?')
+parser.add_argument('--align', action = 'store_true')
+parser.add_argument('--verbose', action = 'store_true')
+#parser.add_argument('--window-size', type = float, default = 0.02)
+
+
+args = parser.parse_args()
+args.output_path = args.output_path or args.data_path
+
+vad = webrtcvad.Vad()
+vad.set_mode(args.vad if isinstance(args.vad, int) else 3)
+>>>>>>> 6e83fe4... uks test + dialog start
 
 	decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 	
