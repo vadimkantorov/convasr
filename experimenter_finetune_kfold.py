@@ -11,15 +11,15 @@ bash_template = """
     --verbose --lang ru \
     --model JasperNetBig \
     --train-batch-size 32 --val-batch-size 196 \
-    --lr 1e-4 \
+    --lr 5e-5 \
     --optimizer NovoGrad \
     --train-data-path {train_set} \
-    --val-data-path kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv data/domain_splits/mixed_val.csv data/domain_splits/clean_val.csv {val_set} \
+    --val-data-path kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv data/mixed_val.csv data/clean_val.csv {val_set} \
     --analyze kontur_calls_micro.csv \
     --val-iteration-interval 2500 \
     --fp16 O2 \
     --checkpoint {cp} \
-    --experiment-name finetune_kfold_1603_{i} \
+    --experiment-name finetune_kfold_long_train_long_ftune_1603_{i} \
     --epochs {epoch} 
 """
 
@@ -41,7 +41,7 @@ def run_task(worker_id, args):
     print(epoch)
     epoch = int(cp.split('_')[-2].replace('epoch', ''))
     print(epoch) 
-    bashcmd = bash_template.format(i=i, epoch=epoch+30, train_set='data/kfold_splits/' + train_set, val_set =' '.join(['data/kfold_splits/' + vs for vs in val_set.split(' ')]), cp=cp)
+    bashcmd = bash_template.format(i=i, epoch=epoch+100, train_set='data/kfold_splits/' + train_set, val_set =' '.join(['data/kfold_splits/' + vs for vs in val_set.split(' ')]), cp=cp)
     print(bashcmd)
     with open(f'data/experiments/experiment_{i}_output.txt', 'a+') as out:
         with open(f'data/experiments/subprocess_{i}_exit_codes.txt', 'a+') as experiment_results:
@@ -71,9 +71,9 @@ def main():
     queue = Queue()
 
     for v in [
-	(0, 38, 'trainset_kfold_16032020_fold_0.csv', 'valset_kfold_16032020_fold_0.csv valset_kfold_16032020.1_fold_0.csv valset_kfold_16032020.0_fold_0.csv', 'best_checkpoints/JasperNetBig_NovoGrad_lr1e-3_wd1e-3_bs512____long-train_lr1e-4_checkpoint_epoch48_iter0173280.pt'),
-	(1, 38, 'trainset_kfold_16032020_fold_1.csv', 'valset_kfold_16032020_fold_1.csv valset_kfold_16032020.1_fold_1.csv valset_kfold_16032020.0_fold_1.csv', 'best_checkpoints/JasperNetBig_NovoGrad_lr1e-3_wd1e-3_bs512____long-train_lr1e-4_checkpoint_epoch48_iter0173280.pt'),
-	(2, 38, 'trainset_kfold_16032020_fold_2.csv', 'valset_kfold_16032020_fold_2.csv valset_kfold_16032020.1_fold_2.csv valset_kfold_16032020.0_fold_2.csv', 'best_checkpoints/JasperNetBig_NovoGrad_lr1e-3_wd1e-3_bs512____long-train_lr1e-4_checkpoint_epoch48_iter0173280.pt'),
+	(0, 38, 'trainset_kfold_16032020_fold_0.csv', 'valset_kfold_16032020_fold_0.csv valset_kfold_16032020.1_fold_0.csv valset_kfold_16032020.0_fold_0.csv', 'data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs1024____long-train_bs1024/checkpoint_epoch106_iter0191648.pt'),
+	(1, 38, 'trainset_kfold_16032020_fold_1.csv', 'valset_kfold_16032020_fold_1.csv valset_kfold_16032020.1_fold_1.csv valset_kfold_16032020.0_fold_1.csv', 'data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs1024____long-train_bs1024/checkpoint_epoch106_iter0191648.pt'),
+	(2, 38, 'trainset_kfold_16032020_fold_2.csv', 'valset_kfold_16032020_fold_2.csv valset_kfold_16032020.1_fold_2.csv valset_kfold_16032020.0_fold_2.csv', 'data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs1024____long-train_bs1024/checkpoint_epoch106_iter0191648.pt'),
 	]:
         queue.put(v)
 
