@@ -66,7 +66,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			transcript = [dict(dict(audio_path = audio_path, channel = 0, speaker = None, begin = 0, end = signal.shape[1] / sample_rate), **t) for t in sorted(transcript, key = transcripts.sort_key)]
 			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], int(t['begin'] * sample_rate) : 1 + int(t['end'] * sample_rate)]]]
 			targets = [[labels.encode(t.get('ref', ''))[1] for t in transcript] for labels in self.labels]
-
+		from IPython import embed
+		embed()
 		return [transcript, features] + list(targets)
 			
 	def __len__(self):

@@ -24,7 +24,6 @@ import transcripts
 import audio
 import vis
 
-<<<<<<< HEAD
 @torch.no_grad()
 def main(args):
 	os.makedirs(args.output_path, exist_ok = True)
@@ -40,34 +39,6 @@ def main(args):
 	model.eval()
 	model.fuse_conv_bn_eval()
 	model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-=======
-parser = argparse.ArgumentParser()
-parser.add_argument('--checkpoint', required = True)
-parser.add_argument('-i', '--data-path', required = True)
-parser.add_argument('-o', '--output-path')
-parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
-parser.add_argument('--max-segment-seconds', type = float, default = 2)
-parser.add_argument('--num-workers', type = int, default = 32)
-parser.add_argument('--ext', default = ['wav', 'mp3'])
-parser.add_argument('--decoder', default = 'GreedyDecoder', choices = ['GreedyDecoder', 'BeamSearchDecoder'])
-parser.add_argument('--decoder-topk', type = int, default = 1)
-parser.add_argument('--beam-width', type = int, default = 5000)
-parser.add_argument('--beam-alpha', type = float, default = 0.3)
-parser.add_argument('--beam-beta', type = float, default = 1.0)
-parser.add_argument('--lm')
-parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
-parser.add_argument('--vad', type = int, choices = [0, 1, 2, 3], default = False, nargs = '?')
-parser.add_argument('--align', action = 'store_true')
-parser.add_argument('--verbose', action = 'store_true')
-#parser.add_argument('--window-size', type = float, default = 0.02)
-
-
-args = parser.parse_args()
-args.output_path = args.output_path or args.data_path
-
-vad = webrtcvad.Vad()
-vad.set_mode(args.vad if isinstance(args.vad, int) else 3)
->>>>>>> 6e83fe4... uks test + dialog start
 
 	decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 	
@@ -77,6 +48,7 @@ vad.set_mode(args.vad if isinstance(args.vad, int) else 3)
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
 
 	for meta, x, xlen, y, ylen in val_data_loader:
+		print('run predicting')
 		audio_path, speakers = map(meta[0].get, ['audio_path', 'speakers'])
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
 
@@ -125,7 +97,9 @@ vad.set_mode(args.vad if isinstance(args.vad, int) else 3)
 			alignment = ctc.alignment(log_probs.permute(2, 0, 1), y.squeeze(1), olen, ylen.squeeze(1), blank = labels.blank_idx)
 			ref_segments = [labels.decode(y[i, 0, :ylen[i]].tolist(), ts[i], alignment[i], channel = channel[i], speaker = speaker[i], key = 'ref', speakers = speakers) for i in range(len(decoded))]
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic_alignment))
-		
+	 	
+		from IPython import embed
+
 		if args.max_segment_duration:
 			ref_transcript, hyp_transcript = sum(ref_segments, []), sum(hyp_segments, [])
 			if ref:
@@ -138,6 +112,7 @@ vad.set_mode(args.vad if isinstance(args.vad, int) else 3)
 		transcript = [dict(audio_path = audio_path, ref = ref, hyp = hyp, speaker = transcripts.speaker(ref = ref_transcript, hyp = hyp_transcript), cer = metrics.cer(hyp, ref), words = metrics.align_words(hyp, ref)[-1], alignment = dict(ref = ref_transcript, hyp = hyp_transcript), **transcripts.summary(hyp_transcript)) for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments) for ref, hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]]
 	
 		filtered_transcript = list(transcripts.filter(transcript, align_boundary_words = args.align_boundary_words, cer = args.cer, duration = args.duration, gap = args.gap, unk = args.unk, num_speakers = args.num_speakers))
+		embed()
 		json.dump(filtered_transcript, open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 		print('Filtered segments:', len(filtered_transcript), 'out of', len(transcript))
 		print(transcript_path)
@@ -177,7 +152,7 @@ if __name__ == '__main__':
 	parser.add_argument('--unk', type = transcripts.number_tuple)
 	parser.add_argument('--align-boundary-words', action = 'store_true')
 	parser.add_argument('--audio-backend', default = 'ffmpeg', choices = ['sox', 'ffmpeg'])
-	parser.add_argument('--speaker', nargs = '*')
+	parser.add_argument('--speakers', nargs = '*')
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
