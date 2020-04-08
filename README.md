@@ -100,6 +100,20 @@ sudo docker run --runtime=nvidia --privileged --cap-add=SYS_PTRACE -v ~/.ssh:/ro
 sudo docker image rm -f convasr
 ```
 
+# Tensorboard
+```shell
+ssh -L 6007:YOURHOST:6006 YOURHOST -N &
+```
+
+# Html server docker commands
+```shell
+# launch nginx docker
+docker run -d -p 127.0.0.1:8080:80 -v /home/data/html:/usr/share/nginx/html:ro -it --rm nginx
+
+# ssh port forwarding for port 8080
+ssh -L 8081:YOURHOST:8080 YOURHOST -N &
+```
+
 # KenLM
 Dependencies: `sudo apt-get install build-essential cmake libboost-all-dev zlib1g-dev libbz2-dev liblzma-dev`
 ```shell
