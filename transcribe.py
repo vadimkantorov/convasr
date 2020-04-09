@@ -39,7 +39,6 @@ def main(args):
 	model.eval()
 	model.fuse_conv_bn_eval()
 	model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-
 	decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 	
 	data_paths = [p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f]) if os.path.isfile(p) and any(map(p.endswith, args.ext))] + [p for p in args.input_path if any(map(p.endswith, ['.json', '.json.gz']))]
@@ -48,7 +47,6 @@ def main(args):
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
 
 	for meta, x, xlen, y, ylen in val_data_loader:
-		print('run predicting')
 		audio_path, speakers = map(meta[0].get, ['audio_path', 'speakers'])
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
 
@@ -74,7 +72,7 @@ def main(args):
 		channel = [t['channel'] for t in meta]
 		speaker = [t['speaker'] for t in meta]
 		ref_segments = [[dict(channel = channel[i], begin = meta[i]['begin'], end = meta[i]['end'], ref = labels.decode(y[i, 0, :ylen[i]].tolist()))] for i in range(len(decoded))]
-		hyp_segments = [labels.decode(decoded[i], ts[i], channel = channel[i], replace_blank = True, replace_repeat = True, replace_space = False, speakers = args.speakers) for i in range(len(decoded))]
+		hyp_segments = [labels.decode(decoded[i], ts[i], channel = channel[i], replace_blank = True, replace_repeat = True, replace_space = False, speaker = torch.full((len(decoded[i]),), channel[i], dtype=torch.uint8), speakers = args.speakers) for i in range(len(decoded))]
 		
 		ref, hyp = ' '.join(transcripts.join(ref = r) for r in ref_segments).strip(), ' '.join(transcripts.join(hyp = h) for h in hyp_segments).strip()
 		if args.verbose:
@@ -98,26 +96,25 @@ def main(args):
 			ref_segments = [labels.decode(y[i, 0, :ylen[i]].tolist(), ts[i], alignment[i], channel = channel[i], speaker = speaker[i], key = 'ref', speakers = speakers) for i in range(len(decoded))]
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic_alignment))
 	 	
-		from IPython import embed
-
 		if args.max_segment_duration:
 			ref_transcript, hyp_transcript = sum(ref_segments, []), sum(hyp_segments, [])
 			if ref:
 				ref_segments = list(transcripts.segment(ref_transcript, args.max_segment_duration))
 				hyp_segments = list(transcripts.segment(hyp_transcript, ref_segments))
 			else:
+				hyp_transcript = list(sorted(hyp_transcript, key=transcripts.sort_key))
 				hyp_segments = list(transcripts.segment(hyp_transcript, args.max_segment_duration))
 				ref_segments = [[] for _ in hyp_segments]
-
 		transcript = [dict(audio_path = audio_path, ref = ref, hyp = hyp, speaker = transcripts.speaker(ref = ref_transcript, hyp = hyp_transcript), cer = metrics.cer(hyp, ref), words = metrics.align_words(hyp, ref)[-1], alignment = dict(ref = ref_transcript, hyp = hyp_transcript), **transcripts.summary(hyp_transcript)) for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments) for ref, hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]]
 	
 		filtered_transcript = list(transcripts.filter(transcript, align_boundary_words = args.align_boundary_words, cer = args.cer, duration = args.duration, gap = args.gap, unk = args.unk, num_speakers = args.num_speakers))
-		embed()
 		json.dump(filtered_transcript, open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 		print('Filtered segments:', len(filtered_transcript), 'out of', len(transcript))
 		print(transcript_path)
 		if args.html:
 			vis.transcript(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), args.sample_rate, args.mono, transcript, filtered_transcript)
+		if args.txt:
+			open(os.path.join(args.output_path, os.path.basename(audio_path) + '.txt'), 'w').write(hyp)
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
 if __name__ == '__main__':
@@ -145,6 +142,7 @@ if __name__ == '__main__':
 	parser.add_argument('--window-size-dilate', type = float, default = 1.0)
 	parser.add_argument('--mono', action = 'store_true')
 	parser.add_argument('--html', action = 'store_true')
+	parser.add_argument('--txt', action = 'store_true') # store whole transcript in txt format need for assessments
 	parser.add_argument('--cer', type = transcripts.number_tuple)
 	parser.add_argument('--duration', type = transcripts.number_tuple)
 	parser.add_argument('--num-speakers', type = transcripts.number_tuple)

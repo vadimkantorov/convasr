@@ -20,7 +20,6 @@ def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize =
 		sample_rate_, signal = sample_rate, torch.tensor([[]], dtype = dtype)
 
 	signal = torch.as_tensor(signal).to(dtype)
-	
 	if offset or duration is not None:
 		signal = signal[..., slice(int(offset * sample_rate_) if offset else None, int((offset + duration) * sample_rate_) if duration is not None else None)]
 	if mono:
