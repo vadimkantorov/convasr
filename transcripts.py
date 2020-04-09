@@ -13,10 +13,17 @@ def join(ref = [], hyp = []):
 	return ' '.join(t['ref'] for t in ref).strip() + ' '.join(t['hyp'] for t in hyp).strip()
 
 def speaker(ref = None, hyp = None):
-	return ', '.join(sorted(set(t.get('speaker') or 'NA' for t in (ref if ref is not None else hyp if hyp is not None else []))))
+	return ', '.join(sorted(set(t.get('speaker') or 'N/A' for t in (ref + hyp) if t.get('ref', '') + t.get('hyp', ''))))
 
-def take_between(transcript, ind_last_taken, t, first, last):
-	res = [(k, u) for k, u in enumerate(transcript) if (first or ind_last_taken < 0 or transcript[ind_last_taken]['end'] < u['begin']) and (last or u['end'] < t['begin'])]
+def take_between(transcript, ind_last_taken, t, first, last, sort_by_time=True):
+	if sort_by_time:
+		lt = lambda a, b:  a['end'] < b['begin']
+		gt = lambda a, b: a['begin'] > b['begin']
+	else:
+		lt = lambda a, b:  sort_key(a) < sort_key(b)
+		gt = lambda a, b: sort_key(a) > sort_key(b)
+
+	res = [(k, u) for k, u in enumerate(transcript) if (first or ind_last_taken < 0 or lt(transcript[ind_last_taken], u)) and (last or gt(t, u))]
 	ind_last_taken, transcript = zip(*res) if res else ([ind_last_taken], [])
 	return ind_last_taken[-1], list(transcript)
 
@@ -25,13 +32,15 @@ def segment(transcript, max_segment_seconds):
 	if isinstance(max_segment_seconds, list):
 		for j in range(len(max_segment_seconds)):
 			first, last = ind_last_taken == -1, j == len(max_segment_seconds) - 1
-			ind_last_taken, transcript_segment = take_between(transcript, ind_last_taken, max_segment_seconds[j + 1][0] if not last else None, first, last)
+			ind_last_taken, transcript_segment = take_between(transcript, ind_last_taken, max_segment_seconds[j + 1][0] if not last else None, first, last, sort_by_time=True)
 			yield transcript_segment
 	else:
 		for j, t in enumerate(transcript):
 			first, last = ind_last_taken == -1, j == len(transcript) - 1
-			if last or (t['end'] - transcript[ind_last_taken + 1]['begin'] > max_segment_seconds) or t['speaker'] != transcript[ind_last_taken + 1]['speaker']:
-				ind_last_taken, transcript_segment = take_between(transcript, ind_last_taken, t, first, last)
+			if last or (t['end'] - transcript[ind_last_taken + 1]['begin'] > max_segment_seconds) \
+					or (j >= 1 and t['speaker'] != transcript[j - 1]['speaker']) \
+					or (j >= 1 and t['channel'] != transcript[j - 1]['channel']):
+				ind_last_taken, transcript_segment = take_between(transcript, ind_last_taken, t, first, last, sort_by_time=False)
 				if transcript_segment:
 					yield transcript_segment
 	

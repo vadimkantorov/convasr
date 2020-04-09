@@ -62,12 +62,10 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				speakers = [None] + list(sorted(set(t['speaker'] for t in transcript if t.get('speaker') is not None)))
 				speaker = torch.cat([torch.full((len(ref) + 1,), speakers.index(t.get('speaker')), dtype = torch.uint8).scatter_(0, torch.tensor(len(ref)), 0) for t, ref in zip(transcript, ref_full)])[:-1]
 				transcript = [dict(speaker = speaker, speakers = speakers, ref = ' '.join(ref_full))]
-			
-			transcript = [dict(dict(audio_path = audio_path, channel = 0, speaker = None, begin = 0, end = signal.shape[1] / sample_rate), **t) for t in sorted(transcript, key = transcripts.sort_key)]
+		
+			transcript = [dict(dict(audio_path = audio_path, channel = channel, speaker = None, begin = 0, end = signal.shape[1] / sample_rate), **t) for t in sorted(transcript, key = transcripts.sort_key) for channel in ([t['channel']] if 'channel' in t else range(len(signal)))]
 			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], int(t['begin'] * sample_rate) : 1 + int(t['end'] * sample_rate)]]]
 			targets = [[labels.encode(t.get('ref', ''))[1] for t in transcript] for labels in self.labels]
-		from IPython import embed
-		embed()
 		return [transcript, features] + list(targets)
 			
 	def __len__(self):
@@ -170,7 +168,7 @@ class Labels:
 
 	def decode(self, idx : list, ts = None, I = None, speaker = None, channel = 0, speakers = None, replace_blank = True, replace_space = False, replace_repeat = True, key = 'hyp'):
 		decode_ = lambda i, j: self.postprocess_transcript(''.join(self[idx[ij]] for ij in range(i, j + 1) if replace_repeat is False or ij == 0 or idx[ij] != idx[ij - 1]), replace_blank = replace_blank, replace_space = replace_space, replace_repeat = replace_repeat)
-		speaker_ = lambda i, j: None if speaker is None else int(speaker[i:1 + j].max()) if speakers else speakers[int(speaker[i:1 + j].max())]
+		speaker_ = lambda i, j: int(speaker[i:1 + j].max()) if speaker is not None and speakers is None  else speakers[int(speaker[i:1 + j].max())] if speaker is not None and speakers is not None else None
 		channel_ = lambda i_, j_: channel if isinstance(channel, int) else int(channel[i_])
 
 		if ts is None:
