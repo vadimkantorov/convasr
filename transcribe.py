@@ -97,12 +97,11 @@ def main(args):
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic_alignment))
 	 	
 		if args.max_segment_duration:
-			ref_transcript, hyp_transcript = sum(ref_segments, []), sum(hyp_segments, [])
+			ref_transcript, hyp_transcript = [list(sorted(sum(segments, []), key = transcripts.sort_key)) for segments in [ref_segments, hyp_segments]]
 			if ref:
 				ref_segments = list(transcripts.segment(ref_transcript, args.max_segment_duration))
 				hyp_segments = list(transcripts.segment(hyp_transcript, ref_segments))
 			else:
-				hyp_transcript = list(sorted(hyp_transcript, key=transcripts.sort_key))
 				hyp_segments = list(transcripts.segment(hyp_transcript, args.max_segment_duration))
 				ref_segments = [[] for _ in hyp_segments]
 		transcript = [dict(audio_path = audio_path, ref = ref, hyp = hyp, speaker = transcripts.speaker(ref = ref_transcript, hyp = hyp_transcript), cer = metrics.cer(hyp, ref), words = metrics.align_words(hyp, ref)[-1], alignment = dict(ref = ref_transcript, hyp = hyp_transcript), **transcripts.summary(hyp_transcript)) for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments) for ref, hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]]
