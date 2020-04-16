@@ -39,7 +39,7 @@ def cut(input_path, output_path, sample_rate, mono, dilate, strip):
 
 	for t in sorted(transcript, key = lambda t: t['audio_path']):
 		audio_path = t['audio_path']
-		signal = audio.read_audio(audio_path, sample_rate, normalize = False, dtype = torch.float32)[0] if audio_path != prev_audio_path else signal
+		signal = audio.read_audio(audio_path, sample_rate, normalize = False)[0] if audio_path != prev_audio_path else signal
 		t['channel'] = 0 if len(signal) == 1 else None if mono else t.get('channel')
 		segment = signal[t['channel'] if t['channel'] is not None else ..., int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)]
 		segment_path = os.path.join(output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t))

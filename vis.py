@@ -34,7 +34,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	has_ref = any(t['alignment']['ref'] for t in transcript)
 
 	audio_path = transcript[0]['audio_path']
-	signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = mono, dtype = torch.int16, normalize = False)
+	signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = mono, normalize = False)
 	
 	fmt_link = lambda ref = '', hyp = '', channel = 0, begin = 0, end = 0, speaker = '', i = '', j = '': (f'<a onclick="return play({channel},{begin},{end})"' if ref not in [0, 1] else '<span') + f' title="#{channel}. {speaker}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + ((ref + hyp) if isinstance(ref, str) else f'{begin:.02f}' if ref == 0 else f'{end:.02f}' if ref == 1 else f'{end - begin:.02f}') + ('</a>' if ref not in [0, 1] else '</span>')
 	fmt_words = lambda rh: ' '.join(fmt_link(**w) for w in rh)

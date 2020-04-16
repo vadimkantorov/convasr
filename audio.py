@@ -4,11 +4,14 @@ import librosa
 import torch
 import models
 
-def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize = True, mono = True, dtype = torch.float32, byte_order = 'little', backend = 'sox'):
+f2s = lambda signal: (signal * torch.iinfo(torch.int16).max).short()
+s2f = lambda signal: signal.float() * torch.iinfo(torch.int16).max
+
+def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize = True, mono = True, byte_order = 'little', backend = 'sox'):
 	try:
 		if audio_path.endswith('.wav'):
 			sample_rate_, signal = scipy.io.wavfile.read(audio_path)
-			signal = signal[None, :] if len(signal.shape) == 1 else signal.T
+			signal = torch.as_tensor(signal[None, :] if len(signal.shape) == 1 else signal.T)
 		elif backend == 'sox':
 			num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path])) if not mono else 1
 			sample_rate_, signal = sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', str(num_channels), '-t', 'raw', '-']), byte_order = byte_order)).reshape(-1, num_channels).t()
@@ -19,23 +22,24 @@ def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize =
 		print(f'Error when reading [{audio_path}]')
 		sample_rate_, signal = sample_rate, torch.tensor([[]], dtype = dtype)
 
-	signal = torch.as_tensor(signal).to(dtype)
+	assert signal.dtype in [torch.int16, torch.float32]
+	if signal.dtype is torch.int16:
+		signal = s2f(signal)
 	if offset or duration is not None:
 		signal = signal[..., slice(int(offset * sample_rate_) if offset else None, int((offset + duration) * sample_rate_) if duration is not None else None)]
 	if mono:
-		signal = signal.float().mean(dim = 0, keepdim = True).to(dtype)
+		signal = signal.mean(dim = 0, keepdim = True)
 	if normalize:
 		signal = models.normalize_signal(signal, dim = -1)
-	if dtype is torch.float32 and sample_rate_ != sample_rate:
+	if sample_rate_ != sample_rate:
 		signal, sample_rate_ = resample(signal, sample_rate_, sample_rate)
-
-	assert sample_rate_ == sample_rate, 'Cannot resample non-float tensors because of librosa constraints'
 
 	return signal, sample_rate_
 
 def write_audio(audio_path, signal, sample_rate, mono = False):
-	signal = signal if not mono else signal.float().mean(dim = 0, keepdim = True).type_as(signal)
-	scipy.io.wavfile.write(audio_path, sample_rate, signal.t().numpy())
+	assert signal.dtype is torch.float32
+	signal = signal if not mono else signal.mean(dim = 0, keepdim = True)
+	scipy.io.wavfile.write(audio_path, sample_rate, f2s(signal.t()).numpy())
 	return audio_path
 
 def resample(signal, sample_rate_, sample_rate):
