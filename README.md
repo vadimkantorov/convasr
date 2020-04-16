@@ -86,7 +86,7 @@ python senet_infer.py -d ../data/sample_ok.convasr.1.sox -m models
 "sox -V0 -t wav - -r 16k -b 16 -e signed -t wav -c 1 -"
 
 # print total duration of audio files in a directory
-ls mydir/*.wav | xargs soxi -D | awk '{sum += $1} END {print sum / 60; print "minutes"}'
+find -type f -name '*.wav' | xargs soxi -D | awk '{sum += $1} END {print sum / 3600; print "hours"}'
 ```
 
 # Docker commands
