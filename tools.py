@@ -30,7 +30,7 @@ def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, 
 		json.dump(transcript_cat, open(output_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 	print(output_path)
 
-def cut(input_path, output_path, sample_rate, mono, dilate, strip):
+def cut(input_path, output_path, sample_rate, mono, dilate, strip, audio_backend):
 	os.makedirs(output_path, exist_ok = True)
 	transcript_cat = []
 	
@@ -39,7 +39,7 @@ def cut(input_path, output_path, sample_rate, mono, dilate, strip):
 
 	for t in sorted(transcript, key = lambda t: t['audio_path']):
 		audio_path = t['audio_path']
-		signal = audio.read_audio(audio_path, sample_rate, normalize = False)[0] if audio_path != prev_audio_path else signal
+		signal = audio.read_audio(audio_path, sample_rate, normalize = False, backend = audio_backend)[0] if audio_path != prev_audio_path else signal
 		t['channel'] = 0 if len(signal) == 1 else None if mono else t.get('channel')
 		segment = signal[t['channel'] if t['channel'] is not None else ..., int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)]
 		segment_path = os.path.join(output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t))
@@ -179,6 +179,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--sample-rate', '-r', type = int, default = 8_000, choices = [8_000, 16_000, 32_000, 48_000])
 	cmd.add_argument('--strip', nargs = '*', default = ['alignment', 'words'])
 	cmd.add_argument('--mono', action = 'store_true')
+	cmd.add_argument('--audio-backend', default = 'ffmpeg', choices = ['sox', 'ffmpeg'])
 	cmd.set_defaults(func = cut)
 	
 	cmd = subparsers.add_parser('cat')
