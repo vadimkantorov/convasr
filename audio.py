@@ -5,7 +5,7 @@ import torch
 import models
 
 f2s = lambda signal: (signal * torch.iinfo(torch.int16).max).short()
-s2f = lambda signal: signal.float() * torch.iinfo(torch.int16).max
+s2f = lambda signal: signal.float() / torch.iinfo(torch.int16).max
 
 def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize = True, mono = True, byte_order = 'little', backend = 'sox'):
 	try:
