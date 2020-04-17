@@ -67,7 +67,7 @@ def main(args):
 		model.fuse_conv_bn_eval()
 		waveform_input = torch.rand(args.onnx_sample_batch_size, args.onnx_sample_time, device = args.device)
 		logits = model(waveform_input)
-		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B', 1 : 'T'}, logits = {0 : 'B', 2: 't'}))
+		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, export_params = args.onnx_export_params, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B', 1 : 'T'}, logits = {0 : 'B', 2: 't'}))
 		onnxrt_session = onnxruntime.InferenceSession(args.onnx)
 		onnxruntime_logger_severity_verbose = 0
 		onnxruntime.set_default_logger_severity(onnxruntime_logger_severity_verbose)
@@ -366,6 +366,7 @@ if __name__ == '__main__':
 	parser.add_argument('--onnx-sample-batch-size', type = int, default = 16)
 	parser.add_argument('--onnx-sample-time', type = int, default = 1024)
 	parser.add_argument('--onnx-opset', type = int, default = 10, choices = [9, 10, 11])
+	parser.add_argument('--onnx-export-params', type = bool, default = True)
 	parser.add_argument('--dropout', type = float, default = 0.2)
 	parser.add_argument('--githttp')
 	parser.add_argument('--vis-errors-audio', action = 'store_true')

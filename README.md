@@ -30,6 +30,14 @@ wget https://nlp.h-its.org/bpemb/ru/ru.wiki.bpe.vs5000.vocab -P data
 wget https://nlp.h-its.org/bpemb/ru/ru.wiki.bpe.vs5000.model -P data
 ```
 
+# Debugging ONNX problems
+```shell
+# export to ONNX and disable exporting weights for minimal file size
+python3 train.py --onnx data/model.onnx --onnx-export-params=
+
+# upload data/model.onnx to https://lutzroeder.github.io/netron/
+```
+
 # Training on AWS Spot Instances with spotty
 ```shell
 # download the ru_open_stt dataset on an AWS EBS volume from a t2.large On-Demand instance
