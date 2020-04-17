@@ -117,7 +117,7 @@ class JasperNet(nn.Module):
 		self.dict = dict
 
 	def forward(self, x, xlen = None, y = None, ylen = None):
-		x = self.frontend(x.squeeze(1))
+		x = self.frontend(x if x.ndim == 2 else x.squeeze(1))
 		residual = []
 		for i, subblock in enumerate(self.backbone):
 			x = subblock(x, residual = residual, lengths_fraction = xlen)
@@ -322,7 +322,7 @@ class LogFilterBankFrontend(nn.Module):
 		#mel_basis = torchaudio.functional.create_fb_matrix(n_fft, n_mels = num_input_features, fmin = 0, fmax = int(sample_rate/2)).t() # when https://github.com/pytorch/audio/issues/287 is fixed
 		mel_basis = torch.as_tensor(librosa.filters.mel(sample_rate, self.nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2)))
 		self.mel = nn.Conv1d(mel_basis.shape[1], mel_basis.shape[0], 1).requires_grad_(False)
-		self.mel.weight.copy_(mel_basis[..., None])
+		self.mel.weight.copy_(mel_basis.unsqueeze(-1))
 		self.mel.bias.fill_(eps)
 
 		if stft_mode == 'conv':
@@ -335,7 +335,7 @@ class LogFilterBankFrontend(nn.Module):
 			self.stft = None
 
 	def stft_magnitude_squared(self, signal):
-		if self.stft_mode == 'conv':
+		if self.stft is not None:
 			signal = F.pad(signal[:, None, None, :], (self.freq_cutoff - 1, self.freq_cutoff - 1, 0, 0), mode = 'reflect').squeeze(1)
 			forward_transform_squared = self.stft(signal).pow(2)
 			real_squared, imag_squared = forward_transform_squared[:, :self.freq_cutoff, :], forward_transform_squared[:, self.freq_cutoff:, :]
@@ -348,7 +348,7 @@ class LogFilterBankFrontend(nn.Module):
 		signal = torch.cat([signal[..., :1], signal[..., 1:] - self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
 		signal = signal + self.dither * torch.randn_like(signal) if self.dither > 0 else signal
 		power_spectrum = self.stft_magnitude_squared(signal)
-		features = self.mel(power_spectrum.type_as(self.mel.weight)).log()
+		features = self.mel(power_spectrum).log()
 		return normalize_features(features) if self.normalize_features else features 
 	
 	@property
