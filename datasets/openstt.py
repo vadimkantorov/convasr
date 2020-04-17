@@ -68,9 +68,9 @@ if __name__ == '__main__':
 	mixed['val'] = mixed_['val']
 	mixed['small'] = mixed['train'][:int(0.1 * len(mixed['train']))]
 	
-	books = split(by_group, ['buriy_audiobooks_2_val'], dict(val = None))
+	radio = split(by_group, ['radio_2'], dict(train = 0.9, val = 0.1))
 	
-	dump(books, args.output_dir, 'books', gz = args.gzip)
+	dump(radio, args.output_dir, 'radio', gz = args.gzip)
 	dump(clean, args.output_dir, 'clean', gz = args.gzip)
 	dump(mixed, args.output_dir, 'mixed', gz = args.gzip)
 	dump(split(by_group, ['asr_calls_2_val'], dict(val = None)), args.output_dir, 'calls', gz = args.gzip)
