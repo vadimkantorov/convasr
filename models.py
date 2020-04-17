@@ -128,8 +128,8 @@ class JasperNet(nn.Module):
 				residual.append(x)
 
 		logits = self.decoder(x)
-		log_probs = [F.log_softmax(l, dim = 1).float() for l in logits]
-		olen = [compute_output_lengths(l, xlen.float()) for l in logits]
+		log_probs = [F.log_softmax(l, dim = 1).to(torch.float32) for l in logits]
+		olen = [compute_output_lengths(l, xlen.to(torch.float32) if xlen is not None else xlen) for l in logits]
 		aux = {}
 
 		if y is not None and ylen is not None:
@@ -329,7 +329,7 @@ class LogFilterBankFrontend(nn.Module):
 			fourier_basis = torch.rfft(torch.eye(self.nfft), signal_ndim = 1, onesided = False)
 			forward_basis = fourier_basis[:self.freq_cutoff].permute(2, 0, 1).reshape(-1, 1, fourier_basis.shape[1])
 			forward_basis = forward_basis * torch.as_tensor(librosa.util.pad_center(self.window, self.nfft), dtype = forward_basis.dtype)
-			self.stft = nn.Conv1d(forward_basis.shape[1], forward_basis.shape[0], 1, bias = False, stride = self.hop_length).requires_grad_(False)
+			self.stft = nn.Conv1d(forward_basis.shape[1], forward_basis.shape[0], forward_basis.shape[2], bias = False, stride = self.hop_length).requires_grad_(False)
 			self.stft.weight.copy_(forward_basis)
 		else:
 			self.stft = None
