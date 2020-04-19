@@ -196,7 +196,7 @@ def audiosample(input_path, output_path, K):
 		random.shuffle(transcript)
 		for t in transcript[:K]:
 			try:
-				encoded = base64.b64encode(open(t['audio_path'], 'rb').read()).decode()
+				encoded = base64.b64encode(open('data/'+t['audio_path'], 'rb').read()).decode()
 			except:
 				f.write('<tr><td>file not found: {audio_path}</td></tr>'.format(**t))
 				continue
@@ -246,7 +246,7 @@ def summary(input_path):
 	plt.savefig(input_path + '.png', dpi = 150)
 
 def tabulate(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe, der):
-	labels = datasets.Labels(ru)
+	labels = datasets.Labels(lang)
 
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
@@ -255,14 +255,14 @@ def tabulate(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20,
 		iteration = f[eidx:].replace('.json', '')
 		val_dataset_name = f[f.find('transcripts_') + len('transcripts_'):eidx]
 		checkpoint = os.path.join(experiment_dir, 'checkpoint_' + f[eidx:].replace('.json', '.pt')) if not json_ else f
-		val = torch.tensor([j['wer' if wer else 'entropy' if entropy else 'loss' if loss else 'per' if per else 'der' if der else 'cer'] for j in json.load(open(f)) if j['labels'].startswith(bpe)] or [0.0])
+		metric = 'wer' if wer else 'entropy' if entropy else 'loss' if loss else 'per' if per else 'der' if der else 'cer'
+		val = torch.tensor([j[metric] for j in json.load(open(f)) if j['labels'].startswith(labels.alphabet)] or [0.0])
 		val = val[~(torch.isnan(val) | torch.isinf(val))]
 
 		if cer10 or cer20 or cer30 or cer40 or cer50:
 			val = (val < 0.1 * [False, cer10, cer20, cer30, cer40, cer50].index(True)).float()
 		if cer15:
 			val = (val < 0.15).float()
-
 		res[iteration].append((val_dataset_name, float(val.mean()), checkpoint))
 	val_dataset_names = sorted(set(val_dataset_name for r in res.values() for val_dataset_name, cer, checkpoint in r))
 	print('iteration\t' + '\t'.join(val_dataset_names))
