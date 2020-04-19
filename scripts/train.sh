@@ -2,15 +2,17 @@ python3 train.py $@ \
   --githttp https://github.com/vadimkantorov/convasr/commit/%h \
   --verbose --lang ru \
   --model JasperNetBig \
-  --train-batch-size 128 --val-batch-size 64 \
-  --scheduler MultiStepLR --decay-milestones 25000 75000 \
+  --train-batch-size 256 --val-batch-size 192 \
   --lr 1e-2 \
   --optimizer NovoGrad \
-  --train-data-path data/mixed_train.csv \
+  --train-data-path echomsk600/echo_600_train.json \
+  --val-data-path data/clean_val.csv.json echomsk600/echo_600_val.json data/splits/radio_100h_val.csv.json data/mixed_val.csv.json kontur_calls_micro/kontur_calls_micro.csv.json kontur_calls_micro/kontur_calls_micro.0.csv.json kontur_calls_micro/kontur_calls_micro.1.csv.json \
   --analyze kontur_calls_micro.csv \
   --val-iteration-interval 2500 \
-  --epochs 10 --name debug --checkpoint-skip --exphtml= #\
-
+  --fp16 O2 \
+  --experiment-name radio_100h_cut \
+  --epochs 100 --checkpoint-skip --exphtml= #\
+# data/mixed_val.csv data/clean_val.csv kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv 
 #  --val-data-path data/mixed_val.csv data/clean_val.csv kontur_calls_micro/kontur_calls_micro.csv kontur_calls_micro/kontur_calls_micro.0.csv kontur_calls_micro/kontur_calls_micro.1.csv \
 
 #  --finetune --checkpoint-skip
