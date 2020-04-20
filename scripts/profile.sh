@@ -12,7 +12,7 @@ python -m apex.pyprof.prof -w 170 -c kernel,op,sil,tc,flops,bytes,device,stream,
 
 # https://github.com/ezyang/nvprof2json
 # python nvprof2json.py $TRACEFILE > $TRACEFILE.json
-# then open it with chrome://tracking
+# then open it with chrome://tracing
 
 echo nvprof sqlite dump in $TRACEFILE, text trace in $TRACELOG
 echo apex.pyprof dict dump in $TRACEFILE.dict, text trace in $TRACEPYPROFLOG
