@@ -13,7 +13,7 @@ def join(ref = [], hyp = []):
 	return ' '.join(t['ref'] for t in ref).strip() + ' '.join(t['hyp'] for t in hyp).strip()
 
 def speaker(ref = None, hyp = None):
-	return ', '.join(sorted(set(t.get('speaker') or 'N/A' for t in (ref + hyp) if t.get('ref', '') + t.get('hyp', ''))))
+	return ', '.join(sorted(filter(bool, set(t.get('speaker') for t in ref + hyp)))) or None
 
 def take_between(transcript, ind_last_taken, t, first, last, sort_by_time=True):
 	if sort_by_time:
@@ -62,7 +62,7 @@ def group_key(t):
 
 number_tuple = lambda s: tuple(map(lambda ip: (float(ip[1]) if '.' in ip[1] else int(ip[1])) if ip[1] else float(['-inf', 'inf'][ip[0]]), enumerate((s if '-' in s else s + '-' + s).split('-'))))
 
-def filter(transcript, align_boundary_words = False, cer = None, wer = None, duration = None, gap = None, num_speakers = None, audio_name = None, unk = None):
+def prune(transcript, align_boundary_words = False, cer = None, wer = None, duration = None, gap = None, num_speakers = None, audio_name = None, unk = None):
 	is_aligned = lambda w: w['type'] == 'ok'
 	duration_check = lambda t: duration is None or duration[0] <= t['end'] - t['begin'] <= duration[1]
 	cer_check = lambda t: cer is None or cer[0] <= t['cer'] <= cer[1]

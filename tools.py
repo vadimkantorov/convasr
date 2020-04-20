@@ -21,7 +21,7 @@ def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, 
 		if not transcript_name.endswith('.json'):
 			continue
 		transcript = json.load(open(os.path.join(input_path, transcript_name)))
-		transcript = [dict(meta = meta, **t) for t in transcripts.filter(transcript, audio_name = audio_name, **meta)]
+		transcript = [dict(meta = meta, **t) for t in transcripts.prune(transcript, audio_name = audio_name, **meta)]
 		transcript_cat.extend(transcript)
 
 		if not cat:
