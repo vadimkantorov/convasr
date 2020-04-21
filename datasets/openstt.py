@@ -5,12 +5,15 @@ import random
 import itertools
 import argparse
 
+from transcripts import get_duration
+
+
 def dump(by_group, splits, subset_name, gz = True):
 	for split_name, transcript in by_group.items():
 		input_path = os.path.join(splits, f'{subset_name}_{split_name}.json') + ('.gz' if gz else '')
 		with (gzip.open(input_path, 'wt') if gz else open(input_path, 'w')) as f:
 			json.dump(transcript, f, indent = 2, sort_keys = True, ensure_ascii = False)
-		print(input_path, '|', int(os.path.getsize(input_path) // 1e6), 'Mb',  '|', len(transcript) // 1000, 'K utt |', int(sum(t['end'] - t['begin'] for t in transcript) / (60 * 60)), 'hours')
+		print(input_path, '|', int(os.path.getsize(input_path) // 1e6), 'Mb',  '|', len(transcript) // 1000, 'K utt |', int(sum(get_duration(t) for t in transcript) / (60 * 60)), 'hours')
 
 def split(by_group, groups, spec, sample_keyword = 'sample'):
 	transcript = [t for group in groups for t in by_group[group]]
@@ -42,7 +45,8 @@ if __name__ == '__main__':
 	parser.add_argument('--output-dir', '-o', default = 'splits')
 	parser.add_argument('--gzip', action = 'store_true')
 	parser.add_argument('--min-kb', type = int, default = 20)
-	parser.add_argument('--max-cer', default = 'clean_tresholds_cer.json')
+	parser.add_argument('--max-cer', default = 'clean_thresholds_cer.json')
+
 	args = parser.parse_args()
 	
 	args.max_cer = json.load(open(args.max_cer))

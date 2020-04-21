@@ -66,7 +66,7 @@ def main(args):
 		
 		print('Input:', os.path.basename(audio_path))
 		print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
-		print('Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(audio = sum(t['end'] - t['begin'] for t in meta), processing = time.time() - tic))
+		print('Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(audio = sum(transcripts.get_duration(t) for t in meta), processing =time.time() - tic))
 
 		ts = (x.shape[-1] / args.sample_rate) * torch.linspace(0, 1, steps = log_probs.shape[-1]).unsqueeze(0) + torch.FloatTensor([t['begin'] for t in meta]).unsqueeze(1)
 		channel = [t['channel'] for t in meta]
