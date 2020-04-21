@@ -46,12 +46,25 @@ def cut(input_path, output_path, sample_rate, mono, dilate, strip, strip_prefix,
 		segment_path = os.path.join(output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t))
 		audio.write_audio(segment_path, segment, sample_rate, mono = True)
 		if strip_prefix:
-			segment_path = segment_path.replace('data/', '')
-		t = dict(audio_path = segment_path, channel = 0 if len(signal) == 1 else None, begin = 0.0, end = segment.shape[-1] / sample_rate, speaker = t.pop('speaker', None), ref = t.pop('ref'), hyp = t.pop('hyp', None), cer = t.pop('cer', None), alignment = t.pop('alignment', {}), words = t.pop('words', {}), meta = t)
+			segment_path = segment_path.lstrip(strip_prefix)
+			t['audio_path'] = t['audio_path'].lstrip(strip_prefix)
+                        
+		t = dict(audio_path = segment_path,
+				channel = 0 if len(signal) == 1 else None,
+				begin = 0.0,
+				end = segment.shape[-1] / sample_rate,
+				speaker = t.pop('speaker', None),
+				ref = t.pop('ref'),
+				hyp = t.pop('hyp', None),
+				cer = t.pop('cer', None),
+				alignment = t.pop('alignment', {}),
+				words = t.pop('words', {}),
+				meta = t)
+
 		prev_audio_path = audio_path
 		transcript_cat.append(t)
 
-	json.dump(transcripts.strip(transcript_cat, strip),open(os.path.join(output_path, os.path.basename(output_path) + '.json'), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+	json.dump(transcripts.strip(transcript_cat, strip), open(os.path.join(output_path, os.path.basename(output_path) + '.json'), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 	print(output_path)
 
 def cat(input_path, output_path):
@@ -181,7 +194,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--sample-rate', '-r', type = int, default = 8_000, choices = [8_000, 16_000, 32_000, 48_000])
 	cmd.add_argument('--strip', nargs = '*', default = ['alignment', 'words'])
 	cmd.add_argument('--mono', action = 'store_true')
-	cmd.add_argument('--strip-prefix', action = 'store_true')
+	cmd.add_argument('--strip-prefix', type = str)
 	cmd.add_argument('--audio-backend', default = 'ffmpeg', choices = ['sox', 'ffmpeg'])
 	cmd.set_defaults(func = cut)
 	
