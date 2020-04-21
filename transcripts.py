@@ -64,7 +64,7 @@ number_tuple = lambda s: tuple(map(lambda ip: (float(ip[1]) if '.' in ip[1] else
 
 def prune(transcript, align_boundary_words = False, cer = None, wer = None, duration = None, gap = None, num_speakers = None, audio_name = None, unk = None):
 	is_aligned = lambda w: w['type'] == 'ok'
-	duration_check = lambda t: duration is None or duration[0] <= t['end'] - t['begin'] <= duration[1]
+	duration_check = lambda t: duration is None or duration[0] <= get_duration(t) <= duration[1]
 	cer_check = lambda t: cer is None or cer[0] <= t['cer'] <= cer[1]
 	boundary_check = lambda t: ((not t['words']) or (not align_boundary_words) or (is_aligned(t['words'][0]) and is_aligned(t['words'][-1])))
 	gap_check = lambda t, prev: prev is None or gap is None or gap[0] <= t['begin'] - prev['end'] <= gap[1]
@@ -76,3 +76,6 @@ def prune(transcript, align_boundary_words = False, cer = None, wer = None, dura
 		if unk_check(t) and duration_check(t) and cer_check(t) and boundary_check(t) and gap_check(t, prev) and speakers_check(t):
 			prev = t
 			yield t
+
+def get_duration(t):
+	return t['end'] - t['begin']

@@ -78,7 +78,7 @@ def cat(input_path, output_path):
 
 def du(input_path):
 	transcript = json.load(open(input_path))
-	print(input_path, int(os.path.getsize(input_path) // 1e6), 'Mb',  '|', len(transcript) // 1000, 'K utt |', int(sum(t['end'] - t['begin'] for t in transcript) / (60 * 60)), 'hours')
+	print(input_path, int(os.path.getsize(input_path) // 1e6), 'Mb',  '|', len(transcript) // 1000, 'K utt |', int(sum(transcripts.get_duration(t) for t in transcript) / (60 * 60)), 'hours')
 
 def csv2json(input_path, gz, group, reset_duration):
 	gzopen = lambda file_path, mode = 'r': gzip.open(file_path, mode + 't') if file_path.endswith('.gz') else open(file_path, mode)
