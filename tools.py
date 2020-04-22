@@ -45,9 +45,9 @@ def cut(input_path, output_path, sample_rate, mono, dilate, strip, strip_prefix,
 		segment_path = os.path.join(output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t))
 		audio.write_audio(segment_path, segment, sample_rate, mono = True)
 		if strip_prefix:
-			segment_path = segment_path.lstrip(strip_prefix)
-			t['audio_path'] = t['audio_path'].lstrip(strip_prefix)
-                        
+			segment_path = segment_path[len(strip_prefix):] if segment_path.startswith(strip_prefix) else segment_path
+			t['audio_path'] = t['audio_path'][len(strip_prefix):] if t['audio_path'].startswith(strip_prefix) else t['audio_path']
+
 		t = dict(audio_path = segment_path,
 				channel = 0 if len(signal) == 1 else None,
 				begin = 0.0,
