@@ -9,8 +9,9 @@ class BeamSearchDecoder:
 		import ctcdecode
 		self.topk = topk
 		labels_with_spacebug_workaround = list(str(labels).lower())
-		labels_with_spacebug_workaround[labels_with_spacebug_workaround.index(' ')] = '_'
-		self.beam_search_decoder = ctcdecode.CTCBeamDecoder(''.join(labels_with_spacebug_workaround), lm_path, beam_alpha, beam_beta, cutoff_top_n if cutoff_top_n is not None else len(labels), cutoff_prob, beam_width, num_workers, labels.blank_idx, log_probs_input = True)
+		if labels_with_spacebug_workaround.count(' ') == 2:
+			labels_with_spacebug_workaround[labels_with_spacebug_workaround.index(' ')] = '_'
+		self.beam_search_decoder = ctcdecode.CTCBeamDecoder(labels_with_spacebug_workaround, lm_path, beam_alpha, beam_beta, cutoff_top_n if cutoff_top_n is not None else len(labels), cutoff_prob, beam_width, num_workers, labels.blank_idx, log_probs_input = True)
 
 	def decode(self, log_probs, output_lengths):
 		list_or_one = lambda xs: xs if len(xs) > 1 else xs[0]
