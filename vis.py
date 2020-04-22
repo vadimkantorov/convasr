@@ -196,7 +196,7 @@ def audiosample(input_path, output_path, K):
 		random.shuffle(transcript)
 		for t in transcript[:K]:
 			try:
-				encoded = base64.b64encode(open('data/'+t['audio_path'], 'rb').read()).decode()
+				encoded = base64.b64encode(open(os.path.join(args.dataset_root, t['audio_path']), 'rb').read()).decode()
 			except:
 				f.write('<tr><td>file not found: {audio_path}</td></tr>'.format(**t))
 				continue
@@ -346,6 +346,7 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('audiosample')
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o', required = True)
+	cmd.add_argument('--dataset-root', type = str, default = 'data/')
 	cmd.add_argument('-K', type = int, default = 10)
 	cmd.set_defaults(func = audiosample)
 
