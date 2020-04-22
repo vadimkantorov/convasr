@@ -28,4 +28,4 @@ python3 tools.py subset -i $DATASET_TRANSCRIBE -o $DATASET_SUBSET.json $SUBSET
 #rm -r $DATASET_CUT
 python3 tools.py cut -i $DATASET_SUBSET.json -o $DATASET_CUT $CUT
 
-#python3 vis.py audiosample -i $DATASET_CUT/$(basename $DATASET_CUT).json -o $DATASET_CUT.json.html 
+#python3 vis.py audiosample -i $DATASET_CUT/$(basename $DATASET_CUT).json -o $DATASET_CUT.json.html --dataset-root data/
