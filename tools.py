@@ -1,4 +1,3 @@
-import re
 import os
 import json
 import gzip
@@ -11,7 +10,6 @@ import transcripts
 import datasets
 import metrics
 import ru as lang
-from tqdm import tqdm
 
 def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, unk, num_speakers):
 	cat = output_path.endswith('.json')
@@ -38,7 +36,8 @@ def cut(input_path, output_path, sample_rate, mono, dilate, strip, strip_prefix,
 	transcript = json.load(open(input_path))
 	prev_audio_path, signal = None, None
 
-	for t in tqdm(sorted(transcript, key = lambda t: t['audio_path'])):
+	for i, t in enumerate(sorted(transcript, key = lambda t: t['audio_path'])):
+		print(i, '/', len(transcript))
 		audio_path = t['audio_path']
 		signal = audio.read_audio(audio_path, sample_rate, normalize = False, backend = audio_backend)[0] if audio_path != prev_audio_path else signal
 		t['channel'] = 0 if len(signal) == 1 else None if mono else t.get('channel')
