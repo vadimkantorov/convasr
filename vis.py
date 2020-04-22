@@ -346,7 +346,7 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('audiosample')
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o', required = True)
-	cmd.add_argument('--dataset-root', type = str, required = True)
+	cmd.add_argument('--dataset-root', default = '')
 	cmd.add_argument('-K', type = int, default = 10)
 	cmd.set_defaults(func = audiosample)
 
