@@ -172,10 +172,10 @@ def logits(logits, audio_name, MAX_ENTROPY = 1.0):
 	html.write('</body></html>')
 	print('\n', logits_path)
 
-def errors(ours, theirs = [], audio_name = None, audio = False, output_file_name = None):
+def errors(input_path, audio_name = None, audio = False, output_file_name = None):
 	good_audio_name = set(map(str.strip, open(audio_name)) if audio_name is not None else [])
 	read_transcript = lambda path: list(filter(lambda r: not good_audio_name or r['audio_name'] in good_audio_name, json.load(open(path)) if isinstance(path, str) else path)) if path is not None else []
-	ours_, theirs_ = read_transcript(ours), [{r['audio_name'] : r for r in read_transcript(transcript)} for transcript in theirs]
+	ours_, theirs_ = read_transcript(input_path[0]), [{r['audio_name'] : r for r in read_transcript(transcript)} for transcript in input_path[1:]]
 	cat = [[a] + list(filter(None, [t.get(a['audio_name'], None) for t in theirs_])) for a in ours_]
 	
 	#for utt in cat:
@@ -187,7 +187,7 @@ def errors(ours, theirs = [], audio_name = None, audio = False, output_file_name
 				
 	# https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
 	output_file_name = output_file_name or (ours + (audio_name.split('subset')[-1] if audio_name else '') + '.html')
-	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th>audio</th><th></th><th>cer</th><th>mer</th><th></th></tr>' + '\n'.join(f'''<tr class="{'first' if i == 0 else 'any'}"><td>''' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(a["audio_path"], "rb").read()).decode()}"></audio>' if audio and i == 0 else '') + f'<div class="nowrap">{a["audio_name"] if i == 0 else ""}</div></td>' + f'<td>{os.path.basename(ours if i == 0 else theirs[i - 1])}</td><td>{a["cer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{colorize_alignment(a["words"])}</td>' + '</tr>' for utt in cat for i, a in enumerate(utt)) + '</table></body></html>')
+	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th>audio</th><th></th><th>cer</th><th>mer</th><th></th></tr>' + '\n'.join(f'''<tr class="{'first' if i == 0 else 'any'}"><td>''' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(a["audio_path"], "rb").read()).decode()}"></audio>' if audio and i == 0 else '') + f'<div class="nowrap">{a["audio_name"] if i == 0 else ""}</div></td>' + f'<td>{os.path.basename(input_path[i])}</td><td>{a["cer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{colorize_alignment(a["words"])}</td>' + '</tr>' for utt in cat for i, a in enumerate(utt)) + '</table></body></html>')
 	print(output_file_name)
 
 def audiosample(input_path, output_path, K):
@@ -313,8 +313,7 @@ if __name__ == '__main__':
 	cmd.set_defaults(func = transcript)
 
 	cmd = subparsers.add_parser('errors')
-	cmd.add_argument('ours', default = 'data/transcripts.json')
-	cmd.add_argument('--theirs', nargs = '*')
+	cmd.add_argument('input-path', nargs = '+', default = ['data/transcripts.json'])
 	cmd.add_argument('--audio-name')
 	cmd.add_argument('--audio', action = 'store_true')
 	cmd.add_argument('--output-file-name', '-o')
