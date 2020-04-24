@@ -182,7 +182,7 @@ def main(args):
 	train_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob), feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob))
 	train_dataset = datasets.AudioTextDataset(args.train_data_path, labels, args.sample_rate, frontend = train_frontend if not args.frontend_in_model else None, min_duration = args.min_duration, max_duration = args.max_duration, time_padding_multiple = args.batch_time_padding_multiple)
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
-	sampler = datasets.BucketingBatchSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing, bucket = lambda example: int(math.ceil(((example['end'] - example['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple))) #+1 mean bug fix with bucket sizing
+	sampler = datasets.BucketingBatchSampler(train_dataset, batch_size = args.train_batch_size, mixing = args.train_data_mixing, bucket = lambda example: int(math.ceil(((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple))) #+1 mean bug fix with bucket sizing
 	train_data_loader = torch.utils.data.DataLoader(train_dataset, num_workers = args.num_workers, collate_fn = train_dataset.collate_fn, pin_memory = True, batch_sampler = sampler, worker_init_fn = set_random_seed, timeout = args.timeout)
 	optimizer = torch.optim.SGD(model.parameters(), lr = args.lr, momentum = args.momentum, weight_decay = args.weight_decay, nesterov = args.nesterov) if args.optimizer == 'SGD' else torch.optim.AdamW(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'AdamW' else optimizers.NovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'NovoGrad' else apex.optimizers.FusedNovoGrad(model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay) if args.optimizer == 'FusedNovoGrad' else None
 	
@@ -218,14 +218,14 @@ def main(args):
 
 	tic, toc_fwd, toc_bwd = time.time(), time.time(), time.time()
 	loss_avg, entropy_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0, 0.0
-	moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1. / K) * avg
+	exp_moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1. / K) * avg
 	
 	for epoch in range(epoch, args.epochs):
 		sampler.shuffle(epoch)
 		time_epoch_start = time.time()
 		for batch_idx, (meta, x, xlen, y, ylen) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc_data = time.time()
-			lr = optimizer.param_groups[0]['lr']; lr_avg = moving_avg(lr_avg, lr, max = 1)
+			lr = optimizer.param_groups[0]['lr']; lr_avg = exp_moving_avg(lr_avg, lr, max = 1)
 			
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
 			log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'olen', 'loss'])
@@ -260,13 +260,13 @@ def main(args):
 					optimizer.zero_grad()
 					scheduler.step(iteration)
 				
-				loss_avg = moving_avg(loss_avg, loss_cur, max = 1000)
-				entropy_avg = moving_avg(entropy_avg, entropy, max = 4)
+				loss_avg = exp_moving_avg(loss_avg, loss_cur, max = 1000)
+				entropy_avg = exp_moving_avg(entropy_avg, entropy, max = 4)
 			toc_bwd = time.time()
 
 			ms = lambda sec: sec * 1000
 			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = ms(toc_data - tic), ms(toc_fwd - toc_data), ms(toc_bwd - toc_fwd), ms(toc_bwd - toc_data)	
-			time_ms_avg = moving_avg(time_ms_avg, time_ms_data + time_ms_model, max = 10_000)
+			time_ms_avg = exp_moving_avg(time_ms_avg, time_ms_data + time_ms_model, max = 10_000)
 			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}> loss: {loss_cur:.2f} <{loss_avg:.2f}> time: ({"x".join(map(str, x.shape))}) {time_ms_data:.2f}+{time_ms_fwd:4.0f}+{time_ms_bwd:4.0f} <{time_ms_avg:.0f}> | lr: {lr:.5f}')
 			iteration += 1
 			sampler.batch_idx += 1

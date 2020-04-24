@@ -1,4 +1,3 @@
-import re
 import os
 import json
 import gzip
@@ -20,7 +19,7 @@ def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, 
 		if not transcript_name.endswith('.json'):
 			continue
 		transcript = json.load(open(os.path.join(input_path, transcript_name)))
-		transcript = [dict(meta = meta, **t) for t in transcripts.filter(transcript, audio_name = audio_name, **meta)]
+		transcript = [dict(meta = meta, **t) for t in transcripts.prune(transcript, audio_name = audio_name, **meta)]
 		transcript_cat.extend(transcript)
 
 		if not cat:
@@ -30,26 +29,41 @@ def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, 
 		json.dump(transcript_cat, open(output_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 	print(output_path)
 
-def cut(input_path, output_path, sample_rate, mono, dilate, strip, audio_backend):
+def cut(input_path, output_path, sample_rate, mono, dilate, strip, strip_prefix, audio_backend):
 	os.makedirs(output_path, exist_ok = True)
 	transcript_cat = []
 	
 	transcript = json.load(open(input_path))
 	prev_audio_path, signal = None, None
 
-	for t in sorted(transcript, key = lambda t: t['audio_path']):
+	for i, t in enumerate(sorted(transcript, key = lambda t: t['audio_path'])):
+		print(i, '/', len(transcript))
 		audio_path = t['audio_path']
 		signal = audio.read_audio(audio_path, sample_rate, normalize = False, backend = audio_backend)[0] if audio_path != prev_audio_path else signal
 		t['channel'] = 0 if len(signal) == 1 else None if mono else t.get('channel')
-		segment = signal[t['channel'] if t['channel'] is not None else ..., int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)]
+		segment = signal[slice(t['channel'], 1 + t['channel']) if t['channel'] is not None else ..., int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)]
 		segment_path = os.path.join(output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t))
 		audio.write_audio(segment_path, segment, sample_rate, mono = True)
+		if strip_prefix:
+			segment_path = segment_path[len(strip_prefix):] if segment_path.startswith(strip_prefix) else segment_path
+			t['audio_path'] = t['audio_path'][len(strip_prefix):] if t['audio_path'].startswith(strip_prefix) else t['audio_path']
 
-		t = dict(audio_path = segment_path, channel = 0 if len(signal) == 1 else None, begin = 0.0, end = segment.shape[-1] / sample_rate, speaker = t.pop('speaker', None), ref = t.pop('ref'), hyp = t.pop('hyp', None), cer = t.pop('cer', None), alignment = t.pop('alignment', {}), words = t.pop('words', {}), meta = t)
+		t = dict(audio_path = segment_path,
+				channel = 0 if len(signal) == 1 else None,
+				begin = 0.0,
+				end = segment.shape[-1] / sample_rate,
+				speaker = t.pop('speaker', None),
+				ref = t.pop('ref'),
+				hyp = t.pop('hyp', None),
+				cer = t.pop('cer', None),
+				alignment = t.pop('alignment', {}),
+				words = t.pop('words', {}),
+				meta = t)
+
 		prev_audio_path = audio_path
 		transcript_cat.append(t)
 
-	json.dump(transcripts.strip(transcript_cat, strip),open(os.path.join(output_path, os.path.basename(output_path) + '.json'), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+	json.dump(transcripts.strip(transcript_cat, strip), open(os.path.join(output_path, os.path.basename(output_path) + '.json'), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 	print(output_path)
 
 def cat(input_path, output_path):
@@ -63,7 +77,7 @@ def cat(input_path, output_path):
 
 def du(input_path):
 	transcript = json.load(open(input_path))
-	print(input_path, int(os.path.getsize(input_path) // 1e6), 'Mb',  '|', len(transcript) // 1000, 'K utt |', int(sum(t['end'] - t['begin'] for t in transcript) / (60 * 60)), 'hours')
+	print(input_path, int(os.path.getsize(input_path) // 1e6), 'Mb',  '|', len(transcript) // 1000, 'K utt |', int(sum(transcripts.get_duration(t) for t in transcript) / (60 * 60)), 'hours')
 
 def csv2json(input_path, gz, group, reset_duration):
 	gzopen = lambda file_path, mode = 'r': gzip.open(file_path, mode + 't') if file_path.endswith('.gz') else open(file_path, mode)
@@ -179,6 +193,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--sample-rate', '-r', type = int, default = 8_000, choices = [8_000, 16_000, 32_000, 48_000])
 	cmd.add_argument('--strip', nargs = '*', default = ['alignment', 'words'])
 	cmd.add_argument('--mono', action = 'store_true')
+	cmd.add_argument('--strip-prefix', type = str)
 	cmd.add_argument('--audio-backend', default = 'ffmpeg', choices = ['sox', 'ffmpeg'])
 	cmd.set_defaults(func = cut)
 	

@@ -46,7 +46,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	html.writelines(f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="ontimeupdate_(event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{base64.b64encode(wav).decode()}"></audio></figure>' for c, wav in enumerate(audio.write_audio(io.BytesIO(), signal[channel], sample_rate).getvalue() for channel in ([0, 1] if len(signal) == 2 else []) + [...]))
 	html.write(f'<pre class="channel"><h3 class="channel0 channel">hyp #0:<span class="subtitle"></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span class="subtitle"></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span class="subtitle"></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span class="subtitle"></span></h3></pre><hr/><table style="width:100%">')
 	html.write('<tr>' + ('<th>begin</th><th>end</th><th>dur</th><th style="width:50%">hyp</th>' if has_hyp else '') + ('<th style="width:50%">ref</th><th>begin</th><th>end</th><th>dur</th><th>cer</th>' if has_ref else '') + '<th>speaker</th></tr>')
-	html.writelines(f'<tr class="channel{c}">'+ (f'<td class="top">{fmt_link(0, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(hyp, ij = True))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}<template>{colorize_alignment(t["words"], tag = "", hyp = True)}</template></td>' if has_hyp else '') + (f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}<template>{colorize_alignment(t["words"], tag = "", ref = True)}</template></td><td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td><td class="top">{t["cer"]:.2%}</td>' if ref else ('<td></td>' * 5 if has_ref else '')) + f'''<td class="top {ok and 'ok'}">{speaker}</td></tr>''' for t in transcripts.sort(transcript) for ok in [t in filtered_transcript] for c, speaker, ref, hyp in [(t['channel'], t.get('speaker', ''), t['alignment']['ref'], t['alignment']['hyp'])] )
+	html.writelines(f'<tr class="channel{c}">'+ (f'<td class="top">{fmt_link(0, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(hyp, ij = True))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}<template>{colorize_alignment(t["words"], tag = "", hyp = True)}</template></td>' if has_hyp else '') + (f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}<template>{colorize_alignment(t["words"], tag = "", ref = True)}</template></td><td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td><td class="top">{t["cer"]:.2%}</td>' if ref else ('<td></td>' * 5 if has_ref else '')) + f'''<td class="top {ok and 'ok'}">{speaker}</td></tr>''' for t in transcripts.sort(transcript) for ok in [t in filtered_transcript] for c, speaker, ref, hyp in [(t['channel'], t.get('speaker', '') or 'N/A', t['alignment']['ref'], t['alignment']['hyp'])] )
 	html.write('''</tbody></table><script>
 		function play(channel, begin, end)
 		{
@@ -196,7 +196,7 @@ def audiosample(input_path, output_path, K):
 		random.shuffle(transcript)
 		for t in transcript[:K]:
 			try:
-				encoded = base64.b64encode(open(t['audio_path'], 'rb').read()).decode()
+				encoded = base64.b64encode(open(os.path.join(args.dataset_root, t['audio_path']), 'rb').read()).decode()
 			except:
 				f.write('<tr><td>file not found: {audio_path}</td></tr>'.format(**t))
 				continue
@@ -246,7 +246,7 @@ def summary(input_path):
 	plt.savefig(input_path + '.png', dpi = 150)
 
 def tabulate(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe, der):
-	labels = datasets.Labels(ru)
+	labels = datasets.Labels(lang)
 
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
@@ -255,14 +255,14 @@ def tabulate(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20,
 		iteration = f[eidx:].replace('.json', '')
 		val_dataset_name = f[f.find('transcripts_') + len('transcripts_'):eidx]
 		checkpoint = os.path.join(experiment_dir, 'checkpoint_' + f[eidx:].replace('.json', '.pt')) if not json_ else f
-		val = torch.tensor([j['wer' if wer else 'entropy' if entropy else 'loss' if loss else 'per' if per else 'der' if der else 'cer'] for j in json.load(open(f)) if j['labels'].startswith(bpe)] or [0.0])
+		metric = 'wer' if wer else 'entropy' if entropy else 'loss' if loss else 'per' if per else 'der' if der else 'cer'
+		val = torch.tensor([j[metric] for j in json.load(open(f)) if j['labels'].startswith(labels.alphabet)] or [0.0])
 		val = val[~(torch.isnan(val) | torch.isinf(val))]
 
 		if cer10 or cer20 or cer30 or cer40 or cer50:
 			val = (val < 0.1 * [False, cer10, cer20, cer30, cer40, cer50].index(True)).float()
 		if cer15:
 			val = (val < 0.15).float()
-
 		res[iteration].append((val_dataset_name, float(val.mean()), checkpoint))
 	val_dataset_names = sorted(set(val_dataset_name for r in res.values() for val_dataset_name, cer, checkpoint in r))
 	print('iteration\t' + '\t'.join(val_dataset_names))
@@ -346,6 +346,7 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('audiosample')
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o', required = True)
+	cmd.add_argument('--dataset-root', default = '')
 	cmd.add_argument('-K', type = int, default = 10)
 	cmd.set_defaults(func = audiosample)
 

@@ -66,7 +66,7 @@ def main(args):
 		
 		print('Input:', os.path.basename(audio_path))
 		print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
-		print('Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(audio = sum(t['end'] - t['begin'] for t in meta), processing = time.time() - tic))
+		print('Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(audio = sum(transcripts.get_duration(t) for t in meta), processing =time.time() - tic))
 
 		ts = (x.shape[-1] / args.sample_rate) * torch.linspace(0, 1, steps = log_probs.shape[-1]).unsqueeze(0) + torch.FloatTensor([t['begin'] for t in meta]).unsqueeze(1)
 		channel = [t['channel'] for t in meta]
@@ -106,7 +106,7 @@ def main(args):
 				ref_segments = [[] for _ in hyp_segments]
 		transcript = [dict(audio_path = audio_path, ref = ref, hyp = hyp, speaker = transcripts.speaker(ref = ref_transcript, hyp = hyp_transcript), cer = metrics.cer(hyp, ref), words = metrics.align_words(hyp, ref)[-1], alignment = dict(ref = ref_transcript, hyp = hyp_transcript), **transcripts.summary(hyp_transcript)) for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments) for ref, hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]]
 	
-		filtered_transcript = list(transcripts.filter(transcript, align_boundary_words = args.align_boundary_words, cer = args.cer, duration = args.duration, gap = args.gap, unk = args.unk, num_speakers = args.num_speakers))
+		filtered_transcript = list(transcripts.prune(transcript, align_boundary_words = args.align_boundary_words, cer = args.cer, duration = args.duration, gap = args.gap, unk = args.unk, num_speakers = args.num_speakers))
 		json.dump(filtered_transcript, open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 		print('Filtered segments:', len(filtered_transcript), 'out of', len(transcript))
 		print(transcript_path)
