@@ -172,11 +172,11 @@ def logits(logits, audio_name, MAX_ENTROPY = 1.0):
 	html.write('</body></html>')
 	print('\n', logits_path)
 
-def errors(input_path, audio_name = None, audio = False, output_file_name = None):
+def errors(input_path, audio_name = None, audio = False, output_file_name = None, sortdesc = None):
 	good_audio_name = set(map(str.strip, open(audio_name)) if audio_name is not None else [])
 	read_transcript = lambda path: list(filter(lambda r: not good_audio_name or r['audio_name'] in good_audio_name, json.load(open(path)) if isinstance(path, str) else path)) if path is not None else []
-	ours_, theirs_ = read_transcript(input_path[0]), [{r['audio_name'] : r for r in read_transcript(transcript)} for transcript in input_path[1:]]
-	cat = [[a] + list(filter(None, [t.get(a['audio_name'], None) for t in theirs_])) for a in ours_]
+	ours, theirs = read_transcript(input_path[0]), [{r['audio_name'] : r for r in read_transcript(transcript)} for transcript in input_path[1:]]
+	cat = [[a] + list(filter(None, [t.get(a['audio_name'], None) for t in theirs])) for a in (ours if sortdesc is None else sorted(ours, key = lambda a: a[sortdesc], reverse = True))]
 	
 	#for utt in cat:
 	#	for k in range(len(utt[0]['words'])):
@@ -324,6 +324,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--audio-name')
 	cmd.add_argument('--audio', action = 'store_true')
 	cmd.add_argument('--output-file-name', '-o')
+	cmd.add_argument('--sortdesc', choices = ['cer', 'wer', 'mer'])
 	cmd.set_defaults(func = errors)
 
 	cmd = subparsers.add_parser('tabulate')
