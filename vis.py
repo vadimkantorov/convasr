@@ -187,7 +187,7 @@ def errors(input_path, audio_name = None, audio = False, output_file_name = None
 				
 	# https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
 	output_file_name = output_file_name or (input_path[0] + (audio_name.split('subset')[-1] if audio_name else '') + '.html')
-	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th>audio</th><th></th><th>cer</th><th>mer</th><th></th></tr>' + '\n'.join(f'''<tr class="{'first' if i == 0 else 'any'}"><td>''' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(a["audio_path"], "rb").read()).decode()}"></audio>' if audio and i == 0 else '') + f'<div class="nowrap">{a["audio_name"] if i == 0 else ""}</div></td>' + f'<td>{os.path.basename(input_path[i])}</td><td>{a["cer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{colorize_alignment(a["words"])}</td>' + '</tr>' for utt in cat for i, a in enumerate(utt)) + '</table></body></html>')
+	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th>path</th><th>cer</th><th>mer</th><th></th></tr>' + '\n'.join(f'''<tr class="first"><td>''' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(a["audio_path"], "rb").read()).decode()}"></audio>' if audio else '') + f'<div class="nowrap">{utt[0]["audio_name"]}</div></td></td><td></td><td></td><td><pre>ref: {utt[0]["ref"]}</pre></td></tr>' + '\n'.join(f'<tr class="any"><td class="br">{os.path.basename(input_path[i])}</td><td>{a["cer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{colorize_alignment(a["words"])}</td></tr>' for i, a in enumerate(utt)) for utt in cat)   + '</table></body></html>')
 	print(output_file_name)
 
 def audiosample(input_path, output_path, K):
@@ -293,11 +293,11 @@ def histc_vega(tensor, min, max, bins):
 	hist = tensor.histc(min = bins.min(), max = bins.max(), bins = len(bins)).int()
 	return altair.Chart(altair.Data(values = [dict(x = b, y = v) for b, v in zip(bins.tolist(), hist.tolist())])).mark_bar().encode(x = altair.X('x:Q'), y = altair.Y('y:Q')).to_dict()
 
-def colorize_alignment(r, ref = None, hyp = None, tag = '<pre>'):
+def colorize_alignment(transcript, ref = None, hyp = None, tag = '<pre>'):
 	span = lambda word, t = None: '<span style="{style}">{word}</span>'.format(word = word, style = 'background-color:' + dict(ok = 'green', missing = 'red', typo_easy = 'lightgreen', typo_hard = 'pink')[t] if t is not None else '')
 	
-	ref_ = ' '.join(span(w['ref'], w['type'] if w['type'] == 'ok' else None) for w in r)
-	hyp_ = ' '.join(span(w['hyp'], w['type']) for w in r)
+	ref_ = ' '.join(span(w['ref'], w['type'] if w['type'] == 'ok' else None) for w in transcript)
+	hyp_ = ' '.join(span(w['hyp'], w['type']) for w in transcript)
 	contents = hyp_ if hyp is True else ref_ if ref is True else f'ref: {ref_}\nhyp: {hyp_}'
 	return tag + contents + tag.replace('<', '</')
 
