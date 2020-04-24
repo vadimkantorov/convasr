@@ -313,7 +313,7 @@ if __name__ == '__main__':
 	cmd.set_defaults(func = transcript)
 
 	cmd = subparsers.add_parser('errors')
-	cmd.add_argument('input-path', nargs = '+', default = ['data/transcripts.json'])
+	cmd.add_argument('input_path', nargs = '+', default = ['data/transcripts.json'])
 	cmd.add_argument('--audio-name')
 	cmd.add_argument('--audio', action = 'store_true')
 	cmd.add_argument('--output-file-name', '-o')
