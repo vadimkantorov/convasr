@@ -186,7 +186,7 @@ def errors(input_path, audio_name = None, audio = False, output_file_name = None
 	#			a['words'][k]['hyp'] += ' ' * (max_word_len - len(a['words'][k]['hyp']))
 				
 	# https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
-	output_file_name = output_file_name or (ours + (audio_name.split('subset')[-1] if audio_name else '') + '.html')
+	output_file_name = output_file_name or (input_path[0] + (audio_name.split('subset')[-1] if audio_name else '') + '.html')
 	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th>audio</th><th></th><th>cer</th><th>mer</th><th></th></tr>' + '\n'.join(f'''<tr class="{'first' if i == 0 else 'any'}"><td>''' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(a["audio_path"], "rb").read()).decode()}"></audio>' if audio and i == 0 else '') + f'<div class="nowrap">{a["audio_name"] if i == 0 else ""}</div></td>' + f'<td>{os.path.basename(input_path[i])}</td><td>{a["cer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{colorize_alignment(a["words"])}</td>' + '</tr>' for utt in cat for i, a in enumerate(utt)) + '</table></body></html>')
 	print(output_file_name)
 
