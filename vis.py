@@ -172,13 +172,22 @@ def logits(logits, audio_name, MAX_ENTROPY = 1.0):
 	html.write('</body></html>')
 	print('\n', logits_path)
 
-def errors(ours, theirs = None, audio_name = None, audio = False, output_file_name = None):
+def errors(ours, theirs = [], audio_name = None, audio = False, output_file_name = None):
 	good_audio_name = set(map(str.strip, open(audio_name)) if audio_name is not None else [])
-	read_transcript = lambda path: list(filter(lambda r: not good_audio_name or r['audio_name'] in good_audio_name, json.load(open(path)))) if path is not None else []
-	ours_, theirs_ = read_transcript(ours), {r['audio_name'] : r for r in read_transcript(theirs)}
+	read_transcript = lambda path: list(filter(lambda r: not good_audio_name or r['audio_name'] in good_audio_name, json.load(open(path)) if isinstance(path, str) else path)) if path is not None else []
+	ours_, theirs_ = read_transcript(ours), [{r['audio_name'] : r for r in read_transcript(transcript)} for transcript in theirs]
+	cat = [[a] + list(filter(None, [t.get(a['audio_name'], None) for t in theirs_])) for a in ours_]
+	
+	for utt in cat:
+		for k in range(len(utt[0]['words'])):
+			max_word_len = max(max(a['words'][k]['ref'], a['words'][k]['hyp']) for a in utt)
+			for a in utt:
+				a['words'][k]['ref'] += ' ' * (max_word_len - a['words'][k]['ref'])
+				a['words'][k]['hyp'] += ' ' * (max_word_len - a['words'][k]['hyp'])
+				
 	# https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
 	output_file_name = output_file_name or (ours + (audio_name.split('subset')[-1] if audio_name else '') + '.html')
-	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} tr.new>td {border-top: 1px solid black} .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th>audio</th><th></th><th>cer</th><th>mer</th><th></th></tr>' + '\n'.join(f'''<tr class="{'new' if i == 0 else ''}"><td>''' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"></audio>' if audio and i == 0 else '') + f'<div class="nowrap">{r["audio_name"] if i == 0 else ""}</div></td>' + f'<td>{ours if i == 0 else theirs}</td><td>{r_["cer"]:.02%}</td><td class="br">{r_["mer"]:.02%}</td><td>{colorize_alignment(r_["words"])}</td>' + '</tr>' for r in ours_ for i, r_ in enumerate(filter(None, [r, theirs_.get(r['audio_name'])]))) + '</table></body></html>')
+	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>.br{border-right:2px black solid} tr.new>td {border-top: 1px solid black} .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th>audio</th><th></th><th>cer</th><th>mer</th><th></th></tr>' + '\n'.join(f'''<tr class="{'new' if i == 0 else ''}"><td>''' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(r["audio_path"], "rb").read()).decode()}"></audio>' if audio and i == 0 else '') + f'<div class="nowrap">{r["audio_name"] if i == 0 else ""}</div></td>' + f'<td>{os.path.basename(ours if i == 0 else theirs[i - 1])}</td><td>{a["cer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{colorize_alignment(a["words"])}</td>' + '</tr>' for utt in cat for i, a in enumerate(utt)))) + '</table></body></html>')
 	print(output_file_name)
 
 def audiosample(input_path, output_path, K):
@@ -305,7 +314,7 @@ if __name__ == '__main__':
 
 	cmd = subparsers.add_parser('errors')
 	cmd.add_argument('ours', default = 'data/transcripts.json')
-	cmd.add_argument('--theirs')
+	cmd.add_argument('--theirs', nargs = '*')
 	cmd.add_argument('--audio-name')
 	cmd.add_argument('--audio', action = 'store_true')
 	cmd.add_argument('--output-file-name', '-o')
