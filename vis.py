@@ -172,10 +172,10 @@ def logits(logits, audio_name, MAX_ENTROPY = 1.0):
 	html.write('</body></html>')
 	print('\n', logits_path)
 
-def errors(input_path, audio_name = None, audio = False, output_file_name = None, sortdesc = None, topk = None):
+def errors(input_path, audio_name = None, audio = False, output_file_name = None, sortdesc = None, topk = None, duration = None, cer = None, wer = None, mer = None):
 	good_audio_name = set(map(str.strip, open(audio_name)) if audio_name is not None else [])
 	read_transcript = lambda path: list(filter(lambda r: not good_audio_name or r['audio_name'] in good_audio_name, json.load(open(path)) if isinstance(path, str) else path)) if path is not None else []
-	ours, theirs = read_transcript(input_path[0]), [{r['audio_name'] : r for r in read_transcript(transcript)} for transcript in input_path[1:]]
+	ours, theirs = transcripts.prune(read_transcript(input_path[0]), duration = duration, cer = cer, wer = wer, mer = mer), [{r['audio_name'] : r for r in read_transcript(transcript)} for transcript in input_path[1:]]
 	cat = [[a] + list(filter(None, [t.get(a['audio_name'], None) for t in theirs])) for a in list(ours if sortdesc is None else sorted(ours, key = lambda a: a[sortdesc], reverse = True))[slice(topk)]]
 	
 	#for utt in cat:
@@ -326,6 +326,10 @@ if __name__ == '__main__':
 	cmd.add_argument('--output-file-name', '-o')
 	cmd.add_argument('--sortdesc', choices = ['cer', 'wer', 'mer'])
 	cmd.add_argument('--topk', type = int)
+	parser.add_argument('--cer', type = transcripts.number_tuple)
+	parser.add_argument('--wer', type = transcripts.number_tuple)
+	parser.add_argument('--mer', type = transcripts.number_tuple)
+	parser.add_argument('--duration', type = transcripts.number_tuple)
 	cmd.set_defaults(func = errors)
 
 	cmd = subparsers.add_parser('tabulate')
