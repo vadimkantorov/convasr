@@ -68,7 +68,7 @@ def prune(transcript, align_boundary_words = False, cer = None, wer = None, mer 
 	boundary_check = lambda t: ((not t['words']) or (not align_boundary_words) or (is_aligned(t['words'][0]) and is_aligned(t['words'][-1])))
 	gap_check = lambda t, prev: prev is None or gap is None or gap[0] <= t['begin'] - prev['end'] <= gap[1]
 	unk_check = lambda t: unk is None or unk[0] <= t.get('ref', '').count('*') <= unk[1]
-	speakers_check = lambda t: num_speakers is None or num_speakers[0] <= t.get('speaker', '').count(',') + 1 <= num_speakers[1]
+	speakers_check = lambda t: num_speakers is None or num_speakers[0] <= (t.get('speaker') or '').count(',') + 1 <= num_speakers[1]
 	cer_check = lambda t: cer is None or t.get('cer') is None or cer[0] <= t['cer'] <= cer[1]
 	wer_check = lambda t: wer is None or t.get('wer') is None or wer[0] <= t['wer'] <= wer[1]
 	mer_check = lambda t: mer is None or t.get('mer') is None or mer[0] <= t['mer'] <= mer[1]
