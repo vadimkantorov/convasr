@@ -62,10 +62,12 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				speakers = [None] + list(sorted(set(t['speaker'] for t in transcript if t.get('speaker') is not None)))
 				speaker = torch.cat([torch.full((len(ref) + 1,), speakers.index(t.get('speaker')), dtype = torch.uint8).scatter_(0, torch.tensor(len(ref)), 0) for t, ref in zip(transcript, ref_full)])[:-1]
 				transcript = [dict(speaker = speaker, speakers = speakers, ref = ' '.join(ref_full))]
+			import IPython; IPython.embed()
 		
 			transcript = [dict(dict(audio_path = audio_path, channel = channel, speaker = None, begin = 0, end = signal.shape[1] / sample_rate), **t) for t in sorted(transcript, key = transcripts.sort_key) for channel in ([t['channel']] if 'channel' in t else range(len(signal)))]
 			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], int(t['begin'] * sample_rate) : 1 + int(t['end'] * sample_rate)]]]
 			targets = [[labels.encode(t.get('ref', ''))[1] for t in transcript] for labels in self.labels]
+			
 		return [transcript, features] + list(targets)
 			
 	def __len__(self):
@@ -167,7 +169,7 @@ class Labels:
 		return normalized, torch.LongTensor([self.chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
 	def decode(self, idx : list, ts = None, I = None, speaker = None, channel = 0, speakers = None, replace_blank = True, replace_space = False, replace_repeat = True, key = 'hyp'):
-		decode_ = lambda i, j: self.postprocess_transcript(''.join(self[idx[ij]] for ij in range(i, j + 1) if replace_repeat is False or ij == 0 or idx[ij] != idx[ij - 1]), replace_blank = replace_blank, replace_space = replace_space, replace_repeat = replace_repeat)
+		decode_ = lambda i, j: self.postprocess_transcript(''.join(self[idx[k]] for k in range(i, j + 1) if replace_repeat is False or k == 0 or idx[k] != idx[k - 1]), replace_blank = replace_blank, replace_space = replace_space, replace_repeat = replace_repeat)
 		speaker_ = lambda i, j: int(speaker[i:1 + j].max()) if speaker is not None and speakers is None  else speakers[int(speaker[i:1 + j].max())] if speaker is not None and speakers is not None else None
 		channel_ = lambda i_, j_: channel if isinstance(channel, int) else int(channel[i_])
 
@@ -183,6 +185,10 @@ class Labels:
 					j -= 1
 				
 				i_, j_ = int(i if I is None else I[i]), int(j if I is None else I[j])
+				
+				#if key == 'ref' and speaker_(i, j) is None:
+				#	import IPython; IPython.embed()
+				
 				transcript.append(dict(begin = float(ts[i_]), end = float(ts[j_]), i = i_, j = j_, channel = channel_(i_, j_), speaker = speaker_(i, j), **{key : decode_(i, j)}))
 
 				i = None

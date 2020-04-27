@@ -102,18 +102,20 @@ def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = 
 
 	return a
 
+def nanmean(dictlist, key):
+	return float(torch.FloatTensor([r[key] for r in dictlist if key in r and not math.isinf(r[key]) and not math.isnan(r[key])] or [-1.0]).mean())
+
 def aggregate(analyzed, p = 0.5):
-	mean_safe = lambda k: float(torch.FloatTensor([r[k] for r in analyzed if k in r and not math.isinf(r[k]) and not math.isnan(r[k])] or [-1.0]).mean())
 	stats = dict(
-		loss_avg = mean_safe('loss'),
-		entropy_avg = mean_safe('entropy'),
-		cer_avg = mean_safe('cer'),
-		wer_avg = mean_safe('wer'),
-		mer_avg = mean_safe('mer'),
-		cer_easy_avg = mean_safe('cer_easy'),
-		cer_hard_avg = mean_safe('cer_hard'),
-		cer_missing_avg = mean_safe('cer_missing'),
-		der_avg = mean_safe('der')
+		loss_avg = nanmean(analyzed, 'loss'),
+		entropy_avg = nanmean(analyzed, 'entropy'),
+		cer_avg = nanmean(analyzed, 'cer'),
+		wer_avg = nanmean(analyzed, 'wer'),
+		mer_avg = nanmean(analyzed, 'mer'),
+		cer_easy_avg = nanmean(analyzed, 'cer_easy'),
+		cer_hard_avg = nanmean(analyzed, 'cer_hard'),
+		cer_missing_avg = nanmean(analyzed, 'cer_missing'),
+		der_avg = nanmean(analyzed, 'der')
 	)
 
 	errs = collections.defaultdict(int)

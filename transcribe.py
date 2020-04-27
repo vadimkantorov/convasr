@@ -93,6 +93,7 @@ def main(args):
 			#	segments = [([], sum([h for r, h in segments], []))]
 			
 			alignment = ctc.alignment(log_probs.permute(2, 0, 1), y.squeeze(1), olen, ylen.squeeze(1), blank = labels.blank_idx)
+			import IPython; IPython.embed()
 			ref_segments = [labels.decode(y[i, 0, :ylen[i]].tolist(), ts[i], alignment[i], channel = channel[i], speaker = speaker[i], key = 'ref', speakers = speakers) for i in range(len(decoded))]
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic_alignment))
 	 	

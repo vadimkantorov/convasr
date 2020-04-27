@@ -177,17 +177,18 @@ def errors(input_path, audio_name = None, audio = False, output_file_name = None
 	read_transcript = lambda path: list(filter(lambda r: not good_audio_name or r['audio_name'] in good_audio_name, json.load(open(path)) if isinstance(path, str) else path)) if path is not None else []
 	ours, theirs = transcripts.prune(read_transcript(input_path[0]), duration = duration, cer = cer, wer = wer, mer = mer), [{r['audio_name'] : r for r in read_transcript(transcript)} for transcript in input_path[1:]]
 	cat = [[a] + list(filter(None, [t.get(a['audio_name'], None) for t in theirs])) for a in list(ours if sortdesc is None else sorted(ours, key = lambda a: a[sortdesc], reverse = True))[slice(topk)]]
-	
-	#for utt in cat:
-	#	for k in range(len(utt[0]['words'])):
-	#		max_word_len = max(max(len(a['words'][k]['ref']), len(a['words'][k]['hyp'])) for a in utt)
-	#		for a in utt:
-	#			a['words'][k]['ref'] += ' ' * (max_word_len - len(a['words'][k]['ref']))
-	#			a['words'][k]['hyp'] += ' ' * (max_word_len - len(a['words'][k]['hyp']))
 				
-	# https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
+	# TODO: add sorting https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
 	output_file_name = output_file_name or (input_path[0] + (audio_name.split('subset')[-1] if audio_name else '') + '.html')
-	open(output_file_name , 'w').write('<html><meta charset="utf-8"><style>audio {width:100%} .br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap}</style><body><table style="border-collapse:collapse; width: 100%"><tr><th></th><th>cer</th><th>wer</th><th>mer</th><th></th></tr>' + '\n'.join(f'''<tr class="first"><td colspan="4">''' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(utt[0]["audio_path"], "rb").read()).decode()}"></audio>' if audio else '') + f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{colorize_alignment(utt[0], ref = True, flat = True)}</td><td>{colorize_alignment(utt[0], ref = True, flat = True)}</td></tr>' + '\n'.join(f'<tr class="any"><td class="br">{os.path.basename(input_path[i])}</td><td>{a["cer"]:.02%}</td><td>{a["wer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{colorize_alignment(a["words"])}</td><td>{colorize_alignment(a, hyp = True, flat = True)}</td></tr>' for i, a in enumerate(utt)) for utt in cat)   + '</table></body></html>')
+	
+	f = open(output_file_name , 'w')
+	f.write('<html><meta charset="utf-8"><style>audio {width:100%} .br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap}</style>')
+	f.write('<body><table style="border-collapse:collapse; width: 100%"><tr><th></th><th>cer</th><th>wer</th><th>mer</th><th></th></tr>')
+	f.write('<tr><td><strong>averages<strong></td></tr>')
+	f.write('\n'.join('<tr><td class="br">{input_name}</td><td>{cer:.04f}</td><td>{wer:.04f}</td><td>{mer:.04f}</td></tr>'.format(input_name = os.path.basename(input_path[i]), cer = metrics.nanmean(c, 'cer'), wer = metrics.nanmean(c, 'wer'), mer = metrics.nanmean(c, 'mer')) for i, c in enumerate(zip(*cat))))
+	f.write('<tr><td>&nbsp;</td></tr>')
+	f.write('\n'.join(f'''<tr class="first"><td colspan="4">''' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(utt[0]["audio_path"], "rb").read()).decode()}"></audio>' if audio else '') + f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{colorize_alignment(utt[0], ref = True, flat = True)}</td><td>{colorize_alignment(utt[0], ref = True, flat = True)}</td></tr>' + '\n'.join(f'<tr class="any"><td class="br">{os.path.basename(input_path[i])}</td><td>{a["cer"]:.02%}</td><td>{a["wer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{colorize_alignment(a["words"])}</td><td>{colorize_alignment(a, hyp = True, flat = True)}</td></tr>' for i, a in enumerate(utt)) for utt in cat))
+	f.write('</table></body></html>')
 	print(output_file_name)
 
 def audiosample(input_path, output_path, K):
