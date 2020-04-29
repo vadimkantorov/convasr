@@ -23,10 +23,12 @@ def align(hyp, ref):
 			r += ref[i]
 			h += hyp[i]
 			i += 1
+
 	return h, r
 
 def align_words(hyp, ref):
 	h, r = map(list, align(hyp, ref))
+	
 	for i in range(len(r)):
 		if r[i] != '|':
 			break
@@ -37,6 +39,7 @@ def align_words(hyp, ref):
 			break
 		if h[i] == ' ':
 			r[i] = ' '
+	
 	h, r = ''.join(h), ''.join(r)
 
 	def words_():
@@ -47,8 +50,7 @@ def align_words(hyp, ref):
 				if r_:
 					yield r_, h_
 				k = i + 1 #None
-			#elif r[i] != '|' and r[i] != ' ' and k is None:
-			#	k = i
+	
 	words = list(words_())
 	errors = [dict(hyp = h_, ref = r_, type = t) for r_, h_ in words for t, e in [error_type(h_, r_)]]
 	return h, r, words, errors
@@ -143,9 +145,10 @@ def error_type(hyp, ref, p = 0.5, E = 3, L = 4):
 		easy = e <= E and len(ref_) >= L
 		return 'typo_' + ('easy' if easy else 'hard'), e
 	else:
-		return 'missing', e
+		source = '_ref' if ref.count('|') > p * len(ref) else ''
+		return 'missing' + source, e
 
-error_types = ['typo_easy', 'typo_hard', 'missing']
+error_types = ['typo_easy', 'typo_hard', 'missing', 'missing_ref']
 
 def quantiles(tensor):
 	tensor = tensor.sort().values

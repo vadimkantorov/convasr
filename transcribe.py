@@ -43,7 +43,7 @@ def main(args):
 	
 	data_paths = [p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f]) if os.path.isfile(p) and any(map(p.endswith, args.ext))] + [p for p in args.input_path if any(map(p.endswith, ['.json', '.json.gz']))]
 
-	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend) #, vad_options = dict(window_size = args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate))
+	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers) 
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
 
 	for meta, x, xlen, y, ylen in val_data_loader:
@@ -72,7 +72,7 @@ def main(args):
 		channel = [t['channel'] for t in meta]
 		speaker = [t['speaker'] for t in meta]
 		ref_segments = [[dict(channel = channel[i], begin = meta[i]['begin'], end = meta[i]['end'], ref = labels.decode(y[i, 0, :ylen[i]].tolist()))] for i in range(len(decoded))]
-		hyp_segments = [labels.decode(decoded[i], ts[i], channel = channel[i], replace_blank = True, replace_repeat = True, replace_space = False, speaker = torch.full((len(decoded[i]),), channel[i], dtype=torch.uint8), speakers = args.speakers) for i in range(len(decoded))]
+		hyp_segments = [labels.decode(decoded[i], ts[i], channel = channel[i], replace_blank = True, replace_repeat = True, replace_space = False, speaker = speaker[i] if isinstance(speaker[i], str) else None) for i in range(len(decoded))]
 		
 		ref, hyp = ' '.join(transcripts.join(ref = r) for r in ref_segments).strip(), ' '.join(transcripts.join(hyp = h) for h in hyp_segments).strip()
 		if args.verbose:
@@ -93,7 +93,6 @@ def main(args):
 			#	segments = [([], sum([h for r, h in segments], []))]
 			
 			alignment = ctc.alignment(log_probs.permute(2, 0, 1), y.squeeze(1), olen, ylen.squeeze(1), blank = labels.blank_idx)
-			import IPython; IPython.embed()
 			ref_segments = [labels.decode(y[i, 0, :ylen[i]].tolist(), ts[i], alignment[i], channel = channel[i], speaker = speaker[i], key = 'ref', speakers = speakers) for i in range(len(decoded))]
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic_alignment))
 	 	

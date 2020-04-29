@@ -16,16 +16,16 @@ import vad
 import transcripts
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, data_paths, labels, sample_rate, frontend = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, delimiter = ',', segmented = False, time_padding_multiple = 1, audio_backend = 'sox', vad_options = {}):
+	def __init__(self, data_paths, labels, sample_rate, frontend = None, speakers = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, segmented = False, time_padding_multiple = 1, audio_backend = 'sox'):
 		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
 		self.waveform_transform_debug_dir = waveform_transform_debug_dir
-		self.vad_options = vad_options
 		self.segmented = segmented
 		self.time_padding_multiple = time_padding_multiple
 		self.mono = mono
 		self.audio_backend = audio_backend
+		self.speakers = speakers
 
 		gzopen = lambda data_path: open(data_path) if data_path.endswith('.json') else gzip.open(data_path, 'rt')
 		duration = lambda example: sum(t.get('end', 0) - t.get('begin', 0) for t in example)
@@ -55,18 +55,19 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		else:
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = False, backend = self.audio_backend)
 			replace_transcript = not transcript or any(t.get('begin') is None and t.get('end') is None for t in transcript) and all(t.get('ref') is not None for t in transcript)
-			
+			normalize_text = True
+
 			if replace_transcript:
 				assert len(signal) == 1
 				ref_full = [self.labels[0].normalize_text(t['ref']) for t in transcript]
 				speakers = [None] + list(sorted(set(t['speaker'] for t in transcript if t.get('speaker') is not None)))
 				speaker = torch.cat([torch.full((len(ref) + 1,), speakers.index(t.get('speaker')), dtype = torch.uint8).scatter_(0, torch.tensor(len(ref)), 0) for t, ref in zip(transcript, ref_full)])[:-1]
 				transcript = [dict(speaker = speaker, speakers = speakers, ref = ' '.join(ref_full))]
-			import IPython; IPython.embed()
+				normalize_text = False
 		
-			transcript = [dict(dict(audio_path = audio_path, channel = channel, speaker = None, begin = 0, end = signal.shape[1] / sample_rate), **t) for t in sorted(transcript, key = transcripts.sort_key) for channel in ([t['channel']] if 'channel' in t else range(len(signal)))]
+			transcript = [dict(dict(audio_path = audio_path, channel = channel, speaker = self.speakers[channel] if self.speakers else None, begin = 0, end = signal.shape[1] / sample_rate), **t) for t in sorted(transcript, key = transcripts.sort_key) for channel in ([t['channel']] if 'channel' in t else range(len(signal)))]
 			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], int(t['begin'] * sample_rate) : 1 + int(t['end'] * sample_rate)]]]
-			targets = [[labels.encode(t.get('ref', ''))[1] for t in transcript] for labels in self.labels]
+			targets = [[labels.encode(t.get('ref', ''), normalize = normalize_text)[1] for t in transcript] for labels in self.labels]
 			
 		return [transcript, features] + list(targets)
 			
@@ -163,32 +164,28 @@ class Labels:
 	def normalize_text(self, text):
 		return self.candidate_sep.join(self.lang.normalize_text(candidate) for candidate in self.split_candidates(text))# or self.unk 
 
-	def encode(self, text):
-		normalized = self.normalize_text(text)
+	def encode(self, text, normalize = True):
+		normalized = self.normalize_text(text) if normalize else text
 		chars = self.split_candidates(normalized)[0]
 		return normalized, torch.LongTensor([self.chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
 	def decode(self, idx : list, ts = None, I = None, speaker = None, channel = 0, speakers = None, replace_blank = True, replace_space = False, replace_repeat = True, key = 'hyp'):
 		decode_ = lambda i, j: self.postprocess_transcript(''.join(self[idx[k]] for k in range(i, j + 1) if replace_repeat is False or k == 0 or idx[k] != idx[k - 1]), replace_blank = replace_blank, replace_space = replace_space, replace_repeat = replace_repeat)
-		speaker_ = lambda i, j: int(speaker[i:1 + j].max()) if speaker is not None and speakers is None  else speakers[int(speaker[i:1 + j].max())] if speaker is not None and speakers is not None else None
+		speaker_ = lambda i, j: (int(speaker[i:1 + j].max()) if torch.is_tensor(speaker) else speaker) if speaker is not None and speakers is None else speakers[int(speaker[i:1 + j].max())] if speaker is not None and speakers is not None else None
 		channel_ = lambda i_, j_: channel if isinstance(channel, int) else int(channel[i_])
 
 		if ts is None:
 			return decode_(0, len(idx) - 1)
 
-		pad = [self.space_idx] if replace_blank is False else [self.space_idx, self.blank_idx]
+		silence = [self.space_idx] if replace_blank is False else [self.space_idx, self.blank_idx]
 		
 		transcript, i = [], None
 		for j, k in enumerate(idx + [self.space_idx]):
 			if k == self.space_idx and i is not None:
-				while j == len(idx) or (j > 0 and idx[j] in pad):
+				while j == len(idx) or (j > 0 and idx[j] in silence):
 					j -= 1
 				
 				i_, j_ = int(i if I is None else I[i]), int(j if I is None else I[j])
-				
-				#if key == 'ref' and speaker_(i, j) is None:
-				#	import IPython; IPython.embed()
-				
 				transcript.append(dict(begin = float(ts[i_]), end = float(ts[j_]), i = i_, j = j_, channel = channel_(i_, j_), speaker = speaker_(i, j), **{key : decode_(i, j)}))
 
 				i = None
