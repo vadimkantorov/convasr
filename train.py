@@ -52,7 +52,7 @@ def main(args):
 	#TODO: , candidate_sep = datasets.Labels.candidate_sep
 	labels = [datasets.Labels(lang, name = 'char')] + [datasets.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
 	
-	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, stft_mode = 'conv' if args.onnx else None)
+	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, dither = args.dither, stft_mode = 'conv' if args.onnx else None)
 	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, frontend = frontend if args.onnx or args.frontend_in_model else None, **(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx else {}))
 
 	print(' Model capacity:', int(models.compute_capacity(model, scale = 1e6)), 'million parameters\n')
@@ -361,6 +361,7 @@ if __name__ == '__main__':
 	parser.add_argument('--sample-rate', type = int, default = 8_000, help = 'for frontend')
 	parser.add_argument('--window-size', type = float, default = 0.02, help = 'for frontend, in seconds')
 	parser.add_argument('--window-stride', type = float, default = 0.01, help = 'for frontend, in seconds')
+	parser.add_argument('--dither', type = float, default = 1e-5, help = 'Amount of dithering')
 	parser.add_argument('--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'], help = 'for frontend')
 	parser.add_argument('--onnx')
 	parser.add_argument('--onnx-sample-batch-size', type = int, default = 16)
