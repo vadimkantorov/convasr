@@ -3,7 +3,6 @@ import torch
 def reset_options(optimizer):
 	for param_group in optimizer.param_groups:
 		param_group.update(optimizer.defaults)
-		print(param_group['lr'], optimizer.defaults)
 
 class LRScheduler:
 	def __init__(self, optimizer):
