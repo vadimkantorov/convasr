@@ -42,16 +42,15 @@ def align_words(hyp, ref):
 	
 	h, r = ''.join(h), ''.join(r)
 
-	def words_():
-		k = None
-		for i in range(1 + len(r)):
-			if i == len(r) or r[i] == ' ':
-				r_, h_ = r[k : i], h[k : i]
-				if r_:
-					yield r_, h_
-				k = i + 1 #None
+	words = []
+	k = None
+	for i in range(1 + len(r)):
+		if i == len(r) or r[i] == ' ':
+			r_, h_ = r[k : i], h[k : i]
+			if r_:
+				words.append((r_, h_))
+			k = i + 1 #None
 	
-	words = list(words_())
 	errors = [dict(hyp = h_, ref = r_, type = t) for r_, h_ in words for t, e in [error_type(h_, r_)]]
 	return h, r, words, errors
 
@@ -66,7 +65,7 @@ def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = 
 	if full:
 		h, r, words, words_ = align_words(hyp, ref)
 		phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
-		hypref_pseudo = {t : (' '.join((r_ if error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'])[t] else h_).replace('|', '') for r_, h_ in words), r.replace('|', '')) for t in error_types}
+		hypref_pseudo = {t : (' '.join((r_ if error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'], missing_ref = ['missing_ref'])[t] else h_).replace('|', '') for r_, h_ in words), r.replace('|', '')) for t in error_types}
 
 		errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in words_ if r['type'] == t] for t in error_types}
 	

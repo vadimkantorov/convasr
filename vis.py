@@ -179,7 +179,7 @@ def errors(input_path, include = [], exclude = [], audio = False, output_file_na
 	cat = [[a] + list(filter(None, [t.get(a['audio_name'], None) for t in theirs])) for a in list(ours if sortdesc is None else sorted(ours, key = lambda a: a[sortdesc], reverse = True))[slice(topk)]]
 				
 	# TODO: add sorting https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
-	output_file_name = output_file_name or (input_path[0] + (audio_name.split('subset')[-1] if audio_name else '') + '.html')
+	output_file_name = output_file_name or (input_path[0] + (include[0].split('subset')[-1] if include else '') + '.html')
 	
 	f = open(output_file_name , 'w')
 	f.write('<html><meta charset="utf-8"><style>audio {width:100%} .br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap}</style>')

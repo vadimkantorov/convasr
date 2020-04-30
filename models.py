@@ -304,10 +304,11 @@ class AugmentationFrontend(nn.Module):
 		return 'SoxAug' not in self.waveform_transform.__class__.__name__
 
 class LogFilterBankFrontend(nn.Module):
-	def __init__(self, out_channels, sample_rate, window_size, window_stride, window, dither = 1e-5, preemphasis = 0.97, eps = 1e-20, normalize_signal = True, normalize_features = True, stft_mode = None, window_periodic = True):
+	def __init__(self, out_channels, sample_rate, window_size, window_stride, window, dither = 1e-5, dither0 = 0.0, preemphasis = 0.97, eps = 1e-20, normalize_signal = True, normalize_features = True, stft_mode = None, window_periodic = True):
 		super().__init__()
 		self.stft_mode = stft_mode
 		self.dither = dither
+		self.dither0 = dither0
 		self.preemphasis =  preemphasis
 		self.normalize_features = normalize_features
 		self.normalize_signal = normalize_signal
@@ -345,6 +346,7 @@ class LogFilterBankFrontend(nn.Module):
 
 	def forward(self, signal):
 		signal = normalize_signal(signal) if self.normalize_signal else signal
+		signal = signal + self.dither0 * torch.randn_like(signal) if self.dither0 > 0 else signal
 		signal = torch.cat([signal[..., :1], signal[..., 1:] - self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
 		signal = signal + self.dither * torch.randn_like(signal) if self.dither > 0 else signal
 		power_spectrum = self.stft_magnitude_squared(signal)
