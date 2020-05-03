@@ -2,7 +2,8 @@ set -e
 
 CMD=$1
 IN=$2
-OUT=${3:-.}
+OUT=$3
+EXTRAARGS="${@:4}"
 
 if [ -z "${EXT+xxx}" ]; then
 	EXT=mp3
@@ -25,7 +26,7 @@ case $CMD in
 		mkdir -p "$OUT"
 		BATCH=$([[ "$IN" != http* ]] && echo "--batch-file" || echo "")
 		AUDIOFORMAT=$([[ "$EXT" ]] && echo "--audio-format $EXT" || echo "")
-		AUDIOLIST=$(youtube-dl $VERBOSE --write-info-json --sub-lang $SUBLANG --write-sub --write-auto-sub --convert-subs $SUBEXT --extract-audio $AUDIOFORMAT --prefer-ffmpeg -o "$OUT/%(id)s.%(ext)s" $BATCH "$IN" --exec echo)
+		AUDIOLIST=$(youtube-dl $VERBOSE --write-info-json --sub-lang $SUBLANG --write-sub --write-auto-sub --convert-subs $SUBEXT --extract-audio $AUDIOFORMAT --prefer-ffmpeg -o "$OUT/%(id)s.%(ext)s" $BATCH "$IN" --exec echo $EXTRAARGS)
 
 		for AUDIO in $AUDIOLIST; do
 			JSON=${AUDIO%.*}.info.json
