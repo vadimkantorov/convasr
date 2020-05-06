@@ -117,9 +117,10 @@ class JasperNet(nn.Module):
 		self.residual = residual
 		self.dict = dict
 
-	def forward(self, x, xlen = None, y = None, ylen = None):
-		features = self.frontend(x if x.ndim == 2 else x.squeeze(1))
-		x = normalize_features(features, mask = temporal_mask(features, lengths_fraction = xlen)) if self.normalize_features else features 
+	def forward(self, x, xlen = None, y = None, ylen = None, meta = None):
+		x = self.frontend(x if x.ndim == 2 else x.squeeze(1))
+		x = normalize_features(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.normalize_features else x 
+		
 		residual = []
 		for i, subblock in enumerate(self.backbone):
 			x = subblock(x, residual = residual, lengths_fraction = xlen)
@@ -145,7 +146,6 @@ class JasperNet(nn.Module):
 			for module in filter(lambda module: isinstance(module, nn.modules.batchnorm._BatchNorm), m.modules()):
 				module.eval()
 				module.train = lambda training: None
-				# use track_running_stats instead
 			for p in m.parameters():
 				p.requires_grad = False
 
@@ -252,20 +252,6 @@ class BatchNorm1dInplace(nn.BatchNorm1d):
 			grad_input = torch.batch_norm_backward_elemt(grad_output, saved_input, mean, invstd, weight, mean_dy, mean_dy_xmu)
 			return grad_input, grad_weight, grad_bias, None, None, None, None, None
 
-class SqueezeAndExcite(nn.Sequential):
-	def __init__(self, out_channels, ratio = 0.25):
-		se_channels = int(out_channels * ratio)
-		super().__init__(
-			nn.AdaptiveAvgPool1d(1),
-			nn.Conv1d(out_channels, se_channels, kernel_size = 1),
-			nn.ReLU(inplace = True),
-			nn.Conv1d(se_channels, out_channels, kernel_size = 1),
-			nn.Sigmoid()
-		)
-
-	def forward(self, x):
-		return x * super().forward(x)
-
 def relu_dropout(x, p = 0, inplace = False, training = False):
 	if not training or p == 0:
 		return x.clamp_(min = 0) if inplace else x.clamp(min = 0)
@@ -306,12 +292,13 @@ class AugmentationFrontend(nn.Module):
 		return 'SoxAug' not in self.waveform_transform.__class__.__name__
 
 class LogFilterBankFrontend(nn.Module):
-	def __init__(self, out_channels, sample_rate, window_size, window_stride, window, dither = 1e-5, dither0 = 0.0, preemphasis = 0.97, eps = 1e-20, normalize_signal = True, stft_mode = None, window_periodic = True):
+	def __init__(self, out_channels, sample_rate, window_size, window_stride, window, dither = 1e-5, dither0 = 0.0, preemphasis = 0.97, eps = 1e-20, normalize_signal = True, stft_mode = None, window_periodic = True, normalize_features = False):
 		super().__init__()
 		self.stft_mode = stft_mode
 		self.dither = dither
 		self.dither0 = dither0
 		self.preemphasis =  preemphasis
+		self.normalize_features = normalize_features
 		self.normalize_signal = normalize_signal
 		self.sample_rate = sample_rate
 
@@ -352,7 +339,7 @@ class LogFilterBankFrontend(nn.Module):
 		signal = signal + self.dither * torch.randn_like(signal) if self.dither > 0 else signal
 		power_spectrum = self.stft_magnitude_squared(signal)
 		features = self.mel(power_spectrum).log()
-		return features
+		return normalize_features(features) if self.normalize_features else features
 	
 	@property
 	def read_audio(self):

@@ -49,6 +49,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			transcript = transcript[0]
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
 			
+			transcript = dict(dict(audio_name = os.path.basename(transcript['audio_path'])), **transcript)
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
 			ref_normalized, targets = zip(*targets)
@@ -65,10 +66,10 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				transcript = [dict(speaker = speaker, speakers = speakers, ref = ' '.join(ref_full))]
 				normalize_text = False
 		
-			transcript = [dict(dict(audio_path = audio_path, channel = channel, speaker = self.speakers[channel] if self.speakers else None, begin = 0, end = signal.shape[1] / sample_rate), **t) for t in sorted(transcript, key = transcripts.sort_key) for channel in ([t['channel']] if 'channel' in t else range(len(signal)))]
+			transcript = [dict(dict(audio_path = audio_path, audio_name = os.path.basename(t['audio_path']), channel = channel, speaker = self.speakers[channel] if self.speakers else None, begin = 0, end = signal.shape[1] / sample_rate), **t) for t in sorted(transcript, key = transcripts.sort_key) for channel in ([t['channel']] if 'channel' in t else range(len(signal)))]
 			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], int(t['begin'] * sample_rate) : 1 + int(t['end'] * sample_rate)]]]
 			targets = [[labels.encode(t.get('ref', ''), normalize = normalize_text)[1] for t in transcript] for labels in self.labels]
-			
+		
 		return [transcript, features] + list(targets)
 			
 	def __len__(self):

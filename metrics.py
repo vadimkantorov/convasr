@@ -47,7 +47,7 @@ def align_words(hyp, ref, break_ref = False):
 	word_alignment = [dict(hyp = ''.join(hyp), ref = ''.join(ref), type = t) for ref, hyp in words for t, e in [error_type(hyp, ref)]]
 	return ''.join(hyp), ''.join(ref), word_alignment
 
-def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = set(), full = False, **kwargs):
+def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = set(), full = False, break_ref_alignment = True, **kwargs):
 	hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
 	hyp_postproc, ref_postproc = map(functools.partial(labels.postprocess_transcript, collapse_repeat = True), [hyp, ref])
 	hyp_phonetic, ref_phonetic = map(functools.partial(labels.postprocess_transcript, phonetic_replace_groups = phonetic_replace_groups), [hyp_postproc, ref_postproc])
@@ -55,7 +55,7 @@ def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = 
 	a = dict(labels_name = labels.name, labels = str(labels), audio_path = audio_path, audio_name = os.path.basename(audio_path), hyp_postrpoc = hyp_postproc, ref_postproc = ref_postproc, ref = ref, hyp = hyp, cer = cer(hyp_postproc, ref_postproc), wer = wer(hyp_postproc, ref_postproc), per = cer(hyp_phonetic, ref_phonetic), phonetic = dict(ref = ref_phonetic, hyp = hyp_phonetic), der = sum(w in vocab for w in hyp.split()) / (1 + hyp.count(' ')), **kwargs)
 	
 	if full:
-		hyp, ref, word_alignment = align_words(hyp, ref)
+		hyp, ref, word_alignment = align_words(hyp, ref, break_ref = break_ref_alignment)
 		phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
 		hypref_pseudo = {t : (' '.join((r_ if error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'], missing_ref = ['missing_ref'])[t] else h_).replace(placeholder, '') for w in word_alignment for r_, h_ in [(w['ref'], w['hyp'])] ), ref.replace(placeholder, '')) for t in error_types}
 
