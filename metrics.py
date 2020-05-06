@@ -45,7 +45,7 @@ def align_words(hyp, ref, break_ref = False):
 		words = words_
 
 	word_alignment = [dict(hyp = ''.join(hyp), ref = ''.join(ref), type = t) for ref, hyp in words for t, e in [error_type(hyp, ref)]]
-	return ''.join(h), ''.join(r), word_alignment
+	return ''.join(hyp), ''.join(ref), word_alignment
 
 def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = set(), full = False, **kwargs):
 	hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
@@ -127,7 +127,7 @@ def aggregate(analyzed, p = 0.5):
 
 def error_type(hyp, ref, p = 0.5, E = 3, L = 4, placeholder = '|'):
 	e = sum(ch != cr for ch, cr in zip(hyp, ref))
-	ref_placeholders = ref.count(plaeholder)
+	ref_placeholders = ref.count(placeholder)
 	ref_chars = len(ref) - ref_placeholders
 	is_typo = e > 0 and ((hyp.count(placeholder) < p * len(ref) and ref_placeholders < p * len(ref)))
 	

@@ -119,7 +119,8 @@ class JasperNet(nn.Module):
 
 	def forward(self, x, xlen = None, y = None, ylen = None):
 		features = self.frontend(x if x.ndim == 2 else x.squeeze(1))
-		x = normalize_features(features, mask = temporal_mask(features, lengths_fraction = xlen)) if self.normalize_features else features 
+		#x = normalize_features(features, mask = temporal_mask(features, lengths_fraction = xlen)) if self.normalize_features else features 
+		x = normalize_features(features) if self.normalize_features else features 
 		residual = []
 		for i, subblock in enumerate(self.backbone):
 			x = subblock(x, residual = residual, lengths_fraction = xlen)
