@@ -163,7 +163,7 @@ def main(args):
 			exphtml.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
-			torch.save(dict(model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer.state_dict(), amp_state_dict = apex.amp.state_dict() if args.fp16 else None, sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), time = time.time()), checkpoint_path)
+			torch.save(dict(model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer.state_dict(), amp_state_dict = apex.amp.state_dict() if args.fp16 else None, sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), time = time.time(), labels = [(l.name, str(l)) for l in labels]), checkpoint_path)
 
 		model.train()
 	

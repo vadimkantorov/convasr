@@ -198,7 +198,7 @@ class Labels:
 				transcript.append(dict(begin = float(ts[i_]), end = float(ts[j_]), i = i_, j = j_, channel = channel_(i_, j_), speaker = speaker_(i, j), **{key : decode_(i, j)}))
 
 				i = None
-			elif k not in [self.space_idx, self.blank_idx] and i is None:
+			elif k not in silence and i is None:
 				i = j
 		return transcript
 
