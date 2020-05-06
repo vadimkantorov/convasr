@@ -90,7 +90,7 @@ def main(args):
 		for meta, x, xlen, y, ylen in data_loader:
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
 			with torch.no_grad():
-				logits, log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen, meta = meta).get, ['logits', 'log_probs', 'olen', 'loss'])
+				logits, log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'olen', 'loss'])
 	
 			entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, olen))
 			hyp = [list(map(l.decode, d.decode(lp, o))) for l, d, lp, o in zip(labels, decoder, log_probs, olen)]

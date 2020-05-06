@@ -195,7 +195,9 @@ class Labels:
 				i = j
 		return transcript
 
-	def postprocess_transcript(self, word, replace_blank = True, replace_space = False, replace_repeat = True, replace_unk = True, collapse_repeat = False, phonetic_replace_groups = []):
+	def postprocess_transcript(self, word, replace_blank_series = 8, replace_blank = True, replace_space = False, replace_repeat = True, replace_unk = True, collapse_repeat = False, phonetic_replace_groups = []):
+		if replace_blank_series is not False:
+			word = word.replace(self.blank * replace_blank_series, self.space * replace_blank_series)
 		if replace_blank is not False:
 			word = word.replace(self.blank, '' if replace_blank is True else replace_blank)
 		if replace_unk is True:
