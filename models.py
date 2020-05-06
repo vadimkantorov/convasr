@@ -87,7 +87,7 @@ class JasperNet(nn.Module):
 			separable = False, groups = 1, 
 			dropout = 0, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
 			temporal_mask = True, nonlinearity = 'relu', inplace = False,
-			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None, normalize_features = True
+			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None
 		):
 		super().__init__()
 		dropout_prologue = dropout_prologue if dropout != 0 else 0
@@ -111,16 +111,14 @@ class JasperNet(nn.Module):
 			ConvBN(num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), kernel_size = 1, dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = False),
 		])
 		self.frontend = frontend if frontend is not None else nn.Identity()
-		self.normalize_features = normalize_features
 		self.backbone = backbone
 		self.decoder = Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
 		self.residual = residual
 		self.dict = dict
 
 	def forward(self, x, xlen = None, y = None, ylen = None):
-		features = self.frontend(x if x.ndim == 2 else x.squeeze(1))
-		#x = normalize_features(features, mask = temporal_mask(features, lengths_fraction = xlen)) if self.normalize_features else features 
-		x = normalize_features(features) if self.normalize_features else features 
+		x = self.frontend(x if x.ndim == 2 else x.squeeze(1))
+		#x = normalize_features(x)
 		residual = []
 		for i, subblock in enumerate(self.backbone):
 			x = subblock(x, residual = residual, lengths_fraction = xlen)
@@ -275,7 +273,7 @@ def relu_dropout(x, p = 0, inplace = False, training = False):
 	mask = torch.rand_like(x) < p1m
 	mask &= (x > 0)
 	mask.logical_not_()
-	return x.masked_fill_(mask, 0).div_(p1m) if inplace else x.masked_fill(mask, 0).div(p1m)
+	return x.masked_fill_(mask, 0).div_(p1m) if inplace else (x.masked_fill(mask, 0) / p1m)
 
 class AugmentationFrontend(nn.Module):
 	def __init__(self, frontend, feature_transform = None, waveform_transform = None):
@@ -307,12 +305,13 @@ class AugmentationFrontend(nn.Module):
 		return 'SoxAug' not in self.waveform_transform.__class__.__name__
 
 class LogFilterBankFrontend(nn.Module):
-	def __init__(self, out_channels, sample_rate, window_size, window_stride, window, dither = 1e-5, dither0 = 0.0, preemphasis = 0.97, eps = 1e-20, normalize_signal = True, stft_mode = None, window_periodic = True):
+	def __init__(self, out_channels, sample_rate, window_size, window_stride, window, dither = 1e-5, dither0 = 0.0, preemphasis = 0.97, eps = 1e-20, normalize_signal = True, normalize_features = True, stft_mode = None, window_periodic = True):
 		super().__init__()
 		self.stft_mode = stft_mode
 		self.dither = dither
 		self.dither0 = dither0
 		self.preemphasis =  preemphasis
+		self.normalize_features = normalize_features
 		self.normalize_signal = normalize_signal
 		self.sample_rate = sample_rate
 
@@ -353,7 +352,8 @@ class LogFilterBankFrontend(nn.Module):
 		signal = signal + self.dither * torch.randn_like(signal) if self.dither > 0 else signal
 		power_spectrum = self.stft_magnitude_squared(signal)
 		features = self.mel(power_spectrum).log()
-		return features
+		return normalize_features(features) if self.normalize_features else features
+		#return features
 	
 	@property
 	def read_audio(self):
@@ -382,17 +382,8 @@ def normalize_signal(signal, dim = -1, eps = 1e-5):
 	signal = signal.to(torch.float32)
 	return signal / (signal.abs().max(dim = dim, keepdim = True).values + eps) if signal.numel() > 0 else signal
 
-def normalize_features(features, mask = None, dim = -1, eps = 1e-20):
-	if mask is None:
-		mean = features.mean(dim = dim, keepdim = True)
-		std = features.std(dim = dim, keepdim = True)
-		return (features - mean) / (std + eps)
-	else:
-		xlen = mask.sum(dim = dim, keepdim = True)
-		mean = (features * mask).sum(dim = dim, keepdim = True) / xlen
-		features_zero_mean_masked = mask * (features - mean)
-		std = features_zero_mean_masked.pow(2).sum(dim = dim, keepdim = True) / xlen
-		return features_zero_mean_masked / (std + eps)
+def normalize_features(features, dim = -1, eps = 1e-20):
+	return (features - features.mean(dim = dim, keepdim = True)) / (features.std(dim = dim, keepdim = True) + eps)
 
 def unpad(x, lens):
 	return [e[..., :l] for e, l in zip(x, lens)]
