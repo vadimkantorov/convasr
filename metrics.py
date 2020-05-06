@@ -57,7 +57,7 @@ def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = 
 	if full:
 		hyp, ref, word_alignment = align_words(hyp, ref)
 		phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
-		hypref_pseudo = {t : (' '.join((r_ if error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'], missing_ref = ['missing_ref'])[t] else h_).replace(placeholder, '') for w in word_alignment for r_, h_ in [(w['ref'], w['hyp'])] ), r.replace(placeholder, '')) for t in error_types}
+		hypref_pseudo = {t : (' '.join((r_ if error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'], missing_ref = ['missing_ref'])[t] else h_).replace(placeholder, '') for w in word_alignment for r_, h_ in [(w['ref'], w['hyp'])] ), ref.replace(placeholder, '')) for t in error_types}
 
 		errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in word_alignment if r['type'] == t] for t in error_types}
 	

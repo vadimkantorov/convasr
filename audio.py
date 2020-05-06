@@ -11,7 +11,7 @@ def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize =
 	try:
 		if audio_path.endswith('.wav'):
 			sample_rate_, signal = scipy.io.wavfile.read(audio_path)
-			signal.setflags(write = 1)
+			#signal.setflags(write = 1)
 			signal = torch.as_tensor(signal[None, :] if len(signal.shape) == 1 else signal.T)
 		elif backend == 'sox':
 			num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path])) if not mono else 1
@@ -21,7 +21,7 @@ def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize =
 			sample_rate_, signal = sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['ffmpeg', '-i', audio_path, '-nostdin', '-hide_banner', '-nostats', '-loglevel', 'quiet', '-f', 's16le', '-ar', str(sample_rate), '-ac', str(num_channels), '-']), byte_order = byte_order)).reshape(-1, num_channels).t()
 	except:
 		print(f'Error when reading [{audio_path}]')
-		sample_rate_, signal = sample_rate, torch.tensor([[]], dtype = dtype)
+		sample_rate_, signal = sample_rate, torch.tensor([[]], dtype = torch.int16)
 
 	assert signal.dtype in [torch.int16, torch.float32]
 	if signal.dtype is torch.int16:
