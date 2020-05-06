@@ -11,6 +11,7 @@ def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize =
 	try:
 		if audio_path.endswith('.wav'):
 			sample_rate_, signal = scipy.io.wavfile.read(audio_path)
+			signal.setflags(write = 1)
 			signal = torch.as_tensor(signal[None, :] if len(signal.shape) == 1 else signal.T)
 		elif backend == 'sox':
 			num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path])) if not mono else 1
