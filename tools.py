@@ -169,8 +169,7 @@ def lserrorwords(input_path, output_path):
 	words = set(w['ref'].replace('|', '') for t in transcript for w in t['words'] if w['type'] not in ['ok', 'missing_ref'])
 	words = filter(lambda ref: len(ref) > 1, words)
 
-	group = lambda ref: (ref[:-3] if len(ref) > 8 else ref[:-2] if len(ref) > 5 else ref, len(ref))
-	
+	group = lambda word: (lang.lemmatize(word), len(word))
 	words = [next(g) for k, g in itertools.groupby(sorted(words, key = group), key = group)]
 	words = sorted(words, key = lambda ref: (len(ref), ref))
 	output_path = output_path or (input_path + '.txt')

@@ -115,6 +115,9 @@ def normalize_text(text, remove_unk = True):
 	text = re.sub(f'[^{ALPHABET} ]', '*', text)
 
 	return text
+	
+def lemmatize(word):
+	return word[:-3] if len(word) > 8 else word[:-2] if len(word) > 5 else word
 
 if __name__ == '__main__':
 	import argparse
