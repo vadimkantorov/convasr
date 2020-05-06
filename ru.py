@@ -1,6 +1,10 @@
 import re
 
-ALPHABET = 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя* '
+PUNKT = '.'
+UNK = '*'
+ALPHA = 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя'
+
+ALPHABET = ALPHA + UNK + PUNKT
 
 EVAL_REPLACE_GROUPS = ['её']
 
@@ -112,7 +116,7 @@ def normalize_text(text, remove_unk = True):
 	text = text.lower()
 	
 	# replace unk characters by star
-	text = re.sub(f'[^{ALPHABET} ]', '*', text)
+	text = re.sub(f'[^{ALPHA} ]', '*', text)
 
 	return text
 	
