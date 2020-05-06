@@ -137,7 +137,7 @@ def error_type(hyp, ref, p = 0.5, E = 3, L = 4, placeholder = '|'):
 		easy = e <= E and ref_chars >= L
 		return 'typo_' + ('easy' if easy else 'hard'), e
 	else:
-		source = '_ref' if ref_placeholders >= p * len(ref) else ''
+		source = '_ref' if ref_chars > 3 and ref_placeholders >= p * len(ref) else ''
 		return 'missing' + source, e
 
 error_types = ['typo_easy', 'typo_hard', 'missing', 'missing_ref']
