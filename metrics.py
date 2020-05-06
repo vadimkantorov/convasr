@@ -385,13 +385,13 @@ if __name__ == '__main__':
 	subparsers = parser.add_subparsers()
 	
 	cmd = subparsers.add_parser('analyze')
-	cmd.add_argument('--ref')
-	cmd.add_argument('--hyp')
+	cmd.add_argument('--hyp', required = True)
+	cmd.add_argument('--ref', required = True)
 	cmd.set_defaults(func = analyze)
 
 	cmd = subparsers.add_parser('align')
-	cmd.add_argument('--ref')
-	cmd.add_argument('--hyp')
+	cmd.add_argument('--hyp', required = True)
+	cmd.add_argument('--ref', required = True)
 	cmd.set_defaults(func = lambda hyp, ref: print('\n'.join(f'{k}: {v}' for k, v in zip(['hyp', 'ref'], align(hyp, ref)))))
 
 	args = parser.parse_args()
