@@ -23,7 +23,7 @@ def split_by_space(hyp, ref):
 		if i == len(ref) or ref[i] == space:
 			ref_word, hyp_word = ref[k : i], hyp[k : i]
 			if ref_word:
-				words.append((ref_word, hyp_word))
+				words.append((hyp_word, ref_word))
 			k = i + 1
 	return words
 
@@ -34,17 +34,17 @@ def align_words(hyp, ref, break_ref = False):
 
 	if break_ref:
 		words_ = []
-		for ref_word, hyp_word in words:
+		for hyp_word, ref_word in words:
 			ref_charinds = [i for i, c in enumerate(ref_word) if c != placeholder]
 			ref_word, hyp_word = list(ref_word), list(hyp_word)
 			for i in range(len(ref_word)):
-				if (not ref_charinds or i < ref_charinds[0] or i > ref_charinds[-1]) and hyp[i] == space and ref[i] == placeholder:
-					ref[i] = space
-			words_.extend(split_by_space(hyp, ref))
+				if (not ref_charinds or i < ref_charinds[0] or i > ref_charinds[-1]) and hyp_word[i] == space and ref_word[i] == placeholder:
+					ref_word[i] = space
+			words_.extend(split_by_space(hyp_word, ref_word))
 
 		words = words_
 
-	word_alignment = [dict(hyp = ''.join(hyp), ref = ''.join(ref), type = t) for ref, hyp in words for t, e in [error_type(hyp, ref)]]
+	word_alignment = [dict(hyp = ''.join(hyp), ref = ''.join(ref), type = t) for hyp, ref in words for t, e in [error_type(hyp, ref)]]
 	return ''.join(hyp), ''.join(ref), word_alignment
 
 def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = set(), full = False, break_ref_alignment = True, **kwargs):
