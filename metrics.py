@@ -13,6 +13,9 @@ silence = placeholder + space
 def align(hyp, ref):
 	aligner = Needleman()
 	aligner.separator = placeholder
+	aligner.score_sub = -2
+	aligner.score_del = -4
+	aligner.score_ins = -3
 	ref, hyp = aligner.align(list(ref), list(hyp))
 	return ''.join(hyp), ''.join(ref)
 

@@ -170,7 +170,7 @@ class Labels:
 		chars = self.split_candidates(normalized)[0]
 		return normalized, torch.LongTensor([self.chr2idx[c] if i == 0 or c != chars[i - 1] else self.repeat_idx for i, c in enumerate(chars)] if self.bpe is None else self.bpe.EncodeAsIds(chars))
 
-	def decode(self, idx : list, ts = None, I = None, speaker = None, channel = 0, speakers = None, replace_blank = True, replace_space = False, replace_repeat = True, key = 'hyp'):
+	def decode(self, idx : list, ts = None, I = None, speaker = None, channel = 0, speakers = None, replace_blank = True, replace_blank_series = 8, replace_space = False, replace_repeat = True, key = 'hyp'):
 		decode_ = lambda i, j: self.postprocess_transcript(''.join(self[idx[k]] for k in range(i, j + 1) if replace_repeat is False or k == 0 or idx[k] != idx[k - 1]), replace_blank = replace_blank, replace_space = replace_space, replace_repeat = replace_repeat)
 		speaker_ = lambda i, j: (int(speaker[i:1 + j].max()) if torch.is_tensor(speaker) else speaker) if speaker is not None and speakers is None else speakers[int(speaker[i:1 + j].max())] if speaker is not None and speakers is not None else None
 		channel_ = lambda i_, j_: channel if isinstance(channel, int) else int(channel[i_])
@@ -178,6 +178,13 @@ class Labels:
 		idx = torch.as_tensor(idx).tolist()
 		if ts is None:
 			return decode_(0, len(idx) - 1)
+
+		if replace_blank_series is not False:
+			blanks = ''.join(self.blank if i == self.blank_idx else '_' for i in idx)
+			blanks = blanks.replace(self.blank * replace_blank_series, self.space * replace_blank_series)
+			for i, c in enumerate(blanks):
+				if c == self.space:
+					idx[i] = self.space_idx
 
 		silence = [self.space_idx] if replace_blank is False else [self.space_idx, self.blank_idx]
 		
@@ -195,9 +202,7 @@ class Labels:
 				i = j
 		return transcript
 
-	def postprocess_transcript(self, word, replace_blank_series = 8, replace_blank = True, replace_space = False, replace_repeat = True, replace_unk = True, collapse_repeat = False, phonetic_replace_groups = []):
-		if replace_blank_series is not False:
-			word = word.replace(self.blank * replace_blank_series, self.space * replace_blank_series)
+	def postprocess_transcript(self, word, replace_blank = True, replace_space = False, replace_repeat = True, replace_unk = True, collapse_repeat = False, phonetic_replace_groups = []):
 		if replace_blank is not False:
 			word = word.replace(self.blank, '' if replace_blank is True else replace_blank)
 		if replace_unk is True:
