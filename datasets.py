@@ -174,6 +174,7 @@ class Labels:
 		speaker_ = lambda i, j: (int(speaker[i:1 + j].max()) if torch.is_tensor(speaker) else speaker) if speaker is not None and speakers is None else speakers[int(speaker[i:1 + j].max())] if speaker is not None and speakers is not None else None
 		channel_ = lambda i_, j_: channel if isinstance(channel, int) else int(channel[i_])
 
+		idx = torch.as_tensor(idx).tolist()
 		if ts is None:
 			return decode_(0, len(idx) - 1)
 

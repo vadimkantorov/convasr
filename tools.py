@@ -1,6 +1,7 @@
 import os
 import json
 import gzip
+import itertools
 import argparse
 import subprocess
 import torch
@@ -162,6 +163,20 @@ def transcode(input_path, output_path, ext, cmd):
 	json.dump(transcript, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
+def lserrorwords(input_path, output_path):
+	transcript = json.load(open(input_path))
+	transcript = filter(lambda t: [w['type'] for w in t['words']].count('missing_ref') <= 2, transcript)
+	words = set(w['ref'].replace('|', '') for t in transcript for w in t['words'] if w['type'] not in ['ok', 'missing_ref'])
+	words = filter(lambda ref: len(ref) > 1, words)
+
+	group = lambda ref: (ref[:-3] if len(ref) > 8 else ref[:-2] if len(ref) > 5 else ref, len(ref))
+	
+	words = [next(g) for k, g in itertools.groupby(sorted(words, key = group), key = group)]
+	words = sorted(words, key = lambda ref: (len(ref), ref))
+	output_path = output_path or (input_path + '.txt')
+	open(output_path, 'w').write('\n'.join(words))
+	print(output_path)
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -243,6 +258,11 @@ if __name__ == '__main__':
 	cmd.add_argument('input_path')
 	cmd.add_argument('--keys', nargs = '+', default = ['cer', 'wer'])
 	cmd.set_defaults(func = summary)
+	
+	cmd = subparsers.add_parser('lserrorwords')
+	cmd.add_argument('--input-path', '-i', required = True)
+	cmd.add_argument('--output-path', '-o')
+	cmd.set_defaults(func = lserrorwords)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')

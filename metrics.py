@@ -6,96 +6,88 @@ import functools
 import torch
 import Levenshtein
 
+placeholder = '|' 
+space = ' '
+silence = placeholder + space
+
 def align(hyp, ref):
-	ref, hyp = Needleman().align(list(ref), list(hyp))
-	r, h = '', ''
-	i = 0
-	while i < len(ref):
-		if i + 1 < len(hyp) and ref[i] == '|' and hyp[i + 1] == '|':
-			r += ref[i + 1]
-			h += hyp[i]
-			i += 2
-		elif i + 1 < len(ref) and ref[i + 1] == '|' and hyp[i] == '|':
-			r += ref[i]
-			h += hyp[i + 1]
-			i += 2
-		else:
-			r += ref[i]
-			h += hyp[i]
-			i += 1
+	aligner = Needleman()
+	aligner.separator = placeholder
+	ref, hyp = aligner.align(list(ref), list(hyp))
+	return ''.join(hyp), ''.join(ref)
 
-	return h, r
-
-def align_words(hyp, ref):
-	h, r = map(list, align(hyp, ref))
-	
-	for i in range(len(r)):
-		if r[i] != '|':
-			break
-		if h[i] == ' ':
-			r[i] = ' '
-	for i in reversed(range(len(r))):
-		if r[i] != '|':
-			break
-		if h[i] == ' ':
-			r[i] = ' '
-	
-	h, r = ''.join(h), ''.join(r)
-
+def split_by_space(hyp, ref):
 	words = []
 	k = None
-	for i in range(1 + len(r)):
-		if i == len(r) or r[i] == ' ':
-			r_, h_ = r[k : i], h[k : i]
-			if r_:
-				words.append((r_, h_))
-			k = i + 1 #None
-	
-	errors = [dict(hyp = h_, ref = r_, type = t) for r_, h_ in words for t, e in [error_type(h_, r_)]]
-	return h, r, words, errors
+	for i in range(1 + len(ref)):
+		if i == len(ref) or ref[i] == space:
+			ref_word, hyp_word = ref[k : i], hyp[k : i]
+			if ref_word:
+				words.append((ref_word, hyp_word))
+			k = i + 1
+	return words
+
+def align_words(hyp, ref, break_ref = False):
+	hyp, ref = map(list, align(hyp, ref))
+
+	words = split_by_space(hyp, ref)
+
+	if break_ref:
+		words_ = []
+		for ref_word, hyp_word in words:
+			ref_charinds = [i for i, c in enumerate(ref_word) if c != placeholder]
+			ref_word, hyp_word = list(ref_word), list(hyp_word)
+			for i in range(len(ref_word)):
+				if (not ref_charinds or i < ref_charinds[0] or i > ref_charinds[-1]) and hyp[i] == space and ref[i] == placeholder:
+					ref[i] = space
+			words_.extend(split_by_space(hyp, ref))
+
+		words = words_
+
+	word_alignment = [dict(hyp = ''.join(hyp), ref = ''.join(ref), type = t) for ref, hyp in words for t, e in [error_type(hyp, ref)]]
+	return ''.join(h), ''.join(r), word_alignment
 
 def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = set(), full = False, **kwargs):
-	hyp_orig, ref_orig = hyp, ref
 	hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
-	hyp, ref = map(functools.partial(labels.postprocess_transcript, collapse_repeat = True), [hyp, ref])
-	hyp_phonetic, ref_phonetic = map(functools.partial(labels.postprocess_transcript, phonetic_replace_groups = phonetic_replace_groups), [hyp, ref])
+	hyp_postproc, ref_postproc = map(functools.partial(labels.postprocess_transcript, collapse_repeat = True), [hyp, ref])
+	hyp_phonetic, ref_phonetic = map(functools.partial(labels.postprocess_transcript, phonetic_replace_groups = phonetic_replace_groups), [hyp_postproc, ref_postproc])
 	
-	a = dict(labels_name = labels.name, labels = str(labels), audio_path = audio_path, audio_name = os.path.basename(audio_path), hyp_orig = hyp_orig, ref_orig = ref_orig, ref = ref, hyp = hyp, cer = cer(hyp, ref), wer = wer(hyp, ref), per = cer(hyp_phonetic, ref_phonetic), phonetic = dict(ref = ref_phonetic, hyp = hyp_phonetic), der = sum(w in vocab for w in hyp.split()) / (1 + hyp.count(' ')), **kwargs)
+	a = dict(labels_name = labels.name, labels = str(labels), audio_path = audio_path, audio_name = os.path.basename(audio_path), hyp_postrpoc = hyp_postproc, ref_postproc = ref_postproc, ref = ref, hyp = hyp, cer = cer(hyp_postproc, ref_postproc), wer = wer(hyp_postproc, ref_postproc), per = cer(hyp_phonetic, ref_phonetic), phonetic = dict(ref = ref_phonetic, hyp = hyp_phonetic), der = sum(w in vocab for w in hyp.split()) / (1 + hyp.count(' ')), **kwargs)
 	
 	if full:
-		h, r, words, words_ = align_words(hyp, ref)
+		hyp, ref, word_alignment = align_words(hyp, ref)
 		phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
-		hypref_pseudo = {t : (' '.join((r_ if error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'], missing_ref = ['missing_ref'])[t] else h_).replace('|', '') for r_, h_ in words), r.replace('|', '')) for t in error_types}
+		hypref_pseudo = {t : (' '.join((r_ if error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'], missing_ref = ['missing_ref'])[t] else h_).replace(placeholder, '') for w in word_alignment for r_, h_ in [(w['ref'], w['hyp'])] ), r.replace(placeholder, '')) for t in error_types}
 
-		errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in words_ if r['type'] == t] for t in error_types}
+		errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in word_alignment if r['type'] == t] for t in error_types}
 	
 		a.update(dict(
-			alignment = dict(ref = r, hyp = h),
-			words = words_,
+			alignment = dict(ref = ref, hyp = hyp),
+			words = word_alignment,
 			error_stats = dict(
 				spaces = dict(
-					delete = sum(r[i] == ' ' and h[i] != ' ' for i in range(len(r))),
-					insert = sum(h[i] == ' ' and r[i] != ' ' for i in range(len(r))),
-					total =  sum(r[i] == ' ' for i in range(len(r)))
+					delete = sum(ref[i] == space and hyp[i] != space for i in range(len(ref))),
+					insert = sum(hyp[i] == space and ref[i] != space for i in range(len(ref))),
+					total =  sum(ref[i] == space for i in range(len(ref)))
 				),
 				chars = dict(
-					ok = sum(r[i] == h[i] for i in range(len(r))), 
-					replace = sum(r[i] != '|' and r[i] != h[i] and h[i] != '|' for i in range(len(r))),
-					replace_phonetic = sum(r[i] != '|' and r[i] != h[i] and h[i] != '|' and phonetic_group(r[i]) == phonetic_group(h[i]) for i in range(len(r))), 
-					delete = sum(r[i] != '|' and r[i] != h[i] and h[i] == '|' for i in range(len(r))),
-					insert = sum(r[i] == '|' and h[i] != '|' for i in range(len(r))),
-					total = len(r)
+					ok = sum(ref[i] == hyp[i] for i in range(len(ref))), 
+					replace = sum(ref[i] != placeholder and ref[i] != hyp[i] and hyp[i] != placeholder for i in range(len(ref))),
+					replace_phonetic = sum(ref[i] != placeholder and ref[i] != hyp[i] and hyp[i] != placeholder and phonetic_group(ref[i]) == phonetic_group(hyp[i]) for i in range(len(ref))), 
+					delete = sum(ref[i] != placeholder and ref[i] != hyp[i] and hyp[i] == placeholder for i in range(len(ref))),
+					insert = sum(ref[i] == placeholder and hyp[i] != placeholder for i in range(len(ref))),
+					total = len(ref)
 				),
 				words = dict(
-					missing_prefix = sum(h_[0] in ' |' for r_, h_ in words),
-					missing_suffix = sum(h_[-1] in ' |' for r_, h_ in words),
-					ok_prefix_suffix = sum(h_[0] not in ' |' and h_[-1] not in ' |' for r_, h_ in words),
-					delete = sum(h_.count('|') > len(r_) // 2 for r_, h_ in words),
-					total = len(words),
+					missing_prefix = sum(w['hyp'][0] in silence for w in word_alignment),
+					missing_suffix = sum(w['hyp'][-1] in silence for w in word_alignment),
+					ok_prefix_suffix = sum(w['hyp'][0] not in silence and w['hyp'][-1] not in silence for w in word_alignment),
+					delete = sum(w['hyp'].count('|') > len(w['ref']) // 2 for w in word_alignment),
+					total = len(word_alignment),
 					errors = errors,
 				),
 			),
-			mer = len(errors['missing']) / len(words),
+			mer = len(errors['missing']) / len(word_alignment),
 			cer_easy = cer(*hypref_pseudo['typo_easy']),
 			cer_hard = cer(*hypref_pseudo['typo_hard']),
 			cer_missing = cer(*hypref_pseudo['missing'])
@@ -133,18 +125,19 @@ def aggregate(analyzed, p = 0.5):
 			
 	return stats
 
-def error_type(hyp, ref, p = 0.5, E = 3, L = 4):
+def error_type(hyp, ref, p = 0.5, E = 3, L = 4, placeholder = '|'):
 	e = sum(ch != cr for ch, cr in zip(hyp, ref))
-	ref_ = ref.replace('|', '')
-	is_typo = e > 0 and ((hyp.count('|') < p * len(ref) and ref.count('|') < p * len(ref)))
+	ref_placeholders = ref.count(plaeholder)
+	ref_chars = len(ref) - ref_placeholders
+	is_typo = e > 0 and ((hyp.count(placeholder) < p * len(ref) and ref_placeholders < p * len(ref)))
 	
 	if hyp == ref:
 		return 'ok', e
 	elif is_typo:
-		easy = e <= E and len(ref_) >= L
+		easy = e <= E and ref_chars >= L
 		return 'typo_' + ('easy' if easy else 'hard'), e
 	else:
-		source = '_ref' if ref.count('|') > p * len(ref) else ''
+		source = '_ref' if ref_placeholders >= p * len(ref) else ''
 		return 'missing' + source, e
 
 error_types = ['typo_easy', 'typo_hard', 'missing', 'missing_ref']
@@ -388,7 +381,6 @@ class Needleman:
 
 if __name__ == '__main__':
 	import argparse
-	import ru
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
 	

@@ -2,6 +2,8 @@ import re
 
 ALPHABET = 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя* '
 
+EVAL_REPLACE_GROUPS = ['её']
+
 PHONETIC_REPLACE_GROUPS = ['оая', 'пб', 'сзц', 'вф', 'кгх', 'тд', 'чжшщ', 'еыэий', 'лр', 'ую', 'ьъ', 'нм']
 VOWELS = 'аоийеёэыуюя'
 
@@ -95,9 +97,11 @@ def preprocess_word(w):
 
 	return w
 
-def normalize_text(text):
-	# percent isnt preserved
+def normalize_text(text, remove_unk = True):
+	# unk is removed from input
 	text = text.replace('*', '')
+	
+	# percent isnt preserved
 	text = text.replace('%', f' {PERCENT}*')
 	
 	# ignores punct
@@ -113,6 +117,9 @@ def normalize_text(text):
 	return text
 
 if __name__ == '__main__':
-	text = '1-й Здорово http://echomsk.ru/programs/-echo 2.5 оу 1ого 100% XIX век XX-й век -4'
-	print(text)
-	print(normalize_text(text))
+	import argparse
+	parser = argparse.ArgumentParser()
+	parser.add_argument('text', default = '1-й Здорово http://echomsk.ru/programs/-echo 2.5 оу 1ого 100% XIX век XX-й век -4')
+	args = parser.parse_args()
+	print('ORIG:', repr(args.text))
+	print('NORM:', repr(normalize_text(args.text)))
