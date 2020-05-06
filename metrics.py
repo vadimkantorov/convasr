@@ -389,6 +389,11 @@ if __name__ == '__main__':
 	cmd.add_argument('--hyp')
 	cmd.set_defaults(func = analyze)
 
+	cmd = subparsers.add_parser('align')
+	cmd.add_argument('--ref')
+	cmd.add_argument('--hyp')
+	cmd.set_defaults(func = lambda hyp, ref: print('\n'.join(f'{k}: {v}' for k, v in zip(['hyp', 'ref'], align(hyp, ref)))))
+
 	args = parser.parse_args()
 	args = vars(parser.parse_args())
 	func = args.pop('func')
