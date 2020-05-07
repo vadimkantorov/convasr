@@ -178,7 +178,7 @@ def errors(input_path, include = [], exclude = [], audio = False, output_file_na
 	ours, theirs = transcripts.prune(read_transcript(input_path[0]), duration = duration, cer = cer, wer = wer, mer = mer), [{r['audio_name'] : r for r in read_transcript(transcript)} for transcript in input_path[1:]]
 	if filter_transcripts is None:
 		if sortdesc is not None:
-			filter_transcripts = list(sorted(cat, key = lambda utt: utt[0][sortdesc], reverse = True))
+			filter_transcripts = lambda cat: list(sorted(cat, key = lambda utt: utt[0][sortdesc], reverse = True))
 		else:
 			filter_transcripts = lambda cat: cat
 
