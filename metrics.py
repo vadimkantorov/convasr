@@ -47,7 +47,7 @@ def align_words(hyp, ref, break_ref = False):
 
 		words = words_
 
-	word_alignment = [dict(hyp = ''.join(hyp), ref = ''.join(ref), type = t) for hyp, ref in words for t, e in [error_type(hyp, ref)]]
+	word_alignment = [dict(hyp = ''.join(hyp), ref = ''.join(ref), type = t) for hyp, ref in words for t, e in [word_alignment_error_type(hyp, ref)]]
 	return ''.join(hyp), ''.join(ref), word_alignment
 
 def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = set(), full = False, break_ref_alignment = True, **kwargs):
@@ -60,7 +60,7 @@ def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = 
 	if full:
 		hyp, ref, word_alignment = align_words(hyp, ref, break_ref = break_ref_alignment)
 		phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
-		hypref_pseudo = {t : (' '.join((r_ if error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'], missing_ref = ['missing_ref'])[t] else h_).replace(placeholder, '') for w in word_alignment for r_, h_ in [(w['ref'], w['hyp'])] ), ref.replace(placeholder, '')) for t in error_types}
+		hypref_pseudo = {t : (' '.join((r_ if word_alignment_error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'], missing_ref = ['missing_ref'])[t] else h_).replace(placeholder, '') for w in word_alignment for r_, h_ in [(w['ref'], w['hyp'])] ), ref.replace(placeholder, '')) for t in error_types}
 
 		errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in word_alignment if r['type'] == t] for t in error_types}
 	
@@ -119,7 +119,7 @@ def aggregate(analyzed, p = 0.5):
 	for a in analyzed:
 		if 'words' in a: 
 			for hyp, ref in map(lambda b: (b['hyp'], b['ref']), sum(a['error_stats']['words']['errors'].values(), [])):
-				t, e = error_type(hyp, ref)
+				t, e = word_alignment_error_type(hyp, ref)
 				e = e if t == 'typo_easy' else -1 if t == 'typo_hard' else -2
 				errs[e] += 1
 				errs_words[t].append(dict(ref = ref, hyp = hyp))
@@ -128,7 +128,7 @@ def aggregate(analyzed, p = 0.5):
 			
 	return stats
 
-def error_type(hyp, ref, p = 0.5, E = 3, L = 4, placeholder = '|'):
+def word_alignment_error_type(hyp, ref, p = 0.5, E = 3, L = 4, placeholder = '|'):
 	e = sum(ch != cr for ch, cr in zip(hyp, ref))
 	ref_placeholders = ref.count(placeholder)
 	ref_chars = len(ref) - ref_placeholders
@@ -140,7 +140,7 @@ def error_type(hyp, ref, p = 0.5, E = 3, L = 4, placeholder = '|'):
 		easy = e <= E and ref_chars >= L
 		return 'typo_' + ('easy' if easy else 'hard'), e
 	else:
-		source = '_ref' if ref_chars > 3 and ref_placeholders >= p * len(ref) else ''
+		source = '_ref' if len(ref) > 3 and ref_placeholders >= p * len(ref) else ''
 		return 'missing' + source, e
 
 error_types = ['typo_easy', 'typo_hard', 'missing', 'missing_ref']
