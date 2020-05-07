@@ -134,7 +134,7 @@ def word_alignment_error_type(hyp, ref, p = 0.5, E = 3, L = 4, placeholder = '|'
 	e = sum(ch != cr for ch, cr in zip(hyp, ref))
 	ref_placeholders = ref.count(placeholder)
 	ref_chars = len(ref) - ref_placeholders
-	is_typo = e > 0 and ((hyp.count(placeholder) < p * len(ref) and ref_placeholders < p * len(ref)))
+	is_typo = ref_chars < L or (e > 0 and ((hyp.count(placeholder) < p * len(ref) and ref_placeholders < p * len(ref))))
 	
 	if hyp == ref:
 		return 'ok', e
@@ -392,12 +392,12 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('analyze')
 	cmd.add_argument('--hyp', required = True)
 	cmd.add_argument('--ref', required = True)
-	cmd.set_defaults(func = analyze)
+	cmd.set_defaults(func = lambda hyp, ref: print(json.dump(analyze(hyp = hyp, ref = ref), ensure_ascii = False, indent = 2, sort_keys = True)))
 
 	cmd = subparsers.add_parser('align')
 	cmd.add_argument('--hyp', required = True)
 	cmd.add_argument('--ref', required = True)
-	cmd.set_defaults(func = lambda hyp, ref: print('\n'.join(f'{k}: {v}' for k, v in zip(['hyp', 'ref'], align(hyp, ref)))))
+	cmd.set_defaults(func = lambda hyp, ref: print('\n'.join(f'{k}: {v}' for k, v in zip(['hyp', 'ref'], align(hyp = hyp, ref = ref)))))
 
 	args = parser.parse_args()
 	args = vars(parser.parse_args())
