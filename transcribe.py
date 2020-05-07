@@ -52,8 +52,8 @@ def main(args):
 		audio_path, speakers = map(meta[0].get, ['audio_path', 'speakers'])
 
 		duration = max(transcripts.get_duration(t) for t in meta) / 3600
-		if args.skip_duration and duration > args.skip_duration:
-			print(f'Duration of {audio_path} more than {args.skip_duration} hours: {duration} hours')
+		if args.skip_file_longer_than_hours and duration > args.skip_file_longer_than_hours:
+			print(f'Duration of {audio_path} more than {args.skip_file_longer_than_hours} hours: {duration} hours')
 			continue
 
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
@@ -159,7 +159,7 @@ if __name__ == '__main__':
 	parser.add_argument('--speakers', nargs = '*')
 	parser.add_argument('--replace-blank-series', type = int, default = 8)
 	parser.add_argument('--skip-processed', action = 'store_true')
-	parser.add_argument('--skip-duration', type=float) # skip files with duration more than
+	parser.add_argument('--skip-file-longer-than-hours', type=float) # skip files with duration more than specified hours 
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
