@@ -23,12 +23,6 @@ import transcripts
 import audio
 import vis
 
-def find_processed_paths(args):
-	json_paths = [os.path.join(args.output_path, os.path.basename(f)) for f in os.listdir(args.output_path) if f.endswith('.json')]
-	replaced_paths = [p.replace(args.output_path, args.input_path[0]) for p in json_paths]
-	base_names = [os.path.splitext(p)[0] for p in replaced_paths]
-	return base_names
-
 @torch.no_grad()
 def main(args):
 	os.makedirs(args.output_path, exist_ok = True)
@@ -48,18 +42,16 @@ def main(args):
 	
 	data_paths = [p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f]) if os.path.isfile(p) and any(map(p.endswith, args.ext))] + [p for p in args.input_path if any(map(p.endswith, ['.json', '.json.gz']))]
 	
-	if args.skip_processed:
-		before_skip = len(data_paths)
-		data_paths = list(set(data_paths) - set(find_processed_paths(args)))
-		print(f'Skip {before_skip - len(data_paths)} processed files')
+	exclude = set([os.path.splitext(basename)[0] for basename in os.listdir(args.output_path) if basename.endswith('.json')] if args.skip_processed else [])
+	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
 
 	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers) 
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
 
 	for meta, x, xlen, y, ylen in val_data_loader:
 		audio_path, speakers = map(meta[0].get, ['audio_path', 'speakers'])
-		
-		duration = sum(transcripts.get_duration(t) for t in meta) / 3600
+
+		duration = max(transcripts.get_duration(t) for t in meta) / 3600
 		if args.skip_duration and duration > args.skip_duration:
 			print(f'Duration of {audio_path} more than {args.skip_duration} hours: {duration} hours')
 			continue
