@@ -139,7 +139,7 @@ def word_alignment_error_type(hyp, ref, p = 0.5, L = 4, placeholder = '|'):
 	if hyp == ref:
 		return 'ok', e
 	elif is_typo:
-		easy = ref_chars < L or (e == 1 or (e == 2 and all(i >= len(ref) - 2 for i, (ch, cr) in enumerate(zip(hyp, ref)))))
+		easy = ref_chars < L or (e == 1 or (e == 2 and all(ch == cr or i >= len(ref) - 2 for i, (ch, cr) in enumerate(zip(hyp, ref)))))
 		return 'typo_' + ('easy' if easy else 'hard'), e
 	else:
 		source = '_ref' if ref_placeholders > 3 and ref_placeholders >= p * len(ref) else ''
