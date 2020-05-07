@@ -130,16 +130,16 @@ def aggregate(analyzed, p = 0.5):
 			
 	return stats
 
-def word_alignment_error_type(hyp, ref, p = 0.5, E = 2, L = 4, placeholder = '|'):
+def word_alignment_error_type(hyp, ref, p = 0.5, L = 4, placeholder = '|'):
 	e = sum(ch != cr for ch, cr in zip(hyp, ref))
 	ref_placeholders = ref.count(placeholder)
 	ref_chars = len(ref) - ref_placeholders
 	is_typo = ref_chars < L or (e > 0 and ((hyp.count(placeholder) < p * len(ref) and ref_placeholders < p * len(ref))))
-	
+
 	if hyp == ref:
 		return 'ok', e
 	elif is_typo:
-		easy = ref_chars < L or (e <= E and ref_chars >= L)
+		easy = ref_chars < L or (e == 1 or (e == 2 and all(i >= len(ref) - 2 for i, (ch, cr) in enumerate(zip(hyp, ref)))))
 		return 'typo_' + ('easy' if easy else 'hard'), e
 	else:
 		source = '_ref' if ref_placeholders > 3 and ref_placeholders >= p * len(ref) else ''
