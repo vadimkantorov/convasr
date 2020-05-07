@@ -301,7 +301,7 @@ def histc_vega(tensor, min, max, bins):
 	return altair.Chart(altair.Data(values = [dict(x = b, y = v) for b, v in zip(bins.tolist(), hist.tolist())])).mark_bar().encode(x = altair.X('x:Q'), y = altair.Y('y:Q')).to_dict()
 
 def word_alignment(transcript, ref = None, hyp = None, flat = False, tag = '<pre>', prefix = True):
-	span = lambda word, t = None: '<span style="{style}" title="{style or ''}">{word}</span>'.format(word = word, style = 'background-color:' + dict(ok = 'green', missing = 'red', missing_ref = 'darkred', typo_easy = 'lightgreen', typo_hard = 'pink')[t] if t is not None else '')
+	span = lambda word, t = None: '<span style="{style}" title="{word_alignment_error_type}">{word}</span>'.format(word = word, style = ('background-color:' + dict(ok = 'green', missing = 'red', missing_ref = 'darkred', typo_easy = 'lightgreen', typo_hard = 'pink')[t]) if t is not None else '', word_alignment_error_type = t)
 	
 	if flat:
 		ref_ = transcript.get('ref', '')
