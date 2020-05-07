@@ -148,7 +148,7 @@ if __name__ == '__main__':
 	parser.add_argument('--window-size-dilate', type = float, default = 1.0)
 	parser.add_argument('--mono', action = 'store_true')
 	parser.add_argument('--html', action = 'store_true')
-	parser.add_argument('--txt', action = 'store_true') # store whole transcript in txt format need for assessments
+	parser.add_argument('--txt', action = 'store_true', help = 'store whole transcript in txt format need for assessments')
 	parser.add_argument('--cer', type = transcripts.number_tuple)
 	parser.add_argument('--duration', type = transcripts.number_tuple)
 	parser.add_argument('--num-speakers', type = transcripts.number_tuple)
@@ -159,7 +159,7 @@ if __name__ == '__main__':
 	parser.add_argument('--speakers', nargs = '*')
 	parser.add_argument('--replace-blank-series', type = int, default = 8)
 	parser.add_argument('--skip-processed', action = 'store_true')
-	parser.add_argument('--skip-file-longer-than-hours', type=float) # skip files with duration more than specified hours 
+	parser.add_argument('--skip-file-longer-than-hours', type=float, help = 'skip files with duration more than specified hours') 
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
