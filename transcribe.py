@@ -41,12 +41,23 @@ def main(args):
 	decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 	
 	data_paths = [p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f]) if os.path.isfile(p) and any(map(p.endswith, args.ext))] + [p for p in args.input_path if any(map(p.endswith, ['.json', '.json.gz']))]
-
+	
+	processed_data_paths = [os.path.join(args.output_path, os.path.basename(f)) for f in os.listdir(args.output_path) if f.endswith('.json')]
+	processed_data_paths = [p.replace(args.output_path, args.input_path[0]) for p in processed_data_paths]
+	processed_data_paths = [os.path.splitext(p)[0] for p in processed_data_paths]
+	data_paths = list(set(data_paths) - set(processed_data_paths))
+	
 	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers) 
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
 
 	for meta, x, xlen, y, ylen in val_data_loader:
 		audio_path, speakers = map(meta[0].get, ['audio_path', 'speakers'])
+		
+		duration = sum(transcripts.get_duration(t) for t in meta) / 3600
+		if duration > 3.0:
+			print(f'Duration of {audio_path} more than 3 hours: {duration} hours')
+			continue
+
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
 
 		if x.numel() == 0:
