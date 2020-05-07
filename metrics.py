@@ -10,12 +10,12 @@ placeholder = '|'
 space = ' '
 silence = placeholder + space
 
-def align(hyp, ref):
+def align(hyp, ref, score_sub = -2, score_del = -4, score_ins = -3):
 	aligner = Needleman()
 	aligner.separator = placeholder
-	aligner.score_sub = -2
-	aligner.score_del = -4
-	aligner.score_ins = -3
+	aligner.score_sub = score_sub
+	aligner.score_del = score_del
+	aligner.score_ins = score_ins
 	ref, hyp = aligner.align(list(ref), list(hyp))
 	return ''.join(hyp), ''.join(ref)
 
@@ -99,7 +99,9 @@ def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = 
 	return a
 
 def nanmean(dictlist, key):
-	return float(torch.FloatTensor([r[key] for r in dictlist if key in r and not math.isinf(r[key]) and not math.isnan(r[key])] or [-1.0]).mean())
+	tensor = torch.FloatTensor([r[key] for r in dictlist if key in r])
+	isfinite = torch.isfinite(tensor)
+	return float(tensor[isfinite].mean()) if isfinite.any() else -1.0
 
 def aggregate(analyzed, p = 0.5):
 	stats = dict(
@@ -137,7 +139,7 @@ def word_alignment_error_type(hyp, ref, p = 0.5, E = 3, L = 4, placeholder = '|'
 	if hyp == ref:
 		return 'ok', e
 	elif is_typo:
-		easy = e <= E and ref_chars >= L
+		easy = ref_chars < L or (e <= E and ref_chars >= L)
 		return 'typo_' + ('easy' if easy else 'hard'), e
 	else:
 		source = '_ref' if ref_placeholders > 3 and ref_placeholders >= p * len(ref) else ''
