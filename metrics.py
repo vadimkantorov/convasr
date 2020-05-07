@@ -130,7 +130,7 @@ def aggregate(analyzed, p = 0.5):
 			
 	return stats
 
-def word_alignment_error_type(hyp, ref, p = 0.5, E = 3, L = 4, placeholder = '|'):
+def word_alignment_error_type(hyp, ref, p = 0.5, E = 2, L = 4, placeholder = '|'):
 	e = sum(ch != cr for ch, cr in zip(hyp, ref))
 	ref_placeholders = ref.count(placeholder)
 	ref_chars = len(ref) - ref_placeholders
