@@ -23,6 +23,12 @@ import transcripts
 import audio
 import vis
 
+def find_processed_paths(args):
+	json_paths = [os.path.join(args.output_path, os.path.basename(f)) for f in os.listdir(args.output_path) if f.endswith('.json')]
+	replaced_paths = [p.replace(args.output_path, args.input_path[0]) for p in json_paths]
+	base_names = [os.path.splitext(p)[0] for p in replaced_paths]
+	return base_names
+
 @torch.no_grad()
 def main(args):
 	os.makedirs(args.output_path, exist_ok = True)
@@ -42,11 +48,11 @@ def main(args):
 	
 	data_paths = [p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f]) if os.path.isfile(p) and any(map(p.endswith, args.ext))] + [p for p in args.input_path if any(map(p.endswith, ['.json', '.json.gz']))]
 	
-	processed_data_paths = [os.path.join(args.output_path, os.path.basename(f)) for f in os.listdir(args.output_path) if f.endswith('.json')]
-	processed_data_paths = [p.replace(args.output_path, args.input_path[0]) for p in processed_data_paths]
-	processed_data_paths = [os.path.splitext(p)[0] for p in processed_data_paths]
-	data_paths = list(set(data_paths) - set(processed_data_paths))
-	
+	if args.skip_processed:
+		before_skip = len(data_paths)
+		data_paths = list(set(data_paths) - set(find_processed_paths(args)))
+		print(f'Skip {before_skip - len(data_paths)} processed files')
+
 	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers) 
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
 
@@ -54,8 +60,8 @@ def main(args):
 		audio_path, speakers = map(meta[0].get, ['audio_path', 'speakers'])
 		
 		duration = sum(transcripts.get_duration(t) for t in meta) / 3600
-		if duration > 3.0:
-			print(f'Duration of {audio_path} more than 3 hours: {duration} hours')
+		if args.skip_duration and duration > args.skip_duration:
+			print(f'Duration of {audio_path} more than {args.skip_duration} hours: {duration} hours')
 			continue
 
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
@@ -160,6 +166,8 @@ if __name__ == '__main__':
 	parser.add_argument('--audio-backend', default = 'ffmpeg', choices = ['sox', 'ffmpeg'])
 	parser.add_argument('--speakers', nargs = '*')
 	parser.add_argument('--replace-blank-series', type = int, default = 8)
+	parser.add_argument('--skip-processed', action = 'store_true')
+	parser.add_argument('--skip-duration', type=float) # skip files with duration more than
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
