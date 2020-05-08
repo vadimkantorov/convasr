@@ -92,6 +92,7 @@ def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = 
 			),
 			mer = len(errors['missing']) / len(word_alignment),
 			cer_easy = cer(*hypref_pseudo['typo_easy']),
+			wer_easy = wer(*hypref_pseudo['typo_easy']),
 			cer_hard = cer(*hypref_pseudo['typo_hard']),
 			cer_missing = cer(*hypref_pseudo['missing'])
 		))
