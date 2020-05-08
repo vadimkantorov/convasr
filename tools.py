@@ -164,8 +164,9 @@ def transcode(input_path, output_path, ext, cmd):
 	json.dump(transcript, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
-def lserrorwords(input_path, output_path, comment_path):
-	comment = {splitted[0] : splitted[-1] for line in open(comment_path) for splitted in [line.split()] if len(splitted) > 1} if comment_path else {}
+def lserrorwords(input_path, output_path, comment_path, freq_path):
+	freq = {splitted[0] : int(splitted[-1]) for line in open(freq_path) for splitted in [line.split()]} if freq_path else {}
+	comment = {splitted[0] : splitted[-1] for line in open(comment_path) for splitted in [line.split()] if '#' not in line and len(splitted) > 1} if comment_path else {}
 	transcript = json.load(open(input_path))
 	transcript = list(filter(lambda t: [w['type'] for w in t['words']].count('missing_ref') <= 2, transcript))
 	
@@ -179,11 +180,11 @@ def lserrorwords(input_path, output_path, comment_path):
 	group = lambda c: lemmatize(c[0])
 	comment = {k : ';'.join(c[1] for c in g) for k, g in itertools.groupby(sorted(comment.items(), key = group), key = group)}
 
-	words = {ref : (ref, words_error_counter[l] - words_ok_counter[l], words_error_counter[l], words_ok_counter[l], comment.get(l, '')) for ref in words_error for l in [lemmatize(ref)]}
+	words = {ref : (ref, words_error_counter[l] - words_ok_counter[l], words_error_counter[l], words_ok_counter[l], freq.get(ref, 0), comment.get(l, '')) for ref in words_error for l in [lemmatize(ref)]}
 	words = sorted(words.values(), key = lambda t: (t[1], t[0]), reverse = True)
 	
 	output_path = output_path or (input_path + '.csv')
-	open(output_path, 'w').write('\n'.join(','.join(map(str, t)) for t in words))
+	open(output_path, 'w').write('#word,diff,err,ok,freq,comment\n' + '\n'.join(','.join(map(str, t)) for t in words))
 	print(output_path)
 
 if __name__ == '__main__':
@@ -272,6 +273,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o')
 	cmd.add_argument('--comment-path', '-c') 
+	cmd.add_argument('--freq-path', '-f')
 	cmd.set_defaults(func = lserrorwords)
 
 	args = vars(parser.parse_args())

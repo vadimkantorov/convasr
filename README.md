@@ -166,3 +166,10 @@ mkdir -p data/tts_dataset_splits && split --lines 12000 --numeric-suffixes --suf
 export SPEECHKITAPIKEY=yourapikey
 bash scripts/tts_speechkit.sh tts_dataset_100h.txt data/speechkit
 ```
+
+# Download unigram frequency list
+```shell
+# for russian
+wget http://opencorpora.org/files/export/ngrams/unigrams.cyr.lc.bz2 -P data
+bzip2 -d data/unigrams.cyr.lc.bz2
+```
