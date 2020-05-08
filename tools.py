@@ -1,9 +1,10 @@
 import os
 import json
 import gzip
-import itertools
 import argparse
+import itertools
 import subprocess
+import collections
 import torch
 import sentencepiece
 import audio
@@ -163,17 +164,26 @@ def transcode(input_path, output_path, ext, cmd):
 	json.dump(transcript, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
-def lserrorwords(input_path, output_path):
+def lserrorwords(input_path, output_path, comment_path):
+	comment = {splitted[0] : splitted[-1] for line in open(comment_path) for splitted in [line.split()] if len(splitted) > 1} if comment_path else {}
 	transcript = json.load(open(input_path))
-	transcript = filter(lambda t: [w['type'] for w in t['words']].count('missing_ref') <= 2, transcript)
-	words = set(w['ref'].replace('|', '') for t in transcript for w in t['words'] if w['type'] not in ['ok', 'missing_ref'])
-	words = filter(lambda ref: len(ref) > 1, words)
+	transcript = list(filter(lambda t: [w['type'] for w in t['words']].count('missing_ref') <= 2, transcript))
+	
+	lemmatize = lambda word: (lang.lemmatize(word), len(word))
+	words_ok = [w['ref'].replace('|', '') for t in transcript for w in t['words'] if w['type'] == 'ok']
+	words_error = [w['ref'].replace('|', '') for t in transcript for w in t['words'] if w['type'] not in ['ok', 'missing_ref']]
+	words_error = [ref for ref in words_error if len(ref) > 1]
 
-	group = lambda word: (lang.lemmatize(word), len(word))
-	words = [next(g) for k, g in itertools.groupby(sorted(words, key = group), key = group)]
-	words = sorted(words, key = lambda ref: (len(ref), ref))
-	output_path = output_path or (input_path + '.txt')
-	open(output_path, 'w').write('\n'.join(words))
+	words_ok_counter = collections.Counter(map(lemmatize, words_ok))
+	words_error_counter = collections.Counter(map(lemmatize, words_error))
+	group = lambda c: lemmatize(c[0])
+	comment = {k : ';'.join(c[1] for c in g) for k, g in itertools.groupby(sorted(comment.items(), key = group), key = group)}
+
+	words = {ref : (ref, words_error_counter[l] - words_ok_counter[l], words_error_counter[l], words_ok_counter[l], comment.get(l, '')) for ref in words_error for l in [lemmatize(ref)]}
+	words = sorted(words.values(), key = lambda t: (t[1], t[0]), reverse = True)
+	
+	output_path = output_path or (input_path + '.csv')
+	open(output_path, 'w').write('\n'.join(','.join(map(str, t)) for t in words))
 	print(output_path)
 
 if __name__ == '__main__':
@@ -261,6 +271,7 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('lserrorwords')
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o')
+	cmd.add_argument('--comment-path', '-c') 
 	cmd.set_defaults(func = lserrorwords)
 
 	args = vars(parser.parse_args())
