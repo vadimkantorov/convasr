@@ -41,12 +41,21 @@ def main(args):
 	decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 	
 	data_paths = [p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f]) if os.path.isfile(p) and any(map(p.endswith, args.ext))] + [p for p in args.input_path if any(map(p.endswith, ['.json', '.json.gz']))]
+	
+	exclude = set([os.path.splitext(basename)[0] for basename in os.listdir(args.output_path) if basename.endswith('.json')] if args.skip_processed else [])
+	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
 
 	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers) 
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
 
 	for meta, x, xlen, y, ylen in val_data_loader:
 		audio_path, speakers = map(meta[0].get, ['audio_path', 'speakers'])
+
+		duration = max(transcripts.get_duration(t) for t in meta) / 3600
+		if args.skip_file_longer_than_hours and duration > args.skip_file_longer_than_hours:
+			print(f'Duration of {audio_path} more than {args.skip_file_longer_than_hours} hours: {duration} hours')
+			continue
+
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
 
 		if x.numel() == 0:
@@ -139,7 +148,7 @@ if __name__ == '__main__':
 	parser.add_argument('--window-size-dilate', type = float, default = 1.0)
 	parser.add_argument('--mono', action = 'store_true')
 	parser.add_argument('--html', action = 'store_true')
-	parser.add_argument('--txt', action = 'store_true') # store whole transcript in txt format need for assessments
+	parser.add_argument('--txt', action = 'store_true', help = 'store whole transcript in txt format need for assessments')
 	parser.add_argument('--cer', type = transcripts.number_tuple)
 	parser.add_argument('--duration', type = transcripts.number_tuple)
 	parser.add_argument('--num-speakers', type = transcripts.number_tuple)
@@ -149,6 +158,8 @@ if __name__ == '__main__':
 	parser.add_argument('--audio-backend', default = 'ffmpeg', choices = ['sox', 'ffmpeg'])
 	parser.add_argument('--speakers', nargs = '*')
 	parser.add_argument('--replace-blank-series', type = int, default = 8)
+	parser.add_argument('--skip-processed', action = 'store_true')
+	parser.add_argument('--skip-file-longer-than-hours', type=float, help = 'skip files with duration more than specified hours') 
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
