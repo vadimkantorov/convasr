@@ -14,7 +14,7 @@ VERBOSE='--quiet --no-warnings'
 
 youtube-dl () {
 	wget --quiet --no-clobber https://yt-dl.org/downloads/latest/youtube-dl && chmod +x ./youtube-dl
-	./youtube-dl $@
+	python3 ./youtube-dl $@
 }
 
 case $CMD in
