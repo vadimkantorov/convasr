@@ -151,20 +151,18 @@ def diff(ours, theirs, key, output_path):
 	transcript_theirs = {t['audio_file_name']: t for t in json.load(open(theirs))}
 
 	d = list(
-		sorted(
-			[
-				dict(
-					audio_name = audio_name,
-					diff = ours[key] - theirs[key],
-					ref = ours['ref'],
-					hyp_ours = ours['hyp'],
-					hyp_thrs = theirs['hyp']
-				) for audio_name in transcript_ours for ours,
-				theirs in [(transcript_ours[audio_name], transcript_theirs[audio_name])]
-			],
-			key = lambda d: d['diff'],
-			reverse = True
-		)
+		sorted([
+			dict(
+				audio_name = audio_name,
+				diff = ours[key] - theirs[key],
+				ref = ours['ref'],
+				hyp_ours = ours['hyp'],
+				hyp_thrs = theirs['hyp']
+			) for audio_name in transcript_ours for ours,
+			theirs in [(transcript_ours[audio_name], transcript_theirs[audio_name])]
+		],
+				key = lambda d: d['diff'],
+				reverse = True)
 	)
 	json.dump(d, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
@@ -181,7 +179,8 @@ def rmoldcheckpoints(experiments_dir, experiment_id, keepfirstperepoch, remove):
 
 	ckpts = list(
 		sorted(
-			parse(ckpt_name) for ckpt_name in os.listdir(experiment_dir)
+			parse(ckpt_name)
+			for ckpt_name in os.listdir(experiment_dir)
 			if 'checkpoint_' in ckpt_name and ckpt_name.endswith('.pt')
 		)
 	)
