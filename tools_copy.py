@@ -13,9 +13,18 @@ import datasets
 import metrics
 import ru as lang
 
+
 def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, unk, num_speakers):
 	cat = output_path.endswith('.json')
-	meta = dict(align_boundary_words = align_boundary_words, cer = cer, wer = wer, duration = duration, gap = gap, unk = unk, num_speakers = num_speakers)
+	meta = dict(
+		align_boundary_words = align_boundary_words,
+		cer = cer,
+		wer = wer,
+		duration = duration,
+		gap = gap,
+		unk = unk,
+		num_speakers = num_speakers
+	)
 	transcript_cat = []
 	for transcript_name in os.listdir(input_path):
 		if not transcript_name.endswith('.json'):
@@ -26,50 +35,74 @@ def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, 
 
 		if not cat:
 			os.makedirs(output_path, exist_ok = True)
-			json.dump(transcript, open(os.path.join(output_path, transcript_name), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+			json.dump(
+				transcript,
+				open(os.path.join(output_path, transcript_name), 'w'),
+				ensure_ascii = False,
+				sort_keys = True,
+				indent = 2
+			)
 	if cat:
 		json.dump(transcript_cat, open(output_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 	print(output_path)
 
+
 def cut(input_path, output_path, sample_rate, mono, dilate, strip, strip_prefix, audio_backend):
 	os.makedirs(output_path, exist_ok = True)
 	transcript_cat = []
-	
+
 	transcript = json.load(open(input_path))
 	prev_audio_path, signal = None, None
 
 	for i, t in enumerate(sorted(transcript, key = lambda t: t['audio_path'])):
 		print(i, '/', len(transcript))
 		audio_path = t['audio_path']
-		signal = audio.read_audio(audio_path, sample_rate, normalize = False, backend = audio_backend)[0] if audio_path != prev_audio_path else signal
+		signal = audio.read_audio(audio_path, sample_rate, normalize = False,
+									backend = audio_backend)[0] if audio_path != prev_audio_path else signal
 		t['channel'] = 0 if len(signal) == 1 else None if mono else t.get('channel')
-		segment = signal[slice(t['channel'], 1 + t['channel']) if t['channel'] is not None else ..., int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)]
-		segment_path = os.path.join(output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t))
+		segment = signal[slice(t['channel'], 1 + t['channel']) if t['channel'] is not None else ...,
+							int(max(t['begin'] - dilate, 0) * sample_rate):int((t['end'] + dilate) * sample_rate)]
+		segment_path = os.path.join(
+			output_path, os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t)
+		)
 		audio.write_audio(segment_path, segment, sample_rate, mono = True)
 		if strip_prefix:
 			segment_path = segment_path[len(strip_prefix):] if segment_path.startswith(strip_prefix) else segment_path
-			t['audio_path'] = t['audio_path'][len(strip_prefix):] if t['audio_path'].startswith(strip_prefix) else t['audio_path']
+			t['audio_path'] = t['audio_path'][len(strip_prefix):] if t['audio_path'].startswith(strip_prefix
+																								) else t['audio_path']
 
-		t = dict(audio_path = segment_path,
-				channel = 0 if len(signal) == 1 else None,
-				begin = 0.0,
-				end = segment.shape[-1] / sample_rate,
-				speaker = t.pop('speaker', None),
-				ref = t.pop('ref'),
-				hyp = t.pop('hyp', None),
-				cer = t.pop('cer', None),
-				alignment = t.pop('alignment', {}),
-				words = t.pop('words', {}),
-				meta = t)
+		t = dict(
+			audio_path = segment_path,
+			channel = 0 if len(signal) == 1 else None,
+			begin = 0.0,
+			end = segment.shape[-1] / sample_rate,
+			speaker = t.pop('speaker', None),
+			ref = t.pop('ref'),
+			hyp = t.pop('hyp', None),
+			cer = t.pop('cer', None),
+			alignment = t.pop('alignment', {}),
+			words = t.pop('words', {}),
+			meta = t
+		)
 
 		prev_audio_path = audio_path
 		transcript_cat.append(t)
 
-	json.dump(transcripts.strip(transcript_cat, strip), open(os.path.join(output_path, os.path.basename(output_path) + '.json'), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+	json.dump(
+		transcripts.strip(transcript_cat, strip),
+		open(os.path.join(output_path, os.path.basename(output_path) + '.json'), 'w'),
+		ensure_ascii = False,
+		sort_keys = True,
+		indent = 2
+	)
 	print(output_path)
 
+
 def cat(input_path, output_path):
-	transcript_paths = [transcript_path for transcript_path in input_path if transcript_path.endswith('.json')] + [os.path.join(transcript_dir, transcript_name) for transcript_dir in input_path if os.path.isdir(transcript_dir) for transcript_name in os.listdir(transcript_dir) if transcript_name.endswith('.json')]
+	transcript_paths = [transcript_path for transcript_path in input_path if transcript_path.endswith('.json')] + [
+		os.path.join(transcript_dir, transcript_name) for transcript_dir in input_path if os.path.isdir(transcript_dir)
+		for transcript_name in os.listdir(transcript_dir) if transcript_name.endswith('.json')
+	]
 
 	array = lambda o: [o] if isinstance(o, dict) else o
 	transcript = sum([array(json.load(open(transcript_path))) for transcript_path in transcript_paths], [])
@@ -77,28 +110,65 @@ def cat(input_path, output_path):
 	json.dump(transcript, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
+
 def du(input_path):
 	transcript = json.load(open(input_path))
-	print(input_path, int(os.path.getsize(input_path) // 1e6), 'Mb',  '|', len(transcript) // 1000, 'K utt |', int(sum(transcripts.get_duration(t) for t in transcript) / (60 * 60)), 'hours')
+	print(
+		input_path,
+		int(os.path.getsize(input_path) // 1e6),
+		'Mb',
+		'|',
+		len(transcript) // 1000,
+		'K utt |',
+		int(sum(transcripts.get_duration(t) for t in transcript) / (60 * 60)),
+		'hours'
+	)
+
 
 def csv2json(input_path, gz, group, reset_duration):
 	gzopen = lambda file_path, mode = 'r': gzip.open(file_path, mode + 't') if file_path.endswith('.gz') else open(file_path, mode)
+
 	def duration(audio_name):
 		begin, end = map(float, os.path.splitext(audio_name)[0].split('_')[-2:])
 		return end - begin
-	
-	transcript = [dict(audio_path = s[0], ref = s[1], begin = 0.0, end = float(s[2]) if not reset_duration else duration(os.path.basename(s[0])), **(dict(group = s[0].split('/')[group]) if group >= 0 else {})) for l in gzopen(input_path) if '"' not in l for s in [l.strip().split(',')]]
+
+	transcript = [
+		dict(
+			audio_path = s[0],
+			ref = s[1],
+			begin = 0.0,
+			end = float(s[2]) if not reset_duration else duration(os.path.basename(s[0])),
+			**(dict(group = s[0].split('/')[group]) if group >= 0 else {})
+		) for l in gzopen(input_path) if '"' not in l for s in [l.strip().split(',')]
+	]
 	output_path = input_path + '.json' + ('.gz' if gz else '')
 	json.dump(transcript, gzopen(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
+
 def diff(ours, theirs, key, output_path):
-	transcript_ours = {t['audio_file_name'] : t for t in json.load(open(ours))}
-	transcript_theirs = {t['audio_file_name'] : t for t in json.load(open(theirs))}
-	
-	d = list(sorted([dict(audio_name = audio_name, diff = ours[key] - theirs[key], ref = ours['ref'], hyp_ours = ours['hyp'], hyp_thrs = theirs['hyp'])  for audio_name in transcript_ours for ours, theirs in [(transcript_ours[audio_name], transcript_theirs[audio_name])]], key = lambda d: d['diff'], reverse = True))
+	transcript_ours = {t['audio_file_name']: t for t in json.load(open(ours))}
+	transcript_theirs = {t['audio_file_name']: t for t in json.load(open(theirs))}
+
+	d = list(
+		sorted(
+			[
+				dict(
+					audio_name = audio_name,
+					diff = ours[key] - theirs[key],
+					ref = ours['ref'],
+					hyp_ours = ours['hyp'],
+					hyp_thrs = theirs['hyp']
+				) for audio_name in transcript_ours for ours,
+				theirs in [(transcript_ours[audio_name], transcript_theirs[audio_name])]
+			],
+			key = lambda d: d['diff'],
+			reverse = True
+		)
+	)
 	json.dump(d, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
+
 
 def rmoldcheckpoints(experiments_dir, experiment_id, keepfirstperepoch, remove):
 	assert keepfirstperepoch
@@ -108,18 +178,32 @@ def rmoldcheckpoints(experiments_dir, experiment_id, keepfirstperepoch, remove):
 		epoch = ckpt_name.split('epoch')[1].split('_')[0]
 		iteration = ckpt_name.split('iter')[1].split('.')[0]
 		return int(epoch), int(iteration), ckpt_name
-	ckpts = list(sorted(parse(ckpt_name) for ckpt_name in os.listdir(experiment_dir) if 'checkpoint_' in ckpt_name and ckpt_name.endswith('.pt')))
-	
+
+	ckpts = list(
+		sorted(
+			parse(ckpt_name) for ckpt_name in os.listdir(experiment_dir)
+			if 'checkpoint_' in ckpt_name and ckpt_name.endswith('.pt')
+		)
+	)
+
 	if keepfirstperepoch:
-		keep = [ckpt_name for i, (epoch, iteration, ckpt_name) in enumerate(ckpts) if i == 0 or epoch != ckpts[i - 1][0] or epoch == ckpts[-1][0]]
+		keep = [
+			ckpt_name for i, (epoch, iteration, ckpt_name) in enumerate(ckpts)
+			if i == 0 or epoch != ckpts[i - 1][0] or epoch == ckpts[-1][0]
+		]
 	rm = list(sorted(set(ckpt[-1] for ckpt in ckpts) - set(keep)))
 	print('\n'.join(rm))
 
 	for ckpt_name in (rm if remove else []):
 		os.remove(os.path.join(experiment_dir, ckpt_name))
 
+
 def bpetrain(input_path, output_prefix, vocab_size, model_type, max_sentencepiece_length):
-	sentencepiece.SentencePieceTrainer.Train(f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size} --model_type={model_type}' + (f' --max_sentencepiece_length={max_sentencepiece_length}' if max_sentencepiece_length else ''))
+	sentencepiece.SentencePieceTrainer.Train(
+		f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size} --model_type={model_type}' +
+		(f' --max_sentencepiece_length={max_sentencepiece_length}' if max_sentencepiece_length else '')
+	)
+
 
 def normalize(input_path, dry = True):
 	labels = datasets.Labels(lang)
@@ -131,7 +215,7 @@ def normalize(input_path, dry = True):
 				t['ref'] = labels.postprocess_transcript(lang.normalize_text(t['ref']))
 			if 'hyp' in t:
 				t['hyp'] = labels.postprocess_transcript(lang.normalize_text(t['hyp']))
-			
+
 			if 'ref' in t and 'hyp' in t:
 				t['cer'] = t['cer'] if 'cer' in t else metrics.cer(t['hyp'], t['ref'])
 				t['wer'] = t['wer'] if 'wer' in t else metrics.wer(t['hyp'], t['ref'])
@@ -141,6 +225,7 @@ def normalize(input_path, dry = True):
 		else:
 			return transcript
 
+
 def summary(input_path, keys):
 	transcript = normalize([input_path], dry = True)
 	#transcript = json.load(open(input_path))
@@ -149,6 +234,7 @@ def summary(input_path, keys):
 		val = torch.FloatTensor([t[k] for t in transcript if t.get(k) is not None])
 		print('{k}: {v:.02f}'.format(k = k, v = float(val.mean())))
 	print()
+
 
 def transcode(input_path, output_path, ext, cmd):
 	transcript = json.load(open(input_path))
@@ -164,28 +250,49 @@ def transcode(input_path, output_path, ext, cmd):
 	json.dump(transcript, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
+
 def lserrorwords(input_path, output_path, comment_path, freq_path):
-	freq = {splitted[0] : int(splitted[-1]) for line in open(freq_path) for splitted in [line.split()]} if freq_path else {}
-	comment = {splitted[0] : splitted[-1] for line in open(comment_path) for splitted in [line.split()] if '#' not in line and len(splitted) > 1} if comment_path else {}
+	freq = {splitted[0]: int(splitted[-1])
+			for line in open(freq_path) for splitted in [line.split()]} if freq_path else {}
+	comment = {
+		splitted[0]: splitted[-1]
+		for line in open(comment_path) for splitted in [line.split()] if '#' not in line and len(splitted) > 1
+	} if comment_path else {}
 	transcript = json.load(open(input_path))
 	transcript = list(filter(lambda t: [w['type'] for w in t['words']].count('missing_ref') <= 2, transcript))
-	
+
 	lemmatize = lambda word: (lang.lemmatize(word), len(word))
 	words_ok = [w['ref'].replace('|', '') for t in transcript for w in t['words'] if w['type'] == 'ok']
-	words_error = [w['ref'].replace('|', '') for t in transcript for w in t['words'] if w['type'] not in ['ok', 'missing_ref']]
+	words_error = [
+		w['ref'].replace('|', '') for t in transcript for w in t['words'] if w['type'] not in ['ok', 'missing_ref']
+	]
 	words_error = [ref for ref in words_error if len(ref) > 1]
 
 	words_ok_counter = collections.Counter(map(lemmatize, words_ok))
 	words_error_counter = collections.Counter(map(lemmatize, words_error))
 	group = lambda c: lemmatize(c[0])
-	comment = {k : ';'.join(c[1] for c in g) for k, g in itertools.groupby(sorted(comment.items(), key = group), key = group)}
+	comment = {
+		k: ';'.join(c[1] for c in g)
+		for k, g in itertools.groupby(sorted(comment.items(), key = group), key = group)
+	}
 
-	words = {ref : (ref, words_error_counter[l] - words_ok_counter[l], words_error_counter[l], words_ok_counter[l], freq.get(ref, 0), comment.get(l, '')) for ref in words_error for l in [lemmatize(ref)]}
+	words = {
+		ref: (
+			ref,
+			words_error_counter[l] - words_ok_counter[l],
+			words_error_counter[l],
+			words_ok_counter[l],
+			freq.get(ref, 0),
+			comment.get(l, '')
+		)
+		for ref in words_error for l in [lemmatize(ref)]
+	}
 	words = sorted(words.values(), key = lambda t: (t[1], t[0]), reverse = True)
-	
+
 	output_path = output_path or (input_path + '.csv')
 	open(output_path, 'w').write('#word,diff,err,ok,freq,comment\n' + '\n'.join(','.join(map(str, t)) for t in words))
 	print(output_path)
+
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -197,7 +304,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--model-type', default = 'unigram', choices = ['unigram', 'bpe', 'char', 'word'])
 	cmd.add_argument('--max-sentencepiece-length', type = int, default = None)
 	cmd.set_defaults(func = bpetrain)
-	
+
 	cmd = subparsers.add_parser('subset')
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o')
@@ -210,7 +317,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--unk', type = transcripts.number_tuple)
 	cmd.add_argument('--align-boundary-words', action = 'store_true')
 	cmd.set_defaults(func = subset)
-	
+
 	cmd = subparsers.add_parser('cut')
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o')
@@ -221,7 +328,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--strip-prefix', type = str)
 	cmd.add_argument('--audio-backend', default = 'ffmpeg', choices = ['sox', 'ffmpeg'])
 	cmd.set_defaults(func = cut)
-	
+
 	cmd = subparsers.add_parser('cat')
 	cmd.add_argument('--input-path', '-i', nargs = '+')
 	cmd.add_argument('--output-path', '-o')
@@ -251,7 +358,7 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('du')
 	cmd.add_argument('input_path')
 	cmd.set_defaults(func = du)
-	
+
 	cmd = subparsers.add_parser('transcode')
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o', required = True)
@@ -268,11 +375,11 @@ if __name__ == '__main__':
 	cmd.add_argument('input_path')
 	cmd.add_argument('--keys', nargs = '+', default = ['cer', 'wer'])
 	cmd.set_defaults(func = summary)
-	
+
 	cmd = subparsers.add_parser('lserrorwords')
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o')
-	cmd.add_argument('--comment-path', '-c') 
+	cmd.add_argument('--comment-path', '-c')
 	cmd.add_argument('--freq-path', '-f')
 	cmd.set_defaults(func = lserrorwords)
 
