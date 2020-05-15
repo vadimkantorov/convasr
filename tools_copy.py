@@ -57,8 +57,9 @@ def cut(input_path, output_path, sample_rate, mono, dilate, strip, strip_prefix,
 	for i, t in enumerate(sorted(transcript, key = lambda t: t['audio_path'])):
 		print(i, '/', len(transcript))
 		audio_path = t['audio_path']
-		signal = audio.read_audio(audio_path, sample_rate, normalize = False,
-									backend = audio_backend)[0] if audio_path != prev_audio_path else signal
+		signal = audio.read_audio(
+			audio_path, sample_rate, normalize = False, backend = audio_backend
+		)[0] if audio_path != prev_audio_path else signal
 		t['channel'] = 0 if len(signal) == 1 else None if mono else t.get('channel')
 		segment = signal[slice(t['channel'], 1 + t['channel']) if t['channel'] is not None else ...,
 							int(max(t['begin'] - dilate, 0) * sample_rate):int((t['end'] + dilate) * sample_rate)]
