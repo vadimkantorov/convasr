@@ -76,8 +76,9 @@ def prune(transcript, align_boundary_words = False, cer = None, wer = None, mer 
 	prev = None
 	for t in transcript:
 		if unk_check(t) and duration_check(t) and cer_check(t) and wer_check(t) and mer_check(t) and boundary_check(t) and gap_check(t, prev) and speakers_check(t):
-			prev = t
 			yield t
+		prev = t
+
 
 def get_duration(t):
 	return t['end'] - t['begin']
