@@ -13,9 +13,11 @@ DATASET_AUDIO=$DATASET_ROOT/audio
 DATASET_TRANSCRIBE=$DATASET_ROOT/transcribe
 DATASET_SUBSET=$DATASET_ROOT/subset
 DATASET_CUT=$DATASET_ROOT/cut
+DATASET_CUT_JSON=$DATASET_ROOT/cut/cut.json
 TRANSCRIBE='--mono --batch-time-padding-multiple 1 --align --skip-processed --max-segment-duration 4.0 '
 SUBSET='--num-speakers 1 --gap 0.05- --cer 0.0-0.15 --duration 0.5-8.0'
 CUT="--dilate 0.025 --sample-rate $SAMPLE_RATE --mono --strip-prefix data/ --add-sub-paths --strip"
+TRAIN_TEST_SPLIT='--test-duration-in-hours 10'
 
 #mkdir -p $DATASET_AUDIO
 #python3 datasets/echomsk.py -i $ECHOMSK -o $DATASET_AUDIO --sample $SAMPLE
@@ -26,6 +28,6 @@ CUT="--dilate 0.025 --sample-rate $SAMPLE_RATE --mono --strip-prefix data/ --add
 #python3 tools.py subset -i $DATASET_TRANSCRIBE -o $DATASET_SUBSET.json $SUBSET
 
 #rm -r $DATASET_CUT
-python3 tools.py cut -i $DATASET_SUBSET.json -o $DATASET_CUT $CUT
-
+#python3 tools.py cut -i $DATASET_SUBSET.json -o $DATASET_CUT $CUT
+python3 tools.py split -i $DATASET_CUT_JSON -o $DATASET_CUT $TRAIN_TEST_SPLIT
 #python3 vis.py audiosample -i $DATASET_CUT/$(basename $DATASET_CUT).json -o $DATASET_CUT.json.html --dataset-root data/

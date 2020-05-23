@@ -12,6 +12,7 @@ import transcripts
 import datasets
 import metrics
 import ru as lang
+import random
 
 def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, unk, num_speakers):
 	cat = output_path.endswith('.json')
@@ -198,6 +199,28 @@ def lserrorwords(input_path, output_path, comment_path, freq_path):
 	open(output_path, 'w').write('#word,diff,err,ok,freq,comment\n' + '\n'.join(','.join(map(str, t)) for t in words))
 	print(output_path)
 
+
+def split(input_path, output_path, test_duration_in_hours):
+	transcripts_train = json.load(open(input_path))
+	
+	random.seed(42)
+	random.shuffle(transcripts_train)
+	
+	for t in transcripts_train:
+		t.pop('alignment')
+		t.pop('words')
+
+	transcripts_test = []
+	test_set_duration = 0
+	while test_set_duration <= test_duration_in_hours:
+		t = transcripts_train.pop()
+		test_set_duration += transcripts.get_duration(t) / 3600
+		transcripts_test.append(t)
+		
+	json.dump(transcripts_train, open(os.path.join(output_path, os.path.basename(output_path) + '_train.json'), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+	json.dump(transcripts_test, open(os.path.join(output_path, os.path.basename(output_path) + '_test.json'), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -287,6 +310,12 @@ if __name__ == '__main__':
 	cmd.add_argument('--comment-path', '-c') 
 	cmd.add_argument('--freq-path', '-f')
 	cmd.set_defaults(func = lserrorwords)
+	
+	cmd = subparsers.add_parser('split')
+	cmd.add_argument('--input-path', '-i', required = True)
+	cmd.add_argument('--output-path', '-o')
+	cmd.add_argument('--test-duration-in-hours', required = True, type = float)
+	cmd.set_defaults(func = split)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')
