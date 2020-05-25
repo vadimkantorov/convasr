@@ -7,7 +7,6 @@
 import argparse
 import concurrent.futures
 import grpc
-import google.cloud.speech_v1.proto.cloud_speech_pb2 as pb2
 import google.cloud.speech_v1.proto.cloud_speech_pb2_grpc as pb2_grpc
 import transcribe
 
@@ -18,20 +17,19 @@ class SpeechServicerImpl(pb2_grpc.SpeechServicer):
 		self.decoder = decoder
 
 	def Recognize(self, request, context):
-		print('HI!', request)
 		config = request.config
 		audio = request.audio
 
-		return pb2.RecognizeResponse(results = [
-			pb2.SpeechRecognitionResult(
-				alternatives = pb2.SpeechRecognitionAlternative(
+		return dict(results = [
+			dict(
+				alternatives = [dict(
 					transcript = 'transcript', 
 					confidence = 1.0, 
 					words = [
-						pb2.WordInfo(word = str(k), start_time = '1.2s', end_time = '2.3s', speaker_tag = 31337) for k in range(3)
+						dict(word = str(k), start_time = dict(seconds = 1, nanos = 100), end_time = dict(seconds = 2, nanos = 7), speaker_tag = 31337) for k in range(3)
 					]
-				),
-				channel = 0
+				)],
+				channel_tag = 1
 			)
 		])
 

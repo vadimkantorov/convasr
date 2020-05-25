@@ -8,8 +8,10 @@ import io
 import json
 import argparse
 import scipy.io.wavfile
+import grpc
 import google.oauth2.service_account
 import google.cloud.speech_v1
+import google.cloud.speech_v1.gapic.transports.speech_grpc_transport
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--input-path', '-i')
@@ -25,8 +27,13 @@ args = parser.parse_args()
 
 os.environ.update(dict(GRPC_VERBOSITY = 'DEBUG', GRPC_TRACE = 'all') if args.verbose else {})
 
-credentials = google.oauth2.service_account.Credentials.from_service_account_file(args.api_key_credentials) if args.api_key_credentials else {}
-client = google.cloud.speech_v1.SpeechClient(credentials = credentials, client_options = dict(api_endpoint = args.endpoint))
+class LocalSpeechGrpcTransport(google.cloud.speech_v1.gapic.transports.speech_grpc_transport.SpeechGrpcTransport):
+	def create_channel(self, address, credentials, **kwargs):
+		return grpc.secure_channel(address, credentials, **kwargs)
+
+credentials = google.oauth2.service_account.Credentials.from_service_account_file(args.api_key_credentials) if args.api_key_credentials else grpc.local_channel_credentials()
+client_options = dict(api_endpoint = args.endpoint)
+client = google.cloud.speech_v1.SpeechClient(credentials = credentials, client_options = client_options) if args.api_key_credentials else google.cloud.speech_v1.SpeechClient(transport = LocalSpeechGrpcTransport(address = args.endpoint, credentials = credentials), client_options = client_options) 
 
 transcript = []
 for t in json.load(open(args.input_path)):
