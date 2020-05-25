@@ -1,7 +1,7 @@
 # pip install google-cloud-speech
+# https://github.com/googleapis/python-speech
 # https://googleapis.dev/python/speech/latest/index.html
 # https://google-auth.readthedocs.io/en/latest/reference/google.oauth2.service_account.html
-# https://github.com/googleapis/python-speech
 
 import os
 import json

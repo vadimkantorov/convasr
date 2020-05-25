@@ -5,10 +5,8 @@
 # gpu levenshtein, needleman/hirschberg
 
 import os
-import io
 import time
 import json
-import base64
 import argparse
 import importlib
 import torch
@@ -23,10 +21,7 @@ import transcripts
 import audio
 import vis
 
-@torch.no_grad()
-def main(args):
-	os.makedirs(args.output_path, exist_ok = True)
-	
+def setup(args):
 	checkpoint = torch.load(args.checkpoint, map_location = 'cpu')
 	args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, eps = 1e-6)
@@ -34,33 +29,32 @@ def main(args):
 	model = getattr(models, args.model or checkpoint['args']['model'])(args.num_input_features, [len(labels)], frontend = frontend, dict = lambda logits, log_probs, olen, **kwargs: (logits[0], olen[0]))
 	model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 	model = model.to(args.device)
-	frontend = frontend.to(args.device)
 	model.eval()
 	model.fuse_conv_bn_eval()
-	model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+	model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16)
 	decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
-	
+	return labels, model, decoder
+
+@torch.no_grad()
+def main(args):
+	os.makedirs(args.output_path, exist_ok = True)
 	data_paths = [p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f]) if os.path.isfile(p) and any(map(p.endswith, args.ext))] + [p for p in args.input_path if any(map(p.endswith, ['.json', '.json.gz']))]
-	
 	exclude = set([os.path.splitext(basename)[0] for basename in os.listdir(args.output_path) if basename.endswith('.json')] if args.skip_processed else [])
 	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
 
+	labels, model, decoder = setup(args)
 	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers) 
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
 
 	for meta, x, xlen, y, ylen in val_data_loader:
 		audio_path, speakers = map(meta[0].get, ['audio_path', 'speakers'])
 
-		duration = max(transcripts.get_duration(t) for t in meta) / 3600
-		if args.skip_file_longer_than_hours and duration > args.skip_file_longer_than_hours:
-			print(f'Duration of {audio_path} more than {args.skip_file_longer_than_hours} hours: {duration} hours')
+		duration = max(transcripts.compute_duration(t, hours = True) for t in meta)
+		if x.numel() == 0 or (args.skip_file_longer_than_hours and duration > args.skip_file_longer_than_hours):
+			print(f'Skipping [{audio_path}]. Size: {x.numel()}, duration: {duration} hours (>{args.skip_file_longer_than_hours})')
 			continue
 
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
-
-		if x.numel() == 0:
-			print(f'Empty signal in [{audio_path}]. Skipping.')
-			continue
 
 		tic = time.time()
 		y, ylen = y.to(args.device), ylen.to(args.device)
@@ -74,7 +68,7 @@ def main(args):
 		
 		print('Input:', os.path.basename(audio_path))
 		print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
-		print('Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(audio = sum(transcripts.get_duration(t) for t in meta), processing =time.time() - tic))
+		print('Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(audio = sum(transcripts.compute_duration(t) for t in meta), processing =time.time() - tic))
 
 		ts = (x.shape[-1] / args.sample_rate) * torch.linspace(0, 1, steps = log_probs.shape[-1]).unsqueeze(0) + torch.FloatTensor([t['begin'] for t in meta]).unsqueeze(1)
 		channel = [t['channel'] for t in meta]
@@ -131,7 +125,6 @@ if __name__ == '__main__':
 	parser.add_argument('--output-path', '-o', default = 'data/transcribe')
 	parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
-	parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
 	parser.add_argument('--max-segment-duration', type = float, default = 2)
 	parser.add_argument('--num-workers', type = int, default = 0)
 	parser.add_argument('--ext', default = ['wav', 'mp3'])
