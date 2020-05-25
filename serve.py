@@ -18,6 +18,9 @@ class SpeechServicerImpl(pb2_grpc.SpeechServicer):
 		self.decoder = decoder
 
 	def Recognize(self, request, context):
+		config = request.config
+		audio = request.audio
+
 		return pb2.RecognizeResponse(results = [
 			pb2.SpeechRecognitionResult(
 				alternatives = pb2.SpeechRecognitionAlternative(
