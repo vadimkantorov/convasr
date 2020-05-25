@@ -12,14 +12,20 @@ import google.cloud.speech_v1.proto.cloud_speech_pb2
 import google.cloud.speech_v1.proto.cloud_speech_pb2_grpc
 import transcribe
 
-def Recognize(self, request, context):
-	pass
+class SpeechServicerImpl(google.cloud.speech_v1.proto.cloud_speech_pb2_grpc.SpeechServicer):
+	def __init__(self, labels, model, decoder):
+		self.labels = labels
+		self.model = model
+		self.decoder = decoder
 
-def LongRunningRecognize(self, request, context):
-	pass
+	def Recognize(self, request, context):
+		pass
 
-def StreamingRecognize(self, request_iterator, context):
-	pass
+	def LongRunningRecognize(self, request, context):
+		pass
+
+	def StreamingRecognize(self, request_iterator, context):
+		pass
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -34,10 +40,10 @@ if __name__ == '__main__':
 	
 	labels, model, decoder = transcribe.setup(args)
 	
-	impl = type('SpeechServicerImpl', (google.cloud.speech_v1.proto.cloud_speech_pb2_grpc.SpeechServicer,), dict(Recognize = Recognize, LongRunningRecognize = LongRunningRecognize, StreamingRecognize = StreamingRecognize))()
+	service_impl = SpeechServicerImpl(labels, model, decoder)
 
 	server = grpc.server(concurrent.futures.ThreadPoolExecutor(max_workers = args.num_workers))
-	google.cloud.speech_v1.proto.cloud_speech_pb2_grpc.add_SpeechServicer_to_server(impl, server)
+	google.cloud.speech_v1.proto.cloud_speech_pb2_grpc.add_SpeechServicer_to_server(service_impl, server)
 	server.add_insecure_port(f'[::]:{args.port}')
 	server.start()
 	server.wait_for_termination()
