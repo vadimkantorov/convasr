@@ -186,7 +186,7 @@ wget https://github.com/Koziev/NLP_Datasets/raw/master/WordformFrequencies/Data/
 python3 servegoogleapi.py --endpoint localhost:50051 --checkpoint ...
 
 # test
-python3 scripts/stt_google.py --endpoint localhost:50051 --lang ru --api-key-credentials googleapiserviceaccount.json -i calls_micro/calls_micro.json
+python3 scripts/stt_google.py --endpoint localhost:50051 --lang ru --api-key-credentials= -i calls_micro/calls_micro.json
 ```
 
 # Configuring Jigasi Meet transcription for Jitsi

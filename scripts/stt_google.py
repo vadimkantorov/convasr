@@ -14,6 +14,7 @@ import google.cloud.speech_v1
 parser = argparse.ArgumentParser()
 parser.add_argument('--input-path', '-i')
 parser.add_argument('--output-path', '-o', default = 'data')
+parser.add_argument('--verbose', action = 'store_true')
 parser.add_argument('--api-key-credentials', default = 'googleapikeycredentials.json')
 parser.add_argument('--lang', default = 'ru-RU')
 parser.add_argument('--vendor', default = 'google')
@@ -22,7 +23,9 @@ parser.add_argument('--recognition-model', default = 'phone_call', choices = ['p
 parser.add_argument('--endpoint', default = 'speech.googleapis.com:443') # google.cloud.speech_v1.SpeechClient.SERVICE_ADDRESS)
 args = parser.parse_args()
 
-credentials = google.oauth2.service_account.Credentials.from_service_account_file(args.api_key_credentials) if args.api_key_credentials else None
+os.environ.update(dict(GRPC_VERBOSITY = 'DEBUG', GRPC_TRACE = 'all') if args.verbose else {})
+
+credentials = google.oauth2.service_account.Credentials.from_service_account_file(args.api_key_credentials) if args.api_key_credentials else {}
 client = google.cloud.speech_v1.SpeechClient(credentials = credentials, client_options = dict(api_endpoint = args.endpoint))
 
 transcript = []
@@ -37,6 +40,7 @@ for t in json.load(open(args.input_path)):
 	hyp = res.results[0].alternatives[0].transcript
 
 	transcript.append(dict(t, hyp = hyp))
+	break
 
 transcript_path = os.path.join(args.output_path, os.path.basename(args.input_path) + f'.{args.vendor}.json')
 json.dump(transcript, open(transcript_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)

@@ -18,6 +18,7 @@ class SpeechServicerImpl(pb2_grpc.SpeechServicer):
 		self.decoder = decoder
 
 	def Recognize(self, request, context):
+		print('HI!', request)
 		config = request.config
 		audio = request.audio
 
@@ -41,7 +42,7 @@ if __name__ == '__main__':
 	parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
 	parser.add_argument('--decoder', choices = ['GreedyDecoder'], default = 'GreedyDecoder')
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
-	parser.add_argument('--endpoint', default = 'localhost' + ':' + str(50051))
+	parser.add_argument('--endpoint', default = '127.0.0.1:50000')
 	parser.add_argument('--num-workers', type = int, default = 10)
 	args = parser.parse_args()
 	
