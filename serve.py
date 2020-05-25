@@ -5,27 +5,31 @@
 # https://github.com/grpc/grpc/blob/master/examples/python/route_guide/route_guide_server.py
 
 import argparse
-import concurrent
+import concurrent.futures
 import grpc
-import google.cloud.speech_v1
-import google.cloud.speech_v1.proto.cloud_speech_pb2
-import google.cloud.speech_v1.proto.cloud_speech_pb2_grpc
+import google.cloud.speech_v1.proto.cloud_speech_pb2 as pb2
+import google.cloud.speech_v1.proto.cloud_speech_pb2_grpc as pb2_grpc
 import transcribe
 
-class SpeechServicerImpl(google.cloud.speech_v1.proto.cloud_speech_pb2_grpc.SpeechServicer):
+class SpeechServicerImpl(pb2_grpc.SpeechServicer):
 	def __init__(self, labels, model, decoder):
 		self.labels = labels
 		self.model = model
 		self.decoder = decoder
 
 	def Recognize(self, request, context):
-		pass
-
-	def LongRunningRecognize(self, request, context):
-		pass
-
-	def StreamingRecognize(self, request_iterator, context):
-		pass
+		return pb2.RecognizeResponse(results = [
+			pb2.SpeechRecognitionResult(
+				alternatives = pb2.SpeechRecognitionAlternative(
+					transcript = 'transcript', 
+					confidence = 1.0, 
+					words = [
+						pb2.WordInfo(word = str(k), start_time = '1.2s', end_time = '2.3s', speaker_tag = 31337) for k in range(3)
+					]
+				),
+				channel = 0
+			)
+		])
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -35,7 +39,7 @@ if __name__ == '__main__':
 	parser.add_argument('--decoder', choices = ['GreedyDecoder'], default = 'GreedyDecoder')
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
 	parser.add_argument('--port', type = int, default = 50051)
-	parser.add_arugment('--num-workers', type = int, default = 10)
+	parser.add_argument('--num-workers', type = int, default = 10)
 	args = parser.parse_args()
 	
 	labels, model, decoder = transcribe.setup(args)
@@ -43,7 +47,9 @@ if __name__ == '__main__':
 	service_impl = SpeechServicerImpl(labels, model, decoder)
 
 	server = grpc.server(concurrent.futures.ThreadPoolExecutor(max_workers = args.num_workers))
-	google.cloud.speech_v1.proto.cloud_speech_pb2_grpc.add_SpeechServicer_to_server(service_impl, server)
+	pb2_grpc.add_SpeechServicer_to_server(service_impl, server)
 	server.add_insecure_port(f'[::]:{args.port}')
+	
+	print(f'Serving google-cloud-speech API @ grpc://localhost:{args.port}')
 	server.start()
 	server.wait_for_termination()
