@@ -41,18 +41,16 @@ if __name__ == '__main__':
 	parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
 	parser.add_argument('--decoder', choices = ['GreedyDecoder'], default = 'GreedyDecoder')
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
-	parser.add_argument('--port', type = int, default = 50051)
+	parser.add_argument('--endpoint', default = 'localhost' + ':' + str(50051))
 	parser.add_argument('--num-workers', type = int, default = 10)
 	args = parser.parse_args()
 	
-	labels, model, decoder = transcribe.setup(args)
-	
-	service_impl = SpeechServicerImpl(labels, model, decoder)
+	service_impl = SpeechServicerImpl(*transcribe.setup(args))
 
 	server = grpc.server(concurrent.futures.ThreadPoolExecutor(max_workers = args.num_workers))
 	pb2_grpc.add_SpeechServicer_to_server(service_impl, server)
-	server.add_insecure_port(f'[::]:{args.port}')
+	server.add_insecure_port(args.endpoint)
 	
-	print(f'Serving google-cloud-speech API @ grpc://localhost:{args.port}')
+	print('Serving google-cloud-speech API @', args.endpoint)
 	server.start()
 	server.wait_for_termination()

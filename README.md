@@ -179,3 +179,17 @@ bzip2 -d data/unigrams.cyr.lc.bz2
 wget https://github.com/Koziev/NLP_Datasets/raw/master/WordformFrequencies/Data/term2freq.7z -P data
 7z x data/term2freq.7z -odata
 ```
+
+# Serving mock API of Google Cloud Speech API (only for testing)
+```shell
+# serve
+python3 serve.py --endpoint localhost:50051 --checkpoint ...
+
+# test
+python3 scripts/stt_google.py --endpoint localhost:50051 -i ...
+```
+
+# Configuring Jigasi Meet transcription for Jitsi
+[Docs](https://nikvaessen.github.io/jekyll/update/2017/08/24/gsoc2017_work_product_submission.html)
+
+[Configuration](https://github.com/jitsi/jigasi#using-jigasi-to-transcribe-a-jitsi-meet-conference)
