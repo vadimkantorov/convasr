@@ -47,7 +47,7 @@ for t in json.load(open(args.input_path)):
 	hyp = res.results[0].alternatives[0].transcript
 
 	transcript.append(dict(t, hyp = hyp))
-	break
+	#break
 
 transcript_path = os.path.join(args.output_path, os.path.basename(args.input_path) + f'.{args.vendor}.json')
 json.dump(transcript, open(transcript_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
