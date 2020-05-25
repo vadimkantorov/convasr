@@ -103,10 +103,13 @@ find -type f -name '*.wav' | xargs soxi -D | awk '{sum += $1} END {print sum / 3
 sudo docker build --build-arg CUDAVERSION=101 --build-arg CUDAVERSIONPOINT=10.1 -t convasr scripts
 
 # run docker
-sudo docker run --runtime=nvidia --privileged --cap-add=SYS_PTRACE -v ~/.ssh:/root/.ssh -v ~/stt_results:/root/stt_results -v ~/.gitconfig:/root/.gitconfig -v ~/.vimrc:/root/.vimrc -v ~/convasr:/root/convasr -v /home/data/ru_open_stt_wav:/root/convasr/ru_open_stt -v /home/data/kontur_calls_micro:/root/convasr/kontur_calls_micro -v /home/data/valset17122019:/root/convasr/valset17122019 -v /home/data/valset11102019:/root/convasr/valset11102019 -v /home/data/speechcore:/root/convasr/data/speechcore -v/home/html:/root/convasr/data/html -it --ipc=host convasr
+sudo docker run -p 7006:6006 --runtime=nvidia --privileged --cap-add=SYS_PTRACE -v ~/.ssh:/root/.ssh -v ~/stt_results:/root/stt_results -v ~/.gitconfig:/root/.gitconfig -v ~/.vimrc:/root/.vimrc -v ~/convasr:/root/convasr -v /home/data/ru_open_stt_wav:/root/convasr/ru_open_stt -v /home/data/kontur_calls_micro:/root/convasr/kontur_calls_micro -v /home/data/valset17122019:/root/convasr/valset17122019 -v /home/data/valset11102019:/root/convasr/valset11102019 -v /home/data/speechcore:/root/convasr/data/speechcore -v/home/html:/root/convasr/data/html -it --ipc=host convasr
 
 sudo docker image rm -f convasr
 ```
+
+# ssh port forwarding
+ssh -L 7006:$HOST:7006 $HOST -N # -f for background
 
 # Tensorboard
 ```shell
@@ -172,4 +175,7 @@ bash scripts/tts_speechkit.sh tts_dataset_100h.txt data/speechkit
 # for russian
 wget http://opencorpora.org/files/export/ngrams/unigrams.cyr.lc.bz2 -P data
 bzip2 -d data/unigrams.cyr.lc.bz2
+
+wget https://github.com/Koziev/NLP_Datasets/raw/master/WordformFrequencies/Data/term2freq.7z -P data
+7z x data/term2freq.7z -odata
 ```

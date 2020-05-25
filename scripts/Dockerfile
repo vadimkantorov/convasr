@@ -12,7 +12,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   curl \
   ca-certificates \
   apt-utils \
-  bzip2 \
+  bzip2 unzip p7zip-full \
   tree \
   htop \
   bmon \
@@ -28,7 +28,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   libsox-dev \
   libsox-fmt-all \
   ffmpeg \
-  vim unzip \
+  vim \
   sudo \
   wget \
   gdb strace parallel \

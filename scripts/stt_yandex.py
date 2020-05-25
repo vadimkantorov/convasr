@@ -1,6 +1,4 @@
-import io
 import os
-import sys
 import json
 import requests
 import argparse
