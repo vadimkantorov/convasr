@@ -4,38 +4,37 @@
 # https://google-auth.readthedocs.io/en/latest/reference/google.oauth2.service_account.html
 
 import os
+import io
 import json
 import argparse
 import scipy.io.wavfile
+import google.oauth2.service_account
 import google.cloud.speech_v1
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--input-path', '-i')
 parser.add_argument('--output-path', '-o', default = 'data')
-parser.add_argument('--api-key-credentials', default = 'googleapikeyserviceaccount.json')
+parser.add_argument('--api-key-credentials', default = 'googleapikeycredentials.json')
 parser.add_argument('--lang', default = 'ru-RU')
 parser.add_argument('--vendor', default = 'google')
+parser.add_argument('--format', default = 'LINEAR16')
+parser.add_argument('--recognition-model', default = 'phone_call', choices = ['phone_call', 'default', 'video', 'command_and_search'])
 parser.add_argument('--endpoint', default = 'speech.googleapis.com:443') # google.cloud.speech_v1.SpeechClient.SERVICE_ADDRESS)
 args = parser.parse_args()
 
-credentials = service_account.Credentials.from_service_account_file(args.api_key_credentials) if args.api_key_credentials else {}
-client = google.cloud.speech_v1.SpeechClient(credentials = credentials, client_options = dict(api_endpoint = args.api_endpoint))
+credentials = google.oauth2.service_account.Credentials.from_service_account_file(args.api_key_credentials) if args.api_key_credentials else None
+client = google.cloud.speech_v1.SpeechClient(credentials = credentials, client_options = dict(api_endpoint = args.endpoint))
 
 transcript = []
 for t in json.load(open(args.input_path)):
 	sample_rate, signal = scipy.io.wavfile.read(t['audio_path'])
 	assert signal.dtype == 'int16' and sample_rate in [8_000, 16_000]
-
-	req_config = dict(
-		encoding = google.cloud.speech_v1.enums.RecognitionConfig.AudioEncoding.LINEAR16, 
-		sample_rate_hertz = sample_rate,
-		language_code = args.lang
-	)
 	
-	req_audio = google.cloud.speech_v1.types.RecognizeRequest(audio_content = open(t['audio_path'], 'rb').read())
+	pcm = io.BytesIO()
+	scipy.io.wavfile.write(pcm, sample_rate, signal)
 	
-	res = client.recognize(req_config, req_audio)
-	hyp = res.alternatives[0].transcript
+	res = client.recognize(dict(encoding = args.format, sample_rate_hertz = sample_rate, language_code = args.lang, model = args.recognition_model), dict(content = pcm.getvalue()))
+	hyp = res.results[0].alternatives[0].transcript
 
 	transcript.append(dict(t, hyp = hyp))
 

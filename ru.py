@@ -126,7 +126,7 @@ def lemmatize(word):
 if __name__ == '__main__':
 	import argparse
 	parser = argparse.ArgumentParser()
-	parser.add_argument('text', default = '1-й Здорово http://echomsk.ru/programs/-echo 2.5 оу 1ого 100% XIX век XX-й век -4')
+	parser.add_argument('text', default = '1-й Здорово http://echomsk.ru/programs/-echo 2.5 оу 1ого 100% XIX век XX-й век -4 13.06')
 	args = parser.parse_args()
 	print('ORIG:', repr(args.text))
 	print('NORM:', repr(normalize_text(args.text)))

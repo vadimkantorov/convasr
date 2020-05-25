@@ -65,7 +65,7 @@ The passed command must read from stdin and write to stdout.
 
 ```shell
 # transcode to MP3
-python3 tools.py transcode -o kontur_calls_micro/kontur_calls_micro.csv.json -o data/kontur_calls_micro_mp3 --ext .mp3 "sox -V0 -t wav - -r 8k -t mp3 -"
+python3 tools.py transcode -o calls_micro/calls_micro.json -o data/calls_micro_mp3 --ext .mp3 "sox -V0 -t wav - -r 8k -t mp3 -"
 
 # encode to GSM and back
 "sox -V0 -t wav - -r 8k -c 1 -t gsm - | sox -V0 -r 8k -t gsm - -t wav -b 16 -e signed -r 8k -c 1 -"
@@ -183,10 +183,10 @@ wget https://github.com/Koziev/NLP_Datasets/raw/master/WordformFrequencies/Data/
 # Serving mock API of Google Cloud Speech API (only for testing)
 ```shell
 # serve
-python3 serve.py --endpoint localhost:50051 --checkpoint ...
+python3 servegoogleapi.py --endpoint localhost:50051 --checkpoint ...
 
 # test
-python3 scripts/stt_google.py --endpoint localhost:50051 -i ...
+python3 scripts/stt_google.py --endpoint localhost:50051 --lang ru --api-key-credentials googleapiserviceaccount.json -i calls_micro/calls_micro.json
 ```
 
 # Configuring Jigasi Meet transcription for Jitsi
