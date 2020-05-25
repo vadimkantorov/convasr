@@ -1,10 +1,10 @@
+# https://cloud.yandex.ru/docs/speechkit/stt/request
+
 import os
 import json
 import requests
 import argparse
 import scipy.io.wavfile
-
-# https://cloud.yandex.ru/docs/speechkit/stt/request
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--input-path', '-i')
@@ -22,7 +22,9 @@ transcript = []
 for t in json.load(open(args.input_path)):
 	sample_rate, signal = scipy.io.wavfile.read(t['audio_path'])
 	assert signal.dtype == 'int16' and sample_rate in [8_000, 16_000]
-	hyp = requests.post(args.endpoint, headers = dict(Authorization = 'Api-Key ' + args.api_key), params = dict(lang = args.lang, sampleRateHertz = sample_rate, format = args.format, raw_results = True), data = signal.tobytes()).json()['result']
+	
+	res = requests.post(args.endpoint, headers = dict(Authorization = 'Api-Key ' + args.api_key), params = dict(lang = args.lang, sampleRateHertz = sample_rate, format = args.format, raw_results = True), data = signal.tobytes()).json()
+	hyp = res['result']
 	transcript.append(dict(t, hyp = hyp))
 
 transcript_path = os.path.join(args.output_path, os.path.basename(args.input_path) + f'.{args.vendor}.json')

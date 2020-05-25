@@ -1,3 +1,7 @@
+# git clone --recursive https://github.com/TinkoffCreditSystems/voicekit-examples.git && pip install -r voicekit-examples/python/requirements.txt
+# https://voicekit.tinkoff.ru/docs/recognition
+# https://voicekit.tinkoff.ru/docs/usingstt
+
 import os
 import io
 import sys
@@ -5,12 +9,7 @@ import json
 import contextlib
 import argparse
 import scipy.io.wavfile
-
-# git clone --recursive https://github.com/TinkoffCreditSystems/voicekit-examples.git && pip install -r voicekit-examples/python/requirements.txt
 sys.path.insert(0, 'voicekit-examples/python'); import recognize
-
-# https://voicekit.tinkoff.ru/docs/recognition
-# https://voicekit.tinkoff.ru/docs/usingstt
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--input-path', '-i')

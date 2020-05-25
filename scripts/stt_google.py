@@ -1,3 +1,8 @@
+# pip install google-cloud-speech
+# https://googleapis.dev/python/speech/latest/index.html
+# https://google-auth.readthedocs.io/en/latest/reference/google.oauth2.service_account.html
+# https://github.com/googleapis/python-speech
+
 import os
 import json
 import argparse
@@ -12,10 +17,6 @@ parser.add_argument('--lang', default = 'ru-RU')
 parser.add_argument('--vendor', default = 'google')
 parser.add_argument('--endpoint', default = 'speech.googleapis.com:443') # google.cloud.speech_v1.SpeechClient.SERVICE_ADDRESS)
 args = parser.parse_args()
-
-# https://googleapis.dev/python/speech/latest/index.html
-# https://google-auth.readthedocs.io/en/latest/reference/google.oauth2.service_account.html
-# https://github.com/googleapis/python-speech
 
 credentials = service_account.Credentials.from_service_account_file(args.api_key_credentials) if args.api_key_credentials else {}
 client = google.cloud.speech_v1.SpeechClient(credentials = credentials, client_options = dict(api_endpoint = args.api_endpoint))
