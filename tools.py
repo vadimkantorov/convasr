@@ -1,3 +1,4 @@
+import hashlib
 import os
 import json
 import gzip
@@ -47,7 +48,8 @@ def cut(input_path, output_path, sample_rate, mono, dilate, strip, strip_prefix,
 		segment = signal[slice(t['channel'], 1 + t['channel']) if t['channel'] is not None else ..., int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)]
 		
 		segment_file_name = os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t)
-		sub_path = [str(hash(segment_file_name) % 10), str(hash(segment_file_name) % 1000)] if add_sub_paths else []
+		digest = hashlib.md5(segment_file_name.encode('utf-8')).hexdigest()
+		sub_path = [digest[-1:], digest[:2]] if add_sub_paths else []
 		segment_path_components = [output_path] + sub_path + [segment_file_name]
 		segment_path = os.path.join(*segment_path_components)
 		
