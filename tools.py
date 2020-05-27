@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import gzip
 import argparse
@@ -55,11 +56,11 @@ def cut(input_path, output_path, sample_rate, mono, dilate, strip, strip_prefix,
 				begin = 0.0,
 				end = segment.shape[-1] / sample_rate,
 				speaker = t.pop('speaker', None),
-				ref = t.pop('ref'),
+				ref = t.pop('ref', None),
 				hyp = t.pop('hyp', None),
 				cer = t.pop('cer', None),
-				alignment = t.pop('alignment', {}),
-				words = t.pop('words', {}),
+				alignment = t.pop('alignment', []),
+				words = t.pop('words', []),
 				meta = t)
 
 		prev_audio_path = audio_path
@@ -164,9 +165,10 @@ def transcode(input_path, output_path, ext, cmd):
 	json.dump(transcript, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
-def lserrorwords(input_path, output_path, comment_path, freq_path):
-	freq = {splitted[0] : int(splitted[-1]) for line in open(freq_path) for splitted in [line.split()]} if freq_path else {}
-	comment = {splitted[0] : splitted[-1] for line in open(comment_path) for splitted in [line.split()] if '#' not in line and len(splitted) > 1} if comment_path else {}
+def lserrorwords(input_path, output_path, comment_path, freq_path, sortdesc, sortasc):
+	regex = r'[ ]+-[ ]*', '-'
+	freq = {splitted[0] : int(splitted[-1]) for line in open(freq_path) for splitted in [re.sub(regex[0], regex[1], line).split()]} if freq_path else {}
+	comment = {splitted[0] : splitted[-1].strip() for line in open(comment_path) for splitted in [line.split(',')] if '#' not in line and len(splitted) > 1} if comment_path else {}
 	transcript = json.load(open(input_path))
 	transcript = list(filter(lambda t: [w['type'] for w in t['words']].count('missing_ref') <= 2, transcript))
 	
@@ -178,10 +180,11 @@ def lserrorwords(input_path, output_path, comment_path, freq_path):
 	words_ok_counter = collections.Counter(map(lemmatize, words_ok))
 	words_error_counter = collections.Counter(map(lemmatize, words_error))
 	group = lambda c: lemmatize(c[0])
-	comment = {k : ';'.join(c[1] for c in g) for k, g in itertools.groupby(sorted(comment.items(), key = group), key = group)}
+	comment = {k : ';'.join(set(c[1] for c in g if c[1])) for k, g in itertools.groupby(sorted(comment.items(), key = group), key = group)}
 
 	words = {ref : (ref, words_error_counter[l] - words_ok_counter[l], words_error_counter[l], words_ok_counter[l], freq.get(ref, 0), comment.get(l, '')) for ref in words_error for l in [lemmatize(ref)]}
-	words = sorted(words.values(), key = lambda t: (t[1], t[0]), reverse = True)
+	key = sortdesc or sortasc
+	words = sorted(words.values(), key = lambda t: (t[1] if key == 'diff' else (t[-2], -t[1]), t[0]), reverse = bool(sortdesc))
 	
 	output_path = output_path or (input_path + '.csv')
 	open(output_path, 'w').write('#word,diff,err,ok,freq,comment\n' + '\n'.join(','.join(map(str, t)) for t in words))
@@ -271,9 +274,11 @@ if __name__ == '__main__':
 	
 	cmd = subparsers.add_parser('lserrorwords')
 	cmd.add_argument('--input-path', '-i', required = True)
-	cmd.add_argument('--output-path', '-o')
+	cmd.add_argument('--output-path', '-o', default = 'data/error_words.csv')
 	cmd.add_argument('--comment-path', '-c') 
 	cmd.add_argument('--freq-path', '-f')
+	cmd.add_argument('--sortdesc', choices = ['diff', 'freq'])
+	cmd.add_argument('--sortasc', choices = ['diff', 'freq'])
 	cmd.set_defaults(func = lserrorwords)
 
 	args = vars(parser.parse_args())

@@ -9,6 +9,7 @@ import json
 import random
 import functools
 import itertools
+import importlib
 import torch.utils.data
 import sentencepiece
 import audio
@@ -224,3 +225,6 @@ class Labels:
 
 	def __str__(self):
 		return self.alphabet + ''.join([self.repeat, self.space, self.blank])
+
+def load_language(lang):
+	return importlib.import_module(lang)

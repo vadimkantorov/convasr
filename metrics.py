@@ -50,7 +50,7 @@ def align_words(hyp, ref, break_ref = False):
 	word_alignment = [dict(hyp = ''.join(hyp), ref = ''.join(ref), type = t) for hyp, ref in words for t, e in [word_alignment_error_type(hyp, ref)]]
 	return ''.join(hyp), ''.join(ref), word_alignment
 
-def analyze(ref, hyp, labels, audio_path, phonetic_replace_groups = [], vocab = set(), full = False, break_ref_alignment = True, **kwargs):
+def analyze(ref, hyp, labels, audio_path = '', phonetic_replace_groups = [], vocab = set(), full = False, break_ref_alignment = True, **kwargs):
 	hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
 	hyp_postproc, ref_postproc = map(functools.partial(labels.postprocess_transcript, collapse_repeat = True), [hyp, ref])
 	hyp_phonetic, ref_phonetic = map(functools.partial(labels.postprocess_transcript, phonetic_replace_groups = phonetic_replace_groups), [hyp_postproc, ref_postproc])
@@ -135,12 +135,12 @@ def word_alignment_error_type(hyp, ref, p = 0.5, L = 3, placeholder = '|'):
 	e = sum(ch != cr and not (ch == space and cr == placeholder) for ch, cr in zip(hyp, ref))
 	ref_placeholders = ref.count(placeholder)
 	ref_chars = len(ref) - ref_placeholders
-	is_typo = ref_chars < L or (e > 0 and ((hyp.count(placeholder) < p * len(ref) and ref_placeholders < p * len(ref))))
+	is_typo = ref_chars < L or (e >= 0 and ((hyp.count(placeholder) < p * len(ref) and ref_placeholders < p * len(ref))))
 
 	if hyp == ref:
 		return 'ok', e
 	elif is_typo:
-		easy = ref_chars < L or (e == 1 or (e == 2 and all(ch == cr or i >= len(ref) - 2 or (ch == space and cr == placeholder) for i, (ch, cr) in enumerate(zip(hyp, ref)))))
+		easy = ref_chars < L or (e <= 1 or (e == 2 and all(ch == cr or i >= len(ref) - 2 or (ch == space and cr == placeholder) for i, (ch, cr) in enumerate(zip(hyp, ref)))))
 		return 'typo_' + ('easy' if easy else 'hard'), e
 	else:
 		source = '_ref' if ref_placeholders > 3 and ref_placeholders >= p * len(ref) else ''
@@ -387,13 +387,15 @@ class Needleman:
 
 if __name__ == '__main__':
 	import argparse
+	import datasets
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
 	
 	cmd = subparsers.add_parser('analyze')
 	cmd.add_argument('--hyp', required = True)
 	cmd.add_argument('--ref', required = True)
-	cmd.set_defaults(func = lambda hyp, ref: print(json.dump(analyze(hyp = hyp, ref = ref), ensure_ascii = False, indent = 2, sort_keys = True)))
+	cmd.add_argument('--lang', default = 'ru')
+	cmd.set_defaults(func = lambda hyp, ref, lang: print(json.dumps(analyze(hyp = hyp, ref = ref, labels = datasets.Labels(datasets.load_language(lang)), full = True), ensure_ascii = False, indent = 2, sort_keys = True)))
 
 	cmd = subparsers.add_parser('align')
 	cmd.add_argument('--hyp', required = True)
