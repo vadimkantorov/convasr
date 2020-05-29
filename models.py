@@ -14,10 +14,10 @@ class Decoder(nn.Sequential):
 			super().__init__(nn.Conv1d(input_size, num_classes[0], kernel_size = 1))
 		elif type == 'bpe':
 			super().__init__(
-				nn.Conv1d(input_size, num_classes[0], kernel_size = 1), 
+				nn.Conv1d(input_size, num_classes[0], kernel_size = 1),
 				nn.Sequential(
 					#nn.Conv1d(input_size, num_classes[1], kernel_size = 1)#, padding = 7)
-					ConvBN(num_channels = (input_size, input_size), kernel_size = 15), 
+					ConvBN(num_channels = (input_size, input_size), kernel_size = 15),
 					ConvBN(num_channels = (input_size, num_classes[1]), kernel_size = 15)
 				)
 			)
@@ -82,9 +82,9 @@ class ConvBN(nn.Module):
 # residual = 'dense' | True | False
 class JasperNet(nn.Module):
 	def __init__(self, num_input_features, num_classes, repeat = 3, num_subblocks = 1, dilation = 1, residual = 'dense',
-			kernel_sizes = [11, 13, 17, 21, 25], kernel_size_prologue = 11, kernel_size_epilogue = 29, 
+			kernel_sizes = [11, 13, 17, 21, 25], kernel_size_prologue = 11, kernel_size_epilogue = 29,
 			base_width = 128, out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			separable = False, groups = 1, 
+			separable = False, groups = 1,
 			dropout = 0, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
 			temporal_mask = True, nonlinearity = 'relu', inplace = False,
 			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None, normalize_features = True
@@ -110,7 +110,7 @@ class JasperNet(nn.Module):
 			ConvBN(num_channels = (in_width_factor * base_width, out_width_factors_large[0] * base_width), kernel_size = kernel_size_epilogue, dropout = dropout_epilogue, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = False),
 			ConvBN(num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), kernel_size = 1, dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = False),
 		])
-		self.frontend = frontend if frontend is not None else nn.Identity()
+		self.frontend = frontend if frontend is not None else lambda x, *args, **kwargs: x
 		self.normalize_features = normalize_features
 		self.backbone = backbone
 		self.decoder = Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
@@ -118,9 +118,9 @@ class JasperNet(nn.Module):
 		self.dict = dict
 
 	def forward(self, x, xlen = None, y = None, ylen = None):
-		x = self.frontend(x if x.ndim == 2 else x.squeeze(1))
-		x = normalize_features(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.normalize_features else x 
-		
+		x = self.frontend(x if x.ndim == 2 else x.squeeze(1), mask=temporal_mask(x, lengths_fraction=xlen))
+		x = normalize_features(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.normalize_features else x
+
 		residual = []
 		for i, subblock in enumerate(self.backbone):
 			x = subblock(x, residual = residual, lengths_fraction = xlen)
@@ -155,19 +155,19 @@ class JasperNet(nn.Module):
 
 class Wav2Letter(JasperNet):
 	def __init__(self, num_input_features, num_classes, dropout = 0.2, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):
-		super().__init__(num_input_features, num_classes, base_width = base_width, 
-			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks, 
+		super().__init__(num_input_features, num_classes, base_width = base_width,
+			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
 			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
-			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8], 
+			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
 			residual = False, diletion = dilation, nonlinearity = nonlinearity
 		)
-		
+
 class Wav2LetterFlat(JasperNet):
 	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, width_factor_large = 16, width_factor = 6, kernel_size_epilogue = 29, kernel_size_prologue = 13, num_blocks = 6):
-		super().__init__(num_input_features, num_classes, base_width = base_width, 
-			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks, 
+		super().__init__(num_input_features, num_classes, base_width = base_width,
+			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
 			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
-			out_width_factors = [width_factor] * num_blocks, out_width_factors_large = [width_factor_large, width_factor_large], 
+			out_width_factors = [width_factor] * num_blocks, out_width_factors_large = [width_factor_large, width_factor_large],
 			residual = False
 		)
 
@@ -233,12 +233,12 @@ class ResidualActivation(nn.Module):
 
 class BatchNorm1dInplace(nn.BatchNorm1d):
 	def forward(self, input):
-		return BatchNorm1dInplace.Function.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training) 
+		return BatchNorm1dInplace.Function.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training)
 
 	class Function(torch.autograd.function.Function):
 		@staticmethod
 		def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, training):
-			mean, var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum) if training else (running_mean, running_var) 
+			mean, var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum) if training else (running_mean, running_var)
 			invstd = (var + eps).rsqrt_()
 			output = torch.batch_norm_elemt(input, weight, bias, mean, invstd, 0, out = input)
 			self.save_for_backward(output, weight, bias, mean, invstd)
@@ -255,7 +255,7 @@ class BatchNorm1dInplace(nn.BatchNorm1d):
 def relu_dropout(x, p = 0, inplace = False, training = False):
 	if not training or p == 0:
 		return x.clamp_(min = 0) if inplace else x.clamp(min = 0)
-	
+
 	p1m = 1 - p
 	mask = torch.rand_like(x) < p1m
 	mask &= (x > 0)
@@ -268,11 +268,11 @@ class AugmentationFrontend(nn.Module):
 		self.frontend = frontend
 		self.feature_transform = feature_transform
 		self.waveform_transform = waveform_transform
-	
+
 	def forward(self, signal, audio_path = None, dataset_name = None, waveform_transform_debug = None, **kwargs):
 		if self.waveform_transform is not None:
 			signal = self.waveform_transform(signal, self.frontend.sample_rate, dataset_name = dataset_name)
-		
+
 		if waveform_transform_debug is not None:
 			waveform_transform_debug(audio_path, self.frontend.sample_rate, signal)
 
@@ -298,7 +298,6 @@ class LogFilterBankFrontend(nn.Module):
 		self.dither = dither
 		self.dither0 = dither0
 		self.preemphasis =  preemphasis
-		self.normalize_features = normalize_features
 		self.normalize_signal = normalize_signal
 		self.sample_rate = sample_rate
 
@@ -306,7 +305,7 @@ class LogFilterBankFrontend(nn.Module):
 		self.hop_length = int(window_stride * sample_rate)
 		self.nfft = 2 ** math.ceil(math.log2(self.win_length))
 		self.freq_cutoff = self.nfft // 2 + 1
-		
+
 		self.register_buffer('window', getattr(torch, window)(self.win_length, periodic = window_periodic).float())
 		#mel_basis = torchaudio.functional.create_fb_matrix(n_fft, n_mels = num_input_features, fmin = 0, fmax = int(sample_rate/2)).t() # when https://github.com/pytorch/audio/issues/287 is fixed
 		mel_basis = torch.as_tensor(librosa.filters.mel(sample_rate, self.nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2)))
@@ -323,24 +322,41 @@ class LogFilterBankFrontend(nn.Module):
 		else:
 			self.stft = None
 
+	def pad_signal(self, signal):
+		signal_dim = signal.dim()
+		extended_shape = [1] * (3 - signal_dim) + list(signal.size())
+		pad = self.freq_cutoff - 1
+
+		signal = signal.view(extended_shape)
+
+		left_padded_signal = F.pad(signal, (pad, 0), 'reflect')
+		right_padded_signal = F.pad(left_padded_signal, (0, pad), 'constant', value=0.0)
+
+		signal = right_padded_signal.view(right_padded_signal.shape[-signal_dim:])
+		return signal
+
 	def stft_magnitude_squared(self, signal):
+		padded_signal = self.pad_signal(signal)
+
 		if self.stft is not None:
-			signal = F.pad(signal[:, None, None, :], (self.freq_cutoff - 1, self.freq_cutoff - 1, 0, 0), mode = 'reflect').squeeze(1)
-			forward_transform_squared = self.stft(signal).pow(2)
+			forward_transform_squared = self.stft(padded_signal).pow(2)
 			real_squared, imag_squared = forward_transform_squared[:, :self.freq_cutoff, :], forward_transform_squared[:, self.freq_cutoff:, :]
 		else:
-			real_squared, imag_squared = signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = True, pad_mode = 'reflect').pow(2).unbind(dim = -1)
+			real_squared, imag_squared = padded_signal.stft(self.nfft, hop_length=self.hop_length, win_length=self.win_length, window=self.window, center=False).pow(2).unbind(dim=-1)
 		return real_squared + imag_squared
 
-	def forward(self, signal):
+	def forward(self, signal, mask=None):
 		signal = normalize_signal(signal) if self.normalize_signal else signal
 		signal = signal + self.dither0 * torch.randn_like(signal) if self.dither0 > 0 else signal
 		signal = torch.cat([signal[..., :1], signal[..., 1:] - self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
 		signal = signal + self.dither * torch.randn_like(signal) if self.dither > 0 else signal
+		if mask is not None:
+			signal = signal * mask
+
 		power_spectrum = self.stft_magnitude_squared(signal)
 		features = self.mel(power_spectrum).log()
-		return normalize_features(features) if self.normalize_features else features
-	
+		return features
+
 	@property
 	def read_audio(self):
 		return True
