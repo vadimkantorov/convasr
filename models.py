@@ -61,6 +61,8 @@ class ConvBN(nn.Module):
 		residual = residual or [x]
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
 			x = self.activation(bn(conv(x)), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)] if i == len(self.conv) - 1 else [])
+			return x
+
 			x = x * temporal_mask(x, lengths_fraction = lengths_fraction) if (self.temporal_mask and lengths_fraction is not None) else x
 		return x
 
@@ -124,6 +126,8 @@ class JasperNet(nn.Module):
 		residual = []
 		for i, subblock in enumerate(self.backbone):
 			x = subblock(x, residual = residual, lengths_fraction = xlen)
+			#if i == 0:
+			#	return x
 			#torch.cuda.empty_cache()
 			if self.residual != 'dense':
 				residual.clear()
@@ -404,11 +408,19 @@ def reset_bn_running_stats_(model):
 	return model
 
 def data_parallel_and_autocast(model, optimizer = None, opt_level = None, **kwargs):
+	data_parallel = torch.cuda.device_count() > 1
+
 	if opt_level is None:
-		return torch.nn.DataParallel(model), optimizer
-	model, optimizer = apex.amp.initialize(nn.Sequential(model), optimizers = optimizer, opt_level = opt_level, **kwargs) if optimizer is not None else (apex.amp.initialize(nn.Sequential(model), opt_level = opt_level, **kwargs), None)
-	model = torch.nn.DataParallel(model[0])
-	model.forward = lambda *args, old_fwd = model.forward, input_caster = lambda tensor: tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_type']) if tensor.is_floating_point() else tensor, output_caster = lambda tensor: (tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_outputs'] if apex.amp._amp_state.opt_properties.options.get('cast_model_outputs') is not None else torch.float32)) if tensor.is_floating_point() else tensor, **kwargs: apex.amp._initialize.applier(old_fwd(*apex.amp._initialize.applier(args, input_caster), **apex.amp._initialize.applier(kwargs, input_caster)), output_caster)
+		model = torch.nn.DataParallel(model) if data_parallel else model
+	
+	elif data_parallel:
+		model, optimizer = apex.amp.initialize(nn.Sequential(model), optimizers = optimizer, opt_level = opt_level, **kwargs) if optimizer is not None else (apex.amp.initialize(nn.Sequential(model), opt_level = opt_level, **kwargs), None)
+		model = torch.nn.DataParallel(model[0])
+		model.forward = lambda *args, old_fwd = model.forward, input_caster = lambda tensor: tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_type']) if tensor.is_floating_point() else tensor, output_caster = lambda tensor: (tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_outputs'] if apex.amp._amp_state.opt_properties.options.get('cast_model_outputs') is not None else torch.float32)) if tensor.is_floating_point() else tensor, **kwargs: apex.amp._initialize.applier(old_fwd(*apex.amp._initialize.applier(args, input_caster), **apex.amp._initialize.applier(kwargs, input_caster)), output_caster)
+	
+	else:
+		model, optimizer = apex.amp.initialize(model, optimizers = optimizer, opt_level = opt_level, **kwargs) if optimizer is not None else (apex.amp.initialize(model, opt_level = opt_level, **kwargs), None)
+		
 	return model, optimizer
 
 def silence_space_mask(log_probs, speech, blank_idx, space_idx, kernel_size = 101):
