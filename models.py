@@ -110,7 +110,7 @@ class JasperNet(nn.Module):
 			ConvBN(num_channels = (in_width_factor * base_width, out_width_factors_large[0] * base_width), kernel_size = kernel_size_epilogue, dropout = dropout_epilogue, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = False),
 			ConvBN(num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), kernel_size = 1, dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = False),
 		])
-		self.frontend = frontend if frontend is not None else lambda x, *args, **kwargs: x
+		self.frontend = frontend
 		self.normalize_features = normalize_features
 		self.backbone = backbone
 		self.decoder = Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
@@ -118,7 +118,7 @@ class JasperNet(nn.Module):
 		self.dict = dict
 
 	def forward(self, x, xlen = None, y = None, ylen = None):
-		x = self.frontend(x if x.ndim == 2 else x.squeeze(1), mask=temporal_mask(x, lengths_fraction=xlen))
+		x = self.frontend(x if x.ndim == 2 else x.squeeze(1), mask = temporal_mask(x, lengths_fraction=xlen)) if self.frontend is not None else x
 		x = normalize_features(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.normalize_features else x
 
 		residual = []
@@ -132,7 +132,7 @@ class JasperNet(nn.Module):
 
 		logits = self.decoder(x)
 		log_probs = [F.log_softmax(l, dim = 1).to(torch.float32) for l in logits]
-		olen = [compute_output_lengths(l, xlen.to(torch.float32) if xlen is not None else xlen) for l in logits]
+		olen = [compute_output_lengths(l, xlen.to(torch.float32) if xlen is not None else None) for l in logits]
 		aux = {}
 
 		if y is not None and ylen is not None:
@@ -183,10 +183,6 @@ class JasperNetBigInplace(JasperNet):
 	def __init__(self, *args, **kwargs):
 		inplace = kwargs.pop('inplace', True)
 		super().__init__(*args, num_subblocks = 2, temporal_mask = False, inplace = inplace, nonlinearity = ('leaky_relu', 0.01), **kwargs)
-
-class JasperNetBigInplaceLargeStride(JasperNet):
-	def __init__(self, *args, **kwargs):
-		super().__init__(*args, num_subblocks = 2, temporal_mask = False, inplace = True, nonlinearity = ('leaky_relu', 0.01), dilation = 2, **kwargs)
 
 class ResidualActivation(nn.Module):
 	def __init__(self, nonlinearity, dropout = 0, inplace = False):

@@ -22,20 +22,21 @@ import audio
 import vis
 
 def setup(args):
+	torch.set_grad_enabled(False)
 	checkpoint = torch.load(args.checkpoint, map_location = 'cpu')
 	args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, eps = 1e-6)
-	labels = datasets.Labels(importlib.import_module(checkpoint['args']['lang']), name = 'char')
+	labels = datasets.Labels(datasets.Language(checkpoint['args']['lang']), name = 'char')
 	model = getattr(models, args.model or checkpoint['args']['model'])(args.num_input_features, [len(labels)], frontend = frontend, dict = lambda logits, log_probs, olen, **kwargs: (logits[0], olen[0]))
 	model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 	model = model.to(args.device)
 	model.eval()
 	model.fuse_conv_bn_eval()
-	model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16)
+	if args.device != 'cpu':
+		model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16)
 	decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
 	return labels, model, decoder
 
-@torch.no_grad()
 def main(args):
 	os.makedirs(args.output_path, exist_ok = True)
 	data_paths = [p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f]) if os.path.isfile(p) and any(map(p.endswith, args.ext))] + [p for p in args.input_path if any(map(p.endswith, ['.json', '.json.gz']))]

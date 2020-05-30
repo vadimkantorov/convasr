@@ -6,7 +6,6 @@ import time
 import shutil
 import random
 import argparse
-import importlib
 import torch
 import torch.utils.data
 import torch.utils.tensorboard
@@ -48,7 +47,7 @@ def main(args):
 	if args.cudnn == 'benchmark':
 		torch.backends.cudnn.benchmark = True
 
-	lang = importlib.import_module(args.lang)
+	lang = datasets.Language(args.lang)
 	#TODO: , candidate_sep = datasets.Labels.candidate_sep
 	labels = [datasets.Labels(lang, name = 'char')] + [datasets.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
 	
@@ -170,10 +169,11 @@ def main(args):
 	model.to(args.device)
 
 	if not args.train_data_path:
+		model.eval()
 		if not args.adapt_bn:
-			model.eval()
 			model.fuse_conv_bn_eval()
-		model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+		if args.device != 'cpu':
+			model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 		evaluate_model(val_data_loaders, adapt_bn = args.adapt_bn)
 		return
 
@@ -200,7 +200,8 @@ def main(args):
 		else:
 			epoch += 1
 
-	model, optimizer = models.data_parallel_and_autocast(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+	if args.device != 'cpu':
+		model, optimizer = models.data_parallel_and_autocast(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 	if checkpoint and args.fp16 and checkpoint['amp_state_dict'] is not None:
 		apex.amp.load_state_dict(checkpoint['amp_state_dict'])
 	
