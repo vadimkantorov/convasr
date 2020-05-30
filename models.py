@@ -61,8 +61,6 @@ class ConvBN(nn.Module):
 		residual = residual or [x]
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
 			x = self.activation(bn(conv(x)), residual = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)] if i == len(self.conv) - 1 else [])
-			return x
-
 			x = x * temporal_mask(x, lengths_fraction = lengths_fraction) if (self.temporal_mask and lengths_fraction is not None) else x
 		return x
 
@@ -126,8 +124,6 @@ class JasperNet(nn.Module):
 		residual = []
 		for i, subblock in enumerate(self.backbone):
 			x = subblock(x, residual = residual, lengths_fraction = xlen)
-			#if i == 0:
-			#	return x
 			#torch.cuda.empty_cache()
 			if self.residual != 'dense':
 				residual.clear()
