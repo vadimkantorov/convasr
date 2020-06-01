@@ -188,7 +188,7 @@ def errors(input_path, include = [], exclude = [], audio = False, output_file_na
 	output_file_name = output_file_name or (input_path[0] + (include[0].split('subset')[-1] if include else '') + '.html')
 	
 	f = open(output_file_name , 'w')
-	f.write('<html><meta charset="utf-8"><style> table{border-collapse:collapse; width: 100%; table-layout: fixed} audio {width:100%} .br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap} th.col{width:80px}</style>')
+	f.write('<html><meta charset="utf-8"><style> table{border-collapse:collapse; width: 100%;} audio {width:100%} .br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap} th.col{width:80px}</style>')
 	f.write('<body><table><tr><th></th><th class="col">cer_easy</th><th class="col">cer</th><th class="col">wer_easy</th><th class="col">wer</th><th class="col">mer</th><th></th></tr>')
 	f.write('<tr><td><strong>averages<strong></td></tr>')
 	f.write('\n'.join('<tr><td class="br">{input_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td>{mer:.02%}</td></tr>'.format(input_name = os.path.basename(input_path[i]), cer_easy = metrics.nanmean(c, 'cer_easy'), cer = metrics.nanmean(c, 'cer'), wer_easy = metrics.nanmean(c, 'wer_easy'), wer = metrics.nanmean(c, 'wer'), mer = metrics.nanmean(c, 'mer')) for i, c in enumerate(zip(*cat))))
