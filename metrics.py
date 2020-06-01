@@ -144,7 +144,7 @@ def word_alignment_error_type(hyp, ref, p = 0.5, L = 3, placeholder = '|'):
 		easy = ref_chars < L or (e <= 1 or (e == 2 and all(ch == cr or i >= len(ref) - 2 or (ch == space and cr == placeholder) for i, (ch, cr) in enumerate(zip(hyp, ref)))))
 		return 'typo_' + ('easy' if easy else 'hard'), e
 	else:
-		source = '_ref' if ref_placeholders > 3 and ref_placeholders >= p * len(ref) else ''
+		source = '_ref' if ref_placeholders >= p * len(ref) else ''
 		return 'missing' + source, e
 
 error_types = ['typo_easy', 'typo_hard', 'missing', 'missing_ref']
