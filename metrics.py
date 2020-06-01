@@ -112,6 +112,7 @@ def aggregate(analyzed, p = 0.5):
 		wer_avg = nanmean(analyzed, 'wer'),
 		mer_avg = nanmean(analyzed, 'mer'),
 		cer_easy_avg = nanmean(analyzed, 'cer_easy'),
+		wer_easy_avg = nanmean(analyzed, 'wer_easy'),
 		cer_hard_avg = nanmean(analyzed, 'cer_hard'),
 		cer_missing_avg = nanmean(analyzed, 'cer_missing'),
 		der_avg = nanmean(analyzed, 'der')
@@ -135,7 +136,7 @@ def word_alignment_error_type(hyp, ref, p = 0.5, L = 3, placeholder = '|'):
 	e = sum(ch != cr and not (ch == space and cr == placeholder) for ch, cr in zip(hyp, ref))
 	ref_placeholders = ref.count(placeholder)
 	ref_chars = len(ref) - ref_placeholders
-	is_typo = ref_chars < L or (e >= 0 and ((hyp.count(placeholder) < p * len(ref) and ref_placeholders < p * len(ref))))
+	is_typo = (0 < ref_chars < L and len(hyp) <= L) or (e >= 0 and ((hyp.count(placeholder) < p * len(ref) and ref_placeholders < p * len(ref))))
 
 	if hyp == ref:
 		return 'ok', e
@@ -395,7 +396,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--hyp', required = True)
 	cmd.add_argument('--ref', required = True)
 	cmd.add_argument('--lang', default = 'ru')
-	cmd.set_defaults(func = lambda hyp, ref, lang: print(json.dumps(analyze(hyp = hyp, ref = ref, labels = datasets.Labels(datasets.load_language(lang)), full = True), ensure_ascii = False, indent = 2, sort_keys = True)))
+	cmd.set_defaults(func = lambda hyp, ref, lang: print(json.dumps(analyze(hyp = hyp, ref = ref, labels = datasets.Labels(datasets.Language(lang)), full = True), ensure_ascii = False, indent = 2, sort_keys = True)))
 
 	cmd = subparsers.add_parser('align')
 	cmd.add_argument('--hyp', required = True)
