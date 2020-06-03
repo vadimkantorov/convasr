@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn.functional as F
 
@@ -82,3 +83,7 @@ def prune(transcript, align_boundary_words = False, cer = None, wer = None, mer 
 def compute_duration(t, hours = False):
 	seconds = t['end'] - t['begin']
 	return seconds / (60 * 60) if hours else seconds
+
+def audio_name(t):
+	return t.get('audio_name') or os.path.basename(t['audio_path'])
+	

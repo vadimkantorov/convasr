@@ -24,7 +24,6 @@ import metrics
 import models
 import ctc
 import transcripts
-import ru as lang
 
 def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = []):
 	if isinstance(transcript, str):
@@ -172,8 +171,8 @@ def logits(logits, audio_name, MAX_ENTROPY = 1.0):
 	html.write('</body></html>')
 	print('\n', logits_path)
 
-def errors(input_path, include = [], exclude = [], audio = False, output_file_name = None, sortdesc = None, topk = None, duration = None, cer = None, wer = None, mer = None, filter_transcripts = None):
-	include, exclude = (sum([open(file_path).read().splitlines() for file_path in clude], []) for clude in [include, exclude])
+def errors(input_path, include = [], exclude = [], audio = False, output_path = None, sortdesc = None, topk = None, duration = None, cer = None, wer = None, mer = None, filter_transcripts = None):
+	include, exclude = (set(sum([list(map(transcripts.audio_name, json.load(open(file_path)))) if file_path.endswith('.json') else open(file_path).read().splitlines() for file_path in clude], [])) for clude in [include, exclude])
 	read_transcript = lambda path: list(filter(lambda r: (not include or r['audio_name'] in include) and (not exclude or r['audio_name'] not in exclude), json.load(open(path)) if isinstance(path, str) else path)) if path is not None else []
 	ours, theirs = transcripts.prune(read_transcript(input_path[0]), duration = duration, cer = cer, wer = wer, mer = mer), [{r['audio_name'] : r for r in read_transcript(transcript)} for transcript in input_path[1:]]
 	if filter_transcripts is None:
@@ -185,17 +184,17 @@ def errors(input_path, include = [], exclude = [], audio = False, output_file_na
 	cat = filter_transcripts([[a] + list(filter(None, [t.get(a['audio_name'], None) for t in theirs])) for a in ours])[slice(topk)]
 				
 	# TODO: add sorting https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
-	output_file_name = output_file_name or (input_path[0] + (include[0].split('subset')[-1] if include else '') + '.html')
+	output_path = output_path or (input_path[0] + '.html')
 	
-	f = open(output_file_name , 'w')
+	f = open(output_path , 'w')
 	f.write('<html><meta charset="utf-8"><style> table{border-collapse:collapse; width: 100%;} audio {width:100%} .br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap} th.col{width:80px}</style>')
 	f.write('<body><table><tr><th></th><th class="col">cer_easy</th><th class="col">cer</th><th class="col">wer_easy</th><th class="col">wer</th><th class="col">mer</th><th></th></tr>')
 	f.write('<tr><td><strong>averages<strong></td></tr>')
 	f.write('\n'.join('<tr><td class="br">{input_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td>{mer:.02%}</td></tr>'.format(input_name = os.path.basename(input_path[i]), cer_easy = metrics.nanmean(c, 'cer_easy'), cer = metrics.nanmean(c, 'cer'), wer_easy = metrics.nanmean(c, 'wer_easy'), wer = metrics.nanmean(c, 'wer'), mer = metrics.nanmean(c, 'mer')) for i, c in enumerate(zip(*cat))))
 	f.write('<tr><td>&nbsp;</td></tr>')
-	f.write('\n'.join(f'''<tr class="first"><td colspan="6">''' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(utt[0]["audio_path"], "rb").read()).decode()}"></audio>' if audio else '') + f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{word_alignment(utt[0], ref = True, flat = True)}</td><td>{word_alignment(utt[0], ref = True, flat = True)}</td></tr>' + '\n'.join(f'<tr class="any"><td class="br">{os.path.basename(input_path[i])}</td><td>{a["cer_easy"]:.02%}</td><td>{a["cer"]:.02%}</td><td>{a["wer_easy"]:.02%}</td><td>{a["wer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{word_alignment(a["words"])}</td><td>{word_alignment(a, hyp = True, flat = True)}</td></tr>' for i, a in enumerate(utt)) for utt in cat))
+	f.write('\n'.join(f'''<tr class="first"><td colspan="6">''' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(utt[0]["audio_path"], "rb").read()).decode()}"></audio>' if audio else '') + f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{word_alignment(utt[0], ref = True, flat = True)}</td><td>{word_alignment(utt[0], ref = True, flat = True)}</td></tr>' + '\n'.join(f'<tr class="any"><td class="br">{os.path.basename(input_path[i])}</td><td>{a["cer_easy"]:.02%}</td><td>{a["cer"]:.02%}</td><td>{a.get("wer_easy", 0):.02%}</td><td>{a["wer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{word_alignment(a["words"])}</td><td>{word_alignment(a, hyp = True, flat = True)}</td></tr>' for i, a in enumerate(utt)) for utt in cat))
 	f.write('</table></body></html>')
-	print(output_file_name)
+	print(output_path)
 
 def audiosample(input_path, output_path, K):
 	transcript = json.load(open(input_path))
@@ -261,8 +260,8 @@ def summary(input_path):
 	plt.subplots_adjust(hspace = 0.4)
 	plt.savefig(input_path + '.png', dpi = 150)
 
-def tabulate(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe, der):
-	labels = datasets.Labels(lang)
+def tabulate(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe, der, lang):
+	labels = datasets.Labels(datasets.Language(lang))
 
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
@@ -328,10 +327,10 @@ if __name__ == '__main__':
 
 	cmd = subparsers.add_parser('errors')
 	cmd.add_argument('input_path', nargs = '+', default = ['data/transcripts.json'])
+	cmd.add_argument('--output-path', '-o')
 	cmd.add_argument('--include', nargs = '*', default = [])
 	cmd.add_argument('--exclude', nargs = '*', default = [])
 	cmd.add_argument('--audio', action = 'store_true')
-	cmd.add_argument('--output-file-name', '-o')
 	cmd.add_argument('--sortdesc', choices = ['cer', 'wer', 'mer', 'cer_easy'])
 	cmd.add_argument('--topk', type = int)
 	parser.add_argument('--cer', type = transcripts.number_tuple)
@@ -356,6 +355,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--json', dest = "json_", action = 'store_true')
 	cmd.add_argument('--bpe', default = 'char')
 	cmd.add_argument('--der', action = 'store_true')
+	cmd.add_argument('--lang', default = 'ru')
 	cmd.set_defaults(func = tabulate)
 
 	cmd = subparsers.add_parser('summary')

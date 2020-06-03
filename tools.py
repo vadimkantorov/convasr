@@ -173,8 +173,8 @@ def lserrorwords(input_path, output_path, comment_path, freq_path, sortdesc, sor
 	transcript = list(filter(lambda t: [w['type'] for w in t['words']].count('missing_ref') <= 2, transcript))
 	
 	lemmatize = lambda word: (lang.lemmatize(word), len(word))
-	words_ok = [w['ref'].replace('|', '') for t in transcript for w in t['words'] if w['type'] == 'ok']
-	words_error = [w['ref'].replace('|', '') for t in transcript for w in t['words'] if w['type'] not in ['ok', 'missing_ref']]
+	words_ok = [w['ref'].replace(metrics.placeholder, '') for t in transcript for w in t['words'] if w['type'] == 'ok']
+	words_error = [w['ref'].replace(metrics.placeholder, '') for t in transcript for w in t['words'] if w['type'] not in ['ok', 'missing_ref']]
 	words_error = [ref for ref in words_error if len(ref) > 1]
 
 	words_ok_counter = collections.Counter(map(lemmatize, words_ok))
@@ -184,11 +184,39 @@ def lserrorwords(input_path, output_path, comment_path, freq_path, sortdesc, sor
 
 	words = {ref : (ref, words_error_counter[l] - words_ok_counter[l], words_error_counter[l], words_ok_counter[l], freq.get(ref, 0), comment.get(l, '')) for ref in words_error for l in [lemmatize(ref)]}
 	key = sortdesc or sortasc
-	words = sorted(words.values(), key = lambda t: (t[1] if key == 'diff' else (t[-2], -t[1]), t[0]), reverse = bool(sortdesc))
+	words = sorted(words.values(), key = lambda t: (t[1] if key == 'diff' else (-t[2] - t[3], t[-2]), t[0]), reverse = bool(sortdesc))
 	
 	output_path = output_path or (input_path + '.csv')
 	open(output_path, 'w').write('#word,diff,err,ok,freq,comment\n' + '\n'.join(','.join(map(str, t)) for t in words))
 	print(output_path)
+
+def processcomments(input_path, output_path, comment_path):
+	transcript = json.load(open(input_path))
+	comment = {splitted[0] : splitted[-1].strip() for line in open(comment_path) for splitted in [line.split(',')] if '#' not in line and len(splitted) > 1 and splitted[-1].strip() } if comment_path else {}
+	
+	not_word = set(k for k, v in comment.items() if v == 'naw')
+	terms = set(k for k, v in comment.items() if v == 'comp' or v == 'term' or v == 'abbr')
+
+	exclude = not_word | terms
+
+	normalize = lambda ref: ref.replace(metrics.placeholder, '')
+
+	print('Before filtering:', len(transcript))
+	transcript = [t for t in transcript if not any(normalize(w['ref']) in exclude for w in t['words'])]
+	print('After filtering:', len(transcript))
+
+	json.dump(transcript, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	print(output_path)
+
+	#not_word_stats = collections.defaultdict(lambda: dict(b = 0, e = 0, be = 0))
+	#slices = dict(b = slice(1), e = slice(-1, None), be = slice(1, -1))
+	#for t in transcript:
+	#	for k, s in slices.items():
+	#		for w in t['words'][s]:
+	#			w_ = normalize(w['ref'])
+	#			if w_ in not_word:
+	#				not_word_stats[w_][k] += 1
+	#print('\n'.join('{w},{be},{be_}'.format(w = w, be = not_word_stats[w]['be'], be_ = not_word_stats[w]['b'] + not_word_stats[w]['e']) for w in not_word))
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -280,6 +308,12 @@ if __name__ == '__main__':
 	cmd.add_argument('--sortdesc', choices = ['diff', 'freq'])
 	cmd.add_argument('--sortasc', choices = ['diff', 'freq'])
 	cmd.set_defaults(func = lserrorwords)
+
+	cmd = subparsers.add_parser('processcomments')
+	cmd.add_argument('--input-path', '-i', required = True)
+	cmd.add_argument('--output-path', '-o', default = 'data')
+	cmd.add_argument('--comment-path', '-c') 
+	cmd.set_defaults(func = processcomments)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')
