@@ -1,6 +1,9 @@
 set -e 
 
-export CUDA_VISIBLE_DEVICES=0,1
+CUDA_DEVICE=$1
+THREAD=$2
+
+export CUDA_VISIBLE_DEVICES=$CUDA_DEVICE
 
 YOUTUBE='https://www.youtube.com/channel/UCb9_Bhv37NXN1m8Bmrm9x9w'
 CHECKPOINT=best_checkpoints/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs1024____long-train_bs1024_step6_430k_checkpoint_epoch247_iter0446576.pt
@@ -13,11 +16,13 @@ DATASET_AUDIO=$DATASET_ROOT/audio
 DATASET_TRANSCRIBE=$DATASET_ROOT/transcribe
 DATASET_SUBSET=$DATASET_ROOT/subset
 DATASET_CUT=$DATASET_ROOT/cut
+DATASET_CUT_JSON=$DATASET_ROOT/cut/cut.json
 
-TRANSCRIBE='--mono --batch-time-padding-multiple 1 --align --skip-processed --max-segment-duration 4.0  --skip-file-longer-than-hours 0.8'
-SUBSET='--num-speakers 1 --gap 0.05- --cer 0.0-0.15 --duration 0.5-8.0'
+TRANSCRIBE='--mono --batch-time-padding-multiple 1 --align --skip-processed --max-segment-duration 4.0  --skip-file-longer-than-hours 2.0'
+SUBSET='--num-speakers 1 --gap 0.05- --cer 0.0-0.25 --duration 0.5-8.0'
 CUT="--dilate 0.025 --sample-rate $SAMPLE_RATE --mono --strip-prefix data/ --add-sub-paths --strip"
-TRAIN_TEST_SPLIT='--test-duration-in-hours 10'
+TRAIN_TEST_SPLIT='--microval-duration-in-hours 10 --val-duration-in-hours 0 --test-duration-in-hours 0'
+
 
 #mkdir -p $DATASET_AUDIO
 #bash datasets/youtube.sh LIST "$YOUTUBE" > $DATASET_ROOT/youtube.txt
@@ -25,7 +30,7 @@ TRAIN_TEST_SPLIT='--test-duration-in-hours 10'
 #head -n $SAMPLE $DATASET_ROOT/youtube.txt > $DATASET_AUDIO/audio.txt # list of links like http://youtu.be/e8bkFQD3ZhA
 #bash datasets/youtube.sh RETR $DATASET_AUDIO/audio.txt $DATASET_AUDIO
 
-#python3 datasets/youtube.py -i $DATASET_AUDIO -o $DATASET_AUDIO.json
+python3 datasets/youtube.py -i $DATASET_AUDIO -o $DATASET_AUDIO.json --split-by-parts 3
 
 python3 transcribe.py --checkpoint $CHECKPOINT -i $DATASET_AUDIO.json -o $DATASET_TRANSCRIBE $TRANSCRIBE
 
