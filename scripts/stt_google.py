@@ -26,15 +26,15 @@ parser.add_argument('--endpoint', default = 'speech.googleapis.com:443') # googl
 args = parser.parse_args()
 
 os.environ.update(dict(GRPC_VERBOSITY = 'DEBUG', GRPC_TRACE = 'all') if args.verbose else {})
+LocalSpeechGrpcTransport = type('LocalSpeechGrpcTransport', (google.cloud.speech_v1.gapic.transports.speech_grpc_transport.SpeechGrpcTransport, ), dict(create_channel = lambda self, address, credentials, **kwargs: grpc.secure_channel(address, credentials, **kwargs)))
 
-class LocalSpeechGrpcTransport(google.cloud.speech_v1.gapic.transports.speech_grpc_transport.SpeechGrpcTransport):
-	def create_channel(self, address, credentials, **kwargs):
-		return grpc.secure_channel(address, credentials, **kwargs)
+#class LocalSpeechGrpcTransport(google.cloud.speech_v1.gapic.transports.speech_grpc_transport.SpeechGrpcTransport):
+#	def create_channel(self, address, credentials, **kwargs):
+#		return grpc.secure_channel(address, credentials, **kwargs)
 
 credentials = google.oauth2.service_account.Credentials.from_service_account_file(args.api_key_credentials) if args.api_key_credentials else grpc.local_channel_credentials()
 client_options = dict(api_endpoint = args.endpoint)
 client = google.cloud.speech_v1.SpeechClient(credentials = credentials, client_options = client_options) if args.api_key_credentials else google.cloud.speech_v1.SpeechClient(transport = LocalSpeechGrpcTransport(address = args.endpoint, credentials = credentials), client_options = client_options) 
-
 transcript = []
 for t in json.load(open(args.input_path)):
 	sample_rate, signal = scipy.io.wavfile.read(t['audio_path'])
@@ -43,11 +43,10 @@ for t in json.load(open(args.input_path)):
 	pcm = io.BytesIO()
 	scipy.io.wavfile.write(pcm, sample_rate, signal)
 	
-	res = client.recognize(dict(encoding = args.format, sample_rate_hertz = sample_rate, language_code = args.lang, model = args.recognition_model), dict(content = pcm.getvalue()))
+	res = client.recognize(dict(audio_channel_count = 1, encoding = args.format, sample_rate_hertz = sample_rate, language_code = args.lang, model = args.recognition_model), dict(content = pcm.getvalue()))
 	hyp = res.results[0].alternatives[0].transcript
-
 	transcript.append(dict(t, hyp = hyp))
-	#break
+	break
 
 transcript_path = os.path.join(args.output_path, os.path.basename(args.input_path) + f'.{args.vendor}.json')
 json.dump(transcript, open(transcript_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)

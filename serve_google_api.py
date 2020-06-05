@@ -7,26 +7,46 @@
 import argparse
 import concurrent.futures
 import grpc
+import google.cloud.speech_v1.proto.cloud_speech_pb2 as pb2
 import google.cloud.speech_v1.proto.cloud_speech_pb2_grpc as pb2_grpc
+import torch
+import audio
+import transcripts
 import transcribe
 
 class SpeechServicerImpl(pb2_grpc.SpeechServicer):
-	def __init__(self, labels, model, decoder):
+	def __init__(self, device, labels, frontend, model, decoder):
+		self.device = device
 		self.labels = labels
 		self.model = model
+		self.frontend = frontend
 		self.decoder = decoder
 
-	def Recognize(self, request, context):
-		config = request.config
-		audio = request.audio
+	def Recognize(self, req, ctx):
+		assert req.config.encoding == pb2.RecognitionConfig.LINEAR16
 
-		return dict(results = [
+		signal, sample_rate = audio.from_raw(req.audio.content, req.config.sample_rate_hertz, req.config.audio_channel_count, sample_rate = self.frontend.sample_rate, mono = True, normalize = True) 
+		x = signal
+		logits, olen = self.model(x.to(self.device))
+		decoded = self.decoder.decode(logits, olen)
+		ts = (x.shape[-1] / sample_rate) * torch.linspace(0, 1, steps = logits.shape[-1])
+
+		transcript = self.labels.decode(decoded[0], ts)
+		hyp = transcripts.join(hyp = transcript)
+		
+		mktime = lambda t: dict(seconds = int(t), nanos = int((t - int(t)) * 1e9))
+		return pb2.RecognizeResponse(results = [
 			dict(
 				alternatives = [dict(
-					transcript = 'transcript', 
+					transcript = hyp,
 					confidence = 1.0, 
 					words = [
-						dict(word = str(k), start_time = dict(seconds = 1, nanos = 100), end_time = dict(seconds = 2, nanos = 7), speaker_tag = 31337) for k in range(3)
+						dict(
+							word = t['hyp'],
+							start_time = mktime(t['begin']),
+							end_time = mktime(t['end']), 
+							speaker_tag = 0
+						) for t in transcript
 					]
 				)],
 				channel_tag = 1
@@ -44,7 +64,7 @@ if __name__ == '__main__':
 	parser.add_argument('--num-workers', type = int, default = 10)
 	args = parser.parse_args()
 	
-	service_impl = SpeechServicerImpl(*transcribe.setup(args))
+	service_impl = SpeechServicerImpl(args.device, *transcribe.setup(args))
 
 	server = grpc.server(concurrent.futures.ThreadPoolExecutor(max_workers = args.num_workers))
 	pb2_grpc.add_SpeechServicer_to_server(service_impl, server)

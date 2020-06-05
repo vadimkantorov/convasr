@@ -188,7 +188,7 @@ wget https://github.com/Koziev/NLP_Datasets/raw/master/WordformFrequencies/Data/
 # Serving mock API of Google Cloud Speech API (only for testing)
 ```shell
 # serve
-python3 servegoogleapi.py --endpoint localhost:50051 --checkpoint ...
+python3 serve_google_api.py --endpoint localhost:50051 --checkpoint ...
 
 # test
 python3 scripts/stt_google.py --endpoint localhost:50051 --lang ru --api-key-credentials= -i calls_micro/calls_micro.json

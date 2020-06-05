@@ -35,7 +35,7 @@ def setup(args):
 	if args.device != 'cpu':
 		model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16)
 	decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
-	return labels, model, decoder
+	return labels, frontend, model, decoder
 
 def main(args):
 	os.makedirs(args.output_path, exist_ok = True)
@@ -43,7 +43,7 @@ def main(args):
 	exclude = set([os.path.splitext(basename)[0] for basename in os.listdir(args.output_path) if basename.endswith('.json')] if args.skip_processed else [])
 	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
 
-	labels, model, decoder = setup(args)
+	labels, frontend, model, decoder = setup(args)
 	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers) 
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
 

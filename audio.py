@@ -43,5 +43,18 @@ def write_audio(audio_path, signal, sample_rate, mono = False):
 	scipy.io.wavfile.write(audio_path, sample_rate, f2s(signal.t()).numpy())
 	return audio_path
 
+def from_raw(pcm_s16le, sample_rate_, num_channels, sample_rate, byte_order = 'little', mono = False, normalize = True):
+	signal = s2f(torch.ShortTensor(torch.ShortStorage.from_buffer(pcm_s16le, byte_order = byte_order)).reshape(-1, num_channels))
+	signal = signal.t()
+
+	if mono:
+		signal = signal.mean(dim = 0, keepdim = True)
+	if normalize:
+		signal = models.normalize_signal(signal, dim = -1)
+	if sample_rate_ != sample_rate:
+		signal, sample_rate_ = resample(signal, sample_rate_, sample_rate)
+	
+	return signal, sample_rate_
+
 def resample(signal, sample_rate_, sample_rate):
 	return torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate)), sample_rate
