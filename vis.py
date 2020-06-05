@@ -221,8 +221,14 @@ def audiosample(input_path, output_path, K):
 
 	print(output_path)
 
-def summary(input_path):
+def summary(input_path, lang):
+	lang = datasets.Language(lang)
 	transcript = json.load(open(input_path))
+	for t in transcript:
+		hyp, ref = map(lang.normalize_text, [t['hyp'], t['ref']])
+		t['cer'] = t.get('cer', metrics.cer(hyp, ref))
+		t['wer'] = t.get('wer', metrics.wer(hyp, ref))
+	
 	cer_, wer_ = [torch.tensor([t[k] for t in transcript]) for k in ['cer', 'wer']]
 	cer_avg, wer_avg = float(cer_.mean()), float(wer_.mean())
 	print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')
@@ -362,6 +368,7 @@ if __name__ == '__main__':
 
 	cmd = subparsers.add_parser('summary')
 	cmd.add_argument('input_path')
+	cmd.add_argument('--lang', default = 'ru')
 	cmd.set_defaults(func = summary)
 
 	cmd = subparsers.add_parser('words')
