@@ -29,6 +29,7 @@ def setup(args):
 	labels = datasets.Labels(datasets.Language(checkpoint['args']['lang']), name = 'char')
 	model = getattr(models, args.model or checkpoint['args']['model'])(args.num_input_features, [len(labels)], frontend = frontend, dict = lambda logits, log_probs, olen, **kwargs: (logits[0], olen[0]))
 	model.load_state_dict(checkpoint['model_state_dict'], strict = False)
+	#model = model.to(torch.float32)
 	model = model.to(args.device)
 	model.eval()
 	model.fuse_conv_bn_eval()
@@ -59,7 +60,7 @@ def main(args):
 
 		tic = time.time()
 		y, ylen = y.to(args.device), ylen.to(args.device)
-		log_probs, olen = model(x.to(args.device), xlen.to(args.device))
+		log_probs, olen = model(x.squeeze(1).to(args.device), xlen.to(args.device))
 
 		#speech = vad.detect_speech(x.squeeze(1), args.sample_rate, args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)
 		#speech = vad.upsample(speech, log_probs)
@@ -125,7 +126,7 @@ if __name__ == '__main__':
 	parser.add_argument('--checkpoint', required = True)
 	parser.add_argument('--model')
 	parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
-	parser.add_argument('--ext', default = ['wav', 'mp3'])
+	parser.add_argument('--ext', default = ['wav', 'mp3', 'opus', 'm4a'])
 	parser.add_argument('--skip-processed', action = 'store_true')
 	parser.add_argument('--skip-file-longer-than-hours', type=float, help = 'skip files with duration more than specified hours') 
 	parser.add_argument('--input-path', '-i', nargs = '+')
