@@ -4,6 +4,7 @@ import glob
 import json
 import io
 import sys
+import math
 import time
 import random
 import itertools
@@ -33,42 +34,48 @@ def audio_data_uri(audio_path, sample_rate = None):
 	
 	return 'data:audio/wav;base64,' + base64.b64encode(wav_bytes).decode()
 
-def label(html_path, transcript, info):
+def label(output_path, transcript, info, page_size, prefix):
 	if isinstance(transcript, str):
 		transcript = json.load(open(transcript))
 	if isinstance(info, str):
 		info = json.load(open(info))
-
-	html = open(html_path, 'w')
-	html.write('<html><head><meta charset="UTF-8"><style>figure{margin:0} h6{margin:0}</style></head><body>')
-	html.write('''<script>
-		function export_user_input()
-		{
-			const data_text_plain_base64_encode_utf8 = str => 'data:text/plain;base64,' + btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1) {return String.fromCharCode(parseInt(p1, 16)) }));
-			
-			const after = Array.from(document.querySelectorAll('input.after'));
-			const data = after.map(input => ({audio_name : input.name, before : input.dataset.before, after : input.value}));
-
-			const href = data_text_plain_base64_encode_utf8(JSON.stringify(data, null, 2));
-			const unixtime = Math.round((new Date()).getTime() / 1000);
-			let a = document.querySelector('a');
-			a.download = `export_${unixtime}.json`;
-			a.href = href;
-		}
-	</script>''')
-	html.write('<a download="export.json" onclick="export_user_input(); return true" href="#">Export</a>\n')
 	transcript = {transcripts.audio_name(t) : t for t in transcript}
-	for i in info:
-		i['after'] = i.get('after', '')
-		t = transcript[i['audio_name']]
-		html.write('<hr/>\n')
-		html.write(f'<figure><figcaption><pre>{transcripts.audio_name(t)}</pre></figcaption><audio style="width:100%" controls src="{audio_data_uri(t["audio_path"][len("/data/"):])}"></audio><figcaption><pre>{t["ref"]}</pre></figcaption></figure>')
-		html.write('<h6>before</h6>')
-		html.write('<pre name="{audio_name}" class="before">{before}</pre>'.format(**i))
-		html.write('<h6>after</h6>')
-		html.write('<input name="{audio_name}" class="after" type="text" value="{after}" data-before="{before}">'.format(**i))
-	html.write('</body></html>')
-	print(html_path)
+
+	page_count = int(math.ceil(len(info) / page_size))
+	for p in range(page_count):
+		html_path = output_path + f'.page{p}.html'
+		html = open(html_path, 'w')
+		html.write('<html><head><meta charset="UTF-8"><style>figure{margin:0} h6{margin:0}</style></head><body>')
+		html.write('''<script>
+			function export_user_input()
+			{
+				const data_text_plain_base64_encode_utf8 = str => 'data:text/plain;base64,' + btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1) {return String.fromCharCode(parseInt(p1, 16)) }));
+				
+				const after = Array.from(document.querySelectorAll('input.after'));
+				const data = after.map(input => ({audio_name : input.name, before : input.dataset.before, after : input.value}));
+
+				const href = data_text_plain_base64_encode_utf8(JSON.stringify(data, null, 2));
+				const unixtime = Math.round((new Date()).getTime() / 1000);
+				let a = document.querySelector('a');
+				const {page, prefix} = a.dataset;
+				a.download = `${prefix}_page${page}_time${unixtime}.json`;
+				a.href = href;
+			}
+		</script>''')
+		html.write(f'<a data-page="{p}" data-prefix="{prefix}" download="export.json" onclick="export_user_input(); return true" href="#">Export</a>\n')
+		
+		k = p * page_size
+		for j, i in enumerate(info[k : k + page_size]):
+			i['after'] = i.get('after', '')
+			t = transcript[i['audio_name']]
+			html.write('<hr/>\n')
+			html.write(f'<figure><figcaption>page {p}/{page_count}:<strong>{k + j}</strong><pre>{transcripts.audio_name(t)}</pre></figcaption><audio style="width:100%" controls src="{audio_data_uri(t["audio_path"][len("/data/"):])}"></audio><figcaption><pre>{t["ref"]}</pre></figcaption></figure>')
+			html.write('<h6>before</h6>')
+			html.write('<pre name="{audio_name}" class="before">{before}</pre>'.format(**i))
+			html.write('<h6>after</h6>')
+			html.write('<input name="{audio_name}" class="after" type="text" value="{after}" data-before="{before}">'.format(**i))
+		html.write('</body></html>')
+		print(html_path)
 
 def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = []):
 	if isinstance(transcript, str):
@@ -372,7 +379,9 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('label')
 	cmd.add_argument('--transcript', '-i')
 	cmd.add_argument('--info')
-	cmd.add_argument('--html-path', '-o')
+	cmd.add_argument('--output-path', '-o')
+	cmd.add_argument('--page-size', type = int, default = 100)
+	cmd.add_argument('--prefix', default = 'export')
 	cmd.set_defaults(func = label)
 
 	cmd = subparsers.add_parser('transcript')
