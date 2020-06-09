@@ -12,5 +12,6 @@ python3 train.py $@ \
   --analyze kontur_calls_micro.csv \
   --val-iteration-interval 2500 \
   --fp16 O2 \
-  --experiment-name youtube_100h \
-  --epochs 105 --exphtml= #\
+  --experiment-name exp_youtube_100h \
+  --skip-on-epoch-end-evaluation \
+  --epochs 205 --exphtml= #\

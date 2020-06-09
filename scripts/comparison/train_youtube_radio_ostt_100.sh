@@ -13,5 +13,6 @@ python3 train.py $@ \
   --val-iteration-interval 2500 \
   --fp16 O2 \
   --experiment-name youtube_radio_osst_100h \
+  --skip-on-epoch-end-evaluation \
   --epochs 105 --exphtml= #\
 
