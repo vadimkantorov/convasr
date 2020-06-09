@@ -281,7 +281,8 @@ def main(args):
 
 		sampler.batch_idx = 0
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
-		evaluate_model(val_data_loaders, epoch+1, iteration)
+		if not args.skip_on_epoch_end_evaluation:
+			evaluate_model(val_data_loaders, epoch+1, iteration)
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -307,12 +308,13 @@ if __name__ == '__main__':
 	parser.add_argument('--train-data-path', nargs = '*', default = [])
 	parser.add_argument('--train-data-mixing', type = float, nargs = '*')
 	parser.add_argument('--val-data-path', nargs = '*', default = [])
-	parser.add_argument('--num-workers', type = int, default = 32)
+	parser.add_argument('--num-workers', type = int, default = 64)
 	parser.add_argument('--train-batch-size', type = int, default = 256)
 	parser.add_argument('--val-batch-size', type = int, default = 256)
 	parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 	parser.add_argument('--checkpoint', nargs = '*', default = [], help = 'simple checkpoint weight averaging, for advanced weight averaging see Stochastic Weight Averaging')
 	parser.add_argument('--checkpoint-skip', action = 'store_true')
+	parser.add_argument('--skip-on-epoch-end-evaluation', action = 'store_true')
 	parser.add_argument('--experiments-dir', default = 'data/experiments')
 	parser.add_argument('--experiment-dir', default = '{experiments_dir}/{experiment_id}')
 	parser.add_argument('--checkpoint-format', default = 'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')
