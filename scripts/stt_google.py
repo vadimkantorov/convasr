@@ -22,7 +22,7 @@ parser.add_argument('--lang', default = 'ru-RU')
 parser.add_argument('--vendor', default = 'google')
 parser.add_argument('--format', default = 'LINEAR16')
 parser.add_argument('--recognition-model', default = 'phone_call', choices = ['phone_call', 'default', 'video', 'command_and_search'])
-parser.add_argument('--endpoint', default = 'speech.googleapis.com:443') # google.cloud.speech_v1.SpeechClient.SERVICE_ADDRESS)
+parser.add_argument('--endpoint', default = google.cloud.speech_v1.SpeechClient.SERVICE_ADDRESS)
 args = parser.parse_args()
 
 os.environ.update(dict(GRPC_VERBOSITY = 'DEBUG', GRPC_TRACE = 'all') if args.verbose else {})
