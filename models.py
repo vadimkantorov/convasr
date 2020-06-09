@@ -118,7 +118,8 @@ class JasperNet(nn.Module):
 		self.dict = dict
 
 	def forward(self, x, xlen = None, y = None, ylen = None):
-		x = self.frontend(x if x.ndim == 2 else x.squeeze(1), mask = temporal_mask(x, lengths_fraction=xlen)) if self.frontend is not None else x
+		x = x if x.ndim == 2 else x.squeeze(1)
+		x = self.frontend(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.frontend is not None else x
 		x = normalize_features(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.normalize_features else x
 
 		residual = []

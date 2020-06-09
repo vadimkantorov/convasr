@@ -25,6 +25,51 @@ import models
 import ctc
 import transcripts
 
+def audio_data_uri(audio_path, sample_rate = None):
+	if isinstance(audio_path, str):
+		wav_bytes = open(audio_path, 'rb').read()
+	else:
+		wav_bytes = audio.write_audio(io.BytesIO(), audio_path, sample_rate).getvalue()
+	
+	return 'data:audio/wav;base64,' + base64.b64encode(wav_bytes).decode()
+
+def label(html_path, transcript, info):
+	if isinstance(transcript, str):
+		transcript = json.load(open(transcript))
+	if isinstance(info, str):
+		info = json.load(open(info))
+
+	html = open(html_path, 'w')
+	html.write('<html><head><meta charset="UTF-8"><style>figure{margin:0} h6{margin:0}</style></head><body>')
+	html.write('''<script>
+		function export_user_input()
+		{
+			const data_text_plain_base64_encode_utf8 = str => 'data:text/plain;base64,' + btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1) {return String.fromCharCode(parseInt(p1, 16)) }));
+			
+			const after = Array.from(document.querySelectorAll('input.after'));
+			const data = after.map(input => ({audio_name : input.name, before : input.dataset.before, after : input.value}));
+
+			const href = data_text_plain_base64_encode_utf8(JSON.stringify(data, null, 2));
+			const unixtime = Math.round((new Date()).getTime() / 1000);
+			let a = document.querySelector('a');
+			a.download = `export_${unixtime}.json`;
+			a.href = href;
+		}
+	</script>''')
+	html.write('<a download="export.json" onclick="export_user_input(); return true" href="#">Export</a>\n')
+	transcript = {transcripts.audio_name(t) : t for t in transcript}
+	for i in info:
+		i['after'] = i.get('after', '')
+		t = transcript[i['audio_name']]
+		html.write('<hr/>\n')
+		html.write(f'<figure><figcaption><pre>{transcripts.audio_name(t)}</pre></figcaption><audio style="width:100%" controls src="{audio_data_uri(t["audio_path"][len("/data/"):])}"></audio><figcaption><pre>{t["ref"]}</pre></figcaption></figure>')
+		html.write('<h6>before</h6>')
+		html.write('<pre name="{audio_name}" class="before">{before}</pre>'.format(**i))
+		html.write('<h6>after</h6>')
+		html.write('<input name="{audio_name}" class="after" type="text" value="{after}" data-before="{before}">'.format(**i))
+	html.write('</body></html>')
+	print(html_path)
+
 def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = []):
 	if isinstance(transcript, str):
 		transcript = json.load(open(transcript))
@@ -40,9 +85,9 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	fmt_begin_end = 'data-begin="{begin}" data-end="{end}"'.format
 
 	html = open(html_path, 'w')
-	html.write('<html><head><meta charset="UTF-8"><style>a {text-decoration: none;} .channel0 .hyp{padding-right:150px} .channel1 .hyp{padding-left:150px}     .ok{background-color:green} .m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue;' + ('display:none' if len(signal) == 1 else '') + '} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
+	html.write('<html><head><meta charset="UTF-8"><style>a {text-decoration: none;} .channel0 .hyp{padding-right:150px} .channel1 .hyp{padding-left:150px} .ok{background-color:green} .m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue;' + ('display:none' if len(signal) == 1 else '') + '} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
 	html.write(f'<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>')
-	html.writelines(f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="ontimeupdate_(event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{base64.b64encode(wav).decode()}"></audio></figure>' for c, wav in enumerate(audio.write_audio(io.BytesIO(), signal[channel], sample_rate).getvalue() for channel in ([0, 1] if len(signal) == 2 else []) + [...]))
+	html.writelines(f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="ontimeupdate_(event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="{uri}"></audio></figure>' for c, uri in enumerate(audio_data_uri(signal[channel], sample_rate) for channel in ([0, 1] if len(signal) == 2 else []) + [...]))
 	html.write(f'<pre class="channel"><h3 class="channel0 channel">hyp #0:<span class="subtitle"></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span class="subtitle"></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span class="subtitle"></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span class="subtitle"></span></h3></pre><hr/><table style="width:100%">')
 	html.write('<tr>' + ('<th>begin</th><th>end</th><th>dur</th><th style="width:50%">hyp</th>' if has_hyp else '') + ('<th style="width:50%">ref</th><th>begin</th><th>end</th><th>dur</th><th>cer</th>' if has_ref else '') + '<th>speaker</th></tr>')
 	html.writelines(f'<tr class="channel{c}">'+ (f'<td class="top">{fmt_link(0, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(hyp, ij = True))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}<template>{word_alignment(t["words"], tag = "", hyp = True)}</template></td>' if has_hyp else '') + (f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}<template>{word_alignment(t["words"], tag = "", ref = True)}</template></td><td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td><td class="top">{t["cer"]:.2%}</td>' if ref else ('<td></td>' * 5 if has_ref else '')) + f'''<td class="top {ok and 'ok'}">{speaker}</td></tr>''' for t in transcripts.sort(transcript) for ok in [t in filtered_transcript] for c, speaker, ref, hyp in [(t['channel'], t.get('speaker', '') or 'N/A', t['alignment']['ref'], t['alignment']['hyp'])] )
@@ -167,7 +212,7 @@ def logits(logits, audio_name, MAX_ENTROPY = 1.0):
 		html.write('<h4>{audio_name} | cer: {cer:.02f}</h4>'.format(**r))
 		html.write(word_alignment(r['words']))
 		html.write('<img onclick="onclick_(event)" style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(encoded = base64.b64encode(buf.getvalue()).decode()))	
-		html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio><hr/>'.format(encoded = base64.b64encode(open(r['audio_path'], 'rb').read()).decode()))
+		html.write('<audio style="width:100%" controls src="{audio_data_uri(r["audio_path"])}"></audio><hr/>')
 	html.write('</body></html>')
 	print('\n', logits_path)
 
@@ -184,18 +229,17 @@ def errors(input_path, include = [], exclude = [], audio = False, output_path = 
 	cat = filter_transcripts([[a] + list(filter(None, [t.get(a['audio_name'], None) for t in theirs])) for a in ours])[slice(topk)]
 				
 	# TODO: add sorting https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
-	output_path = output_path or (input_path[0] + '.html')
+	html_path = output_path or (input_path[0] + '.html')
 	
-	f = open(output_path , 'w')
+	f = open(html_path , 'w')
 	f.write('<html><meta charset="utf-8"><style> table{border-collapse:collapse; width: 100%;} audio {width:100%} .br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap} th.col{width:80px}</style>')
 	f.write('<body><table><tr><th></th><th class="col">cer_easy</th><th class="col">cer</th><th class="col">wer_easy</th><th class="col">wer</th><th class="col">mer</th><th></th></tr>')
 	f.write('<tr><td><strong>averages<strong></td></tr>')
 	f.write('\n'.join('<tr><td class="br">{input_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td>{mer:.02%}</td></tr>'.format(input_name = os.path.basename(input_path[i]), cer_easy = metrics.nanmean(c, 'cer_easy'), cer = metrics.nanmean(c, 'cer'), wer_easy = metrics.nanmean(c, 'wer_easy'), wer = metrics.nanmean(c, 'wer'), mer = metrics.nanmean(c, 'mer')) for i, c in enumerate(zip(*cat))))
 	f.write('<tr><td>&nbsp;</td></tr>')
-	audio2base64 = lambda audio_path: base64.b64encode(open(audio_path[len(strip_audio_path_prefix):], "rb").read()).decode()
-	f.write('\n'.join(f'''<tr class="first"><td colspan="6">''' + (f'<audio controls src="data:audio/wav;base64,{audio2base64(utt[0]["audio_path"])}"></audio>' if audio else '') + f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{word_alignment(utt[0], ref = True, flat = True)}</td><td>{word_alignment(utt[0], ref = True, flat = True)}</td></tr>' + '\n'.join(f'<tr class="any"><td class="br">{os.path.basename(input_path[i])}</td><td>{a["cer_easy"]:.02%}</td><td>{a["cer"]:.02%}</td><td>{a.get("wer_easy", 0):.02%}</td><td>{a["wer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{word_alignment(a["words"])}</td><td>{word_alignment(a, hyp = True, flat = True)}</td></tr>' for i, a in enumerate(utt)) for utt in cat))
+	f.write('\n'.join(f'''<tr class="first"><td colspan="6">''' + (f'<audio controls src="{audio_data_uri(utt[0]["audio_path"][len(strip_audio_prefix):])}"></audio>' if audio else '') + f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{word_alignment(utt[0], ref = True, flat = True)}</td><td>{word_alignment(utt[0], ref = True, flat = True)}</td></tr>' + '\n'.join(f'<tr class="any"><td class="br">{os.path.basename(input_path[i])}</td><td>{a["cer_easy"]:.02%}</td><td>{a["cer"]:.02%}</td><td>{a.get("wer_easy", 0):.02%}</td><td>{a["wer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{word_alignment(a["words"])}</td><td>{word_alignment(a, hyp = True, flat = True)}</td></tr>' for i, a in enumerate(utt)) for utt in cat))
 	f.write('</table></body></html>')
-	print(output_path)
+	print(html_path)
 
 def audiosample(input_path, output_path, K):
 	transcript = json.load(open(input_path))
@@ -212,11 +256,11 @@ def audiosample(input_path, output_path, K):
 		random.shuffle(transcript)
 		for t in transcript[:K]:
 			try:
-				encoded = base64.b64encode(open(os.path.join(args.dataset_root, t['audio_path']), 'rb').read()).decode()
+				data_uri = audio_data_uri(os.path.join(args.dataset_root, t['audio_path']))
 			except:
 				f.write('<tr><td>file not found: {audio_path}</td></tr>'.format(**t))
 				continue
-			f.write('<tr><td>{audio_path}</td><td><audio controls src="data:audio/wav;base64,{encoded}"/></td><td>{ref}</td></tr>\n'.format(encoded = encoded, **t))
+			f.write('<tr><td>{audio_path}</td><td><audio controls src="{data_uri}"/></td><td>{ref}</td></tr>\n'.format(encoded = encoded, **t))
 		f.write('</table>')
 
 	print(output_path)
@@ -324,6 +368,12 @@ def word_alignment(transcript, ref = None, hyp = None, flat = False, tag = '<pre
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
+
+	cmd = subparsers.add_parser('label')
+	cmd.add_argument('--transcript', '-i')
+	cmd.add_argument('--info')
+	cmd.add_argument('--html-path', '-o')
+	cmd.set_defaults(func = label)
 
 	cmd = subparsers.add_parser('transcript')
 	cmd.add_argument('--transcript', '-i')

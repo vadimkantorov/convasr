@@ -56,6 +56,8 @@ ORDINALCARIDNAL2TEXT = {
 
 ARABIC2ROMAN = {1000 : 'M', 900 : 'CM', 500 : 'D', 400 : 'CD', 100 : 'C', 90 : 'XC', 50 : 'L', 40 : 'XL', 10 : 'X', 9: 'IX', 5 : 'V', 4 : 'IV', 1 : 'I'}
 
+INFLECTIONS = list(sorted(['а', 'я', 'ы', 'и', 'ое', 'ее', 'ой', 'ые', 'ие', 'ый', 'ий', 'ать', 'ать', 'ять', 'оть', 'еть', 'уть' 'у' 'ю', 'ем', 'им', 'ешь', 'ишь', 'ете', 'ите', 'ет', 'ит', 'ут', 'ют', 'ят', 'ал', 'ял', 'ала', 'яла', 'али', 'яли', 'ол', 'ел', 'ола',  'ела', 'оли',  'ели', 'ул', 'ула', 'ули', 'еми',  'емя',  'а',  'ам',  'ами', 'ас',  'am',  'ax',  'ая',  'е',  'её', 'ей', 'ем', 'ex',  'ею',  'ёт', 'ёте',  'ёх',  'ёшь',  'и',  'ие',  'ий',  'им', 'ими', 'ит',  'ите',  'их', 'ишь',  'ию',  'м',  'ми',  'мя',  'о',  'ов',  'ого', 'ое',  'оё',  'ой',  'ом',  'ому',  'ою',  'cm',  'у', 'ум',  'умя',  'ут',  'ух', 'ую', 'шь'], key = len, reverse = True))
+
 def roman2arabic(x):
 	res = ''
 	for a, r in sorted(ARABIC2ROMAN.items(), reverse = True):
@@ -120,8 +122,14 @@ def normalize_text(text, remove_unk = True):
 
 	return text
 	
-def lemmatize(word):
-	return word[:-3] if len(word) > 8 else word[:-2] if len(word) > 5 else word
+def stem(word, inflections = []):
+	if not inflections:
+		return word[:-3] if len(word) > 8 else word[:-2] if len(word) > 5 else word
+	else:
+		for inflection in (inflections if len(word) > 5 else []):
+			if word.endswith(inflection):
+				return word[:-len(inflection)]
+		return word
 
 if __name__ == '__main__':
 	import argparse

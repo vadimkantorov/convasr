@@ -29,7 +29,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.speakers = speakers
 
 		gzopen = lambda data_path: open(data_path) if data_path.endswith('.json') else gzip.open(data_path, 'rt')
-		duration = lambda example: sum(t.get('end', 0) - t.get('begin', 0) for t in example)
+		duration = lambda example: sum(map(transcripts.compute_duration, example))
 		data_paths = data_paths if isinstance(data_paths, list) else [data_paths]
 
 		def read_transcript(data_path):
@@ -229,3 +229,9 @@ class Labels:
 class Language:
 	def __new__(cls, lang):
 		return importlib.import_module(lang)
+
+def normalize_text_(ref, replace_full_forms = {}, replace_subwords = {}, replace_stems = {}, replace_full_forms_by_unk = [], remove_chars = []):
+	words = ref.split()
+	words = [replace_full_forms.get(w, w) for w in words]
+	words = [w.replace(u, v) for w in words for u, v in replace_subwords.items()]
+	return ' '.join(words)
