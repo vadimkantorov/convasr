@@ -1,4 +1,6 @@
+
 import hashlib
+
 import os
 import json
 import gzip
@@ -6,14 +8,20 @@ import argparse
 import itertools
 import subprocess
 import collections
+from functools import partial
+
 import torch
 import sentencepiece
+import tqdm
+
 import audio
 import transcripts
 import datasets
 import metrics
 import ru as lang
 import random
+import numpy as np
+from multiprocessing.pool import Pool
 
 def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, unk, num_speakers):
 	cat = output_path.endswith('.json')
@@ -33,53 +41,71 @@ def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, 
 		json.dump(transcript_cat, open(output_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 	print(output_path)
 
-def cut(input_path, output_path, sample_rate, mono, dilate, strip, strip_prefix, audio_backend, add_sub_paths):
-	os.makedirs(output_path, exist_ok = True)
-	transcript_cat = []
-	
-	transcript = json.load(open(input_path))
-	prev_audio_path, signal = None, None
 
-	for i, t in enumerate(sorted(transcript, key = lambda t: t['audio_path'])):
-		print(i, '/', len(transcript))
+def cut_audio(output_path, sample_rate, mono, dilate, strip_prefix, audio_backend, add_sub_paths, audio_transcripts):
+	audio_path_res = []
+	prev_audio_path = ''
+	for t in audio_transcripts:
 		audio_path = t['audio_path']
-		signal = audio.read_audio(audio_path, sample_rate, normalize = False, backend = audio_backend)[0] if audio_path != prev_audio_path else signal
+		signal = audio.read_audio(audio_path, sample_rate, normalize=False, backend=audio_backend)[
+			0] if audio_path != prev_audio_path else signal
 		t['channel'] = 0 if len(signal) == 1 else None if mono else t.get('channel')
-		segment = signal[slice(t['channel'], 1 + t['channel']) if t['channel'] is not None else ..., int(max(t['begin'] - dilate, 0) * sample_rate) : int((t['end'] + dilate) * sample_rate)]
-		
+		segment = signal[slice(t['channel'], 1 + t['channel']) if t['channel'] is not None else ...,
+		int(max(t['begin'] - dilate, 0) * sample_rate): int((t['end'] + dilate) * sample_rate)]
+
 		segment_file_name = os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t)
 		digest = hashlib.md5(segment_file_name.encode('utf-8')).hexdigest()
 		sub_path = [digest[-1:], digest[:2]] if add_sub_paths else []
 		segment_path_components = [output_path] + sub_path + [segment_file_name]
 		segment_path = os.path.join(*segment_path_components)
-		
+
 		if not os.path.exists(os.path.join(*segment_path_components[:-1])):
-			os.makedirs(os.path.join(*segment_path_components[:-1]), exist_ok = True)
+			os.makedirs(os.path.join(*segment_path_components[:-1]), exist_ok=True)
 
-		audio.write_audio(segment_path, segment, sample_rate, mono = True)
-		
+		audio.write_audio(segment_path, segment, sample_rate, mono=True)
+
 		if strip_prefix:
-			segment_path = segment_path[len(strip_prefix):] if segment_path.startswith(strip_prefix) else segment_path
-			t['audio_path'] = t['audio_path'][len(strip_prefix):] if t['audio_path'].startswith(strip_prefix) else t['audio_path']
+			segment_path = segment_path[len(strip_prefix):] if segment_path.startswith(
+					strip_prefix) else segment_path
+			t['audio_path'] = t['audio_path'][len(strip_prefix):] if t['audio_path'].startswith(strip_prefix) else \
+			t['audio_path']
 
-		t = dict(audio_path = segment_path,
-				audio_name= os.path.basename(segment_path),
-				channel = 0 if len(signal) == 1 else None,
-				begin = 0.0,
-				end = segment.shape[-1] / sample_rate,
-				speaker = t.pop('speaker', None),
-				ref = t.pop('ref'),
-				hyp = t.pop('hyp', None),
-				cer = t.pop('cer', None),
-				wer = t.pop('wer', 0),
-				alignment = t.pop('alignment', {}),
-				words = t.pop('words', {}),
-				meta = t)
+		t = dict(audio_path=segment_path,
+				audio_name=os.path.basename(segment_path),
+				channel=0 if len(signal) == 1 else None,
+				begin=0.0,
+				end=segment.shape[-1] / sample_rate,
+				speaker=t.pop('speaker', None),
+				ref=t.pop('ref'),
+				hyp=t.pop('hyp', None),
+				cer=t.pop('cer', None),
+				wer=t.pop('wer', None),
+				alignment=t.pop('alignment', {}),
+				words=t.pop('words', {}),
+				meta=t)
 
 		prev_audio_path = audio_path
-		transcript_cat.append(t)
+		audio_path_res.append(t)
+	return audio_path_res
 
-	json.dump(transcripts.strip(transcript_cat, strip), open(os.path.join(output_path, os.path.basename(output_path) + '.json'), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+def cut(input_path, output_path, sample_rate, mono, dilate, strip, strip_prefix, audio_backend, add_sub_paths):
+	os.makedirs(output_path, exist_ok = True)
+
+	transcript = json.load(open(input_path))
+	print('Segment count: ', len(transcript))
+
+	transcript_by_path = {t['audio_path']: [] for t in transcript}
+	for t in transcript:
+		transcript_by_path[t['audio_path']].append(t)
+
+	print("Unique audio_path count: ", len(transcript_by_path.keys()))
+	with Pool(processes=32) as pool:
+		map_func = partial(cut_audio, output_path, sample_rate, mono, dilate, strip_prefix, audio_backend, add_sub_paths)
+		transcript_cat = []
+		for ts in tqdm.tqdm(pool.imap_unordered(map_func, transcript_by_path.values())):
+			transcript_cat.extend(ts)
+
+	json.dump(transcripts.strip(transcript_cat, strip), open(os.path.join(output_path, os.path.basename(output_path) + '2.json'), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 	print(output_path)
 
 def cat(input_path, output_path):
@@ -202,7 +228,7 @@ def lserrorwords(input_path, output_path, comment_path, freq_path):
 	print(output_path)
 
 
-def split(input_path, output_path, test_duration_in_hours):
+def split(input_path, output_path, test_duration_in_hours, val_duration_in_hours, microval_duration_in_hours):
 	transcripts_train = json.load(open(input_path))
 	
 	random.seed(42)
@@ -212,15 +238,18 @@ def split(input_path, output_path, test_duration_in_hours):
 		t.pop('alignment')
 		t.pop('words')
 
-	transcripts_test = []
-	test_set_duration = 0
-	while test_set_duration <= test_duration_in_hours:
-		t = transcripts_train.pop()
-		test_set_duration += transcripts.get_duration(t) / 3600
-		transcripts_test.append(t)
-		
+	for set_name, duration in [('test', test_duration_in_hours), ('val', val_duration_in_hours), ('microval', microval_duration_in_hours)]:
+		if duration is not None:
+			print(set_name)
+			s = []
+			set_duration = 0
+			while set_duration <= duration:
+				t = transcripts_train.pop()
+				set_duration += transcripts.get_duration(t) / 3600
+				s.append(t)
+			json.dump(s, open(os.path.join(output_path, os.path.basename(output_path) + f'_{set_name}.json'), 'w'), ensure_ascii=False, sort_keys=True, indent=2)
+
 	json.dump(transcripts_train, open(os.path.join(output_path, os.path.basename(output_path) + '_train.json'), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
-	json.dump(transcripts_test, open(os.path.join(output_path, os.path.basename(output_path) + '_test.json'), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 
 
 if __name__ == '__main__':
@@ -317,6 +346,8 @@ if __name__ == '__main__':
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o')
 	cmd.add_argument('--test-duration-in-hours', required = True, type = float)
+	cmd.add_argument('--val-duration-in-hours', required = True, type = float)
+	cmd.add_argument('--microval-duration-in-hours', required = True, type = float)
 	cmd.set_defaults(func = split)
 
 	args = vars(parser.parse_args())
