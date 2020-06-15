@@ -45,7 +45,7 @@ def label(output_path, transcript, info, page_size, prefix):
 	for p in range(page_count):
 		html_path = output_path + f'.page{p}.html'
 		html = open(html_path, 'w')
-		html.write('<html><head><meta charset="UTF-8"><style>figure{margin:0} h6{margin:0}</style></head><body>')
+		html.write('<html><head><meta charset="UTF-8"><style>figure{margin:0} h6{margin:0}</style></head><body onkeydown="return onkeydown_(event)">')
 		html.write('''<script>
 			function export_user_input()
 			{
@@ -61,6 +61,21 @@ def label(output_path, transcript, info, page_size, prefix):
 				a.download = `${prefix}_page${page}_time${unixtime}.json`;
 				a.href = href;
 			}
+
+			function onkeydown_(evt)
+			{
+					const tab = evt.keyCode == 9, shift = evt.shiftKey;
+					const tabIndex = (document.activeElement || {tabIndex : -1}).tabIndex;
+					if(tab)
+					{
+							const newTabIndex = shift ? Math.max(0, tabIndex - 1) : tabIndex + 1;
+							const newElem = document.querySelector(`[tabindex="${newTabIndex}"`);
+							if(newElem)
+									newElem.focus();
+							return false;
+					}
+					return true;
+			}
 		</script>''')
 		html.write(f'<a data-page="{p}" data-prefix="{prefix}" download="export.json" onclick="export_user_input(); return true" href="#">Export</a>\n')
 		
@@ -73,7 +88,7 @@ def label(output_path, transcript, info, page_size, prefix):
 			html.write('<h6>before</h6>')
 			html.write('<pre name="{audio_name}" class="before">{before}</pre>'.format(**i))
 			html.write('<h6>after</h6>')
-			html.write('<input name="{audio_name}" class="after" type="text" value="{after}" data-before="{before}">'.format(**i))
+			html.write('<input tabindex="{tabindex}" name="{audio_name}" class="after" type="text" value="{after}" data-before="{before}">'.format(tabindex = j, **i))
 		html.write('</body></html>')
 		print(html_path)
 
