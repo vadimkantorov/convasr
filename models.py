@@ -320,6 +320,9 @@ class LogFilterBankFrontend(nn.Module):
 			self.stft = None
 
 	def pad_signal(self, signal):
+		# forces constant padding on the right to avoid padding affecting accuracy
+		# taken from https://github.com/pytorch/pytorch/blob/88fe05e10660706ee557c17eb19c6e5f9c90d84c/torch/functional.py#L459
+		# todo: simplify reshaping and avoid copies by doing pad manually
 		signal_dim = signal.dim()
 		extended_shape = [1] * (3 - signal_dim) + list(signal.size())
 		pad = self.freq_cutoff - 1
@@ -327,22 +330,11 @@ class LogFilterBankFrontend(nn.Module):
 		signal = signal.view(extended_shape)
 
 		left_padded_signal = F.pad(signal, (pad, 0), 'reflect')
-		right_padded_signal = F.pad(left_padded_signal, (0, pad), 'constant', value=0.0)
+		right_padded_signal = F.pad(left_padded_signal, (0, pad), 'constant', value = 0)
 
-		signal = right_padded_signal.view(right_padded_signal.shape[-signal_dim:])
-		return signal
+		return right_padded_signal.view(right_padded_signal.shape[-signal_dim:])
 
-	def stft_magnitude_squared(self, signal):
-		padded_signal = self.pad_signal(signal)
-
-		if self.stft is not None:
-			forward_transform_squared = self.stft(padded_signal).pow(2)
-			real_squared, imag_squared = forward_transform_squared[:, :self.freq_cutoff, :], forward_transform_squared[:, self.freq_cutoff:, :]
-		else:
-			real_squared, imag_squared = padded_signal.stft(self.nfft, hop_length=self.hop_length, win_length=self.win_length, window=self.window, center=False).pow(2).unbind(dim=-1)
-		return real_squared + imag_squared
-
-	def forward(self, signal, mask=None):
+	def forward(self, signal, mask = None):
 		signal = normalize_signal(signal) if self.normalize_signal else signal
 		signal = signal + self.dither0 * torch.randn_like(signal) if self.dither0 > 0 else signal
 		signal = torch.cat([signal[..., :1], signal[..., 1:] - self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
@@ -350,7 +342,9 @@ class LogFilterBankFrontend(nn.Module):
 		if mask is not None:
 			signal = signal * mask
 
-		power_spectrum = self.stft_magnitude_squared(signal)
+		padded_signal = self.pad_signal(signal)
+		real_squared, imag_squared = self.stft(padded_signal.unsqueeze(dim = 1)).pow(2).split(self.freq_cutoff, dim = 1) if self.stft is not None else padded_signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = False).pow(2).unbind(dim = -1)
+		power_spectrum = real_squared + imag_squared
 		features = self.mel(power_spectrum).log()
 		return features
 
@@ -387,7 +381,7 @@ def normalize_features(features, mask = None, dim = -1, eps = 1e-20):
 		std = features.std(dim = dim, keepdim = True)
 		return (features - mean) / (std + eps)
 	else:
-		xlen = mask.sum(dim = dim, keepdim = True)
+		xlen = mask.int().sum(dim = dim, keepdim = True)
 		mean = (features * mask).sum(dim = dim, keepdim = True) / xlen
 		features_zero_mean_masked = mask * (features - mean)
 		std = (features_zero_mean_masked.pow(2).sum(dim = dim, keepdim = True) / xlen).sqrt()
