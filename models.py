@@ -101,9 +101,10 @@ class JasperNet(nn.Module):
 			for s in range(num_subblocks):
 				num_channels = (in_width_factor * base_width, (out_width_factor * base_width) if s == num_subblocks - 1 else (in_width_factor * base_width))
 				#num_channels = (in_width_factor * base_wdith, out_width_factor * base_width) # seems they do this in https://github.com/NVIDIA/DeepLearningExamples/blob/21120850478d875e9f2286d13143f33f35cd0c74/PyTorch/SpeechRecognition/Jasper/configs/jasper10x5dr_nomask.toml
-				num_channels_residual.append(in_width_factor * base_width)
+				if residual:
+					num_channels_residual.append(in_width_factor * base_width)
 				# use None in num_channels_residual
-				backbone.append(ConvBN(num_channels = num_channels, kernel_size = kernel_size, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = True))
+				backbone.append(ConvBN(num_channels = num_channels, kernel_size = kernel_size, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace, residual = residual))
 			in_width_factor = out_width_factor
 
 		backbone.extend([
@@ -149,17 +150,17 @@ class JasperNet(nn.Module):
 			for p in m.parameters():
 				p.requires_grad = False
 
-	def fuse_conv_bn_eval(self, K = -1):
+	def fuse_conv_bn_eval(self, K = None):
 		for subblock in self.backbone[:K]:
 			subblock.fuse_conv_bn_eval()
 
 class Wav2Letter(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2):
+	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 6, decoder_type = None, normalize_features = True, frontend = None):
 		super().__init__(num_input_features, num_classes, base_width = base_width,
 			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
 			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
 			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			residual = False, diletion = dilation, nonlinearity = nonlinearity
+			residual = False, dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
 		)
 
 class Wav2LetterFlat(JasperNet):
@@ -396,7 +397,7 @@ def unpad(x, lens):
 	return [e[..., :l] for e, l in zip(x, lens)]
 
 def reset_bn_running_stats_(model):
-	for bn in [module for module in self.model.modules() if isinstance(module, nn.modules.batchnorm._BatchNorm)]:
+	for bn in [module for module in model.modules() if isinstance(module, nn.modules.batchnorm._BatchNorm)]:
 		bn.running_mean = torch.zeros_like(bn.running_mean)
 		bn.running_var = torch.ones_like(bn.running_var)
 		bn.momentum = None
@@ -408,7 +409,7 @@ def data_parallel_and_autocast(model, optimizer = None, opt_level = None, **kwar
 
 	if opt_level is None:
 		model = torch.nn.DataParallel(model) if data_parallel else model
-	
+
 	elif data_parallel:
 		model, optimizer = apex.amp.initialize(nn.Sequential(model), optimizers = optimizer, opt_level = opt_level, **kwargs) if optimizer is not None else (apex.amp.initialize(nn.Sequential(model), opt_level = opt_level, **kwargs), None)
 		model = torch.nn.DataParallel(model[0])
@@ -432,3 +433,6 @@ def sparse_topk(x, k, dim = -1, largest = True, indices_dtype = None, values_dty
 def sparse_topk_todense(saved, device = None):
 	device = device or saved['device']
 	return torch.full(saved['shape'], saved['fill_value'], dtype = saved['dtype'], device = device).scatter_(saved['dim'], saved['indices'].to(dtype = torch.int64, device = device), saved['values'].to(dtype = saved['dtype'], device = device))
+
+def master_module(model):
+	return model.module if isinstance(model, nn.DataParallel) else model
