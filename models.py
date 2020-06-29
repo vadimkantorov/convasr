@@ -58,12 +58,12 @@ class ConvBN(nn.Module):
 		self.temporal_mask = temporal_mask
 
 	def forward(self, x, lengths_fraction = None, residual: List = []):
-		residual_value = []
+		residual_inputs = []
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
 			if i == len(self.conv) - 1:
 				assert len(residual) == len(self.conv_residual) == len(self.bn_residual)
-				residual_value = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)]
-			x = self.activation(bn(conv(x)), residual = residual_value)
+				residual_inputs = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)]
+			x = self.activation(bn(conv(x)), residual = residual_inputs)
 			x = x * temporal_mask(x, lengths_fraction = lengths_fraction) if (self.temporal_mask and lengths_fraction is not None) else x
 		return x
 
@@ -113,10 +113,13 @@ class JasperNet(nn.Module):
 				backbone.append(ConvBN(num_channels = num_channels, kernel_size = kernel_size, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace))
 			in_width_factor = out_width_factor
 
-		backbone.extend([
+		epilogue = [
 			ConvBN(num_channels = (in_width_factor * base_width, out_width_factors_large[0] * base_width), kernel_size = kernel_size_epilogue, dropout = dropout_epilogue, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
 			ConvBN(num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), kernel_size = 1, dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
-		])
+		]
+		backbone.extend(epilogue)
+
+		self.num_epilogue_modules = len(epilogue)
 		self.frontend = frontend
 		self.normalize_features = normalize_features
 		self.backbone = backbone
@@ -131,7 +134,7 @@ class JasperNet(nn.Module):
 		residual = []
 		for i, subblock in enumerate(self.backbone):
 			x = subblock(x, residual = residual, lengths_fraction = xlen)
-			if i >= len(self.backbone) - 3: # HACK: drop residual connections for epilogue
+			if i >= len(self.backbone) - self.num_epilogue_modules - 1: # HACK: drop residual connections for epilogue
 				residual = []
 			elif self.residual == 'dense':
 				residual.append(x)
