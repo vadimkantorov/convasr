@@ -57,11 +57,9 @@ def cut_audio(output_path, sample_rate, mono, dilate, strip_prefix, audio_backen
 		digest = hashlib.md5(segment_file_name.encode('utf-8')).hexdigest()
 		sub_path = [digest[-1:], digest[:2]] if add_sub_paths else []
 		segment_path_components = [output_path] + sub_path + [segment_file_name]
+
 		segment_path = os.path.join(*segment_path_components)
-
-		if not os.path.exist_ok(os.path.join(*segment_path_components[:-1])):
-			os.makedirs(os.path.join(*segment_path_components[:-1]), exist_ok=True)
-
+		os.makedirs(os.path.join(*segment_path_components[:-1]), exist_ok=True)
 		audio.write_audio(segment_path, segment, sample_rate, mono=True)
 
 		if strip_prefix:
