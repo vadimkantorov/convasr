@@ -49,6 +49,11 @@ def cut_audio(output_path, sample_rate, mono, dilate, strip_prefix, audio_backen
 		audio_path = t['audio_path']
 		signal = audio.read_audio(audio_path, sample_rate, normalize=False, backend=audio_backend)[
 			0] if audio_path != prev_audio_path else signal
+
+		if signal.shape[-1] == 0: # bug with empty audio files witch produce empty cut file
+			print('Empty audio_path ', audio_path)
+			return []
+
 		t['channel'] = 0 if len(signal) == 1 else None if mono else t.get('channel')
 		segment = signal[slice(t['channel'], 1 + t['channel']) if t['channel'] is not None else ...,
 		int(max(t['begin'] - dilate, 0) * sample_rate): int((t['end'] + dilate) * sample_rate)]
@@ -228,7 +233,7 @@ def lserrorwords(input_path, output_path, comment_path, freq_path):
 	print(output_path)
 
 
-def split(input_path, output_path, test_duration_in_hours, val_duration_in_hours, microval_duration_in_hours):
+def split(input_path, output_path, test_duration_in_hours, val_duration_in_hours, microval_duration_in_hours, old_microval_path):
 	transcripts_train = json.load(open(input_path))
 	
 	random.seed(42)
@@ -237,6 +242,11 @@ def split(input_path, output_path, test_duration_in_hours, val_duration_in_hours
 	for t in transcripts_train:
 		t.pop('alignment')
 		t.pop('words')
+
+	if old_microval_path:
+		old_microval = json.load(open(os.path.join(output_path, old_microval_path)))
+		old_microval_pahts = set([e['audio_path'] for e in old_microval])
+		transcripts_train = [e for e in transcripts_train if e['audio_path'] not in old_microval_pahts]
 
 	for set_name, duration in [('test', test_duration_in_hours), ('val', val_duration_in_hours), ('microval', microval_duration_in_hours)]:
 		if duration is not None:
@@ -345,6 +355,7 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('split')
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o')
+	cmd.add_argument('--old-microval-path', type = str)
 	cmd.add_argument('--test-duration-in-hours', required = True, type = float)
 	cmd.add_argument('--val-duration-in-hours', required = True, type = float)
 	cmd.add_argument('--microval-duration-in-hours', required = True, type = float)
