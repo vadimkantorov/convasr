@@ -19,6 +19,7 @@ if __name__ == '__main__':
 		t['ref'] = t['ref'].replace('⁶', '')
 		t['ref'] = t['ref'].replace('¹', '')
 		t['ref'] = t['ref'].replace('³', '')
+		t['ref'] = t['ref'].replace('⁰', '')
 		return t
 
 
