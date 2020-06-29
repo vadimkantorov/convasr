@@ -45,10 +45,15 @@ def main(args):
 	exclude = set([os.path.splitext(basename)[0] for basename in os.listdir(args.output_path) if basename.endswith('.json')] if args.skip_processed else [])
 	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
 
-	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers) 
+	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers, exclude=exclude)
+	examples = len(val_dataset.examples)
+	print("Examples count: ", examples)
+
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
 
-	for meta, x, xlen, y, ylen in val_data_loader:
+	for i, (meta, x, xlen, y, ylen) in enumerate(val_data_loader):
+		print(f'Processing: {i}/{examples}')
+
 		audio_path, speakers = map(meta[0].get, ['audio_path', 'speakers'])
 
 		duration = max(transcripts.get_duration(t) for t in meta) / 3600
@@ -62,16 +67,23 @@ def main(args):
 			print(f'Empty signal in [{audio_path}]. Skipping.')
 			continue
 
+		if max(ylen) > args.skip_subtitles_longer_than:
+			print(f'Too large subtitles [{ylen}] [{audio_path}]. Skipping.')
+			continue
+
 		tic = time.time()
 		y, ylen = y.to(args.device), ylen.to(args.device)
 		log_probs, olen = model(x.to(args.device), xlen.to(args.device))
+		if log_probs.shape[-1] > args.skip_log_probs_longer_than:
+			print(f'Too large logprobs in subtitles [{log_probs.shape[-1]}] [{audio_path}]. Skipping.')
+			continue
 
 		#speech = vad.detect_speech(x.squeeze(1), args.sample_rate, args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)
 		#speech = vad.upsample(speech, log_probs)
 		#log_probs.masked_fill_(models.silence_space_mask(log_probs, speech, space_idx = labels.space_idx, blank_idx = labels.blank_idx), float('-inf'))
 		
 		decoded = decoder.decode(log_probs, olen)
-		
+
 		print('Input:', os.path.basename(audio_path))
 		print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
 		print('Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(audio = sum(transcripts.get_duration(t) for t in meta), processing =time.time() - tic))
@@ -82,7 +94,7 @@ def main(args):
 		ref_segments = [[dict(channel = channel[i], begin = meta[i]['begin'], end = meta[i]['end'], ref = labels.decode(y[i, 0, :ylen[i]].tolist()))] for i in range(len(decoded))]
 		hyp_segments = [labels.decode(decoded[i], ts[i], channel = channel[i], replace_blank = True, replace_blank_series = args.replace_blank_series, replace_repeat = True, replace_space = False, speaker = speaker[i] if isinstance(speaker[i], str) else None) for i in range(len(decoded))]
 		
-		ref, hyp = ' '.join(transcripts.join(ref = r) for r in ref_segments).strip(), ' '.join(transcripts.join(hyp = h) for h in hyp_segments).strip()
+		ref, hyp = '\n'.join(transcripts.join(ref = r) for r in ref_segments).strip(), '\n'.join(transcripts.join(hyp = h) for h in hyp_segments).strip()
 		if args.verbose:
 			print('HYP:', hyp)
 		print('CER: {cer:.02%}'.format(cer = metrics.cer(hyp, ref)))
@@ -115,6 +127,7 @@ def main(args):
 		transcript = [dict(audio_path = audio_path, ref = ref, hyp = hyp, speaker = transcripts.speaker(ref = ref_transcript, hyp = hyp_transcript), cer = metrics.cer(hyp, ref), words = metrics.align_words(hyp, ref)[-1], alignment = dict(ref = ref_transcript, hyp = hyp_transcript), **transcripts.summary(hyp_transcript)) for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments) for ref, hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]]
 		filtered_transcript = list(transcripts.prune(transcript, align_boundary_words = args.align_boundary_words, cer = args.cer, duration = args.duration, gap = args.gap, unk = args.unk, num_speakers = args.num_speakers))
 		json.dump(filtered_transcript, open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+
 		print('Filtered segments:', len(filtered_transcript), 'out of', len(transcript))
 		print(transcript_path)
 		if args.html:
@@ -134,7 +147,7 @@ if __name__ == '__main__':
 	parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
 	parser.add_argument('--max-segment-duration', type = float, default = 2)
 	parser.add_argument('--num-workers', type = int, default = 0)
-	parser.add_argument('--ext', default = ['wav', 'mp3'])
+	parser.add_argument('--ext', default = ['wav', 'mp3', 'opus', 'm4a'])
 	parser.add_argument('--decoder', default = 'GreedyDecoder', choices = ['GreedyDecoder', 'BeamSearchDecoder'])
 	parser.add_argument('--decoder-topk', type = int, default = 1)
 	parser.add_argument('--beam-width', type = int, default = 5000)
@@ -159,7 +172,9 @@ if __name__ == '__main__':
 	parser.add_argument('--speakers', nargs = '*')
 	parser.add_argument('--replace-blank-series', type = int, default = 8)
 	parser.add_argument('--skip-processed', action = 'store_true')
-	parser.add_argument('--skip-file-longer-than-hours', type=float, help = 'skip files with duration more than specified hours') 
+	parser.add_argument('--skip-file-longer-than-hours', type=float, help = 'skip files with duration more than specified hours')
+	parser.add_argument('--skip-log-probs-longer-than', type=int, default=185000)
+	parser.add_argument('--skip-subtitles-longer-than', type=int, default=45000)
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
