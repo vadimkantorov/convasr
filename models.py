@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import apex
 import librosa
-from typing import Optional, List
+from typing import List
 
 class Decoder(nn.Sequential):
 	def __init__(self, input_size, num_classes, type = None):
@@ -48,21 +48,19 @@ class ConvSamePadding(nn.Sequential):
 			)
 
 class ConvBN(nn.Module):
-	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual: Optional[List] = None, repeat = 1, dilation = 1, separable = False, temporal_mask = True, inplace = False, nonlinearity = 'relu'):
+	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual: List = [], repeat = 1, dilation = 1, separable = False, temporal_mask = True, inplace = False, nonlinearity = 'relu'):
 		super().__init__()
-		self.add_residual = bool(num_channels_residual)
 		self.conv = nn.ModuleList(ConvSamePadding(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, separable = separable, bias = False, groups = groups) for i in range(repeat))
 		self.bn = nn.ModuleList(BatchNorm1dInplace(num_channels[1], momentum = batch_norm_momentum) if inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat))
-		if self.add_residual:
-			self.conv_residual = nn.ModuleList(nn.Identity() if in_channels is None else nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual)
-			self.bn_residual = nn.ModuleList(nn.Identity() if in_channels is None else BatchNorm1dInplace(num_channels[1], momentum = batch_norm_momentum) if inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual)
+		self.conv_residual = nn.ModuleList(nn.Identity() if in_channels is None else nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual)
+		self.bn_residual = nn.ModuleList(nn.Identity() if in_channels is None else BatchNorm1dInplace(num_channels[1], momentum = batch_norm_momentum) if inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual)
 		self.activation = ResidualActivation(nonlinearity, dropout, inplace = inplace)
 		self.temporal_mask = temporal_mask
 
-	def forward(self, x, lengths_fraction = None, residual: Optional[List] = None):
-		residual_value = None
+	def forward(self, x, lengths_fraction = None, residual: List = []):
+		residual_value = []
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
-			if self.add_residual and i == len(self.conv) - 1:
+			if i == len(self.conv) - 1:
 				assert len(residual) == len(self.conv_residual) == len(self.bn_residual)
 				residual_value = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)]
 			x = self.activation(bn(conv(x)), residual = residual_value)
@@ -107,11 +105,11 @@ class JasperNet(nn.Module):
 				num_channels = (in_width_factor * base_width, (out_width_factor * base_width) if s == num_subblocks - 1 else (in_width_factor * base_width))
 				#num_channels = (in_width_factor * base_wdith, out_width_factor * base_width) # seems they do this in https://github.com/NVIDIA/DeepLearningExamples/blob/21120850478d875e9f2286d13143f33f35cd0c74/PyTorch/SpeechRecognition/Jasper/configs/jasper10x5dr_nomask.toml
 				if residual == 'dense':
-					num_channels_residual.append(in_width_factor * base_width)
+					num_channels_residual.append(num_channels[0])
 				elif residual:
-					num_channels_residual = [in_width_factor * base_width]
+					num_channels_residual = [num_channels[0]]
 				else:
-					num_channels_residual = None
+					num_channels_residual = []
 				backbone.append(ConvBN(num_channels = num_channels, kernel_size = kernel_size, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace))
 			in_width_factor = out_width_factor
 
@@ -133,12 +131,14 @@ class JasperNet(nn.Module):
 		residual = []
 		for i, subblock in enumerate(self.backbone):
 			x = subblock(x, residual = residual, lengths_fraction = xlen)
-			if self.residual == 'dense':
+			if i >= len(self.backbone) - 3: # HACK: drop residual connections for epilogue
+				residual = []
+			elif self.residual == 'dense':
 				residual.append(x)
 			elif self.residual:
 				residual = [x]
 			else:
-				residual = None
+				residual = []
 
 		logits = self.decoder(x)
 		log_probs = [F.log_softmax(l, dim = 1).to(torch.float32) for l in logits]
@@ -219,9 +219,7 @@ class ResidualActivation(nn.Module):
 		self.inplace = inplace
 		self.dropout = dropout
 
-	def forward(self, y, residual: Optional[List] = None):
-		if residual is None:
-			residual = []
+	def forward(self, y, residual: List = []):
 		if self.inplace is True:
 			y = ResidualActivation.Function.apply(self.nonlinearity, y, *residual)
 			y = F.dropout(y, p = self.dropout, training = self.training)
