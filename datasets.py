@@ -15,9 +15,10 @@ import sentencepiece
 import audio
 import vad
 import transcripts
+import random
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, data_paths, labels, sample_rate, frontend = None, speakers = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, segmented = False, time_padding_multiple = 1, audio_backend = 'sox'):
+	def __init__(self, data_paths, labels, sample_rate, frontend = None, speakers = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, segmented = False, time_padding_multiple = 1, audio_backend = 'sox', exclude=[]):
 		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
@@ -39,6 +40,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.examples = [list(g) for data_path in data_paths for k, g in itertools.groupby(sorted(read_transcript(data_path), key = transcripts.sort_key), key = transcripts.group_key)]
 		self.examples = list(sorted(self.examples, key = duration))
 		self.examples = list(filter(lambda example: (min_duration is None or min_duration <= duration(example)) and (max_duration is None or duration(example) <= max_duration), self.examples))
+		self.examples = [e for e in self.examples if os.path.basename(e[0]['audio_path']) not in set(exclude)]
+		random.shuffle(self.examples)
 
 	def __getitem__(self, index):
 		transcript = self.examples[index]
