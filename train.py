@@ -1,26 +1,25 @@
-import os
-import sys
+import argparse
 import json
 import math
-import time
-import shutil
+import os
 import random
-import argparse
+import shutil
+import time
+
+import apex
+import datasets
+import decoders
+import exphtml
+import metrics
+import models
+import onnxruntime
+import optimizers
 import torch
 import torch.utils.data
 import torch.utils.tensorboard
-import torch.nn as nn
-import torch.nn.functional as F
-import apex
-import onnxruntime
-import datasets
 import transforms
-import decoders
-import metrics
-import models
-import optimizers
 import vis
-import exphtml
+
 
 def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
@@ -162,7 +161,7 @@ def main(args):
 			exphtml.exphtml(args.exphtml)
 		
 		if training and not args.checkpoint_skip:
-			torch.save(dict(model_state_dict = model.module.state_dict(), optimizer_state_dict = optimizer.state_dict(), amp_state_dict = apex.amp.state_dict() if args.fp16 else None, sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), time = time.time(), labels = [(l.name, str(l)) for l in labels]), checkpoint_path)
+			torch.save(dict(model_state_dict = models.master_module(model).state_dict(), optimizer_state_dict = optimizer.state_dict(), amp_state_dict = apex.amp.state_dict() if args.fp16 else None, sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), time = time.time(), labels = [(l.name, str(l)) for l in labels]), checkpoint_path)
 
 		model.train()
 	
@@ -247,7 +246,7 @@ def main(args):
 
 					if iteration % args.log_iteration_interval == 0:
 						tensorboard.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
-						for param_name, param in model.module.named_parameters():
+						for param_name, param in models.master_module(model).named_parameters():
 							if param.grad is None:
 								continue
 							tag = 'params/' + param_name.replace('.', '/')
