@@ -9,6 +9,14 @@ import apex
 import librosa
 from typing import List
 
+class InputOutputTypeCast(nn.Sequential):
+	def __init__(self, model, dtype):
+		super().__init__(model)
+		self.dtype = dtype
+
+	def forward(self, x, *args, **kwargs):
+		return super().forward(x.to(self.dtype), *args, **kwargs).to(torch.float32)
+
 class Decoder(nn.Sequential):
 	def __init__(self, input_size, num_classes, type = None):
 		if type is None:
@@ -98,7 +106,7 @@ class JasperNet(nn.Module):
 		dropouts = dropouts if dropout != 0 else [0] * len(dropouts)
 
 		in_width_factor = out_width_factors[0]
-		backbone = nn.ModuleList([ConvBN(kernel_size = kernel_size_prologue, num_channels = (num_input_features, in_width_factor * base_width), dropout = dropout_prologue, stride = stride1, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace)])
+		self.backbone = nn.ModuleList([ConvBN(kernel_size = kernel_size_prologue, num_channels = (num_input_features, in_width_factor * base_width), dropout = dropout_prologue, stride = stride1, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace)])
 		num_channels_residual = []
 		for kernel_size, dropout, out_width_factor in zip(kernel_sizes, dropouts, out_width_factors):
 			for s in range(num_subblocks):
@@ -112,19 +120,18 @@ class JasperNet(nn.Module):
 					num_channels_residual = [num_channels[0]]
 				else:
 					num_channels_residual = []
-				backbone.append(ConvBN(num_channels = num_channels, kernel_size = kernel_size, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace))
+				self.backbone.append(ConvBN(num_channels = num_channels, kernel_size = kernel_size, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace))
 			in_width_factor = out_width_factor
 
 		epilogue = [
 			ConvBN(num_channels = (in_width_factor * base_width, out_width_factors_large[0] * base_width), kernel_size = kernel_size_epilogue, dropout = dropout_epilogue, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
 			ConvBN(num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), kernel_size = 1, dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
 		]
-		backbone.extend(epilogue)
+		self.backbone.extend(epilogue)
 
 		self.num_epilogue_modules = len(epilogue)
 		self.frontend = frontend
 		self.normalize_features = normalize_features
-		self.backbone = backbone
 		self.decoder = Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
 		self.residual = residual
 		self.dict = dict
@@ -367,6 +374,7 @@ class LogFilterBankFrontend(nn.Module):
 		return right_padded_signal.view(right_padded_signal.shape[-signal_dim:])
 
 	def forward(self, signal, mask = None):
+		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
 		signal = normalize_signal(signal) if self.normalize_signal else signal
 		signal = signal + self.dither0 * torch.randn_like(signal) if self.dither0 > 0 else signal
 		signal = torch.cat([signal[..., :1], signal[..., 1:] - self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
@@ -404,7 +412,6 @@ def compute_capacity(model, scale = 1):
 	return sum(map(torch.numel, model.parameters())) / scale
 
 def normalize_signal(signal, dim = -1, eps = 1e-5):
-	signal = signal.to(torch.float32)
 	return signal / (signal.abs().max(dim = dim, keepdim = True).values + eps) if signal.numel() > 0 else signal
 
 def normalize_features(features, mask = None, dim = -1, eps = 1e-20):
@@ -430,8 +437,8 @@ def reset_bn_running_stats_(model):
 		bn.train()
 	return model
 
-def data_parallel_and_autocast(model, optimizer = None, opt_level = None, **kwargs):
-	data_parallel = torch.cuda.device_count() > 1
+def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, opt_level = None, **kwargs):
+	data_parallel = data_parallel and torch.cuda.device_count() > 1
 
 	if opt_level is None:
 		model = torch.nn.DataParallel(model) if data_parallel else model
