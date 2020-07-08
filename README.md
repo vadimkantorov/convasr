@@ -114,7 +114,9 @@ sudo docker image rm -f convasr
 ```
 
 # ssh port forwarding
+```shell
 ssh -L 7006:$HOST:7006 $HOST -N # -f for background
+```
 
 # Tensorboard
 ```shell
