@@ -6,7 +6,7 @@ import argparse
 import itertools
 import subprocess
 import collections
-from functools import partial
+import functools
 import torch
 import sentencepiece
 import tqdm
@@ -17,7 +17,7 @@ import metrics
 import ru as lang
 import random
 import hashlib
-from multiprocessing.pool import Pool
+import multiprocessing
 
 def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, unk, num_speakers):
 	cat = output_path.endswith('.json')
@@ -86,7 +86,7 @@ def cut_audio(output_path, sample_rate, mono, dilate, strip_prefix, audio_backen
 		audio_path_res.append(t)
 	return audio_path_res
 
-def cut(input_path, output_path, sample_rate, mono, dilate, strip, strip_prefix, audio_backend, add_sub_paths):
+def cut(input_path, output_path, sample_rate, mono, dilate, strip, strip_prefix, audio_backend, add_sub_paths, num_workers):
 	os.makedirs(output_path, exist_ok = True)
 
 	transcript = json.load(open(input_path))
@@ -97,8 +97,8 @@ def cut(input_path, output_path, sample_rate, mono, dilate, strip, strip_prefix,
 		transcript_by_path[t['audio_path']].append(t)
 
 	print("Unique audio_path count: ", len(transcript_by_path.keys()))
-	with Pool(processes=32) as pool:
-		map_func = partial(cut_audio, output_path, sample_rate, mono, dilate, strip_prefix, audio_backend, add_sub_paths)
+	with multiprocessing.pool.Pool(processes=num_workers) as pool:
+		map_func = functools.partial(cut_audio, output_path, sample_rate, mono, dilate, strip_prefix, audio_backend, add_sub_paths)
 		transcript_cat = []
 		for ts in tqdm.tqdm(pool.imap_unordered(map_func, transcript_by_path.values())):
 			transcript_cat.extend(ts)
@@ -284,7 +284,7 @@ def split(input_path, output_path, test_duration_in_hours, val_duration_in_hours
 			set_duration = 0
 			while set_duration <= duration:
 				t = transcripts_train.pop()
-				set_duration += transcripts.get_duration(t) / 3600
+				set_duration += transcripts.compute_duration(t, hours=True)
 				s.append(t)
 			json.dump(s, open(os.path.join(output_path, os.path.basename(output_path) + f'_{set_name}.json'), 'w'), ensure_ascii=False, sort_keys=True, indent=2)
 
@@ -325,6 +325,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--strip-prefix', type = str, default = '')
 	cmd.add_argument('--audio-backend', default = 'ffmpeg', choices = ['sox', 'ffmpeg'])
 	cmd.add_argument('--add-sub-paths', action = 'store_true')
+	cmd.add_argument('--num-workers', type = int, default=32)
 	cmd.set_defaults(func = cut)
 	
 	cmd = subparsers.add_parser('cat')

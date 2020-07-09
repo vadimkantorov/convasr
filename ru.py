@@ -131,6 +131,13 @@ def stem(word, inflections = []):
 				return word[:-len(inflection)]
 		return word
 
+def replace_superscripts(elem):
+	replaces = dict(zip('¹²³⁴⁵⁶⁷⁸⁹⁰', '          '))
+	replaces['²'] = 'квадратных'
+	for key, val in replaces.items():
+		elem = elem.replace(key, val)
+	return elem
+
 if __name__ == '__main__':
 	import argparse
 	parser = argparse.ArgumentParser()

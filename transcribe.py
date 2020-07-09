@@ -44,13 +44,13 @@ def main(args):
 	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
 
 	labels, frontend, model, decoder = setup(args)
-	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers, exclude=exclude)
-	examples = len(val_dataset.examples)
-	print("Examples count: ", examples)
+	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers, exclude=exclude, shuffle=args.shuffle)
+	num_examples = len(val_dataset.examples)
+	print("Examples count: ", num_examples)
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
 
 	for i, (meta, x, xlen, y, ylen) in enumerate(val_data_loader):
-		print(f'Processing: {i}/{examples}')
+		print(f'Processing: {i}/{num_examples}')
 
 		audio_path, speakers = map(meta[0].get, ['audio_path', 'speakers'])
 
@@ -61,17 +61,13 @@ def main(args):
 
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
 
-		if max(ylen) > args.skip_subtitles_longer_than:
-			print(f'Too large subtitles [{ylen}] [{audio_path}]. Skipping.')
+		if max(ylen) > args.max_ref_len:
+			print(f'Too large refs [{ylen}] [{audio_path}]. Skipping.')
 			continue
 
 		tic = time.time()
 		y, ylen = y.to(args.device), ylen.to(args.device)
 		log_probs, olen = model(x.squeeze(1).to(args.device), xlen.to(args.device))
-
-		if log_probs.shape[-1] > args.skip_log_probs_longer_than:
-			print(f'Too large logprobs in subtitles [{log_probs.shape[-1]}] [{audio_path}]. Skipping.')
-			continue
 
 		#speech = vad.detect_speech(x.squeeze(1), args.sample_rate, args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)
 		#speech = vad.upsample(speech, log_probs)
@@ -169,8 +165,8 @@ if __name__ == '__main__':
 	parser.add_argument('--html', action = 'store_true')
 	parser.add_argument('--txt', action = 'store_true', help = 'store whole transcript in txt format need for assessments')
 	parser.add_argument('--mono', action='store_true')
-	parser.add_argument('--skip-log-probs-longer-than', type=int, default=185000)
-	parser.add_argument('--skip-subtitles-longer-than', type=int, default=45000)
+	parser.add_argument('--shuffle', action='store_true')
+	parser.add_argument('--max-ref-len', type=int, default=45000)
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
