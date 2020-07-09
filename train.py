@@ -62,8 +62,8 @@ def main(args):
 		model.fuse_conv_bn_eval()
 		
 		if args.fp16:
-			model.to(torch.float16)
-			model = models.InputOutputTypeCast(model, dtype = torch.float16)
+			model = model.to(torch.float16)
+			#model = models.InputOutputTypeCast(model, dtype = torch.float16)
 		
 		waveform_input = torch.rand(args.onnx_sample_batch_size, args.onnx_sample_time, device = args.device)
 		logits = model(waveform_input)

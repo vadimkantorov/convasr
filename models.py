@@ -9,13 +9,14 @@ import apex
 import librosa
 from typing import List
 
-class InputOutputTypeCast(nn.Sequential):
+class InputOutputTypeCast(nn.Module):
 	def __init__(self, model, dtype):
-		super().__init__(model)
+		super().__init__()
+		self.model = model
 		self.dtype = dtype
 
 	def forward(self, x, *args, **kwargs):
-		return super().forward(x.to(self.dtype), *args, **kwargs).to(torch.float32)
+		return self.model(x.to(self.dtype), *args, **kwargs)#.to(x.dtype)
 
 class Decoder(nn.Sequential):
 	def __init__(self, input_size, num_classes, type = None):
@@ -98,7 +99,7 @@ class JasperNet(nn.Module):
 			separable = False, groups = 1,
 			dropout = 0, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
 			temporal_mask = True, nonlinearity = 'relu', inplace = False,
-			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None, normalize_features = True
+			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None, normalize_features = True, normalize_features_eps = 1e-20
 		):
 		super().__init__()
 		dropout_prologue = dropout_prologue if dropout != 0 else 0
@@ -131,15 +132,16 @@ class JasperNet(nn.Module):
 
 		self.num_epilogue_modules = len(epilogue)
 		self.frontend = frontend
-		self.normalize_features = normalize_features
+		self.normalize_features = MaskedInstanceNorm1d(num_input_features, track_running_stats = False, eps = normalize_features_eps) if normalize_features else None
 		self.decoder = Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
 		self.residual = residual
 		self.dict = dict
 
 	def forward(self, x, xlen = None, y = None, ylen = None):
+		#x = x.to(torch.float16)
 		x = x if x.ndim == 2 else x.squeeze(1)
 		x = self.frontend(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.frontend is not None else x
-		x = normalize_features(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.normalize_features else x
+		x = self.normalize_features(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.normalize_features is not None else x
 
 		residual = []
 		for i, subblock in enumerate(self.backbone):
@@ -414,17 +416,21 @@ def compute_capacity(model, scale = 1):
 def normalize_signal(signal, dim = -1, eps = 1e-5):
 	return signal / (signal.abs().max(dim = dim, keepdim = True).values + eps) if signal.numel() > 0 else signal
 
-def normalize_features(features, mask = None, dim = -1, eps = 1e-20):
-	if mask is None:
-		mean = features.mean(dim = dim, keepdim = True)
-		std = features.std(dim = dim, keepdim = True)
-		return (features - mean) / (std + eps)
-	else:
-		xlen = mask.int().sum(dim = dim, keepdim = True)
-		mean = (features * mask).sum(dim = dim, keepdim = True) / xlen
-		features_zero_mean_masked = mask * (features - mean)
-		std = (features_zero_mean_masked.pow(2).sum(dim = dim, keepdim = True) / xlen).sqrt()
-		return features_zero_mean_masked / (std + eps)
+class MaskedInstanceNorm1d(nn.InstanceNorm1d):
+	def forward(self, features, mask = None):
+		if mask is None:
+			#replace by super().forward(features) after fixing eps, here we computes denom=var.sqrt().add(eps), F.instance_norm computes denom=var.add(eps).sqrt()
+			assert self.track_running_stats is False
+			std, mean = torch.std_mean(features, dim = dim, keepdim = True)
+			return (features - mean) / (std + self.eps)
+
+		else:
+			assert self.track_running_stats is False
+			xlen = mask.int().sum(dim = dim, keepdim = True)
+			mean = (features * mask).sum(dim = dim, keepdim = True) / xlen
+			features_zero_mean_masked = mask * (features - mean)
+			std = (features_zero_mean_masked.pow(2).sum(dim = dim, keepdim = True) / xlen).sqrt()
+			return features_zero_mean_masked / (std + self.eps)
 
 def unpad(x, lens):
 	return [e[..., :l] for e, l in zip(x, lens)]
