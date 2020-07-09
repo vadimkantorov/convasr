@@ -132,7 +132,7 @@ class JasperNet(nn.Module):
 
 		self.num_epilogue_modules = len(epilogue)
 		self.frontend = frontend
-		self.normalize_features = MaskedInstanceNorm1d(num_input_features, track_running_stats = False, eps = normalize_features_eps) if normalize_features else None
+		self.normalize_features = MaskedInstanceNorm1d(num_input_features, eps = normalize_features_eps, affine = False, track_running_stats = False) if normalize_features else None
 		self.decoder = Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
 		self.residual = residual
 		self.dict = dict
