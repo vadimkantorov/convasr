@@ -29,6 +29,9 @@ def main(args):
 			json_transcripts = [t for t in json_transcripts if
 				t['ref_char_count'] <= args.skip_transcript_large_than_char]
 
+		for dirty_attribute in ['duration', 'ref_char_count']:
+			[t.pop(dirty_attribute) for t in json_transcripts]
+
 		transcripts.extend(json_transcripts)
 	transcripts = [ru.replace_superscripts(t) for t in transcripts]
 	json.dump(transcripts, open(args.output_path, 'w'), ensure_ascii=False, indent=2, sort_keys=True)
