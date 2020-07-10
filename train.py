@@ -5,7 +5,8 @@ import os
 import random
 import shutil
 import time
-
+import torch.utils.data
+import torch.utils.tensorboard
 import apex
 import datasets
 import decoders
@@ -15,12 +16,9 @@ import models
 import onnxruntime
 import optimizers
 import torch
-import torch.utils.data
-import torch.utils.tensorboard
 import transforms
 import vis
 import utils
-
 
 def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
@@ -50,7 +48,6 @@ def main(args):
 	lang = datasets.Language(args.lang)
 	#TODO: , candidate_sep = datasets.Labels.candidate_sep
 	labels = [datasets.Labels(lang, name = 'char')] + [datasets.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
-	
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, dither = args.dither, dither0 = args.dither0, stft_mode = 'conv' if args.onnx else None)
 	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, frontend = frontend if args.onnx or args.frontend_in_model else None, **(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx else {}))
 
@@ -64,13 +61,19 @@ def main(args):
 		model.eval()
 		model.to(args.device)
 		model.fuse_conv_bn_eval()
+		
+		if args.fp16:
+			model = model.to(torch.float16)
+			#model = models.InputOutputTypeCast(model, dtype = torch.float16)
+		
 		waveform_input = torch.rand(args.onnx_sample_batch_size, args.onnx_sample_time, device = args.device)
 		logits = model(waveform_input)
+
 		torch.onnx.export(model, (waveform_input,), args.onnx, opset_version = args.onnx_opset, export_params = args.onnx_export_params, do_constant_folding = True, input_names = ['x'], output_names = ['logits'], dynamic_axes = dict(x = {0 : 'B', 1 : 'T'}, logits = {0 : 'B', 2: 't'}))
-		onnxrt_session = onnxruntime.InferenceSession(args.onnx)
+		onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
 		onnxruntime_logger_severity_verbose = 0
 		onnxruntime.set_default_logger_severity(onnxruntime_logger_severity_verbose)
-		(logits_, ) = onnxrt_session.run(None, dict(x = waveform_input.cpu().numpy()))
+		(logits_, ) = onnxruntime_session.run(None, dict(x = waveform_input.cpu().numpy()))
 		assert torch.allclose(logits.cpu(), torch.from_numpy(logits_), rtol = 1e-02, atol = 1e-03)
 		return
 
@@ -81,7 +84,7 @@ def main(args):
 
 	val_frontend = models.AugmentationFrontend(frontend, waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob), feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob))
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = val_dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path for val_dataset in [datasets.AudioTextDataset(val_data_path, labels, args.sample_rate, frontend = val_frontend if not args.frontend_in_model else None, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, min_duration = args.min_duration, time_padding_multiple = args.batch_time_padding_multiple)]}
-	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.GreedyNoBlankDecoder() if args.decoder == 'GreedyNoBlankDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
+	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
 	vocab = set(map(str.strip, open(args.vocab))) if args.vocab else set()
 

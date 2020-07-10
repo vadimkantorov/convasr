@@ -9,6 +9,15 @@ import apex
 import librosa
 from typing import List
 
+class InputOutputTypeCast(nn.Module):
+	def __init__(self, model, dtype):
+		super().__init__()
+		self.model = model
+		self.dtype = dtype
+
+	def forward(self, x, *args, **kwargs):
+		return self.model(x.to(self.dtype), *args, **kwargs)#.to(x.dtype)
+
 class Decoder(nn.Sequential):
 	def __init__(self, input_size, num_classes, type = None):
 		if type is None:
@@ -90,7 +99,7 @@ class JasperNet(nn.Module):
 			separable = False, groups = 1,
 			dropout = 0, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
 			temporal_mask = True, nonlinearity = 'relu', inplace = False,
-			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None, normalize_features = True, bpe_only = False
+			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None, normalize_features = True, normalize_features_eps = 1e-20, bpe_only = False
 		):
 		super().__init__()
 		dropout_prologue = dropout_prologue if dropout != 0 else 0
@@ -98,7 +107,7 @@ class JasperNet(nn.Module):
 		dropouts = dropouts if dropout != 0 else [0] * len(dropouts)
 
 		in_width_factor = out_width_factors[0]
-		backbone = nn.ModuleList([ConvBN(kernel_size = kernel_size_prologue, num_channels = (num_input_features, in_width_factor * base_width), dropout = dropout_prologue, stride = stride1, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace)])
+		self.backbone = nn.ModuleList([ConvBN(kernel_size = kernel_size_prologue, num_channels = (num_input_features, in_width_factor * base_width), dropout = dropout_prologue, stride = stride1, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace)])
 		num_channels_residual = []
 		for kernel_size, dropout, out_width_factor in zip(kernel_sizes, dropouts, out_width_factors):
 			for s in range(num_subblocks):
@@ -112,27 +121,28 @@ class JasperNet(nn.Module):
 					num_channels_residual = [num_channels[0]]
 				else:
 					num_channels_residual = []
-				backbone.append(ConvBN(num_channels = num_channels, kernel_size = kernel_size, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace))
+				self.backbone.append(ConvBN(num_channels = num_channels, kernel_size = kernel_size, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace))
 			in_width_factor = out_width_factor
 
 		epilogue = [
 			ConvBN(num_channels = (in_width_factor * base_width, out_width_factors_large[0] * base_width), kernel_size = kernel_size_epilogue, dropout = dropout_epilogue, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
 			ConvBN(num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), kernel_size = 1, dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
 		]
-		backbone.extend(epilogue)
+		self.backbone.extend(epilogue)
 
 		self.num_epilogue_modules = len(epilogue)
 		self.frontend = frontend
-		self.normalize_features = normalize_features
-		self.backbone = backbone
+		self.normalize_features = MaskedInstanceNorm1d(num_input_features, eps = normalize_features_eps, affine = False, track_running_stats = False) if normalize_features else None
 		self.decoder = Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
 		self.residual = residual
 		self.dict = dict
 		self.bpe_only = bpe_only
 
 	def forward(self, x, xlen = None, y = None, ylen = None):
-		x = self.frontend(x if x.ndim == 2 else x.squeeze(1), mask = temporal_mask(x, lengths_fraction=xlen)) if self.frontend is not None else x
-		x = normalize_features(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.normalize_features else x
+		#x = x.to(torch.float16)
+		x = x if x.ndim == 2 else x.squeeze(1)
+		x = self.frontend(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.frontend is not None else x
+		x = self.normalize_features(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.normalize_features is not None else x
 
 		residual = []
 		for i, subblock in enumerate(self.backbone):
@@ -304,6 +314,9 @@ class LogFilterBankFrontend(nn.Module):
 			self.stft = None
 
 	def pad_signal(self, signal):
+		# forces constant padding on the right to avoid padding affecting accuracy
+		# taken from https://github.com/pytorch/pytorch/blob/88fe05e10660706ee557c17eb19c6e5f9c90d84c/torch/functional.py#L459
+		# todo: simplify reshaping and avoid copies by doing pad manually
 		signal_dim = signal.dim()
 		extended_shape = [1] * (3 - signal_dim) + list(signal.size())
 		pad = self.freq_cutoff - 1
@@ -311,22 +324,12 @@ class LogFilterBankFrontend(nn.Module):
 		signal = signal.view(extended_shape)
 
 		left_padded_signal = F.pad(signal, (pad, 0), 'reflect')
-		right_padded_signal = F.pad(left_padded_signal, (0, pad), 'constant', value=0.0)
+		right_padded_signal = F.pad(left_padded_signal, (0, pad), 'constant', value = 0)
 
-		signal = right_padded_signal.view(right_padded_signal.shape[-signal_dim:])
-		return signal
+		return right_padded_signal.view(right_padded_signal.shape[-signal_dim:])
 
-	def stft_magnitude_squared(self, signal):
-		padded_signal = self.pad_signal(signal)
-
-		if self.stft is not None:
-			forward_transform_squared = self.stft(padded_signal).pow(2)
-			real_squared, imag_squared = forward_transform_squared[:, :self.freq_cutoff, :], forward_transform_squared[:, self.freq_cutoff:, :]
-		else:
-			real_squared, imag_squared = padded_signal.stft(self.nfft, hop_length=self.hop_length, win_length=self.win_length, window=self.window, center=False).pow(2).unbind(dim=-1)
-		return real_squared + imag_squared
-
-	def forward(self, signal, mask=None):
+	def forward(self, signal, mask = None):
+		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
 		signal = normalize_signal(signal) if self.normalize_signal else signal
 		signal = signal + self.dither0 * torch.randn_like(signal) if self.dither0 > 0 else signal
 		signal = torch.cat([signal[..., :1], signal[..., 1:] - self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
@@ -334,7 +337,9 @@ class LogFilterBankFrontend(nn.Module):
 		if mask is not None:
 			signal = signal * mask
 
-		power_spectrum = self.stft_magnitude_squared(signal)
+		padded_signal = self.pad_signal(signal)
+		real_squared, imag_squared = self.stft(padded_signal.unsqueeze(dim = 1)).pow(2).split(self.freq_cutoff, dim = 1) if self.stft is not None else padded_signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = False).pow(2).unbind(dim = -1)
+		power_spectrum = real_squared + imag_squared
 		features = self.mel(power_spectrum).log()
 		return features
 
@@ -362,20 +367,23 @@ def compute_capacity(model, scale = 1):
 	return sum(map(torch.numel, model.parameters())) / scale
 
 def normalize_signal(signal, dim = -1, eps = 1e-5):
-	signal = signal.to(torch.float32)
 	return signal / (signal.abs().max(dim = dim, keepdim = True).values + eps) if signal.numel() > 0 else signal
 
-def normalize_features(features, mask = None, dim = -1, eps = 1e-20):
-	if mask is None:
-		mean = features.mean(dim = dim, keepdim = True)
-		std = features.std(dim = dim, keepdim = True)
-		return (features - mean) / (std + eps)
-	else:
-		xlen = mask.sum(dim = dim, keepdim = True)
-		mean = (features * mask).sum(dim = dim, keepdim = True) / xlen
-		features_zero_mean_masked = mask * (features - mean)
-		std = (features_zero_mean_masked.pow(2).sum(dim = dim, keepdim = True) / xlen).sqrt()
-		return features_zero_mean_masked / (std + eps)
+class MaskedInstanceNorm1d(nn.InstanceNorm1d):
+	def forward(self, features, mask = None):
+		if mask is None:
+			#replace by super().forward(features) after fixing eps, here we computes denom=var.sqrt().add(eps), F.instance_norm computes denom=var.add(eps).sqrt()
+			assert self.track_running_stats is False
+			std, mean = torch.std_mean(features, dim = dim, keepdim = True)
+			return (features - mean) / (std + self.eps)
+
+		else:
+			assert self.track_running_stats is False
+			xlen = mask.int().sum(dim = dim, keepdim = True)
+			mean = (features * mask).sum(dim = dim, keepdim = True) / xlen
+			features_zero_mean_masked = mask * (features - mean)
+			std = (features_zero_mean_masked.pow(2).sum(dim = dim, keepdim = True) / xlen).sqrt()
+			return features_zero_mean_masked / (std + self.eps)
 
 def unpad(x, lens):
 	return [e[..., :l] for e, l in zip(x, lens)]
@@ -388,8 +396,8 @@ def reset_bn_running_stats_(model):
 		bn.train()
 	return model
 
-def data_parallel_and_autocast(model, optimizer = None, opt_level = None, **kwargs):
-	data_parallel = torch.cuda.device_count() > 1
+def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, opt_level = None, **kwargs):
+	data_parallel = data_parallel and torch.cuda.device_count() > 1
 
 	if opt_level is None:
 		model = torch.nn.DataParallel(model) if data_parallel else model

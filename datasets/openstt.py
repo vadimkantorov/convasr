@@ -5,15 +5,14 @@ import random
 import itertools
 import argparse
 
-from transcripts import get_duration
-
+import transcripts
 
 def dump(by_group, splits, subset_name, gz = True):
 	for split_name, transcript in by_group.items():
 		input_path = os.path.join(splits, f'{subset_name}_{split_name}.json') + ('.gz' if gz else '')
 		with (gzip.open(input_path, 'wt') if gz else open(input_path, 'w')) as f:
 			json.dump(transcript, f, indent = 2, sort_keys = True, ensure_ascii = False)
-		print(input_path, '|', int(os.path.getsize(input_path) // 1e6), 'Mb',  '|', len(transcript) // 1000, 'K utt |', int(sum(get_duration(t) for t in transcript) / (60 * 60)), 'hours')
+		print(input_path, '|', int(os.path.getsize(input_path) // 1e6), 'Mb',  '|', len(transcript) // 1000, 'K utt |', int(sum(transcripts.compute_duration(t, hours = True) for t in transcript)), 'hours')
 
 def split(by_group, groups, spec, sample_keyword = 'sample'):
 	transcript = [t for group in groups for t in by_group[group]]

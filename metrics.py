@@ -10,6 +10,16 @@ placeholder = '|'
 space = ' '
 silence = placeholder + space
 
+class StemTagger(collections.defaultdict):
+	def __init__(self, lang, tags_path = None):
+		tags = json.load(open(tags_path)) if tags_path is not None else {}
+		self.lang = lang
+		self.stem2tag = {lang.stem(word) : tag for tag, words in tags.items() for word in words}
+
+	def __missing__(self, word):
+		self[key] = self.get(word) or self.stem2tag.get(self.lang.stem(word))
+		return self[key]
+
 def align(hyp, ref, score_sub = -2, score_del = -4, score_ins = -3):
 	aligner = Needleman()
 	aligner.separator = placeholder

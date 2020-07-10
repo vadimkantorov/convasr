@@ -4,6 +4,7 @@ import glob
 import json
 import io
 import sys
+import math
 import time
 import random
 import itertools
@@ -24,7 +25,72 @@ import metrics
 import models
 import ctc
 import transcripts
-import ru as lang
+
+def audio_data_uri(audio_path, sample_rate = None):
+	if isinstance(audio_path, str):
+		wav_bytes = open(audio_path, 'rb').read()
+	else:
+		wav_bytes = audio.write_audio(io.BytesIO(), audio_path, sample_rate).getvalue()
+	
+	return 'data:audio/wav;base64,' + base64.b64encode(wav_bytes).decode()
+
+def label(output_path, transcript, info, page_size, prefix):
+	if isinstance(transcript, str):
+		transcript = json.load(open(transcript))
+	if isinstance(info, str):
+		info = json.load(open(info))
+	transcript = {transcripts.audio_name(t) : t for t in transcript}
+
+	page_count = int(math.ceil(len(info) / page_size))
+	for p in range(page_count):
+		html_path = output_path + f'.page{p}.html'
+		html = open(html_path, 'w')
+		html.write('<html><head><meta charset="UTF-8"><style>figure{margin:0} h6{margin:0}</style></head><body onkeydown="return onkeydown_(event)">')
+		html.write('''<script>
+			function export_user_input()
+			{
+				const data_text_plain_base64_encode_utf8 = str => 'data:text/plain;base64,' + btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1) {return String.fromCharCode(parseInt(p1, 16)) }));
+				
+				const after = Array.from(document.querySelectorAll('input.after'));
+				const data = after.map(input => ({audio_name : input.name, before : input.dataset.before, after : input.value}));
+
+				const href = data_text_plain_base64_encode_utf8(JSON.stringify(data, null, 2));
+				const unixtime = Math.round((new Date()).getTime() / 1000);
+				let a = document.querySelector('a');
+				const {page, prefix} = a.dataset;
+				a.download = `${prefix}_page${page}_time${unixtime}.json`;
+				a.href = href;
+			}
+
+			function onkeydown_(evt)
+			{
+					const tab = evt.keyCode == 9, shift = evt.shiftKey;
+					const tabIndex = (document.activeElement || {tabIndex : -1}).tabIndex;
+					if(tab)
+					{
+							const newTabIndex = shift ? Math.max(0, tabIndex - 1) : tabIndex + 1;
+							const newElem = document.querySelector(`[tabindex="${newTabIndex}"`);
+							if(newElem)
+									newElem.focus();
+							return false;
+					}
+					return true;
+			}
+		</script>''')
+		html.write(f'<a data-page="{p}" data-prefix="{prefix}" download="export.json" onclick="export_user_input(); return true" href="#">Export</a>\n')
+		
+		k = p * page_size
+		for j, i in enumerate(info[k : k + page_size]):
+			i['after'] = i.get('after', '')
+			t = transcript[i['audio_name']]
+			html.write('<hr/>\n')
+			html.write(f'<figure><figcaption>page {p}/{page_count}:<strong>{k + j}</strong><pre>{transcripts.audio_name(t)}</pre></figcaption><audio style="width:100%" controls src="{audio_data_uri(t["audio_path"][len("/data/"):])}"></audio><figcaption><pre>{t["ref"]}</pre></figcaption></figure>')
+			html.write('<h6>before</h6>')
+			html.write('<pre name="{audio_name}" class="before">{before}</pre>'.format(**i))
+			html.write('<h6>after</h6>')
+			html.write('<input tabindex="{tabindex}" name="{audio_name}" class="after" type="text" value="{after}" data-before="{before}">'.format(tabindex = j, **i))
+		html.write('</body></html>')
+		print(html_path)
 
 def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = []):
 	if isinstance(transcript, str):
@@ -41,9 +107,9 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	fmt_begin_end = 'data-begin="{begin}" data-end="{end}"'.format
 
 	html = open(html_path, 'w')
-	html.write('<html><head><meta charset="UTF-8"><style>a {text-decoration: none;} .channel0 .hyp{padding-right:150px} .channel1 .hyp{padding-left:150px}     .ok{background-color:green} .m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue;' + ('display:none' if len(signal) == 1 else '') + '} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
+	html.write('<html><head><meta charset="UTF-8"><style>a {text-decoration: none;} .channel0 .hyp{padding-right:150px} .channel1 .hyp{padding-left:150px} .ok{background-color:green} .m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue;' + ('display:none' if len(signal) == 1 else '') + '} .reference{opacity:0.4} .channel{margin:0px}</style></head><body>')
 	html.write(f'<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>')
-	html.writelines(f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="ontimeupdate_(event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="data:audio/wav;base64,{base64.b64encode(wav).decode()}"></audio></figure>' for c, wav in enumerate(audio.write_audio(io.BytesIO(), signal[channel], sample_rate).getvalue() for channel in ([0, 1] if len(signal) == 2 else []) + [...]))
+	html.writelines(f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="ontimeupdate_(event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="{uri}"></audio></figure>' for c, uri in enumerate(audio_data_uri(signal[channel], sample_rate) for channel in ([0, 1] if len(signal) == 2 else []) + [...]))
 	html.write(f'<pre class="channel"><h3 class="channel0 channel">hyp #0:<span class="subtitle"></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span class="subtitle"></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span class="subtitle"></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span class="subtitle"></span></h3></pre><hr/><table style="width:100%">')
 	html.write('<tr>' + ('<th>begin</th><th>end</th><th>dur</th><th style="width:50%">hyp</th>' if has_hyp else '') + ('<th style="width:50%">ref</th><th>begin</th><th>end</th><th>dur</th><th>cer</th>' if has_ref else '') + '<th>speaker</th></tr>')
 	html.writelines(f'<tr class="channel{c}">'+ (f'<td class="top">{fmt_link(0, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(hyp, ij = True))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}<template>{word_alignment(t["words"], tag = "", hyp = True)}</template></td>' if has_hyp else '') + (f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}<template>{word_alignment(t["words"], tag = "", ref = True)}</template></td><td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td><td class="top">{t["cer"]:.2%}</td>' if ref else ('<td></td>' * 5 if has_ref else '')) + f'''<td class="top {ok and 'ok'}">{speaker}</td></tr>''' for t in transcripts.sort(transcript) for ok in [t in filtered_transcript] for c, speaker, ref, hyp in [(t['channel'], t.get('speaker', '') or 'N/A', t['alignment']['ref'], t['alignment']['hyp'])] )
@@ -168,12 +234,12 @@ def logits(logits, audio_name, MAX_ENTROPY = 1.0):
 		html.write('<h4>{audio_name} | cer: {cer:.02f}</h4>'.format(**r))
 		html.write(word_alignment(r['words']))
 		html.write('<img onclick="onclick_(event)" style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(encoded = base64.b64encode(buf.getvalue()).decode()))	
-		html.write('<audio style="width:100%" controls src="data:audio/wav;base64,{encoded}"></audio><hr/>'.format(encoded = base64.b64encode(open(r['audio_path'], 'rb').read()).decode()))
+		html.write('<audio style="width:100%" controls src="{audio_data_uri(r["audio_path"])}"></audio><hr/>')
 	html.write('</body></html>')
 	print('\n', logits_path)
 
-def errors(input_path, include = [], exclude = [], audio = False, output_file_name = None, sortdesc = None, topk = None, duration = None, cer = None, wer = None, mer = None, filter_transcripts = None):
-	include, exclude = (sum([open(file_path).read().splitlines() for file_path in clude], []) for clude in [include, exclude])
+def errors(input_path, include = [], exclude = [], audio = False, output_path = None, sortdesc = None, topk = None, duration = None, cer = None, wer = None, mer = None, filter_transcripts = None, strip_audio_path_prefix = None):
+	include, exclude = (set(sum([list(map(transcripts.audio_name, json.load(open(file_path)))) if file_path.endswith('.json') else open(file_path).read().splitlines() for file_path in clude], [])) for clude in [include, exclude])
 	read_transcript = lambda path: list(filter(lambda r: (not include or r['audio_name'] in include) and (not exclude or r['audio_name'] not in exclude), json.load(open(path)) if isinstance(path, str) else path)) if path is not None else []
 	ours, theirs = transcripts.prune(read_transcript(input_path[0]), duration = duration, cer = cer, wer = wer, mer = mer), [{r['audio_name'] : r for r in read_transcript(transcript)} for transcript in input_path[1:]]
 	if filter_transcripts is None:
@@ -193,9 +259,9 @@ def errors(input_path, include = [], exclude = [], audio = False, output_file_na
 
 
 	# TODO: add sorting https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
-	output_file_name = output_file_name or (input_path[0] + (include[0].split('subset')[-1] if include else '') + '.html')
+	html_path = output_path or (input_path[0] + '.html')
 	
-	f = open(output_file_name , 'w')
+	f = open(html_path , 'w')
 	f.write('<html><meta charset="utf-8"><style> table{border-collapse:collapse; width: 100%;} audio {width:100%} .br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap} th.col{width:80px}</style>')
 	f.write('<body><table><tr><th></th><th class="col">cer_easy</th><th class="col">cer</th><th class="col">wer_easy</th><th class="col">wer</th><th class="col">mer</th><th></th></tr>')
 	f.write('<tr><td><strong>averages<strong></td></tr>')
@@ -207,9 +273,9 @@ def errors(input_path, include = [], exclude = [], audio = False, output_file_na
 				input_name=os.path.basename(input_path[i]), cer_easy=metrics.nanmean(c, 'cer_easy'), cer=metrics.nanmean(c, 'cer'), wer_easy=metrics.nanmean(c, 'wer_easy'), wer=metrics.nanmean(c, 'wer'),
 				mer=metrics.nanmean(c, 'mer')) for i, c in enumerate(zip(*labels_transcripts))))
 	f.write('<tr><td>&nbsp;</td></tr>')
-	f.write('\n'.join(f'''<tr class="first"><td colspan="6">''' + (f'<audio controls src="data:audio/wav;base64,{base64.b64encode(open(utt[0]["audio_path"], "rb").read()).decode()}"></audio>' if audio else '') + f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{word_alignment(utt[0], ref = True, flat = True)}</td><td>{word_alignment(utt[0], ref = True, flat = True)}</td></tr>' + '\n'.join(f'<tr class="any"><td class="br">{os.path.basename(input_path[i])}</td><td>{a["cer_easy"]:.02%}</td><td>{a["cer"]:.02%}</td><td>{a["wer_easy"]:.02%}</td><td>{a["wer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{word_alignment(a["words"])}</td><td>{word_alignment(a, hyp = True, flat = True)}</td></tr>' for i, a in enumerate(utt)) for utt in cat))
+	f.write('\n'.join(f'''<tr class="first"><td colspan="6">''' + (f'<audio controls src="{audio_data_uri(utt[0]["audio_path"][len(strip_audio_prefix):])}"></audio>' if audio else '') + f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{word_alignment(utt[0], ref = True, flat = True)}</td><td>{word_alignment(utt[0], ref = True, flat = True)}</td></tr>' + '\n'.join(f'<tr class="any"><td class="br">{os.path.basename(input_path[i])}</td><td>{a["cer_easy"]:.02%}</td><td>{a["cer"]:.02%}</td><td>{a.get("wer_easy", 0):.02%}</td><td>{a["wer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{word_alignment(a["words"])}</td><td>{word_alignment(a, hyp = True, flat = True)}</td></tr>' for i, a in enumerate(utt)) for utt in cat))
 	f.write('</table></body></html>')
-	print(output_file_name)
+	print(html_path)
 
 def audiosample(input_path, output_path, K):
 	transcript = json.load(open(input_path))
@@ -226,17 +292,23 @@ def audiosample(input_path, output_path, K):
 		random.shuffle(transcript)
 		for t in transcript[:K]:
 			try:
-				encoded = base64.b64encode(open(os.path.join(args.dataset_root, t['audio_path']), 'rb').read()).decode()
+				data_uri = audio_data_uri(os.path.join(args.dataset_root, t['audio_path']))
 			except:
 				f.write('<tr><td>file not found: {audio_path}</td></tr>'.format(**t))
 				continue
-			f.write('<tr><td>{audio_path}</td><td><audio controls src="data:audio/wav;base64,{encoded}"/></td><td>{ref}</td></tr>\n'.format(encoded = encoded, **t))
+			f.write('<tr><td>{audio_path}</td><td><audio controls src="{data_uri}"/></td><td>{ref}</td></tr>\n'.format(encoded = encoded, **t))
 		f.write('</table>')
 
 	print(output_path)
 
-def summary(input_path):
+def summary(input_path, lang):
+	lang = datasets.Language(lang)
 	transcript = json.load(open(input_path))
+	for t in transcript:
+		hyp, ref = map(lang.normalize_text, [t['hyp'], t['ref']])
+		t['cer'] = t.get('cer', metrics.cer(hyp, ref))
+		t['wer'] = t.get('wer', metrics.wer(hyp, ref))
+	
 	cer_, wer_ = [torch.tensor([t[k] for t in transcript]) for k in ['cer', 'wer']]
 	cer_avg, wer_avg = float(cer_.mean()), float(wer_.mean())
 	print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')
@@ -275,8 +347,8 @@ def summary(input_path):
 	plt.subplots_adjust(hspace = 0.4)
 	plt.savefig(input_path + '.png', dpi = 150)
 
-def tabulate(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe, der):
-	labels = datasets.Labels(lang)
+def tabulate(experiments_dir, experiment_id, entropy, loss, cer10, cer15, cer20, cer30, cer40, cer50, per, wer, json_, bpe, der, lang):
+	labels = datasets.Labels(datasets.Language(lang))
 
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
@@ -333,6 +405,14 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
 
+	cmd = subparsers.add_parser('label')
+	cmd.add_argument('--transcript', '-i')
+	cmd.add_argument('--info')
+	cmd.add_argument('--output-path', '-o')
+	cmd.add_argument('--page-size', type = int, default = 100)
+	cmd.add_argument('--prefix', default = 'export')
+	cmd.set_defaults(func = label)
+
 	cmd = subparsers.add_parser('transcript')
 	cmd.add_argument('--transcript', '-i')
 	cmd.add_argument('--mono', action = 'store_true')
@@ -342,16 +422,17 @@ if __name__ == '__main__':
 
 	cmd = subparsers.add_parser('errors')
 	cmd.add_argument('input_path', nargs = '+', default = ['data/transcripts.json'])
+	cmd.add_argument('--output-path', '-o')
 	cmd.add_argument('--include', nargs = '*', default = [])
 	cmd.add_argument('--exclude', nargs = '*', default = [])
 	cmd.add_argument('--audio', action = 'store_true')
-	cmd.add_argument('--output-file-name', '-o')
 	cmd.add_argument('--sortdesc', choices = ['cer', 'wer', 'mer', 'cer_easy'])
 	cmd.add_argument('--topk', type = int)
-	parser.add_argument('--cer', type = transcripts.number_tuple)
-	parser.add_argument('--wer', type = transcripts.number_tuple)
-	parser.add_argument('--mer', type = transcripts.number_tuple)
-	parser.add_argument('--duration', type = transcripts.number_tuple)
+	cmd.add_argument('--cer', type = transcripts.number_tuple)
+	cmd.add_argument('--wer', type = transcripts.number_tuple)
+	cmd.add_argument('--mer', type = transcripts.number_tuple)
+	cmd.add_argument('--duration', type = transcripts.number_tuple)
+	cmd.add_argument('--strip-audio-path-prefix', default = '')
 	cmd.set_defaults(func = errors)
 
 	cmd = subparsers.add_parser('tabulate')
@@ -370,10 +451,12 @@ if __name__ == '__main__':
 	cmd.add_argument('--json', dest = "json_", action = 'store_true')
 	cmd.add_argument('--bpe', default = 'char')
 	cmd.add_argument('--der', action = 'store_true')
+	cmd.add_argument('--lang', default = 'ru')
 	cmd.set_defaults(func = tabulate)
 
 	cmd = subparsers.add_parser('summary')
 	cmd.add_argument('input_path')
+	cmd.add_argument('--lang', default = 'ru')
 	cmd.set_defaults(func = summary)
 
 	cmd = subparsers.add_parser('words')

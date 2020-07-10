@@ -7,11 +7,15 @@ import models
 f2s = lambda signal: (signal * torch.iinfo(torch.int16).max).short()
 s2f = lambda signal: signal.float() / torch.iinfo(torch.int16).max
 
-def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize = True, mono = True, byte_order = 'little', backend = 'sox'):
+def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize = True, mono = True, byte_order = 'little', backend = 'sox', raw_s16le = None, raw_sample_rate = None, raw_num_channels = None):
 	try:
-		if audio_path.endswith('.wav'):
+		if audio_path is None or audio_path.endswith('.raw'):
+			if audio_path is not None:
+				with open(audio_path, 'rb') as f:
+					raw_s16le = f.read()
+			sample_rate_, signal = raw_sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(raw_s16le, byte_order = byte_order)).reshape(-1, raw_num_channels).t()
+		elif audio_path.endswith('.wav'):
 			sample_rate_, signal = scipy.io.wavfile.read(audio_path)
-			#signal.setflags(write = 1)
 			signal = torch.as_tensor(signal[None, :] if len(signal.shape) == 1 else signal.T)
 		elif backend == 'sox':
 			num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path])) if not mono else 1

@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn.functional as F
 
@@ -60,9 +61,7 @@ def sort_key(t):
 def group_key(t):
 	return t.get('audio_path')
 
-number_tuple = lambda s: tuple(map(lambda ip: (float(ip[1]) if '.' in ip[1] else int(ip[1])) if ip[1] else float(['-inf', 'inf'][ip[0]]), enumerate((s if '-' in s else s + '-' + s).split('-'))))
-
-def prune(transcript, align_boundary_words = False, cer = None, wer = None, mer = None, duration = None, gap = None, num_speakers = None, audio_name = None, unk = None):
+def prune(transcript, align_boundary_words = False, cer = None, wer = None, mer = None, duration = None, gap = None, num_speakers = None, audio_name = None, unk = None, groups = None):
 	is_aligned = lambda w: w['type'] == 'ok'
 	duration_check = lambda t: duration is None or duration[0] <= compute_duration(t) <= duration[1]
 	boundary_check = lambda t: ((not t['words']) or (not align_boundary_words) or (is_aligned(t['words'][0]) and is_aligned(t['words'][-1])))
@@ -72,13 +71,19 @@ def prune(transcript, align_boundary_words = False, cer = None, wer = None, mer 
 	cer_check = lambda t: cer is None or t.get('cer') is None or cer[0] <= t['cer'] <= cer[1]
 	wer_check = lambda t: wer is None or t.get('wer') is None or wer[0] <= t['wer'] <= wer[1]
 	mer_check = lambda t: mer is None or t.get('mer') is None or mer[0] <= t['mer'] <= mer[1]
-	
+	groups_check = lambda t: groups is None or t.get('group') is None or t['group'] in groups
+
 	prev = None
 	for t in transcript:
-		if unk_check(t) and duration_check(t) and cer_check(t) and wer_check(t) and mer_check(t) and boundary_check(t) and gap_check(t, prev) and speakers_check(t):
+		if groups_check(t) and unk_check(t) and duration_check(t) and cer_check(t) and wer_check(t) and mer_check(t) and boundary_check(t) and gap_check(t, prev) and speakers_check(t):
 			prev = t
 			yield t
 
 def compute_duration(t, hours = False):
-	seconds = t['end'] - t['begin']
+	seconds = t.get('end', 0) - t.get('begin', 0)
 	return seconds / (60 * 60) if hours else seconds
+
+def audio_name(t):
+	return t.get('audio_name') or os.path.basename(t['audio_path'])
+	
+number_tuple = lambda s: tuple(map(lambda ip: (float(ip[1]) if '.' in ip[1] else int(ip[1])) if ip[1] else float(['-inf', 'inf'][ip[0]]), enumerate((s if '-' in s else s + '-' + s).split('-'))))

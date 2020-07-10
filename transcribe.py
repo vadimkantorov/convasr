@@ -29,13 +29,14 @@ def setup(args):
 	labels = datasets.Labels(datasets.Language(checkpoint['args']['lang']), name = 'char')
 	model = getattr(models, args.model or checkpoint['args']['model'])(args.num_input_features, [len(labels)], frontend = frontend, dict = lambda logits, log_probs, olen, **kwargs: (logits[0], olen[0]))
 	model.load_state_dict(checkpoint['model_state_dict'], strict = False)
+	#model = model.to(torch.float32)
 	model = model.to(args.device)
 	model.eval()
 	model.fuse_conv_bn_eval()
 	if args.device != 'cpu':
 		model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16)
 	decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels, lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)
-	return labels, model, decoder
+	return labels, frontend, model, decoder
 
 def main(args):
 	os.makedirs(args.output_path, exist_ok = True)
@@ -43,7 +44,7 @@ def main(args):
 	exclude = set([os.path.splitext(basename)[0] for basename in os.listdir(args.output_path) if basename.endswith('.json')] if args.skip_processed else [])
 	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
 
-	labels, model, decoder = setup(args)
+	labels, frontend, model, decoder = setup(args)
 	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers) 
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
 
@@ -59,7 +60,7 @@ def main(args):
 
 		tic = time.time()
 		y, ylen = y.to(args.device), ylen.to(args.device)
-		log_probs, olen = model(x.to(args.device), xlen.to(args.device))
+		log_probs, olen = model(x.squeeze(1).to(args.device), xlen.to(args.device))
 
 		#speech = vad.detect_speech(x.squeeze(1), args.sample_rate, args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)
 		#speech = vad.upsample(speech, log_probs)
@@ -125,7 +126,7 @@ if __name__ == '__main__':
 	parser.add_argument('--checkpoint', required = True)
 	parser.add_argument('--model')
 	parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
-	parser.add_argument('--ext', default = ['wav', 'mp3'])
+	parser.add_argument('--ext', default = ['wav', 'mp3', 'opus', 'm4a'])
 	parser.add_argument('--skip-processed', action = 'store_true')
 	parser.add_argument('--skip-file-longer-than-hours', type=float, help = 'skip files with duration more than specified hours') 
 	parser.add_argument('--input-path', '-i', nargs = '+')
