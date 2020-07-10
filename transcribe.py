@@ -44,7 +44,7 @@ def main(args):
 	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
 
 	labels, frontend, model, decoder = setup(args)
-	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers, exclude=exclude, shuffle=args.shuffle)
+	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers, exclude=exclude)
 	num_examples = len(val_dataset.examples)
 	print("Examples count: ", num_examples)
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
@@ -165,7 +165,6 @@ if __name__ == '__main__':
 	parser.add_argument('--html', action = 'store_true')
 	parser.add_argument('--txt', action = 'store_true', help = 'store whole transcript in txt format need for assessments')
 	parser.add_argument('--mono', action='store_true')
-	parser.add_argument('--shuffle', action='store_true')
 	parser.add_argument('--max-ref-len', type=int, default=45000)
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3

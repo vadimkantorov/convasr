@@ -18,7 +18,7 @@ import transcripts
 import random
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, data_paths, labels, sample_rate, frontend = None, speakers = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, segmented = False, time_padding_multiple = 1, audio_backend = 'sox', exclude=[], shuffle=False):
+	def __init__(self, data_paths, labels, sample_rate, frontend = None, speakers = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, segmented = False, time_padding_multiple = 1, audio_backend = 'sox', exclude=[]):
 		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
@@ -42,8 +42,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.examples = list(filter(lambda example: (min_duration is None or min_duration <= duration(example)) and (max_duration is None or duration(example) <= max_duration), self.examples))
 		self.examples = [e for e in self.examples if transcripts.audio_name(e[0]) not in set(exclude)]
 
-		if shuffle:
-			random.shuffle(self.examples)
 
 	def __getitem__(self, index):
 		transcript = self.examples[index]
