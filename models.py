@@ -419,9 +419,9 @@ def normalize_signal(signal, dim = -1, eps = 1e-5):
 class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 	def forward(self, features, mask = None):
 		if mask is None:
-			#replace by super().forward(features) after fixing eps, here we computes denom=var.sqrt().add(eps), F.instance_norm computes denom=var.add(eps).sqrt()
+			#replace by super().forward(features) after fixing eps, here we compute denom=var.sqrt().add(eps), F.instance_norm computes denom=var.add(eps).sqrt()
 			assert self.track_running_stats is False
-			std, mean = torch.std_mean(features, dim = dim, keepdim = True)
+			std, mean = torch.std_mean(features, dim = -1, keepdim = True)
 			return (features - mean) / (std + self.eps)
 
 		else:
