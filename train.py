@@ -19,6 +19,7 @@ import torch.utils.data
 import torch.utils.tensorboard
 import transforms
 import vis
+import utils
 
 
 def set_random_seed(seed):
@@ -213,6 +214,7 @@ def main(args):
 		if os.path.exists(tensorboard_dir_checkpoint) and not os.path.exists(tensorboard_dir):
 			shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
 	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
+	performance_meter = utils.PerformanceMeter()
 	with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
 		json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
 
@@ -246,6 +248,8 @@ def main(args):
 
 					if iteration % args.log_iteration_interval == 0:
 						tensorboard.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
+						for name, value in performance_meter.metrics.items():
+							tensorboard.add_scalar(name, value, iteration)
 						for param_name, param in models.master_module(model).named_parameters():
 							if param.grad is None:
 								continue
@@ -256,7 +260,8 @@ def main(args):
 							if args.log_weight_distribution:
 								tensorboard.add_histogram(tag, param, iteration)
 								tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
-					
+
+					performance_meter.update_memory_metrics()
 					optimizer.zero_grad()
 					scheduler.step(iteration)
 				
@@ -265,7 +270,8 @@ def main(args):
 			toc_bwd = time.time()
 
 			ms = lambda sec: sec * 1000
-			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = ms(toc_data - tic), ms(toc_fwd - toc_data), ms(toc_bwd - toc_fwd), ms(toc_bwd - toc_data)	
+			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = ms(toc_data - tic), ms(toc_fwd - toc_data), ms(toc_bwd - toc_fwd), ms(toc_bwd - toc_data)
+			performance_meter.update_time_metrics(time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model)
 			time_ms_avg = exp_moving_avg(time_ms_avg, time_ms_data + time_ms_model, max = 10_000)
 			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}> loss: {loss_cur:.2f} <{loss_avg:.2f}> time: ({"x".join(map(str, x.shape))}) {time_ms_data:.2f}+{time_ms_fwd:4.0f}+{time_ms_bwd:4.0f} <{time_ms_avg:.0f}> | lr: {lr:.5f}')
 			iteration += 1
@@ -282,6 +288,7 @@ def main(args):
 		sampler.batch_idx = 0
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
 		evaluate_model(val_data_loaders, epoch+1, iteration)
+	evaluate_model(val_data_loaders, epoch + 1, iteration)
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
