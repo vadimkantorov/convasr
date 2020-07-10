@@ -45,7 +45,7 @@ def main(args):
 
 	labels, frontend, model, decoder = setup(args)
 	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers, exclude=exclude)
-	num_examples = len(val_dataset.examples)
+	num_examples = len(val_dataset)
 	print("Examples count: ", num_examples)
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
 
@@ -62,7 +62,7 @@ def main(args):
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
 
 		if max(ylen) > args.max_ref_len:
-			print(f'Too large refs [{ylen}] [{audio_path}]. Skipping.')
+			print(f'Too large refs ylen = [{ylen}] > max_ref_len = [{args.max_ref_len}] [{audio_path}]. Skipping.')
 			continue
 
 		tic = time.time()
