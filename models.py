@@ -423,21 +423,21 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 		self.temporal_mask = temporal_mask
 		self.legacy = legacy
 		
-	def forward(self, features, mask = None):
+	def forward(self, x, mask = None):
 		if not self.temporal_mask or mask is None:
-			if legacy:
+			if self.legacy:
 				assert self.track_running_stats is False
-				std, mean = torch.std_mean(features, dim = -1, keepdim = True)
-				return (features - mean) / (std + self.eps)
+				std, mean = torch.std_mean(x, dim = -1, keepdim = True)
+				return (x - mean) / (std + self.eps)
 			else:
-				return super().forward(features)
+				return super().forward(x)
 		else:
 			assert self.track_running_stats is False
 			xlen = mask.int().sum(dim = dim, keepdim = True)
-			mean = (features * mask).sum(dim = dim, keepdim = True) / xlen
-			features_zero_mean_masked = mask * (features - mean)
-			std = (features_zero_mean_masked.pow(2).sum(dim = dim, keepdim = True) / xlen).sqrt()
-			return features_zero_mean_masked / (std + self.eps)
+			mean = (x * mask).sum(dim = dim, keepdim = True) / xlen
+			zero_mean_masked = mask * (x - mean)
+			std = (zero_mean_masked.pow(2).sum(dim = dim, keepdim = True) / xlen).sqrt()
+			return zero_mean_masked / (std + self.eps)
 
 def unpad(x, lens):
 	return [e[..., :l] for e, l in zip(x, lens)]
