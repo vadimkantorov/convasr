@@ -57,13 +57,21 @@ class ConvSamePadding(nn.Sequential):
 			)
 
 class ConvBN(nn.Module):
-	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, batch_norm_momentum = 0.1, groups = 1, num_channels_residual: List = [], repeat = 1, dilation = 1, separable = False, temporal_mask = True, inplace = False, nonlinearity = 'relu'):
+	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, groups = 1, num_channels_residual: List = [], repeat = 1, dilation = 1, separable = False, temporal_mask = True,
+		nonlinearity = ('relu',), nonlinearity_reference = True,
+		batch_norm_momentum = 0.1, batch_norm_inplace = False,
+		inplace = False
+	):
+		if inplace:
+			batch_norm_inplace = False
+			nonlinearity_reference = False
+
 		super().__init__()
 		self.conv = nn.ModuleList(ConvSamePadding(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, separable = separable, bias = False, groups = groups) for i in range(repeat))
-		self.bn = nn.ModuleList(BatchNorm1dInplace(num_channels[1], momentum = batch_norm_momentum) if inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat))
+		self.bn = nn.ModuleList(BatchNorm1dInplace(num_channels[1], momentum = batch_norm_momentum) if batch_norm_inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat))
 		self.conv_residual = nn.ModuleList(nn.Identity() if in_channels is None else nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual)
-		self.bn_residual = nn.ModuleList(nn.Identity() if in_channels is None else BatchNorm1dInplace(num_channels[1], momentum = batch_norm_momentum) if inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual)
-		self.activation = ResidualActivation(nonlinearity, dropout, inplace = inplace)
+		self.bn_residual = nn.ModuleList(nn.Identity() if in_channels is None else BatchNorm1dInplace(num_channels[1], momentum = batch_norm_momentum) if batch_norm_inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual)
+		self.activation = ResidualActivation(nonlinearity, dropout, reference = nonlinearity_reference, invertible = batch_norm_inplace)
 		self.temporal_mask = temporal_mask
 
 	def forward(self, x, lengths_fraction = None, residual: List = []):
@@ -98,7 +106,7 @@ class JasperNet(nn.Module):
 			base_width = 128, out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
 			separable = False, groups = 1,
 			dropout = 0, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
-			temporal_mask = True, nonlinearity = 'relu', inplace = False,
+			temporal_mask = True, nonlinearity = ('relu',), inplace = False,
 			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None,
 			bpe_only = False,
 			normalize_features = True, normalize_features_eps = 1e-20, normalize_features_track_running_stats = False, normalize_features_legacy = True, normalize_features_temporal_mask = True
@@ -182,46 +190,69 @@ class JasperNet(nn.Module):
 			subblock.fuse_conv_bn_eval()
 
 class ResidualActivation(nn.Module):
-	def __init__(self, nonlinearity, dropout = 0, inplace = False):
+	def __init__(self, nonlinearity, dropout = 0, invertible = False, reference = False):
 		super().__init__()
 		self.nonlinearity = nonlinearity
-		self.inplace = inplace
 		self.dropout = dropout
+		self.reference = reference
+		self.invertible = invertible
 
 	def forward(self, y, residual: List = []):
-		if self.inplace is True:
-			y = ResidualActivation.Function.apply(self.nonlinearity, y, *residual)
+		if self.reference:
+			y = sum([y] + residual) if residual else y
+			y = F.dropout(getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = True), p = self.dropout, training = self.training)
+		
+		elif self.invertible:
+			y = ResidualActivation.InvertibleResidualFunction.apply(self.nonlinearity, self.invertible, y, *residual)
 			y = F.dropout(y, p = self.dropout, training = self.training)
+		
 		else:
-			y = y + sum(residual)
-			if self.nonlinearity == 'relu':
-				y = relu_dropout(y, p = self.dropout, inplace = not (self.inplace is False), training = self.training) # F.dropout(F.relu(y, inplace = True), p = self.dropout, training = self.training)
-			elif self.nonlinearity and self.nonlinearity[0] in ['leaky_relu', 'hardtanh']:
-				y = F.dropout(getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = not (self.inplace is False)), p = self.dropout, training = self.training)
+			for r in residual:
+				y += r
+			
+			if self.self.dropout > 0 and self.training and self.nonlinearity[0] == 'relu':
+				y = relu_dropout(y, p = self.dropout, training = self.training, inplace = True)
+			else:
+				y = getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = True)
+				y = F.dropout(y, p = self.dropout, training = self.training)
+
 		return y
 
-	class Function(torch.autograd.function.Function):
+	class InvertibleResidualFunction(torch.autograd.function.Function):
 		@staticmethod
-		def forward(self, nonlinearity, x, *residual):
+		def forward(self, nonlinearity, invertible, x, *residual):
 			self.nonlinearity = nonlinearity
-			x_ = x.data
+			self.invertible = invertible
+			assert self.nonlinearity and self.nonlinearity[0] in ['relu', 'leaky_relu', 'hardtanh']
+			assert not self.invertible or self.nonlinearity[0] == 'leaky_relu'
+
+			y = x.data
 			for r in residual:
-				x_ += r
-			if self.nonlinearity and self.nonlinearity[0] == 'leaky_relu':
-				F.leaky_relu_(x_, self.nonlinearity[1])
-			self.save_for_backward(x, *residual)
-			return x
+				y += r
+			
+			y = getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = True)
+			self.save_for_backward(y, *residual)
+			return y
 
 		@staticmethod
 		def backward(self, grad_output):
 			x, *residual = self.saved_tensors
 			x_ = x.data
-			if self.nonlinearity and self.nonlinearity[0] == 'leaky_relu':
-				mask = torch.ones_like(grad_output).masked_fill_(x < 0, self.nonlinearity[1])
-				grad_output *= mask
+			
+			mask = torch.ones_like(grad_output)
+			if self.nonlinearity[0] == 'relu'
+				mask = mask.masked_fill_(x < 0, 0)
+			elif self.nonlinearity[0] == 'leaky_relu':
+				mask = mask.masked_fill_(x < 0, self.nonlinearity[1])
+			elif self.nonlinearity[0] == 'hardtanh':
+				mask = mask.masked_fill_((x < self.nonlinearity[1]).logical_or_(x > self.nonlinearity[2])), 0)
+			
+			grad_output *= mask
+			if self.invertible:
 				x_ /= mask
-			for r in residual:
-				x_ -= r
+				for r in residual:
+					x_ -= r
+
 			return (None, ) + (grad_output,) * (1 + len(residual))
 
 class BatchNorm1dInplace(nn.BatchNorm1d):
@@ -250,9 +281,8 @@ def relu_dropout(x, p = 0, inplace = False, training = False):
 		return x.clamp_(min = 0) if inplace else x.clamp(min = 0)
 
 	p1m = 1 - p
-	mask = torch.rand_like(x) < p1m
-	mask &= (x > 0)
-	mask.logical_not_()
+	mask = torch.rand_like(x) > p1m
+	mask |= (x < 0)
 	return x.masked_fill_(mask, 0).div_(p1m) if inplace else x.masked_fill(mask, 0).div(p1m)
 
 class AugmentationFrontend(nn.Module):
