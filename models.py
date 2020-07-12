@@ -253,7 +253,7 @@ class ResidualActivation(nn.Module):
 				for r in residual:
 					x_ -= r
 
-			return (None, ) + (grad_output,) * (1 + len(residual))
+			return (None, None) + (grad_output,) * (1 + len(residual))
 
 class BatchNorm1dInplace(nn.BatchNorm1d):
 	def forward(self, input):
