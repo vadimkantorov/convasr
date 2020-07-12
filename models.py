@@ -203,7 +203,7 @@ class ResidualActivation(nn.Module):
 			y = F.dropout(getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = True), p = self.dropout, training = self.training)
 		
 		elif self.invertible:
-			y = ResidualActivation.InvertibleResidualFunction.apply(self.nonlinearity, self.invertible, y, *residual)
+			y = ResidualActivation.InvertibleResidualInplaceFunction.apply(self.nonlinearity, self.invertible, y, *residual)
 			y = F.dropout(y, p = self.dropout, training = self.training)
 		
 		else:
@@ -218,7 +218,7 @@ class ResidualActivation(nn.Module):
 
 		return y
 
-	class InvertibleResidualFunction(torch.autograd.function.Function):
+	class InvertibleResidualInplaceFunction(torch.autograd.function.Function):
 		@staticmethod
 		def forward(self, nonlinearity, invertible, x, *residual):
 			self.nonlinearity = nonlinearity
