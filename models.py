@@ -100,7 +100,8 @@ class JasperNet(nn.Module):
 			dropout = 0, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
 			temporal_mask = True, nonlinearity = 'relu', inplace = False,
 			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None,
-		     	normalize_features = True, normalize_features_eps = 1e-20, normalize_features_track_running_stats = False, normalize_features_legacy = True, normalize_features_temporal_mask = True
+			bpe_only = False,
+		  normalize_features = True, normalize_features_eps = 1e-20, normalize_features_track_running_stats = False, normalize_features_legacy = True, normalize_features_temporal_mask = True
 		):
 		super().__init__()
 		dropout_prologue = dropout_prologue if dropout != 0 else 0
@@ -137,6 +138,7 @@ class JasperNet(nn.Module):
 		self.decoder = Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
 		self.residual = residual
 		self.dict = dict
+		self.bpe_only = bpe_only
 
 	def forward(self, x, xlen = None, y = None, ylen = None):
 		#x = x.to(torch.float16)
@@ -163,7 +165,7 @@ class JasperNet(nn.Module):
 
 		if y is not None and ylen is not None:
 			loss = [F.ctc_loss(l.permute(2, 0, 1), y[:, i], olen[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') / ylen[:, 0] for i, l in enumerate(log_probs)]
-			aux = dict(loss = sum(loss))
+			aux = dict(loss = sum(loss) if not self.bpe_only else sum(loss[1:]))
 
 		return self.dict(logits = logits, log_probs = log_probs, olen = olen, **aux)
 
@@ -178,54 +180,6 @@ class JasperNet(nn.Module):
 	def fuse_conv_bn_eval(self, K = None):
 		for subblock in self.backbone[:K]:
 			subblock.fuse_conv_bn_eval()
-
-class Wav2Letter(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 6, decoder_type = None, normalize_features = True, frontend = None):
-		super().__init__(num_input_features, num_classes, base_width = base_width,
-			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
-			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
-			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			residual = False, dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
-		)
-
-class Wav2LetterResidual(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
-		super().__init__(num_input_features, num_classes, base_width = base_width,
-			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
-			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
-			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			residual = True, dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
-		)
-
-class Wav2LetterDense(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
-		super().__init__(num_input_features, num_classes, base_width = base_width,
-			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
-			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
-			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			residual = 'dense', dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
-		)
-
-class Wav2LetterFlat(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout=0.2, base_width=128, nonlinearity=('hardtanh', 0, 20), kernel_size_prologue=13, kernel_size_epilogue=29, kernel_sizes=[11, 13, 17, 21, 25], dilation=2, num_blocks=5, decoder_type=None, normalize_features=True, frontend=None):
-		super().__init__(num_input_features, num_classes, base_width=base_width,
-						 dropout=dropout, dropout_prologue=dropout, dropout_epilogue=dropout, dropouts=[dropout] * num_blocks,
-						 kernel_size_prologue=kernel_size_prologue, kernel_size_epilogue=kernel_size_epilogue, kernel_sizes=[kernel_size_prologue] * num_blocks,
-						 out_width_factors=[6] * num_blocks, out_width_factors_large=[16, 16],
-						 residual='flat', dilation=dilation, nonlinearity=nonlinearity, decoder_type=decoder_type, normalize_features=normalize_features, frontend=frontend)
-
-class JasperNetSeparable(JasperNet):
-	def __init__(self, *args, separable = True, groups = 128, **kwargs):
-		super().__init__(*args, separable = separable, groups = groups, **kwargs)
-
-class JasperNetBig(JasperNet):
-	def __init__(self, *args, **kwargs):
-		super().__init__(*args, num_subblocks = 2, temporal_mask = False, **kwargs)
-
-class JasperNetBigInplace(JasperNet):
-	def __init__(self, *args, **kwargs):
-		inplace = kwargs.pop('inplace', True)
-		super().__init__(*args, num_subblocks = 2, temporal_mask = False, inplace = inplace, nonlinearity = ('leaky_relu', 0.01), **kwargs)
 
 class ResidualActivation(nn.Module):
 	def __init__(self, nonlinearity, dropout = 0, inplace = False):
@@ -482,3 +436,119 @@ def sparse_topk_todense(saved, device = None):
 
 def master_module(model):
 	return model.module if isinstance(model, nn.DataParallel) else model
+
+########CONFIGS########
+
+class Wav2Letter(JasperNet):
+	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 6, decoder_type = None, normalize_features = True, frontend = None):
+		super().__init__(num_input_features, num_classes, base_width = base_width,
+			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
+			residual = False, dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+		)
+
+class Wav2LetterResidual(JasperNet):
+	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
+		super().__init__(num_input_features, num_classes, base_width = base_width,
+			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
+			residual = True, dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+		)
+
+class Wav2LetterResidualNoDilation(JasperNet):
+	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 1, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
+		super().__init__(num_input_features, num_classes, base_width = base_width,
+			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
+			residual = True, dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+		)
+
+class Wav2LetterResidualBig(JasperNet):
+	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
+		super().__init__(num_input_features, num_classes, base_width = base_width, num_subblocks=2,
+			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
+			residual = True, dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+		)
+
+class Wav2LetterDense(JasperNet):
+	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
+		super().__init__(num_input_features, num_classes, base_width = base_width,
+			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
+			residual = 'dense', dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+		)
+
+class Wav2LetterDenseNoDilation(JasperNet):
+	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 1, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
+		super().__init__(num_input_features, num_classes, base_width = base_width,
+			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
+			residual = 'dense', dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+		)
+
+class Wav2LetterDenseLargeKernels(JasperNet):
+	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
+		super().__init__(num_input_features, num_classes, base_width = base_width,
+			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = kernel_sizes,
+			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
+			residual = 'dense', dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+		)
+
+class Wav2LetterDenseNoDilationLargeKernels(JasperNet):
+	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 1, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
+		super().__init__(num_input_features, num_classes, base_width = base_width,
+			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = kernel_sizes,
+			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
+			residual = 'dense', dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+		)
+
+class Wav2LetterDenseBig(JasperNet):
+	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
+		super().__init__(num_input_features, num_classes, base_width = base_width, num_subblocks=2,
+			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
+			residual = 'dense', dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+		)
+
+class Wav2LetterFlat(JasperNet):
+	def __init__(self, num_input_features, num_classes, dropout=0.2, base_width=128, nonlinearity=('hardtanh', 0, 20), kernel_size_prologue=13, kernel_size_epilogue=29, kernel_sizes=[11, 13, 17, 21, 25], dilation=2, num_blocks=5, decoder_type=None, normalize_features=True, frontend=None):
+		super().__init__(num_input_features, num_classes, base_width=base_width,
+						 dropout=dropout, dropout_prologue=dropout, dropout_epilogue=dropout, dropouts=[dropout] * num_blocks,
+						 kernel_size_prologue=kernel_size_prologue, kernel_size_epilogue=kernel_size_epilogue, kernel_sizes=[kernel_size_prologue] * num_blocks,
+						 out_width_factors=[6] * num_blocks, out_width_factors_large=[16, 16],
+						 residual='flat', dilation=dilation, nonlinearity=nonlinearity, decoder_type=decoder_type, normalize_features=normalize_features, frontend=frontend)
+
+class JasperNetSeparable(JasperNet):
+	def __init__(self, *args, separable = True, groups = 128, **kwargs):
+		super().__init__(*args, separable = separable, groups = groups, **kwargs)
+
+class JasperNetSmall(JasperNet):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, num_subblocks = 1, temporal_mask = False, **kwargs)
+
+class JasperNetBig(JasperNet):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, num_subblocks = 2, temporal_mask = False, **kwargs)
+
+class JasperNetBigBpeOnly(JasperNet):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, num_subblocks = 2, temporal_mask = False, bpe_only = True, **kwargs)
+
+class JasperNetResidualBig(JasperNet):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, num_subblocks = 2, temporal_mask = False, residual = True, **kwargs)
+
+class JasperNetBigInplace(JasperNet):
+	def __init__(self, *args, **kwargs):
+		inplace = kwargs.pop('inplace', True)
+		super().__init__(*args, num_subblocks = 2, temporal_mask = False, inplace = inplace, nonlinearity = ('leaky_relu', 0.01), **kwargs)

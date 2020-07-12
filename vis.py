@@ -249,7 +249,15 @@ def errors(input_path, include = [], exclude = [], audio = False, output_path = 
 			filter_transcripts = lambda cat: cat
 
 	cat = filter_transcripts([[a] + list(filter(None, [t.get(a['audio_name'], None) for t in theirs])) for a in ours])[slice(topk)]
-				
+	cat_by_labels = dict()
+	for c in cat:
+		transcripts_by_labels = dict()
+		for transcript in c:
+			transcripts_by_labels.setdefault(transcript['labels_name'], []).extend(c)
+		for labels_name, grouped_transcripts in transcripts_by_labels.items():
+			cat_by_labels.setdefault(labels_name, []).append(grouped_transcripts)
+
+
 	# TODO: add sorting https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
 	html_path = output_path or (input_path[0] + '.html')
 	
@@ -258,6 +266,12 @@ def errors(input_path, include = [], exclude = [], audio = False, output_path = 
 	f.write('<body><table><tr><th></th><th class="col">cer_easy</th><th class="col">cer</th><th class="col">wer_easy</th><th class="col">wer</th><th class="col">mer</th><th></th></tr>')
 	f.write('<tr><td><strong>averages<strong></td></tr>')
 	f.write('\n'.join('<tr><td class="br">{input_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td>{mer:.02%}</td></tr>'.format(input_name = os.path.basename(input_path[i]), cer_easy = metrics.nanmean(c, 'cer_easy'), cer = metrics.nanmean(c, 'cer'), wer_easy = metrics.nanmean(c, 'wer_easy'), wer = metrics.nanmean(c, 'wer'), mer = metrics.nanmean(c, 'mer')) for i, c in enumerate(zip(*cat))))
+	if len(cat_by_labels.keys()) > 1:
+		for labels_name, labels_transcripts in cat_by_labels.items():
+			f.write(f'<tr><td><strong>averages ({labels_name})<strong></td></tr>')
+			f.write('\n'.join('<tr><td class="br">{input_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td>{mer:.02%}</td></tr>'.format(
+				input_name=os.path.basename(input_path[i]), cer_easy=metrics.nanmean(c, 'cer_easy'), cer=metrics.nanmean(c, 'cer'), wer_easy=metrics.nanmean(c, 'wer_easy'), wer=metrics.nanmean(c, 'wer'),
+				mer=metrics.nanmean(c, 'mer')) for i, c in enumerate(zip(*labels_transcripts))))
 	f.write('<tr><td>&nbsp;</td></tr>')
 	f.write('\n'.join(f'''<tr class="first"><td colspan="6">''' + (f'<audio controls src="{audio_data_uri(utt[0]["audio_path"][len(strip_audio_prefix):])}"></audio>' if audio else '') + f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{word_alignment(utt[0], ref = True, flat = True)}</td><td>{word_alignment(utt[0], ref = True, flat = True)}</td></tr>' + '\n'.join(f'<tr class="any"><td class="br">{os.path.basename(input_path[i])}</td><td>{a["cer_easy"]:.02%}</td><td>{a["cer"]:.02%}</td><td>{a.get("wer_easy", 0):.02%}</td><td>{a["wer"]:.02%}</td><td class="br">{a["mer"]:.02%}</td><td>{word_alignment(a["words"])}</td><td>{word_alignment(a, hyp = True, flat = True)}</td></tr>' for i, a in enumerate(utt)) for utt in cat))
 	f.write('</table></body></html>')
