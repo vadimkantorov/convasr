@@ -99,7 +99,9 @@ class JasperNet(nn.Module):
 			separable = False, groups = 1,
 			dropout = 0, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
 			temporal_mask = True, nonlinearity = 'relu', inplace = False,
-			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None, normalize_features = True, normalize_features_eps = 1e-20, bpe_only = False
+			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None,
+			bpe_only = False,
+		  normalize_features = True, normalize_features_eps = 1e-20, normalize_features_track_running_stats = False, normalize_features_legacy = True, normalize_features_temporal_mask = True
 		):
 		super().__init__()
 		dropout_prologue = dropout_prologue if dropout != 0 else 0
@@ -132,7 +134,7 @@ class JasperNet(nn.Module):
 
 		self.num_epilogue_modules = len(epilogue)
 		self.frontend = frontend
-		self.normalize_features = MaskedInstanceNorm1d(num_input_features, eps = normalize_features_eps, affine = False, track_running_stats = False) if normalize_features else None
+		self.normalize_features = MaskedInstanceNorm1d(num_input_features, affine = False, eps = normalize_features_eps, track_running_stats = normalize_features_track_running_stats, temporal_mask = normalize_features_temporal_mask, legacy = normalize_features_legacy) if normalize_features else None
 		self.decoder = Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
 		self.residual = residual
 		self.dict = dict
@@ -370,20 +372,26 @@ def normalize_signal(signal, dim = -1, eps = 1e-5):
 	return signal / (signal.abs().max(dim = dim, keepdim = True).values + eps) if signal.numel() > 0 else signal
 
 class MaskedInstanceNorm1d(nn.InstanceNorm1d):
-	def forward(self, features, mask = None):
-		if mask is None:
-			#replace by super().forward(features) after fixing eps, here we computes denom=var.sqrt().add(eps), F.instance_norm computes denom=var.add(eps).sqrt()
-			assert self.track_running_stats is False
-			std, mean = torch.std_mean(features, dim = dim, keepdim = True)
-			return (features - mean) / (std + self.eps)
-
+	def __init__(self, *args, temporal_mask = False, legacy = True, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.temporal_mask = temporal_mask
+		self.legacy = legacy
+		
+	def forward(self, x, mask = None):
+		if not self.temporal_mask or mask is None:
+			if self.legacy:
+				assert self.track_running_stats is False
+				std, mean = torch.std_mean(x, dim = -1, keepdim = True)
+				return (x - mean) / (std + self.eps)
+			else:
+				return super().forward(x)
 		else:
 			assert self.track_running_stats is False
 			xlen = mask.int().sum(dim = dim, keepdim = True)
-			mean = (features * mask).sum(dim = dim, keepdim = True) / xlen
-			features_zero_mean_masked = mask * (features - mean)
-			std = (features_zero_mean_masked.pow(2).sum(dim = dim, keepdim = True) / xlen).sqrt()
-			return features_zero_mean_masked / (std + self.eps)
+			mean = (x * mask).sum(dim = dim, keepdim = True) / xlen
+			zero_mean_masked = mask * (x - mean)
+			std = (zero_mean_masked.pow(2).sum(dim = dim, keepdim = True) / xlen).sqrt()
+			return zero_mean_masked / (std + self.eps)
 
 def unpad(x, lens):
 	return [e[..., :l] for e, l in zip(x, lens)]
