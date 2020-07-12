@@ -345,31 +345,18 @@ class LogFilterBankFrontend(nn.Module):
 		else:
 			self.stft = None
 
-	def pad_signal(self, signal):
-		# forces constant padding on the right to avoid padding affecting accuracy
-		# taken from https://github.com/pytorch/pytorch/blob/88fe05e10660706ee557c17eb19c6e5f9c90d84c/torch/functional.py#L459
-		# todo: simplify reshaping and avoid copies by doing pad manually
-		signal_dim = signal.dim()
-		extended_shape = [1] * (3 - signal_dim) + list(signal.size())
-		pad = self.freq_cutoff - 1
-
-		signal = signal.view(extended_shape)
-
-		left_padded_signal = F.pad(signal, (pad, 0), 'reflect')
-		right_padded_signal = F.pad(left_padded_signal, (0, pad), 'constant', value = 0)
-
-		return right_padded_signal.view(right_padded_signal.shape[-signal_dim:])
-
 	def forward(self, signal, mask = None):
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
 		signal = normalize_signal(signal) if self.normalize_signal else signal
 		signal = signal + self.dither0 * torch.randn_like(signal) if self.dither0 > 0 else signal
 		signal = torch.cat([signal[..., :1], signal[..., 1:] - self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
 		signal = signal + self.dither * torch.randn_like(signal) if self.dither > 0 else signal
-		if mask is not None:
-			signal = signal * mask
+		signal = signal * mask if mask is not None else signal
 
-		padded_signal = self.pad_signal(signal)
+		pad = self.freq_cutoff - 1
+		padded_signal = F.pad(signal, (pad, 0), 'reflect')
+		padded_signal = F.pad(padded_signal, (0, pad), 'constant', value = 0) # TODO: avoid this second copy by doing pad manually
+		
 		real_squared, imag_squared = self.stft(padded_signal.unsqueeze(dim = 1)).pow(2).split(self.freq_cutoff, dim = 1) if self.stft is not None else padded_signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = False).pow(2).unbind(dim = -1)
 		power_spectrum = real_squared + imag_squared
 		features = self.mel(power_spectrum).log()
