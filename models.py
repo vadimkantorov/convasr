@@ -27,8 +27,8 @@ class Decoder(nn.Sequential):
 				nn.Conv1d(input_size, num_classes[0], kernel_size = 1),
 				nn.Sequential(
 					#nn.Conv1d(input_size, num_classes[1], kernel_size = 1)#, padding = 7)
-					ConvBN(num_channels = (input_size, input_size), kernel_size = 15),
-					ConvBN(num_channels = (input_size, num_classes[1]), kernel_size = 15)
+					ConvBn1d(num_channels = (input_size, input_size), kernel_size = 15),
+					ConvBn1d(num_channels = (input_size, num_classes[1]), kernel_size = 15)
 				)
 			)
 		self.type = type
@@ -56,7 +56,7 @@ class ConvSamePadding(nn.Sequential):
 				nn.Conv1d(in_channels, out_channels, kernel_size = kernel_size, stride = stride, padding = padding, dilation = dilation, groups = groups, bias = bias)
 			)
 
-class ConvBN(nn.Module):
+class ConvBn1d(nn.Module):
 	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, groups = 1, num_channels_residual: List = [], repeat = 1, dilation = 1, separable = False, temporal_mask = True,
 		nonlinearity = ('relu',), nonlinearity_reference = True,
 		batch_norm_momentum = 0.1, batch_norm_inplace = False,
@@ -68,9 +68,9 @@ class ConvBN(nn.Module):
 
 		super().__init__()
 		self.conv = nn.ModuleList(ConvSamePadding(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, separable = separable, bias = False, groups = groups) for i in range(repeat))
-		self.bn = nn.ModuleList(BatchNorm1dInplace(num_channels[1], momentum = batch_norm_momentum) if batch_norm_inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat))
+		self.bn = nn.ModuleList(InplaceBatchNorm1d(num_channels[1], momentum = batch_norm_momentum) if batch_norm_inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat))
 		self.conv_residual = nn.ModuleList(nn.Identity() if in_channels is None else nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual)
-		self.bn_residual = nn.ModuleList(nn.Identity() if in_channels is None else BatchNorm1dInplace(num_channels[1], momentum = batch_norm_momentum) if batch_norm_inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual)
+		self.bn_residual = nn.ModuleList(nn.Identity() if in_channels is None else InplaceBatchNorm1d(num_channels[1], momentum = batch_norm_momentum) if batch_norm_inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual)
 		self.activation = ResidualActivation(nonlinearity, dropout, reference = nonlinearity_reference, invertible = batch_norm_inplace)
 		self.temporal_mask = temporal_mask
 
@@ -117,7 +117,7 @@ class JasperNet(nn.Module):
 		dropouts = dropouts if dropout != 0 else [0] * len(dropouts)
 
 		in_width_factor = out_width_factors[0]
-		self.backbone = nn.ModuleList([ConvBN(kernel_size = kernel_size_prologue, num_channels = (num_input_features, in_width_factor * base_width), dropout = dropout_prologue, stride = stride1, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace)])
+		self.backbone = nn.ModuleList([ConvBn1d(kernel_size = kernel_size_prologue, num_channels = (num_input_features, in_width_factor * base_width), dropout = dropout_prologue, stride = stride1, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace)])
 		num_channels_residual = []
 		for kernel_size, dropout, out_width_factor in zip(kernel_sizes, dropouts, out_width_factors):
 			for s in range(num_subblocks):
@@ -131,12 +131,12 @@ class JasperNet(nn.Module):
 					num_channels_residual = [num_channels[0]]
 				else:
 					num_channels_residual = []
-				self.backbone.append(ConvBN(num_channels = num_channels, kernel_size = kernel_size, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace))
+				self.backbone.append(ConvBn1d(num_channels = num_channels, kernel_size = kernel_size, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace))
 			in_width_factor = out_width_factor
 
 		epilogue = [
-			ConvBN(num_channels = (in_width_factor * base_width, out_width_factors_large[0] * base_width), kernel_size = kernel_size_epilogue, dropout = dropout_epilogue, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
-			ConvBN(num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), kernel_size = 1, dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
+			ConvBn1d(num_channels = (in_width_factor * base_width, out_width_factors_large[0] * base_width), kernel_size = kernel_size_epilogue, dropout = dropout_epilogue, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
+			ConvBn1d(num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), kernel_size = 1, dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
 		]
 		self.backbone.extend(epilogue)
 
@@ -255,9 +255,9 @@ class ResidualActivation(nn.Module):
 
 			return (None, None) + (grad_output,) * (1 + len(residual))
 
-class BatchNorm1dInplace(nn.BatchNorm1d):
+class InplaceBatchNorm1d(nn.BatchNorm1d):
 	def forward(self, input):
-		return BatchNorm1dInplace.Function.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training)
+		return InplaceBatchNorm1d.Function.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training)
 
 	class Function(torch.autograd.function.Function):
 		@staticmethod
