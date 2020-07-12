@@ -101,7 +101,7 @@ class JasperNet(nn.Module):
 			temporal_mask = True, nonlinearity = 'relu', inplace = False,
 			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None,
 			bpe_only = False,
-		  normalize_features = True, normalize_features_eps = 1e-20, normalize_features_track_running_stats = False, normalize_features_legacy = True, normalize_features_temporal_mask = True
+			normalize_features = True, normalize_features_eps = 1e-20, normalize_features_track_running_stats = False, normalize_features_legacy = True, normalize_features_temporal_mask = True
 		):
 		super().__init__()
 		dropout_prologue = dropout_prologue if dropout != 0 else 0
