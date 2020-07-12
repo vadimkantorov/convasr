@@ -18,7 +18,6 @@ import optimizers
 import torch
 import transforms
 import vis
-import utils
 
 def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
@@ -217,20 +216,19 @@ def main(args):
 		if os.path.exists(tensorboard_dir_checkpoint) and not os.path.exists(tensorboard_dir):
 			shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
 	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
-	performance_meter = utils.PerformanceMeter()
+	performance_meter = metrics.PerformanceMeter()
 	with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
 		json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
 
 	tic, toc_fwd, toc_bwd = time.time(), time.time(), time.time()
 	loss_avg, entropy_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0, 0.0
-	exp_moving_avg = lambda avg, x, max = 0, K = 50: (1. / K) * min(x, max) + (1 - 1. / K) * avg
 	
 	for epoch in range(epoch, args.epochs):
 		sampler.shuffle(epoch)
 		time_epoch_start = time.time()
 		for batch_idx, (meta, x, xlen, y, ylen) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc_data = time.time()
-			lr = optimizer.param_groups[0]['lr']; lr_avg = exp_moving_avg(lr_avg, lr, max = 1)
+			lr = optimizer.param_groups[0]['lr']; lr_avg = metrics.exp_moving_average(lr_avg, lr, max = 1)
 			
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
 			log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'olen', 'loss'])
@@ -251,7 +249,7 @@ def main(args):
 
 					if iteration % args.log_iteration_interval == 0:
 						tensorboard.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4), iteration)
-						for name, value in performance_meter.metrics.items():
+						for name, value in performance_meter.items():
 							tensorboard.add_scalar(name, value, iteration)
 						for param_name, param in models.master_module(model).named_parameters():
 							if param.grad is None:
@@ -268,14 +266,14 @@ def main(args):
 					optimizer.zero_grad()
 					scheduler.step(iteration)
 				
-				loss_avg = exp_moving_avg(loss_avg, loss_cur, max = 1000)
-				entropy_avg = exp_moving_avg(entropy_avg, entropy, max = 4)
+				loss_avg = metrics.exp_moving_average(loss_avg, loss_cur, max = 1000)
+				entropy_avg = metrics.exp_moving_average(entropy_avg, entropy, max = 4)
 			toc_bwd = time.time()
 
 			ms = lambda sec: sec * 1000
 			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = ms(toc_data - tic), ms(toc_fwd - toc_data), ms(toc_bwd - toc_fwd), ms(toc_bwd - toc_data)
 			performance_meter.update_time_metrics(time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model)
-			time_ms_avg = exp_moving_avg(time_ms_avg, time_ms_data + time_ms_model, max = 10_000)
+			time_ms_avg = metrics.exp_moving_average(time_ms_avg, time_ms_data + time_ms_model, max = 10_000)
 			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}> loss: {loss_cur:.2f} <{loss_avg:.2f}> time: ({"x".join(map(str, x.shape))}) {time_ms_data:.2f}+{time_ms_fwd:4.0f}+{time_ms_bwd:4.0f} <{time_ms_avg:.0f}> | lr: {lr:.5f}')
 			iteration += 1
 			sampler.batch_idx += 1

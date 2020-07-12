@@ -10,6 +10,43 @@ placeholder = '|'
 space = ' '
 silence = placeholder + space
 
+def exp_moving_average(avg, val, max = 0, K = 50)
+	return (1. / K) * min(val, max) + (1 - 1. / K) * avg
+
+class PerformanceMeter(dict):
+	def update_metric(self, name, value, subtag = None):
+		avg_name = f'performance/{name}_avg' + (f'/{subtag}' if subtag else '')
+		max_name = f'performance/{name}_max' + (f'/{subtag}' if subtag else '')
+		old_value = self.metrics.get(avg_name, 0)
+		self[avg_name] = exp_moving_average(old_value, value)
+
+		old_value = self.metrics.get(max_name, 0)
+		self[max_name] = max(old_value, value)
+
+	def update_memory_metrics(self, byte_scaler = 1024 ** 3):
+		device_count = torch.cuda.device_count()
+		total_allocated = 0
+		total_reserved = 0
+		for i in range(device_count):
+			device_stats = torch.cuda.memory_stats(i)
+
+			allocated = device_stats[f'allocated_bytes.all.peak'] / byte_scaler
+			total_allocated += allocated
+			self.update_metric('allocated', allocated, f'cuda:{i}')
+
+			reserved = device_stats[f'reserved_bytes.all.peak'] / byte_scaler
+			total_reserved += reserved
+			self.update_metric('reserved', reserved, f'cuda:{i}')
+
+		self.update_metric('allocated', total_allocated, 'total')
+		self.update_metric('reserved', total_reserved, 'total')
+
+	def update_time_metrics(self, time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model):
+		self.update_metric('time_data', time_ms_data)
+		self.update_metric('time_forward', time_ms_fwd)
+		self.update_metric('time_backward', time_ms_bwd)
+		self.update_metric('time_iteration', time_ms_data + time_ms_model)
+
 class StemTagger(collections.defaultdict):
 	def __init__(self, lang, tags_path = None):
 		tags = json.load(open(tags_path)) if tags_path is not None else {}
