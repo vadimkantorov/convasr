@@ -200,7 +200,8 @@ class ResidualActivation(nn.Module):
 	def forward(self, y, residual: List = []):
 		if self.reference:
 			y = sum([y] + residual) if residual else y
-			y = F.dropout(getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = True), p = self.dropout, training = self.training)
+			y = getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = True)
+			y = F.dropout(y, p = self.dropout, training = self.training)
 		
 		elif self.invertible:
 			y = ResidualActivation.InvertibleResidualInplaceFunction.apply(self.nonlinearity, self.invertible, y, *residual)
@@ -237,7 +238,6 @@ class ResidualActivation(nn.Module):
 		@staticmethod
 		def backward(self, grad_output):
 			x, *residual = self.saved_tensors
-			x_ = x.data
 			
 			mask = torch.ones_like(grad_output)
 			if self.nonlinearity[0] == 'relu'
@@ -249,9 +249,10 @@ class ResidualActivation(nn.Module):
 			
 			grad_output *= mask
 			if self.invertible:
-				x_ /= mask
+				y = x.data
+				y /= mask
 				for r in residual:
-					x_ -= r
+					y -= r
 
 			return (None, None) + (grad_output,) * (1 + len(residual))
 
