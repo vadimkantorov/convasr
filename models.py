@@ -359,8 +359,8 @@ class LogFilterBankFrontend(nn.Module):
 		
 		real_squared, imag_squared = self.stft(padded_signal.unsqueeze(dim = 1)).pow(2).split(self.freq_cutoff, dim = 1) if self.stft is not None else padded_signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = False).pow(2).unbind(dim = -1)
 		power_spectrum = real_squared + imag_squared
-		features = self.mel(power_spectrum).log()
-		return features
+		log_mel_features = self.mel(power_spectrum).log()
+		return log_mel_features
 
 	@property
 	def read_audio(self):
