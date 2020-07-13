@@ -355,8 +355,8 @@ class LogFilterBankFrontend(nn.Module):
 		signal = signal * mask if mask is not None else signal
 
 		pad = self.freq_cutoff - 1
-		padded_signal = F.pad(signal, (pad, 0), 'reflect')
-		padded_signal = F.pad(padded_signal, (0, pad), 'constant', value = 0) # TODO: avoid this second copy by doing pad manually
+		padded_signal = F.pad(signal.unsqueeze(1), (pad, 0), mode = 'reflect').squeeze(1) # TODO: remove un/squeeze when https://github.com/pytorch/pytorch/issues/29863 is fixed
+		padded_signal = F.pad(padded_signal, (0, pad), mode = 'constant', value = 0) # TODO: avoid this second copy by doing pad manually
 		
 		real_squared, imag_squared = self.stft(padded_signal.unsqueeze(dim = 1)).pow(2).split(self.freq_cutoff, dim = 1) if self.stft is not None else padded_signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = False).pow(2).unbind(dim = -1)
 		power_spectrum = real_squared + imag_squared
