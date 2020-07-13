@@ -30,7 +30,6 @@ parser.add_argument('--profile-cuda', action = 'store_true')
 parser.add_argument('--profile-autograd')
 parser.add_argument('--dataparallel', action = 'store_true')
 args = parser.parse_args()
-args.devices = [0, 1]
 
 torch.set_grad_enabled(False)
 
@@ -41,8 +40,8 @@ if checkpoint:
 labels = dataset.Labels(importlib.import_module(args.lang))
 
 if args.onnx:
-	onnxrt_session = onnxruntime.InferenceSession(args.onnx)
-	model = lambda x: onnxrt_session.run(None, dict(x = x))
+	onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
+	model = lambda x: onnxruntime_session.run(None, dict(x = x))
 	load_batch = lambda x: x.numpy()
 else:
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, stft_mode = args.stft_mode) if args.frontend else None
