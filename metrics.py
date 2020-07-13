@@ -10,7 +10,7 @@ placeholder = '|'
 space = ' '
 silence = placeholder + space
 
-def exp_moving_average(avg, val, max = 0, K = 50)
+def exp_moving_average(avg, val, max = 0, K = 50):
 	return (1. / K) * min(val, max) + (1 - 1. / K) * avg
 
 class PerformanceMeter(dict):
