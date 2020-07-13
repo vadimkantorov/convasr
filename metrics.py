@@ -17,10 +17,10 @@ class PerformanceMeter(dict):
 	def update_metric(self, name, value, subtag = None):
 		avg_name = f'performance/{name}_avg' + (f'/{subtag}' if subtag else '')
 		max_name = f'performance/{name}_max' + (f'/{subtag}' if subtag else '')
-		old_value = self.metrics.get(avg_name, 0)
+		old_value = self.get(avg_name, 0)
 		self[avg_name] = exp_moving_average(old_value, value)
 
-		old_value = self.metrics.get(max_name, 0)
+		old_value = self.get(max_name, 0)
 		self[max_name] = max(old_value, value)
 
 	def update_memory_metrics(self, byte_scaler = 1024 ** 3):
