@@ -227,7 +227,7 @@ class ResidualActivation(nn.Module):
 			assert self.nonlinearity and self.nonlinearity[0] in ['relu', 'leaky_relu', 'hardtanh']
 			assert not self.invertible or self.nonlinearity[0] == 'leaky_relu'
 
-			y = x.data
+			y = x.data # sidestep version tracking
 			for r in residual:
 				y += r
 			
