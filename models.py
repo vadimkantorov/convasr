@@ -211,7 +211,7 @@ class ResidualActivation(nn.Module):
 			for r in residual:
 				y += r
 			
-			if self.self.dropout > 0 and self.training and self.nonlinearity[0] == 'relu':
+			if self.dropout > 0 and self.training and self.nonlinearity[0] == 'relu':
 				y = relu_dropout(y, p = self.dropout, training = self.training, inplace = True)
 			else:
 				y = getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = True)
@@ -221,34 +221,34 @@ class ResidualActivation(nn.Module):
 
 	class InvertibleResidualInplaceFunction(torch.autograd.function.Function):
 		@staticmethod
-		def forward(self, nonlinearity, invertible, x, *residual):
-			self.nonlinearity = nonlinearity
-			self.invertible = invertible
-			assert self.nonlinearity and self.nonlinearity[0] in ['relu', 'leaky_relu', 'hardtanh']
-			assert not self.invertible or self.nonlinearity[0] == 'leaky_relu'
+		def forward(ctx, nonlinearity, invertible, x, *residual):
+			ctx.nonlinearity = nonlinearity
+			ctx.invertible = invertible
+			assert ctx.nonlinearity and ctx.nonlinearity[0] in ['relu', 'leaky_relu', 'hardtanh']
+			assert not ctx.invertible or ctx.nonlinearity[0] == 'leaky_relu'
 
 			y = x.data # sidestep version tracking
 			for r in residual:
 				y += r
 			
-			y = getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = True)
-			self.save_for_backward(y, *residual)
+			y = getattr(F, ctx.nonlinearity[0])(y, *ctx.nonlinearity[1:], inplace = True)
+			ctx.save_for_backward(y, *residual)
 			return y
 
 		@staticmethod
-		def backward(self, grad_output):
-			x, *residual = self.saved_tensors
+		def backward(ctx, grad_output):
+			x, *residual = ctx.saved_tensors
 			
 			mask = torch.ones_like(grad_output)
-			if self.nonlinearity[0] == 'relu'
+			if ctx.nonlinearity[0] == 'relu':
 				mask = mask.masked_fill_(x < 0, 0)
-			elif self.nonlinearity[0] == 'leaky_relu':
-				mask = mask.masked_fill_(x < 0, self.nonlinearity[1])
-			elif self.nonlinearity[0] == 'hardtanh':
-				mask = mask.masked_fill_((x < self.nonlinearity[1]).logical_or_(x > self.nonlinearity[2])), 0)
+			elif ctx.nonlinearity[0] == 'leaky_relu':
+				mask = mask.masked_fill_(x < 0, ctx.nonlinearity[1])
+			elif ctx.nonlinearity[0] == 'hardtanh':
+				mask = mask.masked_fill_(x < ctx.nonlinearity[1]).logical_or_(x > ctx.nonlinearity[2], 0)
 			
 			grad_output *= mask
-			if self.invertible:
+			if ctx.invertible:
 				y = x.data
 				y /= mask
 				for r in residual:
@@ -405,10 +405,10 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 				return super().forward(x)
 		else:
 			assert self.track_running_stats is False
-			xlen = mask.int().sum(dim = dim, keepdim = True)
-			mean = (x * mask).sum(dim = dim, keepdim = True) / xlen
+			xlen = mask.int().sum(dim = -1, keepdim = True)
+			mean = (x * mask).sum(dim = -1, keepdim = True) / xlen
 			zero_mean_masked = mask * (x - mean)
-			std = (zero_mean_masked.pow(2).sum(dim = dim, keepdim = True) / xlen).sqrt()
+			std = (zero_mean_masked.pow(2).sum(dim = -1, keepdim = True) / xlen).sqrt()
 			return zero_mean_masked / (std + self.eps)
 
 def unpad(x, lens):
