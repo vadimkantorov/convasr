@@ -253,7 +253,10 @@ class InplaceBatchNorm1d(nn.BatchNorm1d):
 		def backward(self, grad_output):
 			saved_output, weight, bias, mean, invstd = self.saved_tensors
 			saved_input = torch.batch_norm_elemt(saved_output, invstd.reciprocal(), mean, bias, weight.reciprocal(), 0, out = saved_output)
-			mean_dy, mean_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(grad_output, saved_input, mean, invstd,	weight,	*self.needs_input_grad[:3])
+			sum_dy, sum_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(grad_output, saved_input, mean, invstd,	weight,	*self.needs_input_grad[:3])
+			divisor = saved_input.numel() // saved_input.size(1)
+			mean_dy = sum_dy.div_(divisor)
+			mean_dy_xmu = sum_dy_xmu.div_(divisor)
 			grad_input = torch.batch_norm_backward_elemt(grad_output, saved_input, mean, invstd, weight, mean_dy, mean_dy_xmu)
 			return grad_input, grad_weight, grad_bias, None, None, None, None, None
 
