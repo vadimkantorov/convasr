@@ -278,7 +278,7 @@ def main(args):
 			iteration += 1
 			sampler.batch_idx += 1
 
-			if iteration > 0 and iteration % args.val_iteration_interval == 0:
+			if iteration > 0 and (iteration % args.val_iteration_interval == 0 or iteration == args.iterations):
 				evaluate_model(val_data_loaders, epoch, iteration)
 
 			if iteration and args.iterations and iteration >= args.iterations:
