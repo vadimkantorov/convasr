@@ -3,8 +3,6 @@ import json
 import argparse
 import glob
 
-import ru
-
 
 def main(args):
 	transcripts = []
@@ -29,11 +27,15 @@ def main(args):
 			json_transcripts = [t for t in json_transcripts if
 				t['ref_char_count'] <= args.skip_transcript_large_than_char]
 
+		if args.skip_transcript_after_seconds:
+			json_transcripts = [t for t in json_transcripts if
+				t['end'] <= args.skip_transcript_after_seconds]
+
 		for dirty_attribute in ['duration', 'ref_char_count']:
 			[t.pop(dirty_attribute) for t in json_transcripts]
 
 		transcripts.extend(json_transcripts)
-	transcripts = [ru.replace_superscripts(t) for t in transcripts]
+
 	json.dump(transcripts, open(args.output_path, 'w'), ensure_ascii=False, indent=2, sort_keys=True)
 	if args.split_by_parts:
 		step = len(transcripts) // args.split_by_parts + 1
@@ -49,8 +51,9 @@ if __name__ == '__main__':
 	parser.add_argument('--split-by-parts', type=int, default=2, required=True)
 	parser.add_argument('--skip-files-longer-than-hours', type=float)
 	parser.add_argument('--skip-transcript-large-than-char', type=float)
+	parser.add_argument('--skip-transcript-after-seconds', type=float)
 	parser.add_argument('--input-path', '-i', required=True)
 	parser.add_argument('--output-path', '-o', required=True)
-	parser.add_argument('--strip', nargs='*', default=['begin', 'end'])
+	parser.add_argument('--strip', nargs='*', default=[])
 	args = parser.parse_args()
 	main(args)

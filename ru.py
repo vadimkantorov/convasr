@@ -106,6 +106,9 @@ def preprocess_word(w):
 def normalize_text(text, remove_unk = True):
 	# unk is removed from input
 	text = text.replace('*', '')
+
+	# superscripts
+	text = replace_superscripts(text)
 	
 	# percent isnt preserved
 	text = text.replace('%', f' {PERCENT}*')
@@ -121,7 +124,7 @@ def normalize_text(text, remove_unk = True):
 	text = re.sub(f'[^{ALPHA} ]', '*', text)
 
 	return text
-	
+
 def stem(word, inflections = []):
 	if not inflections:
 		return word[:-3] if len(word) > 8 else word[:-2] if len(word) > 5 else word
@@ -131,12 +134,12 @@ def stem(word, inflections = []):
 				return word[:-len(inflection)]
 		return word
 
-def replace_superscripts(elem):
+def replace_superscripts(text):
 	replaces = dict(zip('¹²³⁴⁵⁶⁷⁸⁹⁰', '          '))
 	replaces['²'] = 'квадратных'
 	for key, val in replaces.items():
-		elem = elem.replace(key, val)
-	return elem
+		text = text.replace(key, val)
+	return text
 
 if __name__ == '__main__':
 	import argparse
