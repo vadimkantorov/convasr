@@ -242,18 +242,20 @@ class InplaceBatchNorm1d(nn.BatchNorm1d):
 
 	class Function(torch.autograd.function.Function):
 		@staticmethod
-		def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, training):
+		def forward(ctx, input, weight, bias, running_mean, running_var, eps, momentum, training):
 			mean, var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum) if training else (running_mean, running_var)
 			invstd = (var + eps).rsqrt_()
 			output = torch.batch_norm_elemt(input, weight, bias, mean, invstd, 0, out = input)
-			self.save_for_backward(output, weight, bias, mean, invstd)
+			ctx.training = training
+			ctx.save_for_backward(output, weight, bias, mean, invstd)
 			return output
 
 		@staticmethod
-		def backward(self, grad_output):
-			saved_output, weight, bias, mean, invstd = self.saved_tensors
+		def backward(ctx, grad_output):
+			assert ctx.training
+			saved_output, weight, bias, mean, invstd = ctx.saved_tensors
 			saved_input = torch.batch_norm_elemt(saved_output, invstd.reciprocal(), mean, bias, weight.reciprocal(), 0, out = saved_output)
-			sum_dy, sum_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(grad_output, saved_input, mean, invstd,	weight,	*self.needs_input_grad[:3])
+			sum_dy, sum_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(grad_output, saved_input, mean, invstd, weight, *self.needs_input_grad[:3])
 			divisor = saved_input.numel() // saved_input.size(1)
 			mean_dy = sum_dy.div_(divisor)
 			mean_dy_xmu = sum_dy_xmu.div_(divisor)
