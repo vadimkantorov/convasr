@@ -59,19 +59,15 @@ class ConvSamePadding(nn.Sequential):
 class ConvBn1d(nn.Module):
 	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, groups = 1, num_channels_residual: List = [], repeat = 1, dilation = 1, separable = False, temporal_mask = True,
 		nonlinearity = ('relu',), nonlinearity_reference = True,
-		batch_norm_momentum = 0.1, batch_norm_inplace = False,
+		batch_norm_momentum = 0.1,
 		inplace = False
 	):
-		if inplace:
-			batch_norm_inplace = False
-			nonlinearity_reference = False
-
 		super().__init__()
 		self.conv = nn.ModuleList(ConvSamePadding(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, separable = separable, bias = False, groups = groups) for i in range(repeat))
 		self.bn = nn.ModuleList(InplaceBatchNorm1d(num_channels[1], momentum = batch_norm_momentum) if batch_norm_inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat))
 		self.conv_residual = nn.ModuleList(nn.Identity() if in_channels is None else nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual)
-		self.bn_residual = nn.ModuleList(nn.Identity() if in_channels is None else InplaceBatchNorm1d(num_channels[1], momentum = batch_norm_momentum) if batch_norm_inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual)
-		self.activation = ResidualActivation(nonlinearity, dropout, reference = nonlinearity_reference, invertible = batch_norm_inplace)
+		self.bn_residual = nn.ModuleList(nn.Identity() if in_channels is None else InplaceBatchNorm1d(num_channels[1], momentum = batch_norm_momentum) if inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual)
+		self.activation = ResidualActivation(nonlinearity, dropout, invertible = inplace)
 		self.temporal_mask = temporal_mask
 
 	def forward(self, x, lengths_fraction = None, residual: List = []):
@@ -190,21 +186,15 @@ class JasperNet(nn.Module):
 			subblock.fuse_conv_bn_eval()
 
 class ResidualActivation(nn.Module):
-	def __init__(self, nonlinearity, dropout = 0, invertible = False, reference = False):
+	def __init__(self, nonlinearity, dropout = 0, invertible = False):
 		super().__init__()
 		self.nonlinearity = nonlinearity
 		self.dropout = dropout
-		self.reference = reference
 		self.invertible = invertible
 
 	def forward(self, y, residual: List = []):
-		if self.reference:
-			y = sum([y] + residual) if residual else y
-			y = getattr(F, self.nonlinearity[0])(y, *self.nonlinearity[1:], inplace = True)
-			y = F.dropout(y, p = self.dropout, training = self.training)
-		
-		elif self.invertible:
-			y = ResidualActivation.InvertibleResidualInplaceFunction.apply(self.nonlinearity, self.invertible, y, *residual)
+		if self.invertible:
+			y = ResidualActivation.InvertibleResidualInplaceFunction.apply(self.nonlinearity, y, *residual)
 			y = F.dropout(y, p = self.dropout, training = self.training)
 		
 		else:
@@ -221,13 +211,11 @@ class ResidualActivation(nn.Module):
 
 	class InvertibleResidualInplaceFunction(torch.autograd.function.Function):
 		@staticmethod
-		def forward(ctx, nonlinearity, invertible, x, *residual):
+		def forward(ctx, nonlinearity, x, *residual):
 			ctx.nonlinearity = nonlinearity
-			ctx.invertible = invertible
-			assert ctx.nonlinearity and ctx.nonlinearity[0] in ['relu', 'leaky_relu', 'hardtanh']
-			assert not ctx.invertible or ctx.nonlinearity[0] == 'leaky_relu'
-
-			y = x.data # sidestep version tracking
+			assert ctx.nonlinearity and ctx.nonlinearity[0] in ['leaky_relu']
+			
+			y = x.data
 			for r in residual:
 				y += r
 			
@@ -239,22 +227,14 @@ class ResidualActivation(nn.Module):
 		def backward(ctx, grad_output):
 			x, *residual = ctx.saved_tensors
 			
-			mask = torch.ones_like(grad_output)
-			if ctx.nonlinearity[0] == 'relu':
-				mask = mask.masked_fill_(x < 0, 0)
-			elif ctx.nonlinearity[0] == 'leaky_relu':
-				mask = mask.masked_fill_(x < 0, ctx.nonlinearity[1])
-			elif ctx.nonlinearity[0] == 'hardtanh':
-				mask = mask.masked_fill_(x < ctx.nonlinearity[1]).logical_or_(x > ctx.nonlinearity[2], 0)
-			
+			mask = torch.ones_like(grad_output).masked_fill_(x < 0, ctx.nonlinearity[1])
 			grad_output *= mask
-			if ctx.invertible:
-				y = x.data
-				y /= mask
-				for r in residual:
-					y -= r
+			y = x.data
+			y /= mask
+			for r in residual:
+				y -= r
 
-			return (None, None) + (grad_output,) * (1 + len(residual))
+			return (None, ) + (grad_output,) * (1 + len(residual))
 
 class InplaceBatchNorm1d(nn.BatchNorm1d):
 	def forward(self, input):
