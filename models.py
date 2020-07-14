@@ -64,7 +64,7 @@ class ConvBn1d(nn.Module):
 	):
 		super().__init__()
 		self.conv = nn.ModuleList(ConvSamePadding(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, separable = separable, bias = False, groups = groups) for i in range(repeat))
-		self.bn = nn.ModuleList(InplaceBatchNorm1d(num_channels[1], momentum = batch_norm_momentum) if batch_norm_inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat))
+		self.bn = nn.ModuleList(InplaceBatchNorm1d(num_channels[1], momentum = batch_norm_momentum) if inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat))
 		self.conv_residual = nn.ModuleList(nn.Identity() if in_channels is None else nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual)
 		self.bn_residual = nn.ModuleList(nn.Identity() if in_channels is None else InplaceBatchNorm1d(num_channels[1], momentum = batch_norm_momentum) if inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual)
 		self.activation = ResidualActivation(nonlinearity, dropout, invertible = inplace)

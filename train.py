@@ -289,7 +289,6 @@ def main(args):
 		sampler.batch_idx = 0
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
 		evaluate_model(val_data_loaders, epoch+1, iteration)
-	evaluate_model(val_data_loaders, epoch + 1, iteration)
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
