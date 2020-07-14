@@ -77,7 +77,7 @@ def cut_audio(output_path, sample_rate, mono, dilate, strip_prefix, audio_backen
 				ref=t.pop('ref', None),
 				hyp=t.pop('hyp', None),
 				cer=t.pop('cer', None),
-				wer=t.pop('wer', []),
+				wer=t.pop('wer', None),
 				alignment=t.pop('alignment', []),
 				words=t.pop('words', []),
 				meta=t)
