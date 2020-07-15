@@ -12,12 +12,13 @@ parser.add_argument('--max-speakers', type = int, default = 2)
 parser.add_argument('--min-seconds', type = float, default = 1)
 parser.add_argument('--max-seconds', type = float, default = 60 * 60)
 parser.add_argument('--sample', type = int, default = 10)
+parser.add_argument('--seed', type = int, default = 1)
 args = parser.parse_args()
 
 gzopen = lambda file_path, mode = 'r': gzip.open(file_path, mode + 't') if file_path.endswith('.gz') else open(file_path, mode)
 episodes = json.load(gzopen(args.input_path))
 episodes = [e for e in episodes if args.min_speakers <= len(e['speakers']) <= args.max_speakers and args.min_seconds <= e['sound_seconds'] <= args.max_seconds and len(e['sound']) == 1]
-random.seed(1)
+random.seed(args.seed)
 random.shuffle(episodes)
 episodes = episodes[:args.sample]
 
