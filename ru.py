@@ -108,7 +108,8 @@ def normalize_text(text, remove_unk = True):
 	text = text.replace('*', '')
 
 	# superscripts
-	text = replace_superscripts(text)
+	superscripts = '⁰¹²³⁴⁵⁶⁷⁸⁹'
+	text = re.sub(f'[{superscripts}]', ' ', text)
 	
 	# percent isnt preserved
 	text = text.replace('%', f' {PERCENT}*')
@@ -133,13 +134,6 @@ def stem(word, inflections = []):
 			if word.endswith(inflection):
 				return word[:-len(inflection)]
 		return word
-
-def replace_superscripts(text):
-	replaces = dict(zip('¹²³⁴⁵⁶⁷⁸⁹⁰', '          '))
-	replaces['²'] = 'квадратных'
-	for key, val in replaces.items():
-		text = text.replace(key, val)
-	return text
 
 if __name__ == '__main__':
 	import argparse

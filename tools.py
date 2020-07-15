@@ -45,7 +45,7 @@ def cut_audio(output_path, sample_rate, mono, dilate, strip_prefix, audio_backen
 		signal = audio.read_audio(audio_path, sample_rate, normalize=False, backend=audio_backend)[
 			0] if audio_path != prev_audio_path else signal
 
-		if signal.shape[-1] == 0: # bug with empty audio files witch produce empty cut file
+		if signal.numel() == 0: # bug with empty audio files witch produce empty cut file
 			print('Empty audio_path ', audio_path)
 			return []
 
@@ -55,11 +55,10 @@ def cut_audio(output_path, sample_rate, mono, dilate, strip_prefix, audio_backen
 
 		segment_file_name = os.path.basename(audio_path) + '.{channel}-{begin:.06f}-{end:.06f}.wav'.format(**t)
 		digest = hashlib.md5(segment_file_name.encode('utf-8')).hexdigest()
-		sub_path = [digest[-1:], digest[:2]] if add_sub_paths else []
-		segment_path_components = [output_path] + sub_path + [segment_file_name]
+		sub_path = [digest[-1:], digest[:2], segment_file_name] if add_sub_paths else [segment_file_name]
 
-		segment_path = os.path.join(*segment_path_components)
-		os.makedirs(os.path.join(*segment_path_components[:-1]), exist_ok=True)
+		segment_path = os.path.join(output_path, *sub_path)
+		os.makedirs(os.path.dirname(segment_path), exist_ok=True)
 		audio.write_audio(segment_path, segment, sample_rate, mono=True)
 
 		if strip_prefix:
@@ -262,10 +261,10 @@ def processcomments(input_path, output_path, comment_path):
 	#print('\n'.join('{w},{be},{be_}'.format(w = w, be = not_word_stats[w]['be'], be_ = not_word_stats[w]['b'] + not_word_stats[w]['e']) for w in not_word))
 
 
-def split(input_path, output_path, test_duration_in_hours, val_duration_in_hours, microval_duration_in_hours, old_microval_path):
+def split(input_path, output_path, test_duration_in_hours, val_duration_in_hours, microval_duration_in_hours, old_microval_path, seed):
 	transcripts_train = json.load(open(input_path))
 
-	random.seed(42)
+	random.seed(seed)
 	random.shuffle(transcripts_train)
 
 	for t in transcripts_train:
@@ -392,6 +391,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--test-duration-in-hours', required = True, type = float)
 	cmd.add_argument('--val-duration-in-hours', required = True, type = float)
 	cmd.add_argument('--microval-duration-in-hours', required = True, type = float)
+	cmd.add_argument('--seed', required = True, type = int, default=42)
 	cmd.set_defaults(func = split)
 
 	cmd = subparsers.add_parser('processcomments')
