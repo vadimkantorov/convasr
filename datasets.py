@@ -12,8 +12,8 @@ import audio
 import transcripts
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, data_paths, labels, sample_rate, frontend = None, speakers = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, segmented = False, time_padding_multiple = 1, audio_backend = 'sox', exclude=set(), load_first_n_sec=None):
-		self.load_first_n_sec = load_first_n_sec
+	def __init__(self, data_paths, labels, sample_rate, frontend = None, speakers = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, segmented = False, time_padding_multiple = 1, audio_backend = 'sox', exclude=set()):
+		self.max_duration = max_duration
 		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
@@ -54,14 +54,14 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		
 		if not self.segmented:
 			transcript = transcript[0]
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend, duration=self.load_first_n_sec) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend, duration=self.max_duration) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
 			
 			transcript = dict(dict(audio_name = os.path.basename(transcript['audio_path'])), **transcript)
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
 			ref_normalized, targets = zip(*targets)
 		else:
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = False, backend = self.audio_backend, duration=self.load_first_n_sec)
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = False, backend = self.audio_backend, duration=self.max_duration)
 			replace_transcript = not transcript or any(t.get('begin') is None and t.get('end') is None for t in transcript) and all(t.get('ref') is not None for t in transcript)
 			normalize_text = True
 

@@ -40,7 +40,7 @@ def main(args):
 	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
 
 	labels, frontend, model, decoder = setup(args)
-	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers, exclude=exclude, load_first_n_sec=args.transcribe_first_n_sec)
+	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers, exclude=exclude, max_duration=args.transcribe_first_n_sec)
 	num_examples = len(val_dataset)
 	print("Examples count: ", num_examples)
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
