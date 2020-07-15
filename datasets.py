@@ -1,23 +1,19 @@
 #TODO: support forced mono even if transcript is given
 
 import os
-import re
 import gzip
-import time
 import math
 import json
-import random
-import functools
 import itertools
 import importlib
 import torch.utils.data
 import sentencepiece
 import audio
-import vad
 import transcripts
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, data_paths, labels, sample_rate, frontend = None, speakers = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, segmented = False, time_padding_multiple = 1, audio_backend = 'sox'):
+	def __init__(self, data_paths, labels, sample_rate, frontend = None, speakers = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, segmented = False, time_padding_multiple = 1, audio_backend = 'sox', exclude=set()):
+		self.max_duration = max_duration
 		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
@@ -39,6 +35,16 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.examples = [list(g) for data_path in data_paths for k, g in itertools.groupby(sorted(read_transcript(data_path), key = transcripts.sort_key), key = transcripts.group_key)]
 		self.examples = list(sorted(self.examples, key = duration))
 		self.examples = list(filter(lambda example: (min_duration is None or min_duration <= duration(example)) and (max_duration is None or duration(example) <= max_duration), self.examples))
+		self.examples = [e for e in self.examples if transcripts.audio_name(e[0]) not in exclude]
+
+		'''
+		def safe_coding_for_audio_lenghts:
+			duration = max(transcripts.compute_duration(t, hours=True) for t in meta)
+			if x.numel() == 0 or (args.skip_file_longer_than_hours and duration > args.skip_file_longer_than_hours):
+				print(
+						f'Skipping [{audio_path}]. Size: {x.numel()}, duration: {duration} hours (>{args.skip_file_longer_than_hours})')
+				continue
+		'''
 
 	def __getitem__(self, index):
 		transcript = self.examples[index]
@@ -48,14 +54,14 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		
 		if not self.segmented:
 			transcript = transcript[0]
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate) 
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend, duration=self.max_duration) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
 			
 			transcript = dict(dict(audio_name = os.path.basename(transcript['audio_path'])), **transcript)
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
 			ref_normalized, targets = zip(*targets)
 		else:
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = False, backend = self.audio_backend)
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = False, backend = self.audio_backend, duration=self.max_duration)
 			replace_transcript = not transcript or any(t.get('begin') is None and t.get('end') is None for t in transcript) and all(t.get('ref') is not None for t in transcript)
 			normalize_text = True
 
