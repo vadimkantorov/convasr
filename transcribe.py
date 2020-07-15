@@ -8,17 +8,13 @@ import os
 import time
 import json
 import argparse
-import importlib
 import torch
-import torch.nn.functional as F
 import datasets
 import models
 import metrics
 import decoders
 import ctc
-import vad
 import transcripts
-import audio
 import vis
 
 def setup(args):
@@ -53,17 +49,7 @@ def main(args):
 		print(f'Processing: {i}/{num_examples}')
 
 		audio_path, speakers = map(meta[0].get, ['audio_path', 'speakers'])
-
-		duration = max(transcripts.compute_duration(t, hours = True) for t in meta)
-		if x.numel() == 0 or (args.skip_file_longer_than_hours and duration > args.skip_file_longer_than_hours):
-			print(f'Skipping [{audio_path}]. Size: {x.numel()}, duration: {duration} hours (>{args.skip_file_longer_than_hours})')
-			continue
-
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
-
-		if max(ylen) > args.max_ref_len:
-			print(f'Too large refs ylen = [{ylen}] > max_ref_len = [{args.max_ref_len}] [{audio_path}]. Skipping.')
-			continue
 
 		tic = time.time()
 		y, ylen = y.to(args.device), ylen.to(args.device)
@@ -136,7 +122,6 @@ if __name__ == '__main__':
 	parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
 	parser.add_argument('--ext', default = ['wav', 'mp3', 'opus', 'm4a'])
 	parser.add_argument('--skip-processed', action = 'store_true')
-	parser.add_argument('--skip-file-longer-than-hours', type=float, help = 'skip files with duration more than specified hours')
 	parser.add_argument('--input-path', '-i', nargs = '+')
 	parser.add_argument('--output-path', '-o', default = 'data/transcribe')
 	parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
@@ -164,7 +149,6 @@ if __name__ == '__main__':
 	parser.add_argument('--replace-blank-series', type = int, default = 8)
 	parser.add_argument('--html', action = 'store_true')
 	parser.add_argument('--txt', action = 'store_true', help = 'store whole transcript in txt format need for assessments')
-	parser.add_argument('--max-ref-len', type=int, default=45000)
 	parser.add_argument('--transcribe-first-n-sec', type=int)
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
