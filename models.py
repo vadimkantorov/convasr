@@ -401,8 +401,8 @@ def unpad(x, lens):
 
 def reset_bn_running_stats_(model):
 	for bn in [module for module in model.modules() if isinstance(module, nn.modules.batchnorm._BatchNorm)]:
-		bn.running_mean = torch.zeros_like(bn.running_mean)
-		bn.running_var = torch.ones_like(bn.running_var)
+		nn.init.zeros_(bn.running_mean)
+		nn.init.ones_(bn.running_var)
 		bn.momentum = None
 		bn.train()
 	return model
