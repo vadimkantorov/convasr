@@ -224,7 +224,7 @@ def main(args):
 	loss_avg, entropy_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0, 0.0
 	
 	for epoch in range(epoch, args.epochs):
-		sampler.shuffle(epoch)
+		sampler.shuffle(epoch + args.seed_sampler)
 		time_epoch_start = time.time()
 		for batch_idx, (meta, x, xlen, y, ylen) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc_data = time.time()
@@ -330,6 +330,7 @@ if __name__ == '__main__':
 	parser.add_argument('--args', default = 'args.json', help = 'save experiment arguments to the experiment dir')
 	parser.add_argument('--model', default = 'JasperNetBig')
 	parser.add_argument('--seed', type = int, default = 1, help = 'reset to this random seed value in the main thread and data loader threads')
+	parser.add_argument('--seed-sampler', type=int, default=0, help='this value is used as summand to random seed value in data sampler')
 	parser.add_argument('--cudnn', default = 'benchmark', help = 'enables cudnn benchmark mode')
 	parser.add_argument('--experiment-id', default = '{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{train_waveform_transform}_{train_feature_transform}_{bpe}_{experiment_name}')
 	parser.add_argument('--experiment-name', '--name', default = '')
