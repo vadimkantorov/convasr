@@ -31,7 +31,7 @@ def audio_data_uri(audio_path, sample_rate = None):
 		wav_bytes = open(audio_path, 'rb').read()
 	else:
 		wav_bytes = audio.write_audio(io.BytesIO(), audio_path, sample_rate).getvalue()
-	
+
 	return 'data:audio/wav;base64,' + base64.b64encode(wav_bytes).decode()
 
 def label(output_path, transcript, info, page_size, prefix):
@@ -78,7 +78,7 @@ def label(output_path, transcript, info, page_size, prefix):
 			}
 		</script>''')
 		html.write(f'<a data-page="{p}" data-prefix="{prefix}" download="export.json" onclick="export_user_input(); return true" href="#">Export</a>\n')
-		
+
 		k = p * page_size
 		for j, i in enumerate(info[k : k + page_size]):
 			i['after'] = i.get('after', '')
@@ -308,7 +308,7 @@ def summary(input_path, lang):
 		hyp, ref = map(lang.normalize_text, [t['hyp'], t['ref']])
 		t['cer'] = t.get('cer', metrics.cer(hyp, ref))
 		t['wer'] = t.get('wer', metrics.wer(hyp, ref))
-	
+
 	cer_, wer_ = [torch.tensor([t[k] for t in transcript]) for k in ['cer', 'wer']]
 	cer_avg, wer_avg = float(cer_.mean()), float(wer_.mean())
 	print(f'CER: {cer_avg:.02f} | WER: {wer_avg:.02f}')

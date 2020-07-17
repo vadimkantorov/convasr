@@ -76,8 +76,9 @@ def prune(transcript, align_boundary_words = False, cer = None, wer = None, mer 
 	prev = None
 	for t in transcript:
 		if groups_check(t) and unk_check(t) and duration_check(t) and cer_check(t) and wer_check(t) and mer_check(t) and boundary_check(t) and gap_check(t, prev) and speakers_check(t):
-			prev = t
 			yield t
+		prev = t
+
 
 def compute_duration(t, hours = False):
 	seconds = t.get('end', 0) - t.get('begin', 0)
@@ -85,5 +86,5 @@ def compute_duration(t, hours = False):
 
 def audio_name(t):
 	return t.get('audio_name') or os.path.basename(t['audio_path'])
-	
+
 number_tuple = lambda s: tuple(map(lambda ip: (float(ip[1]) if '.' in ip[1] else int(ip[1])) if ip[1] else float(['-inf', 'inf'][ip[0]]), enumerate((s if '-' in s else s + '-' + s).split('-'))))
