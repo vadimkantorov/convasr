@@ -53,8 +53,8 @@ RUN pip install https://github.com/matplotlib/matplotlib/archive/v3.2.0rc2.tar.g
 RUN conda install -y -c pytorch magma-cuda${CUDAVERSION}
 
 
-# RUN conda install -y pytorch cudatoolkit=$CUDAVERSIONPOINT -c pytorch
-RUN conda install -y pytorch cudatoolkit=$CUDAVERSIONOPOINT -c pytorch-nightly
+RUN conda install -y pytorch cudatoolkit=$CUDAVERSIONPOINT -c pytorch
+# RUN conda install -y pytorch cudatoolkit=$CUDAVERSIONOPOINT -c pytorch-nightly
 
 # RUN pip install torchaudio -f https://download.pytorch.org/whl/torch_stable.html --no-dependencies
 RUN pip install git+https://github.com/pytorch/audio --no-dependencies

@@ -2,6 +2,7 @@ import os
 import math
 import collections
 import json
+import enum
 import functools
 import torch
 import Levenshtein
@@ -13,15 +14,36 @@ silence = placeholder + space
 def exp_moving_average(avg, val, max = 0, K = 50):
 	return (1. / K) * min(val, max) + (1 - 1. / K) * avg
 
-class PerformanceMeter(dict):
-	def update_metric(self, name, value, subtag = None):
-		avg_name = f'performance/{name}_avg' + (f'/{subtag}' if subtag else '')
-		max_name = f'performance/{name}_max' + (f'/{subtag}' if subtag else '')
-		old_value = self.get(avg_name, 0)
-		self[avg_name] = exp_moving_average(old_value, value)
+class ErrorType(enum.Enum):
+	typo_easy = 'typo_easy'
+	typo_hard = 'typo_hard'
+	missing = 'missing'
+	missing_ref = 'missing_ref'
+	ok = 'ok'
 
-		old_value = self.get(max_name, 0)
-		self[max_name] = max(old_value, value)
+	@staticmethod
+	def tag(hyp, ref, p = 0.5, L = 3, placeholder = '|'):
+		e = sum(ch != cr and not (ch == space and cr == placeholder) for ch, cr in zip(hyp, ref))
+		ref_placeholders = ref.count(placeholder)
+		ref_chars = len(ref) - ref_placeholders
+		is_typo = (0 < ref_chars < L and len(hyp) <= L) or (e >= 0 and ((hyp.count(placeholder) < p * len(ref) and ref_placeholders < p * len(ref))))
+		if hyp == ref:
+			err = ErrorType.ok
+		elif is_typo:
+			easy = ref_chars < L or (e <= 1 or (e == 2 and all(ch == cr or i >= len(ref) - 2 or (ch == space and cr == placeholder) for i, (ch, cr) in enumerate(zip(hyp, ref)))))
+			err = ErrorType.typo_easy if easy else ErrorType.typo_hard
+		else:
+			err = ErrorType.missing_ref if ref_placeholders >= p * len(ref) else ErrorType.missing
+
+		return err.value, e
+
+class PerformanceMeter(dict):
+	def update(self, kwargs, subtag = None):
+		for name, value in kwargs.items():
+			avg_name = f'performance/{name}_avg' + (f'/{subtag}' if subtag else '')
+			max_name = f'performance/{name}_max' + (f'/{subtag}' if subtag else '')
+			self[avg_name] = exp_moving_average(self.get(avg_name, 0), value)
+			self[max_name] = max(self.get(max_name, 0), value)
 
 	def update_memory_metrics(self, byte_scaler = 1024 ** 3):
 		device_count = torch.cuda.device_count()
@@ -29,33 +51,33 @@ class PerformanceMeter(dict):
 		total_reserved = 0
 		for i in range(device_count):
 			device_stats = torch.cuda.memory_stats(i)
-
-			allocated = device_stats[f'allocated_bytes.all.peak'] / byte_scaler
+			allocated = device_stats['allocated_bytes.all.peak'] / byte_scaler
 			total_allocated += allocated
-			self.update_metric('allocated', allocated, f'cuda:{i}')
-
+			
 			reserved = device_stats[f'reserved_bytes.all.peak'] / byte_scaler
 			total_reserved += reserved
-			self.update_metric('reserved', reserved, f'cuda:{i}')
+			self.update(dict(allocated = allocated, reserved = reserved), f'cuda:{i}')
 
-		self.update_metric('allocated', total_allocated, 'total')
-		self.update_metric('reserved', total_reserved, 'total')
+		self.update(dict(allocated = total_allocated, reserved = total_reserved), 'total')
 
 	def update_time_metrics(self, time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model):
-		self.update_metric('time_data', time_ms_data)
-		self.update_metric('time_forward', time_ms_fwd)
-		self.update_metric('time_backward', time_ms_bwd)
-		self.update_metric('time_iteration', time_ms_data + time_ms_model)
+		self.update(dict(
+			time_data = time_ms_data, 
+			time_forward = time_ms_fwd, 
+			time_backward = time_ms_bwd, 
+			time_iteration = time_ms_data + time_ms_model
+		))
 
-class StemTagger(collections.defaultdict):
-	def __init__(self, lang, tags_path = None):
-		tags = json.load(open(tags_path)) if tags_path is not None else {}
+class WordTagger(collections.defaultdict):
+	def __init__(self, lang, tags_path = None, vocab_path = None):
 		self.lang = lang
+		self.vocab = set(map(str.strip, open(vocab_path))) if vocab else set()
+		tags = json.load(open(tags_path)) if tags_path is not None else {}
 		self.stem2tag = {lang.stem(word) : tag for tag, words in tags.items() for word in words}
 
 	def __missing__(self, word):
 		self[key] = self.get(word) or self.stem2tag.get(self.lang.stem(word))
-		return self[key]
+		return ['vocab_hit' if word in self.vocab else 'vocab_miss', self[key]]
 
 def align(hyp, ref, score_sub = -2, score_del = -4, score_ins = -3):
 	aligner = Needleman()
@@ -94,8 +116,77 @@ def align_words(hyp, ref, break_ref = False):
 
 		words = words_
 
-	word_alignment = [dict(hyp = ''.join(hyp), ref = ''.join(ref), type = t) for hyp, ref in words for t, e in [word_alignment_error_type(hyp, ref)]]
+	word_alignment = [dict(hyp = ''.join(hyp), ref = ''.join(ref), type = t) for hyp, ref in words for t, e in [ErrorType.tag(hyp, ref)]]
 	return ''.join(hyp), ''.join(ref), word_alignment
+
+class ErrorAnalyzer:
+	def __init__(self, configs, tagger):
+		self.tagger = tagger
+		self.configs = configs
+
+	def analyze(hyp, ref, full = False, **kwargs):
+		hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
+		hyp_postproc, ref_postproc = map(labels.postprocess_transcript, [hyp, ref])
+		
+		res = dict(
+			audio_path = audio_path, 
+			audio_name = os.path.basename(audio_path), 
+			ref = ref, 
+			hyp = hyp, 
+			**kwargs
+		)
+		
+		hyp, ref, word_alignment = align_words(hyp, ref, **config['align_words'])
+		for w in word_alignment:
+			w['word_tags'] = self.tagger.tag(w['ref'])
+			w['error_tags'] = [ErrorType.tag(w['hyp'], w['ref'])]
+		# der = sum(self.tagger.WORD_IN_VOCAB in self.tagger.tag(w) for w in hyp.split()) / (1 + hyp.count(' ')),
+		
+		# word_include_tags 
+		# word_exclude_tags 
+		# error_include_tags
+		# error_exclude_tags
+		# error_ok_tags
+		
+		# separate wer per tag: numbers, proper
+		# word_include_tags = ['number']
+		
+		# separete wer for not-numbers/not-proper/not-stop
+		# word_exclude_tags = ['number', 'proper', 'stop']
+
+		# separate wer for not-stop-words
+		# word_exclude_tags = ['stop']
+		
+		# separate cer/wer for typo-easy + not-stop-words
+		# word_exclude_tags = ['stop'], error_include_tags = ['ok', 'typo_easy']
+
+		# total number of words, number of erorrs, inlcuding hitting vocab 
+		
+		# hyp_postproc, ref_postproc = map(functools.partial(labels.postprocess_transcript, **config['postprocess_transcript']), [hyp, ref])
+		# cer_postproc = cer(hyp_postproc, ref_postproc)
+		# wer_postproc = wer(hyp_postproc, ref_postproc)
+
+		def filter_words(word_alignment, word_include_tags = [], word_exclude_tags = [], error_include_tags = [], error_exclude_tags = []):
+			word_include_tags, word_exclude_tags, error_include_tags, error_exclude_tags = map(set, [word_include_tags, word_exclude_tags, error_include_tags, error_exclude_tags]) 
+			res = []
+			for w in word_alignment:
+				if bool(w['word_tags'] & word_exclude_tags) or bool(w['error_tags'] & error_exclude_tags):
+					continue
+				
+				if (word_include_tags and not bool(w['word_tags'] & word_exclude_tags)) or (error_include_tags and not bool(w['error_tags'] & error_include_tags)):
+					continue
+
+				res.append(w)
+			return res
+
+		def compute_metrics(word_alignment):
+			pass
+		
+		for config_name, config in self.configs.items():
+			 res[config_name] = compute_metrics(filter_words(word_alignment, **config))
+
+		return res
+
 
 def analyze(ref, hyp, labels, audio_path = '', phonetic_replace_groups = [], vocab = set(), full = False, break_ref_alignment = True, **kwargs):
 	hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
@@ -107,7 +198,7 @@ def analyze(ref, hyp, labels, audio_path = '', phonetic_replace_groups = [], voc
 	if full:
 		hyp, ref, word_alignment = align_words(hyp, ref, break_ref = break_ref_alignment)
 		phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
-		hypref_pseudo = {t : (' '.join((r_ if word_alignment_error_type(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'], missing_ref = ['missing_ref'])[t] else h_).replace(placeholder, '') for w in word_alignment for r_, h_ in [(w['ref'], w['hyp'])] ), ref.replace(placeholder, '')) for t in error_types}
+		hypref_pseudo = {t : (' '.join((r_ if ErrorType.tag(h_, r_)[0] in dict(typo_easy = ['typo_easy'], typo_hard = ['typo_easy', 'typo_hard'], missing = ['missing'], missing_ref = ['missing_ref'])[t] else h_).replace(placeholder, '') for w in word_alignment for r_, h_ in [(w['ref'], w['hyp'])] ), ref.replace(placeholder, '')) for t in error_types}
 
 		errors = {t : [dict(hyp = r['hyp'], ref = r['ref']) for r in word_alignment if r['type'] == t] for t in error_types}
 	
@@ -146,11 +237,6 @@ def analyze(ref, hyp, labels, audio_path = '', phonetic_replace_groups = [], voc
 
 	return a
 
-def nanmean(dictlist, key):
-	tensor = torch.FloatTensor([r[key] for r in dictlist if key in r])
-	isfinite = torch.isfinite(tensor)
-	return float(tensor[isfinite].mean()) if isfinite.any() else -1.0
-
 def aggregate(analyzed, p = 0.5):
 	stats = dict(
 		loss_avg = nanmean(analyzed, 'loss'),
@@ -179,22 +265,10 @@ def aggregate(analyzed, p = 0.5):
 			
 	return stats
 
-def word_alignment_error_type(hyp, ref, p = 0.5, L = 3, placeholder = '|'):
-	e = sum(ch != cr and not (ch == space and cr == placeholder) for ch, cr in zip(hyp, ref))
-	ref_placeholders = ref.count(placeholder)
-	ref_chars = len(ref) - ref_placeholders
-	is_typo = (0 < ref_chars < L and len(hyp) <= L) or (e >= 0 and ((hyp.count(placeholder) < p * len(ref) and ref_placeholders < p * len(ref))))
-
-	if hyp == ref:
-		return 'ok', e
-	elif is_typo:
-		easy = ref_chars < L or (e <= 1 or (e == 2 and all(ch == cr or i >= len(ref) - 2 or (ch == space and cr == placeholder) for i, (ch, cr) in enumerate(zip(hyp, ref)))))
-		return 'typo_' + ('easy' if easy else 'hard'), e
-	else:
-		source = '_ref' if ref_placeholders >= p * len(ref) else ''
-		return 'missing' + source, e
-
-error_types = ['typo_easy', 'typo_hard', 'missing', 'missing_ref']
+def nanmean(dictlist, key):
+	tensor = torch.FloatTensor([r[key] for r in dictlist if key in r])
+	isfinite = torch.isfinite(tensor)
+	return float(tensor[isfinite].mean()) if isfinite.any() else -1.0
 
 def quantiles(tensor):
 	tensor = tensor.sort().values
@@ -448,7 +522,7 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('align')
 	cmd.add_argument('--hyp', required = True)
 	cmd.add_argument('--ref', required = True)
-	cmd.set_defaults(func = lambda hyp, ref: print('\n'.join(f'{k}: {v}' for k, v in zip(['hyp', 'ref'], align(hyp = hyp, ref = ref)))))
+	cmd.set_defaults(func = lambda hyp, ref: (print('\n'.join(f'{k}: {v}' for k, v in zip(['hyp', 'ref'], align(hyp = hyp, ref = ref)))), print('\n'.join(map(str, align_words(hyp, ref, break_ref = True)[-1])))))
 
 	args = parser.parse_args()
 	args = vars(parser.parse_args())

@@ -89,7 +89,7 @@ def main(args):
 			#	ylen = torch.tensor([[y.shape[-1]]], device = log_probs.device, dtype = torch.long)
 			#	segments = [([], sum([h for r, h in segments], []))]
 			
-			alignment = ctc.alignment(log_probs.permute(2, 0, 1), y.squeeze(1), olen, ylen.squeeze(1), blank = labels.blank_idx)
+			alignment = ctc.alignment(log_probs.permute(2, 0, 1), y.squeeze(1), olen, ylen.squeeze(1), blank = labels.blank_idx, pack_backpointers = args.pack_backpointers)
 			ref_segments = [labels.decode(y[i, 0, :ylen[i]].tolist(), ts[i], alignment[i], channel = channel[i], speaker = speaker[i], key = 'ref', speakers = speakers) for i in range(len(decoded))]
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic_alignment))
 	 	
@@ -150,6 +150,7 @@ if __name__ == '__main__':
 	parser.add_argument('--html', action = 'store_true')
 	parser.add_argument('--txt', action = 'store_true', help = 'store whole transcript in txt format need for assessments')
 	parser.add_argument('--transcribe-first-n-sec', type=int)
+	parser.add_argument('--pack-backpointers', action = 'store_true')
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
