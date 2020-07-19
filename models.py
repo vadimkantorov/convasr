@@ -223,7 +223,11 @@ class ResidualActivation(nn.Module):
 			ctx.num_residual = len(residual)
 			
 			if ResidualActivation.InvertibleResidualInplaceFunction.bug:
-				residual = []
+				if residual:
+					residual_ = torch.zeros_like(residual[0])
+					for r in residual[1:]:
+						residual_.add_(r)
+					residual = [residual_]
 			
 			#ctx.mark_dirty(x)
 			ctx.save_for_backward(x, *residual)
@@ -234,7 +238,7 @@ class ResidualActivation(nn.Module):
 			x, *residual = ctx.saved_tensors
 			y = x.data
 			mask = torch.ones_like(grad_output).masked_fill_(x < 0, ctx.nonlinearity[1])
-			grad_output *= mask
+			grad_output.mul_(mask) #grad_output = grad_output.contiguous().mul_(mask)
 			y /= mask
 			for r in residual:
 				y -= r
@@ -445,6 +449,10 @@ def sparse_topk_todense(saved, device = None):
 def master_module(model):
 	return model.module if isinstance(model, nn.DataParallel) else model
 
+def compute_memory_fragmentation():
+	snapshot = torch.cuda.memory_snapshot()
+	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
+
 ########CONFIGS########
 
 class Wav2Letter(JasperNet):
@@ -531,10 +539,10 @@ class Wav2LetterDenseBig(JasperNet):
 class Wav2LetterFlat(JasperNet):
 	def __init__(self, num_input_features, num_classes, dropout=0.2, base_width=128, nonlinearity=('hardtanh', 0, 20), kernel_size_prologue=13, kernel_size_epilogue=29, kernel_sizes=[11, 13, 17, 21, 25], dilation=2, num_blocks=5, decoder_type=None, normalize_features=True, frontend=None):
 		super().__init__(num_input_features, num_classes, base_width=base_width,
-						 dropout=dropout, dropout_prologue=dropout, dropout_epilogue=dropout, dropouts=[dropout] * num_blocks,
-						 kernel_size_prologue=kernel_size_prologue, kernel_size_epilogue=kernel_size_epilogue, kernel_sizes=[kernel_size_prologue] * num_blocks,
-						 out_width_factors=[6] * num_blocks, out_width_factors_large=[16, 16],
-						 residual='flat', dilation=dilation, nonlinearity=nonlinearity, decoder_type=decoder_type, normalize_features=normalize_features, frontend=frontend)
+			dropout=dropout, dropout_prologue=dropout, dropout_epilogue=dropout, dropouts=[dropout] * num_blocks,
+			kernel_size_prologue=kernel_size_prologue, kernel_size_epilogue=kernel_size_epilogue, kernel_sizes=[kernel_size_prologue] * num_blocks,
+			out_width_factors=[6] * num_blocks, out_width_factors_large=[16, 16],
+			residual='flat', dilation=dilation, nonlinearity=nonlinearity, decoder_type=decoder_type, normalize_features=normalize_features, frontend=frontend)
 
 class JasperNetSeparable(JasperNet):
 	def __init__(self, *args, separable = True, groups = 128, **kwargs):
