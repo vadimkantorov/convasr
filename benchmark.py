@@ -12,7 +12,7 @@ import datasets
 parser = argparse.ArgumentParser()
 parser.add_argument('--checkpoint')
 parser.add_argument('--device', default = 'cuda', help ='TODO: proper device choosing')
-parser.add_argument('--iterations', type = int, default = 32)
+parser.add_argument('--iterations', type = int, default = 16)
 parser.add_argument('--iterations-warmup', type = int, default = 16)
 parser.add_argument('--frontend', action = 'store_true')
 parser.add_argument('--fp16', choices = ['', 'O0', 'O1', 'O2', 'O3'], default = None)
@@ -26,7 +26,7 @@ parser.add_argument('--model', default = 'JasperNetBig')
 parser.add_argument('--onnx')
 parser.add_argument('--stft-mode', choices = ['conv', ''], default = '')
 parser.add_argument('-B', type = int, default = 128)
-parser.add_argument('-T', type = int, default = 5.12)
+parser.add_argument('-T', type = int, default = 2.56)
 parser.add_argument('--profile-cuda', action = 'store_true')
 parser.add_argument('--profile-autograd')
 parser.add_argument('--data-parallel', action = 'store_true')
@@ -81,8 +81,9 @@ print()
 
 print('Warming up for', args.iterations_warmup, 'iterations')
 tic_wall = tictoc()
-for i in range(args.iterations_warmup):
-	model(load_batch(batch))
+with torch.no_grad():
+	for i in range(args.iterations_warmup):
+		model(load_batch(batch))
 print('Warmup done in {:.02f} wall clock seconds'.format(tictoc() - tic_wall))
 print()
 
@@ -107,10 +108,7 @@ for i in range(args.iterations):
 	tac = tictoc()
 	times_fwd[i] = toc - tic
 	times_bwd[i] = tac - toc
-
-	#for p in model.parameters():
-	#	p.grad = None
-	#gc.collect()
+	y = None
 
 mem_reserved = torch.cuda.max_memory_reserved(args.device) if use_cuda else 0
 mem_allocated = torch.cuda.max_memory_allocated(args.device) if use_cuda else 0
