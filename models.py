@@ -225,8 +225,9 @@ class ResidualActivation(nn.Module):
 			if ResidualActivation.InvertibleResidualInplaceFunction.bug:
 				residual = []
 			
-			ctx.save_for_backward(y, *residual)
-			return y
+			#ctx.mark_dirty(x)
+			ctx.save_for_backward(x, *residual)
+			return x
 
 		@staticmethod
 		def backward(ctx, grad_output):
@@ -250,8 +251,9 @@ class InplaceBatchNorm1d(nn.BatchNorm1d):
 			invstd = (var + eps).rsqrt_()
 			output = torch.batch_norm_elemt(input, weight, bias, mean, invstd, 0, out = input)
 			ctx.training = training
-			ctx.save_for_backward(output, weight, bias, mean, invstd)
-			return output
+			ctx.save_for_backward(input, weight, bias, mean, invstd)
+			ctx.mark_dirty(input)
+			return input
 
 		@staticmethod
 		def backward(ctx, grad_output):
