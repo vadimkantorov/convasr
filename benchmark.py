@@ -34,9 +34,6 @@ parser.add_argument('--backward', action = 'store_true')
 parser.add_argument('--no-grad', action = 'store_true')
 args = parser.parse_args()
 
-if args.no_grad:
-	torch.set_grad_enabled(False)
-
 checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoint else None
 if checkpoint:
 	args.model, args.lang, args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['model', 'lang', 'sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
@@ -45,18 +42,25 @@ use_cuda = 'cuda' in args.device
 
 labels = datasets.Labels(datasets.Language(args.lang))
 
+if args.no_grad:
+	torch.set_grad_enabled(False)
+
 if args.onnx:
 	onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
 	model = lambda x: onnxruntime_session.run(None, dict(x = x))
 	load_batch = lambda x: x.numpy()
+
 else:
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, stft_mode = args.stft_mode) if args.frontend else None
 	model = getattr(models, args.model)(args.num_input_features, [len(labels)], frontend = frontend, dict = lambda logits, log_probs, olen, **kwargs: logits[0])
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'])
 	model.to(args.device)
-	model.eval()
-	model.fuse_conv_bn_eval()
+	
+	if args.no_grad:
+		model.eval()
+		model.fuse_conv_bn_eval()
+	
 	model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16) if args.data_parallel else (model,)
 	load_batch = lambda x: x.to(args.device, non_blocking = True)
 
@@ -90,7 +94,7 @@ if args.profile_autograd:
 	autograd_profiler = torch.autograd.profiler.profile(use_cuda = use_cuda, enabled = True)
 	autograd_profiler.__enter__()
 
-print('Starting benchmark for', args.iterations, 'iterations:', 'fwd', '+bwd' if args.backward else '')
+print('Starting benchmark for', args.iterations, 'iterations:', 'fwd', '+ bwd' if args.backward else '')
 tic_wall = tictoc()
 times_fwd, times_bwd, fragmentation = torch.zeros(args.iterations), torch.zeros(args.iterations), torch.zeros(args.iterations)
 for i in range(args.iterations):

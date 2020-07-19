@@ -71,11 +71,13 @@ class ConvBn1d(nn.Module):
 		self.temporal_mask = temporal_mask
 
 	def forward(self, x, lengths_fraction = None, residual: List = []):
-		residual_inputs = []
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
 			if i == len(self.conv) - 1:
-				assert len(residual) == len(self.conv_residual) == len(self.bn_residual)
+				assert len(self.conv_residual) == len(self.bn_residual) == len(residual) 
 				residual_inputs = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)]
+			else:
+				residual_inputs = []
+			
 			x = self.activation(bn(conv(x)), residual = residual_inputs)
 			x = x * temporal_mask(x, lengths_fraction = lengths_fraction) if (self.temporal_mask and lengths_fraction is not None) else x
 		return x
@@ -209,8 +211,6 @@ class ResidualActivation(nn.Module):
 		return y
 
 	class InvertibleResidualInplaceFunction(torch.autograd.function.Function):
-		bug = False
-
 		@staticmethod
 		def forward(ctx, nonlinearity, x, *residual):
 			ctx.nonlinearity = nonlinearity
@@ -220,15 +220,6 @@ class ResidualActivation(nn.Module):
 			for r in residual:
 				y += r
 			y = getattr(F, ctx.nonlinearity[0])(y, *ctx.nonlinearity[1:], inplace = True)
-			ctx.num_residual = len(residual)
-			
-			if ResidualActivation.InvertibleResidualInplaceFunction.bug:
-				if residual:
-					residual_ = torch.zeros_like(residual[0])
-					for r in residual[1:]:
-						residual_.add_(r)
-					residual = [residual_]
-			
 			#ctx.mark_dirty(x)
 			ctx.save_for_backward(x, *residual)
 			return x
@@ -242,7 +233,7 @@ class ResidualActivation(nn.Module):
 			y /= mask
 			for r in residual:
 				y -= r
-			return (None, ) + (grad_output,) * (1 + ctx.num_residual)
+			return (None, ) + (grad_output,) * (1 + len(residual))
 
 class InplaceBatchNorm1d(nn.BatchNorm1d):
 	def forward(self, input):
@@ -261,7 +252,7 @@ class InplaceBatchNorm1d(nn.BatchNorm1d):
 
 		@staticmethod
 		def backward(ctx, grad_output):
-			assert ctx.training
+			assert ctx.training, 'Inplace BatchNorm supports only training mode, input gradients with running stats used are not yet supported'
 			saved_output, weight, bias, mean, invstd = ctx.saved_tensors
 			saved_input = torch.batch_norm_elemt(saved_output, invstd.reciprocal(), mean, bias, weight.reciprocal(), 0, out = saved_output)
 			sum_dy, sum_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(grad_output, saved_input, mean, invstd, weight, *ctx.needs_input_grad[:3])
@@ -416,6 +407,10 @@ def reset_bn_running_stats_(model):
 		bn.train()
 	return model
 
+def compute_memory_fragmentation():
+	snapshot = torch.cuda.memory_snapshot()
+	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
+
 def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, opt_level = None, **kwargs):
 	data_parallel = data_parallel and torch.cuda.device_count() > 1
 
@@ -448,10 +443,6 @@ def sparse_topk_todense(saved, device = None):
 
 def master_module(model):
 	return model.module if isinstance(model, nn.DataParallel) else model
-
-def compute_memory_fragmentation():
-	snapshot = torch.cuda.memory_snapshot()
-	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
 
 ########CONFIGS########
 
@@ -568,8 +559,3 @@ class JasperNetBigInplace(JasperNet):
 	def __init__(self, *args, **kwargs):
 		inplace = kwargs.pop('inplace', True)
 		super().__init__(*args, num_subblocks = 2, temporal_mask = False, inplace = inplace, nonlinearity = ('leaky_relu', 0.01), **kwargs)
-
-class JasperNetBigInplaceBug(JasperNetBigInplace):
-	def __init__(self, *args, **kwargs):
-		super().__init__(*args, **kwargs)
-		ResidualActivation.InvertibleResidualInplaceFunction.bug = True
