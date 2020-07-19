@@ -58,7 +58,7 @@ else:
 	model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16) if args.dataparallel else (model,)
 	load_batch = lambda x: x.to(args.device, non_blocking = True)
 
-tictoc = lambda: (and torch.cuda.is_available and torch.cuda.synchronize()) or time.time()
+tictoc = lambda: (use_cuda and torch.cuda.synchronize()) or time.time()
 
 batch_shape = [args.B, args.T * args.sample_rate] if args.frontend else [args.B, args.num_input_features, int(args.T / args.window_stride)]
 if batch_shape[-1] % 128 != 0:
