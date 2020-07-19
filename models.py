@@ -196,7 +196,6 @@ class ResidualActivation(nn.Module):
 		if self.invertible:
 			y = ResidualActivation.InvertibleResidualInplaceFunction.apply(self.nonlinearity, y, *residual)
 			y = F.dropout(y, p = self.dropout, training = self.training)
-		
 		else:
 			for r in residual:
 				y += r
@@ -210,6 +209,8 @@ class ResidualActivation(nn.Module):
 		return y
 
 	class InvertibleResidualInplaceFunction(torch.autograd.function.Function):
+		bug = False
+
 		@staticmethod
 		def forward(ctx, nonlinearity, x, *residual):
 			ctx.nonlinearity = nonlinearity
@@ -218,23 +219,25 @@ class ResidualActivation(nn.Module):
 			y = x.data
 			for r in residual:
 				y += r
-			
 			y = getattr(F, ctx.nonlinearity[0])(y, *ctx.nonlinearity[1:], inplace = True)
+			ctx.num_residual = len(residual)
+			
+			if ResidualActivation.InvertibleResidualInplaceFunction.bug:
+				residual = []
+			
 			ctx.save_for_backward(y, *residual)
 			return y
 
 		@staticmethod
 		def backward(ctx, grad_output):
 			x, *residual = ctx.saved_tensors
-			
+			y = x.data
 			mask = torch.ones_like(grad_output).masked_fill_(x < 0, ctx.nonlinearity[1])
 			grad_output *= mask
-			y = x.data
 			y /= mask
 			for r in residual:
 				y -= r
-
-			return (None, ) + (grad_output,) * (1 + len(residual))
+			return (None, ) + (grad_output,) * (1 + ctx.num_residual)
 
 class InplaceBatchNorm1d(nn.BatchNorm1d):
 	def forward(self, input):
@@ -255,7 +258,7 @@ class InplaceBatchNorm1d(nn.BatchNorm1d):
 			assert ctx.training
 			saved_output, weight, bias, mean, invstd = ctx.saved_tensors
 			saved_input = torch.batch_norm_elemt(saved_output, invstd.reciprocal(), mean, bias, weight.reciprocal(), 0, out = saved_output)
-			sum_dy, sum_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(grad_output, saved_input, mean, invstd, weight, *self.needs_input_grad[:3])
+			sum_dy, sum_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(grad_output, saved_input, mean, invstd, weight, *ctx.needs_input_grad[:3])
 			divisor = saved_input.numel() // saved_input.size(1)
 			mean_dy = sum_dy.div_(divisor)
 			mean_dy_xmu = sum_dy_xmu.div_(divisor)
@@ -555,3 +558,8 @@ class JasperNetBigInplace(JasperNet):
 	def __init__(self, *args, **kwargs):
 		inplace = kwargs.pop('inplace', True)
 		super().__init__(*args, num_subblocks = 2, temporal_mask = False, inplace = inplace, nonlinearity = ('leaky_relu', 0.01), **kwargs)
+
+class JasperNetBigInplaceBug(JasperNetBigInplace):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		ResidualActivation.InvertibleResidualInplaceFunction.bug = True
