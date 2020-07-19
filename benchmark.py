@@ -1,3 +1,4 @@
+import gc
 import math
 import argparse
 import time
@@ -25,7 +26,7 @@ parser.add_argument('--model', default = 'JasperNetBig')
 parser.add_argument('--onnx')
 parser.add_argument('--stft-mode', choices = ['conv', ''], default = '')
 parser.add_argument('-B', type = int, default = 128)
-parser.add_argument('-T', type = int, default = 2.56)
+parser.add_argument('-T', type = int, default = 5.12)
 parser.add_argument('--profile-cuda', action = 'store_true')
 parser.add_argument('--profile-autograd')
 parser.add_argument('--data-parallel', action = 'store_true')
@@ -102,6 +103,11 @@ for i in range(args.iterations):
 	tac = tictoc()
 	times_fwd[i] = toc - tic
 	times_bwd[i] = tac - toc
+
+	#for p in model.parameters():
+	#	p.grad = None
+	#gc.collect()
+
 mem_reserved = torch.cuda.max_memory_reserved(args.device) if use_cuda else 0
 mem_allocated = torch.cuda.max_memory_allocated(args.device) if use_cuda else 0
 print('Benchmark done in {:.02f} wall clock seconds'.format(tictoc() - tic_wall))
@@ -111,4 +117,4 @@ if args.profile_autograd:
 	autograd_profiler.__exit__(None, None, None)
 	autograd_profiler.export_chrome_trace(args.profile_autograd)
 
-print('load+fwd {:.02f} msec | bwd {:.02f} msec | cudamemreserved {:.02f} mb | cudamemallocated {:.02f} mb | fragmentation: {:.02f}'.format(float(times_fwd.mean()) * 1e3, float(times_bwd.mean()) * 1e3, mem_reserved * 1e-6, mem_allocated * 1e-6, float(fragmentation.mean())))
+print('load+fwd {:.02f} msec | bwd {:.02f} msec | cudamemreserved {:.02f} mb | cudamemallocated {:.02f} mb | cudamemutilization: {:.02f}'.format(float(times_fwd.mean()) * 1e3, float(times_bwd.mean()) * 1e3, mem_reserved * 1e-6, mem_allocated * 1e-6, float(fragmentation.mean())))
