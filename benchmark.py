@@ -39,6 +39,8 @@ checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoin
 if checkpoint:
 	args.model, args.lang, args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['model', 'lang', 'sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
 
+use_cuda = 'cuda' in args.device
+
 labels = datasets.Labels(datasets.Language(args.lang))
 
 if args.onnx:
@@ -56,7 +58,7 @@ else:
 	model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16) if args.dataparallel else (model,)
 	load_batch = lambda x: x.to(args.device, non_blocking = True)
 
-tictoc = lambda: ('cuda' in args.device and torch.cuda.is_available and torch.cuda.synchronize()) or time.time()
+tictoc = lambda: (and torch.cuda.is_available and torch.cuda.synchronize()) or time.time()
 
 batch_shape = [args.B, args.T * args.sample_rate] if args.frontend else [args.B, args.num_input_features, int(args.T / args.window_stride)]
 if batch_shape[-1] % 128 != 0:
@@ -83,7 +85,7 @@ if args.profile_cuda:
 	torch.autograd.profiler.emit_nvtx()
 	torch.cuda.profiler.start()
 if args.profile_autograd:
-	autograd_profiler = torch.autograd.profiler.profile()
+	autograd_profiler = torch.autograd.profiler.profile(use_cuda = use_cuda, enabled = True)
 	autograd_profiler.__enter__()
 
 print('Starting benchmark for', args.iterations, 'iterations:', 'fwd', '+bwd' if args.backward else '')
@@ -98,7 +100,7 @@ for i in range(args.iterations):
 	tac = tictoc()
 	times_fwd[i] = toc - tic
 	times_bwd[i] = tac - toc
-mem = torch.cuda.max_memory_reserved(args.device) if 'cuda' in args.device else 0
+mem = torch.cuda.max_memory_reserved(args.device) if use_cuda else 0
 print('Benchmark done in {:.02f} wall clock seconds'.format(tictoc() - tic_wall))
 print()
 
