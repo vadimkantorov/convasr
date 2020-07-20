@@ -4,15 +4,16 @@ TRACEFILE=data/profile.sqlite
 TRACELOG=data/profile.txt
 TRACEPYPROFLOG=data/profile.pyprof.txt
 
-nvprof -s -f -o $TRACEFILE --profile-from-start off -- python benchmark.py --profile-cuda $@ &> $TRACELOG
-
-python -m apex.pyprof.parse $TRACEFILE > $TRACEFILE.dict
-
-python -m apex.pyprof.prof -w 170 -c kernel,op,sil,tc,flops,bytes,device,stream,block,grid $TRACEFILE.dict > $TRACEPYPROFLOG
+nvprof -s -f -o $TRACEFILE --profile-from-start off -- python3 benchmark.py --profile-cuda $@ &> $TRACELOG
 
 # https://github.com/ezyang/nvprof2json
-# python nvprof2json.py $TRACEFILE > $TRACEFILE.json
 # then open it with chrome://tracing
+python3 scripts/nvprof2json.py $TRACEFILE > $TRACEFILE.json
+
+#python3 -m apex.pyprof.parse $TRACEFILE > $TRACEFILE.dict
+
+#python3 -m apex.pyprof.prof -w 170 -c kernel,op,sil,tc,flops,bytes,device,stream,block,grid $TRACEFILE.dict > $TRACEPYPROFLOG
+
 
 echo nvprof sqlite dump in $TRACEFILE, text trace in $TRACELOG
 echo apex.pyprof dict dump in $TRACEFILE.dict, text trace in $TRACEPYPROFLOG
