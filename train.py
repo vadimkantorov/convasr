@@ -23,7 +23,7 @@ def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
 		set_random_seed(seed)
 
-def apply_model(data_loader, model, device, crash_on_oom):
+def apply_model(data_loader, model, decoder, device, crash_on_oom):
 	for meta, x, xlen, y, ylen in data_loader:
 		x, xlen, y, ylen = x.to(device, non_blocking = True), xlen.to(device, non_blocking = True), y.to(device, non_blocking = True), ylen.to(device, non_blocking = True)
 		with torch.no_grad():
@@ -41,6 +41,75 @@ def apply_model(data_loader, model, device, crash_on_oom):
 		logits = list(map(models.unpad, logits, olen))
 		y = list(map(models.unpad, y, ylen))
 		yield meta, loss.cpu(), entropy_char.cpu(), hyp, logits, y
+
+def evaluate_model(args, val_data_loaders, model, decoder, epoch = None, iteration = None, adapt_bn = False):
+	training = epoch is not None and iteration is not None
+	columns = {}
+	for val_dataset_name, val_data_loader in val_data_loaders.items():
+		print(f'\n{val_dataset_name}@{iteration}')
+		transcript, logits_, y_ = [], [], []
+		analyze = args.analyze == [] or (args.analyze is not None and val_dataset_name in args.analyze)
+
+		model.eval()
+		if args.adapt_bn:
+			models.reset_bn_running_stats_(model)
+			for _ in apply_model(val_data_loader, model, decoder, args.device, args.val_crash_oom):
+				pass
+		model.eval()
+		cpu_list = lambda l: [[t.cpu() for t in t_] for t_ in l]
+		for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(val_data_loader, model, decoder, args.device, args.val_crash_oom)):
+			logits_.extend(zip(*cpu_list(logits)) if not training and args.logits else [])
+			y_.extend(cpu_list(y))
+			stats = [[metrics.analyze(l.normalize_text(zipped[2]['ref']), h, l, zipped[2]['audio_path'], phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab, loss = zipped[0], entropy = zipped[1]) for l, h in zip(labels, zipped[3:])] for zipped in zip(loss.tolist(), entropy.tolist(), meta, *hyp)]
+			for r in sum(stats, []) if args.verbose else []:
+				print(f'{val_dataset_name}@{iteration}:', batch_idx , '/', len(val_data_loader), '|', args.experiment_id)
+				print('REF: {labels} "{ref_}"'.format(ref_ = r['alignment']['ref'] if analyze else r['ref'], **r))
+				print('HYP: {labels} "{hyp_}"'.format(hyp_ = r['alignment']['hyp'] if analyze else r['hyp'], **r))
+				print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
+			transcript.extend(stats)
+
+		transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)) if training else args.val_transcripts_format.format(val_dataset_name = val_dataset_name, decoder = args.decoder)
+		for r_ in zip(*transcript):
+			labels_name = r_[0]['labels_name']
+			stats = metrics.aggregate(r_)
+			if analyze:
+				with open(f'{transcripts_path}.missing.txt', 'w') as f:
+					f.writelines('{hyp},{ref},missing\n'.format(**a).replace('|', '') for a in stats['missing'])
+				with open(f'{transcripts_path}.typo.txt', 'w') as f:
+					for t in ['typo_easy', 'typo_hard']:
+						f.writelines('{hyp},{ref},{t}\n'.format(t = t, **a).replace('|', '') for a in stats[t])
+
+			print('errors', stats['errors_distribution'])
+			cer = torch.FloatTensor([r['cer'] for r in r_])
+			loss = torch.FloatTensor([r['loss'] for r in r_])
+			print('cer', metrics.quantiles(cer))
+			print('loss', metrics.quantiles(loss))
+			print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} [{cer_easy_avg:.02%} - {cer_hard_avg:.02%} - {cer_missing_avg:.02%}]  MER: {mer_avg:.02%} DER: {der_avg:.02%}\n'.format(**stats))
+			columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_name', 'cer', 'mer', 'alignment')] + [(r['audio_name'], r['cer'], r['mer'], vis.word_alignment(r['words'])) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
+			if training:
+				tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + labels_name, dict(wer_avg = stats['wer_avg'] * 100.0, cer_avg = stats['cer_avg'] * 100.0, loss_avg = stats['loss_avg']), iteration) 
+				tensorboard.flush()
+		
+		with open(transcripts_path, 'w') as f:
+			json.dump([r for t in sorted(transcript, key = lambda t: t[0]['cer'], reverse = True) for r in t], f, ensure_ascii = False, indent = 2, sort_keys = True)
+		if analyze:
+			vis.errors([transcripts_path], audio = args.vis_errors_audio)
+		
+		if args.logits:
+			logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
+			torch.save(list(sorted([dict(**r_, logits = l_ if not args.logits_topk else models.sparse_topk(l_, args.logits_topk, dim = 0), y = y_, ydecoded = labels_.decode(y_.tolist())) for r, l, y in zip(transcript, logits_, y_) for labels_, r_, l_, y_ in zip(labels, r, l, y)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
+			print('Logits saved:', logits_file_path)
+	
+	checkpoint_path = os.path.join(args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)) if training and not args.checkpoint_skip else None
+	if args.exphtml:
+		#columns['checkpoint_path'] = checkpoint_path
+		exphtml.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, tag = 'train' if training else 'test', git_http = args.githttp)
+		exphtml.exphtml(args.exphtml)
+	
+	if training and not args.checkpoint_skip:
+		torch.save(dict(model_state_dict = models.master_module(model).state_dict(), optimizer_state_dict = optimizer.state_dict(), amp_state_dict = apex.amp.state_dict() if args.fp16 else None, sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), time = time.time(), labels = [(l.name, str(l)) for l in labels]), checkpoint_path)
+
+	model.train()
 
 def main(args):
 	checkpoints = [torch.load(checkpoint_path, map_location = 'cpu') for checkpoint_path in args.checkpoint]
@@ -105,75 +174,6 @@ def main(args):
 	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
 	vocab = set(map(str.strip, open(args.vocab))) if args.vocab else set()
-
-	def evaluate_model(val_data_loaders, epoch = None, iteration = None, adapt_bn = False):
-		training = epoch is not None and iteration is not None
-		columns = {}
-		for val_dataset_name, val_data_loader in val_data_loaders.items():
-			print(f'\n{val_dataset_name}@{iteration}')
-			transcript, logits_, y_ = [], [], []
-			analyze = args.analyze == [] or (args.analyze is not None and val_dataset_name in args.analyze)
-
-			model.eval()
-			if adapt_bn:
-				models.reset_bn_running_stats_(model)
-				for _ in apply_model(val_data_loader, model, args.device, args.val_crash_oom):
-					pass
-			model.eval()
-			cpu_list = lambda l: [[t.cpu() for t in t_] for t_ in l]
-			for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(val_data_loader, model, args.device, args.val_crash_oom)):
-				logits_.extend(zip(*cpu_list(logits)) if not training and args.logits else [])
-				y_.extend(cpu_list(y))
-				stats = [[metrics.analyze(l.normalize_text(zipped[2]['ref']), h, l, zipped[2]['audio_path'], phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab, loss = zipped[0], entropy = zipped[1]) for l, h in zip(labels, zipped[3:])] for zipped in zip(loss.tolist(), entropy.tolist(), meta, *hyp)]
-				for r in sum(stats, []) if args.verbose else []:
-					print(f'{val_dataset_name}@{iteration}:', batch_idx , '/', len(val_data_loader), '|', args.experiment_id)
-					print('REF: {labels} "{ref_}"'.format(ref_ = r['alignment']['ref'] if analyze else r['ref'], **r))
-					print('HYP: {labels} "{hyp_}"'.format(hyp_ = r['alignment']['hyp'] if analyze else r['hyp'], **r))
-					print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
-				transcript.extend(stats)
-
-			transcripts_path = os.path.join(args.experiment_dir, args.train_transcripts_format.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)) if training else args.val_transcripts_format.format(val_dataset_name = val_dataset_name, decoder = args.decoder)
-			for r_ in zip(*transcript):
-				labels_name = r_[0]['labels_name']
-				stats = metrics.aggregate(r_)
-				if analyze:
-					with open(f'{transcripts_path}.missing.txt', 'w') as f:
-						f.writelines('{hyp},{ref},missing\n'.format(**a).replace('|', '') for a in stats['missing'])
-					with open(f'{transcripts_path}.typo.txt', 'w') as f:
-						for t in ['typo_easy', 'typo_hard']:
-							f.writelines('{hyp},{ref},{t}\n'.format(t = t, **a).replace('|', '') for a in stats[t])
-
-				print('errors', stats['errors_distribution'])
-				cer = torch.FloatTensor([r['cer'] for r in r_])
-				loss = torch.FloatTensor([r['loss'] for r in r_])
-				print('cer', metrics.quantiles(cer))
-				print('loss', metrics.quantiles(loss))
-				print(f'{args.experiment_id} {val_dataset_name} {labels_name}', f'| epoch {epoch} iter {iteration}' if training else '', f'| {transcripts_path} |', 'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} [{cer_easy_avg:.02%} - {cer_hard_avg:.02%} - {cer_missing_avg:.02%}]  MER: {mer_avg:.02%} DER: {der_avg:.02%}\n'.format(**stats))
-				columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_name', 'cer', 'mer', 'alignment')] + [(r['audio_name'], r['cer'], r['mer'], vis.word_alignment(r['words'])) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
-				if training:
-					tensorboard.add_scalars('datasets/' + val_dataset_name + '_' + labels_name, dict(wer_avg = stats['wer_avg'] * 100.0, cer_avg = stats['cer_avg'] * 100.0, loss_avg = stats['loss_avg']), iteration) 
-					tensorboard.flush()
-			
-			with open(transcripts_path, 'w') as f:
-				json.dump([r for t in sorted(transcript, key = lambda t: t[0]['cer'], reverse = True) for r in t], f, ensure_ascii = False, indent = 2, sort_keys = True)
-			if analyze:
-				vis.errors([transcripts_path], audio = args.vis_errors_audio)
-			
-			if args.logits:
-				logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
-				torch.save(list(sorted([dict(**r_, logits = l_ if not args.logits_topk else models.sparse_topk(l_, args.logits_topk, dim = 0), y = y_, ydecoded = labels_.decode(y_.tolist())) for r, l, y in zip(transcript, logits_, y_) for labels_, r_, l_, y_ in zip(labels, r, l, y)], key = lambda r: r['cer'], reverse = True)), logits_file_path)
-				print('Logits saved:', logits_file_path)
-		
-		checkpoint_path = os.path.join(args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)) if training and not args.checkpoint_skip else None
-		if args.exphtml:
-			#columns['checkpoint_path'] = checkpoint_path
-			exphtml.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, tag = 'train' if training else 'test', git_http = args.githttp)
-			exphtml.exphtml(args.exphtml)
-		
-		if training and not args.checkpoint_skip:
-			torch.save(dict(model_state_dict = models.master_module(model).state_dict(), optimizer_state_dict = optimizer.state_dict(), amp_state_dict = apex.amp.state_dict() if args.fp16 else None, sampler_state_dict = sampler.state_dict(), epoch = epoch, iteration = iteration, args = vars(args), time = time.time(), labels = [(l.name, str(l)) for l in labels]), checkpoint_path)
-
-		model.train()
 	
 	model.to(args.device)
 
@@ -183,7 +183,7 @@ def main(args):
 			model.fuse_conv_bn_eval()
 		if args.device != 'cpu':
 			model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-		evaluate_model(val_data_loaders, adapt_bn = args.adapt_bn)
+		evaluate_model(args, val_data_loaders, model, decoder)
 		return
 
 	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder)
@@ -284,8 +284,7 @@ def main(args):
 				entropy_avg = metrics.exp_moving_average(entropy_avg, entropy, max = 4)
 			toc_bwd = time.time()
 
-			ms = lambda sec: sec * 1000
-			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = ms(toc_data - tic), ms(toc_fwd - toc_data), ms(toc_bwd - toc_fwd), ms(toc_bwd - toc_data)
+			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = map(lambda sec: sec * 1000, [toc_data - tic, toc_fwd - toc_data, toc_bwd - toc_fwd, toc_bwd - toc_data])
 			performance_meter.update_time_metrics(time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model)
 			time_ms_avg = metrics.exp_moving_average(time_ms_avg, time_ms_data + time_ms_model, max = 10_000)
 			print(f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}> loss: {loss_cur:.2f} <{loss_avg:.2f}> time: ({"x".join(map(str, x.shape))}) {time_ms_data:.2f}+{time_ms_fwd:4.0f}+{time_ms_bwd:4.0f} <{time_ms_avg:.0f}> | lr: {lr:.5f}')
@@ -293,7 +292,7 @@ def main(args):
 			sampler.batch_idx += 1
 
 			if iteration > 0 and (iteration % args.val_iteration_interval == 0 or iteration == args.iterations):
-				evaluate_model(val_data_loaders, epoch, iteration)
+				evaluate_model(args, val_data_loaders, model, decoder, epoch, iteration)
 
 			if iteration and args.iterations and iteration >= args.iterations:
 				return
@@ -303,7 +302,7 @@ def main(args):
 		sampler.batch_idx = 0
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
 		if not args.skip_on_epoch_end_evaluation:
-			evaluate_model(val_data_loaders, epoch+1, iteration)
+			evaluate_model(args, val_data_loaders, model, decoder, epoch + 1, iteration)
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
