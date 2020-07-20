@@ -25,13 +25,12 @@ parser.add_argument('--window', default = 'hann_window', choices = ['hann_window
 parser.add_argument('--model', default = 'JasperNetBig')
 parser.add_argument('--onnx')
 parser.add_argument('--stft-mode', choices = ['conv', ''], default = '')
-parser.add_argument('-B', type = int, default = 128)
-parser.add_argument('-T', type = int, default = 2.56)
+parser.add_argument('-B', type = int, default = 256)
+parser.add_argument('-T', type = int, default = 5.12)
 parser.add_argument('--profile-cuda', action = 'store_true')
 parser.add_argument('--profile-autograd')
 parser.add_argument('--data-parallel', action = 'store_true')
 parser.add_argument('--backward', action = 'store_true')
-parser.add_argument('--no-grad', action = 'store_true')
 args = parser.parse_args()
 
 checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoint else None
@@ -41,9 +40,6 @@ if checkpoint:
 use_cuda = 'cuda' in args.device
 
 labels = datasets.Labels(datasets.Language(args.lang))
-
-if args.no_grad:
-	torch.set_grad_enabled(False)
 
 if args.onnx:
 	onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
@@ -57,7 +53,7 @@ else:
 		model.load_state_dict(checkpoint['model_state_dict'])
 	model.to(args.device)
 	
-	if args.no_grad:
+	if not args.backward:
 		model.eval()
 		model.fuse_conv_bn_eval()
 	
@@ -81,9 +77,15 @@ print()
 
 print('Warming up for', args.iterations_warmup, 'iterations')
 tic_wall = tictoc()
-with torch.no_grad():
-	for i in range(args.iterations_warmup):
-		model(load_batch(batch))
+if use_cuda:
+	torch.backends.cudnn.benchmark = True
+
+torch.set_grad_enabled(args.backward)
+for i in range(args.iterations_warmup):
+	y = model(load_batch(batch))
+	if args.backward:
+		y.sum().backward()
+
 print('Warmup done in {:.02f} wall clock seconds'.format(tictoc() - tic_wall))
 print()
 
