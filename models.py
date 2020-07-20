@@ -187,6 +187,10 @@ class JasperNet(nn.Module):
 	def fuse_conv_bn_eval(self, K = None):
 		for subblock in self.backbone[:K]:
 			subblock.fuse_conv_bn_eval()
+	
+	def set_temporal_mask_mode(self, enabled):
+		for module in self.modules():
+			module.temporal_mask = enabled
 
 class ResidualActivation(nn.Module):
 	def __init__(self, nonlinearity, dropout = 0, invertible = False):
