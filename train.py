@@ -23,6 +23,25 @@ def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
 		set_random_seed(seed)
 
+def apply_model(data_loader, model, device, crash_on_oom):
+	for meta, x, xlen, y, ylen in data_loader:
+		x, xlen, y, ylen = x.to(device, non_blocking = True), xlen.to(device, non_blocking = True), y.to(device, non_blocking = True), ylen.to(device, non_blocking = True)
+		with torch.no_grad():
+			try:
+				logits, log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'olen', 'loss'])
+			except Exception as exception:
+				if (not crash_on_oom) and models.handle_out_of_memory_exception(exception, model):
+					print('RECOVERED FROM OOM', exception)
+					continue
+				else:
+					raise
+
+		entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, olen))
+		hyp = [list(map(l.decode, d.decode(lp, o))) for l, d, lp, o in zip(labels, decoder, log_probs, olen)]
+		logits = list(map(models.unpad, logits, olen))
+		y = list(map(models.unpad, y, ylen))
+		yield meta, loss.cpu(), entropy_char.cpu(), hyp, logits, y
+
 def main(args):
 	checkpoints = [torch.load(checkpoint_path, map_location = 'cpu') for checkpoint_path in args.checkpoint]
 	checkpoint = (checkpoints + [{}])[0]
@@ -87,18 +106,6 @@ def main(args):
 
 	vocab = set(map(str.strip, open(args.vocab))) if args.vocab else set()
 
-	def apply_model(data_loader, model):
-		for meta, x, xlen, y, ylen in data_loader:
-			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
-			with torch.no_grad():
-				logits, log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'olen', 'loss'])
-	
-			entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, olen))
-			hyp = [list(map(l.decode, d.decode(lp, o))) for l, d, lp, o in zip(labels, decoder, log_probs, olen)]
-			logits = list(map(models.unpad, logits, olen))
-			y = list(map(models.unpad, y, ylen))
-			yield meta, loss.cpu(), entropy_char.cpu(), hyp, logits, y
-
 	def evaluate_model(val_data_loaders, epoch = None, iteration = None, adapt_bn = False):
 		training = epoch is not None and iteration is not None
 		columns = {}
@@ -110,11 +117,11 @@ def main(args):
 			model.eval()
 			if adapt_bn:
 				models.reset_bn_running_stats_(model)
-				for _ in apply_model(val_data_loader, model):
+				for _ in apply_model(val_data_loader, model, args.device, args.val_crash_oom):
 					pass
 			model.eval()
 			cpu_list = lambda l: [[t.cpu() for t in t_] for t_ in l]
-			for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(val_data_loader, model)):
+			for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(val_data_loader, model, args.device, args.val_crash_oom)):
 				logits_.extend(zip(*cpu_list(logits)) if not training and args.logits else [])
 				y_.extend(cpu_list(y))
 				stats = [[metrics.analyze(l.normalize_text(zipped[2]['ref']), h, l, zipped[2]['audio_path'], phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab, loss = zipped[0], entropy = zipped[1]) for l, h in zip(labels, zipped[3:])] for zipped in zip(loss.tolist(), entropy.tolist(), meta, *hyp)]
@@ -231,7 +238,14 @@ def main(args):
 			lr = optimizer.param_groups[0]['lr']; lr_avg = metrics.exp_moving_average(lr_avg, lr, max = 1)
 			
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
-			log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'olen', 'loss'])
+			try:
+				log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'olen', 'loss'])
+			except Exception as exception:
+				if (not args.train_crash_oom) and models.handle_out_of_memory_exception(exception, model):
+					print('RECOVERED FROM OOM', exception)
+					continue
+				else:
+					raise
 			example_weights = ylen[:, 0]
 			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, float(loss.mean())
 			entropy = float(models.entropy(log_probs[0], olen[0], dim = 1).mean()) 
@@ -386,4 +400,6 @@ if __name__ == '__main__':
 	parser.add_argument('--vocab', default = 'data/vocab_word_list.txt')
 	parser.add_argument('--frontend-in-model', action = 'store_true')
 	parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
+	parser.add_argument('--train-crash-oom', action = 'store_true')
+	parser.add_argument('--val-crash-oom', action = 'store_true')
 	main(parser.parse_args())
