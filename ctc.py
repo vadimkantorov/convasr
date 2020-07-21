@@ -51,7 +51,7 @@ def packbits(tensor, dim = -1, mask = 0b00000001, out = None, dtype = torch.uint
 	out = out.zero_() if out is not None else torch.zeros(shape, device = tensor.device, dtype = dtype)
 	assert out.shape == tuple(shape)
 	for i in range(packed_size):
-		sliced_input = tensor_slice(tensor, dim, slice(i, None, packed_size))
+		sliced_input = tensor_dim_slice(tensor, dim, slice(i, None, packed_size))
 		sliced_output = out.narrow(dim, 0, sliced_input.shape[dim])
 		compress = sliced_input << (nbits * (packed_size - i - 1))
 		torch.bitwise_or(compress, sliced_output, out = sliced_output)
@@ -62,7 +62,7 @@ def unpackbits(tensor, shape, dim = -1, mask = 0b00000001, out = None, dtype = t
 	out = out.zero_() if out is not None else torch.zeros(shape, device = tensor.device, dtype = dtype)
 	assert out.shape == tuple(shape)
 	for i in range(packed_size):
-		sliced_output = tensor_slice(out, dim, slice(i, None, packed_size))
+		sliced_output = tensor_dim_slice(out, dim, slice(i, None, packed_size))
 		sliced_input = tensor.narrow(dim, 0, sliced_output.shape[dim])
 		expand = sliced_input >> (nbits * (packed_size - i - 1))
 		torch.bitwise_and(expand, mask, out = sliced_output)
