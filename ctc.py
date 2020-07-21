@@ -34,8 +34,8 @@ def alignment(log_probs, targets, input_lengths, target_lengths, blank = 0, pack
 		path[t - 1] += indices - backpointer.gather(-1, indices.unsqueeze(-1)).squeeze(-1)
 	return torch.zeros_like(_t_a_r_g_e_t_s_, dtype = torch.long).scatter_(-1, (path.t() - zero_padding).clamp(min = 0), torch.arange(len(path), device = log_alpha.device).expand(len(B), -1))[:, 1::2]
 
-def tensor_dim_slice(tensor, dim, s):
-	return tensor[(slice(None),) * (dim if dim >= 0 else dim + tensor.dim()) + (s, )]
+def tensor_dim_slice(tensor, dim, dim_slice):
+	return tensor[(dim if dim >= 0 else dim + tensor.dim()) * (slice(None), ) + (dim_slice, )]
 
 def packshape(shape, dim = -1, mask = 0b00000001, dtype = torch.uint8):
 	nbits_element = torch.iinfo(dtype).bits
@@ -49,21 +49,21 @@ def packshape(shape, dim = -1, mask = 0b00000001, dtype = torch.uint8):
 def packbits(tensor, dim = -1, mask = 0b00000001, out = None, dtype = torch.uint8):
 	shape, packed_size, nbits = packshape(tensor.shape, dim = dim, mask = mask, dtype = dtype)
 	out = out.zero_() if out is not None else torch.zeros(shape, device = tensor.device, dtype = dtype)
-	assert list(out.shape) == list(shape)
-	for e in range(packed_size):
-		sliced_input = tensor_slice(tensor, dim, slice(e, None, packed_size))
+	assert out.shape == tuple(shape)
+	for i in range(packed_size):
+		sliced_input = tensor_slice(tensor, dim, slice(i, None, packed_size))
 		sliced_output = out.narrow(dim, 0, sliced_input.shape[dim])
-		compress = sliced_input << (nbits * (packed_size - e - 1))
+		compress = sliced_input << (nbits * (packed_size - i - 1))
 		torch.bitwise_or(compress, sliced_output, out = sliced_output)
 	return out
 
 def unpackbits(tensor, shape, dim = -1, mask = 0b00000001, out = None, dtype = torch.uint8):
 	_, packed_size, nbits = packshape(shape, dim = dim, mask = mask, dtype = tensor.dtype)
 	out = out.zero_() if out is not None else torch.zeros(shape, device = tensor.device, dtype = dtype)
-	assert list(out.shape) == list(shape)
-	for e in range(packed_size):
-		sliced_output = tensor_slice(out, dim, slice(e, None, packed_size))
+	assert out.shape == tuple(shape)
+	for i in range(packed_size):
+		sliced_output = tensor_slice(out, dim, slice(i, None, packed_size))
 		sliced_input = tensor.narrow(dim, 0, sliced_output.shape[dim])
-		expand = sliced_input >> (nbits * (packed_size - e - 1))
+		expand = sliced_input >> (nbits * (packed_size - i - 1))
 		torch.bitwise_and(expand, mask, out = sliced_output)
 	return out
