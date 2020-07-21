@@ -4,6 +4,7 @@
 # upstream ctc changes
 # gpu levenshtein, needleman/hirschberg
 
+import gc
 import os
 import time
 import json
@@ -90,7 +91,14 @@ def main(args):
 				#	ylen = torch.tensor([[y.shape[-1]]], device = log_probs.device, dtype = torch.long)
 				#	segments = [([], sum([h for r, h in segments], []))]
 				
+				gc.collect()
+				torch.cuda.empty_cache()
+				
+				torch.cuda.reset_peak_memory_stats()
+
+				print('before', 'reserved', torch.cuda.max_memory_reserved('cuda:0') / 1e6, 'mb', 'allocated', torch.cuda.max_memory_allocated('cuda:0') / 1e6, 'mb')
 				alignment = ctc.alignment(log_probs.permute(2, 0, 1), y.squeeze(1), olen, ylen.squeeze(1), blank = labels.blank_idx, pack_backpointers = args.pack_backpointers)
+				print('after', 'reserved', torch.cuda.max_memory_reserved('cuda:0') / 1e6, 'mb', 'allocated', torch.cuda.max_memory_allocated('cuda:0') / 1e6, 'mb')
 				ref_segments = [labels.decode(y[i, 0, :ylen[i]].tolist(), ts[i], alignment[i], channel = channel[i], speaker = speaker[i], key = 'ref', speakers = speakers) for i in range(len(decoded))]
 		except Exception as exception:
 			if (not args.oom_crash) and models.handle_out_of_memory_exception(exception, model):
@@ -99,7 +107,8 @@ def main(args):
 				continue
 			else:
 				raise
-			print('Alignment time: {:.02f} sec'.format(time.time() - tic_alignment))
+		
+		print('Alignment time: {:.02f} sec'.format(time.time() - tic_alignment))
 			
 		if args.max_segment_duration:
 			ref_transcript, hyp_transcript = [list(sorted(sum(segments, []), key = transcripts.sort_key)) for segments in [ref_segments, hyp_segments]]
