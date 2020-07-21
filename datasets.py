@@ -52,11 +52,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		audio_path = transcript[0]['audio_path']
 
 		waveform_transform_debug = (lambda audio_path, sample_rate, signal: audio.write_audio(os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'), signal, sample_rate)) if self.waveform_transform_debug_dir else None
-		
+
 		if not self.segmented:
 			transcript = transcript[0]
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend, duration=self.max_duration) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
-			
+
 			transcript = dict(dict(audio_name = os.path.basename(transcript['audio_path'])), **transcript)
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
@@ -65,8 +65,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = False, backend = self.audio_backend, duration=self.max_duration)
 			replace_transcript = self.join_transcript or \
 				not transcript or \
-				any(t.get('begin') is None and t.get('end') is None for t in transcript) and \
-				all(t.get('ref') is not None for t in transcript)
+				(any(t.get('begin') is None and t.get('end') is None for t in transcript) and \
+					all(t.get('ref') is not None for t in transcript))
 			normalize_text = True
 
 			if replace_transcript:
@@ -76,11 +76,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				speaker = torch.cat([torch.full((len(ref) + 1,), speakers.index(t.get('speaker')), dtype = torch.uint8).scatter_(0, torch.tensor(len(ref)), 0) for t, ref in zip(transcript, ref_full)])[:-1]
 				transcript = [dict(speaker = speaker, speakers = speakers, ref = ' '.join(ref_full))]
 				normalize_text = False
-		
+
 			transcript = [dict(dict(audio_path = audio_path, channel = channel, speaker = self.speakers[channel] if self.speakers else None, begin = 0, end = signal.shape[1] / sample_rate), **t) for t in sorted(transcript, key = transcripts.sort_key) for channel in ([t['channel']] if 'channel' in t else range(len(signal)))]
 			features = [self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0) if self.frontend is not None else segment.unsqueeze(0) for t in transcript for segment in [signal[t['channel'], int(t['begin'] * sample_rate) : 1 + int(t['end'] * sample_rate)]]]
 			targets = [[labels.encode(t.get('ref', ''), normalize = normalize_text)[1] for t in transcript] for labels in self.labels]
-		
+
 		return [transcript, features] + list(targets)
 
 	def __len__(self):
