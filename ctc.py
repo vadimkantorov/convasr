@@ -7,7 +7,7 @@ import torch.nn.functional as F
 #	torch.float16 : torch.finfo(torch.float16).min
 #}
 
-@torch.jit.script
+#@torch.jit.script
 def alignment(log_probs, targets, input_lengths, target_lengths, blank = 0, pack_backpointers = False):
 	B = torch.arange(len(targets), device = input_lengths.device)
 	_t_a_r_g_e_t_s_ = torch.cat([torch.stack([torch.full_like(targets, blank), targets], dim = -1).flatten(start_dim = -2), torch.full_like(targets[:, :1], blank)], dim = -1)
