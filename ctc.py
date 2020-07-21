@@ -45,5 +45,5 @@ def alignment(log_probs, targets, input_lengths, target_lengths, blank = 0, pack
 		else:
 			backpointer = backpointers[t]
 
-		path[t - 1] += indices - backpointer.gather(-1, indices.unsqueeze(-1)).squeeze(-1).bitwise_and_(0b11)
+		path[t - 1] += indices - backpointer.gather(-1, indices.unsqueeze(-1)).squeeze(-1).bitwise_and_(backpointers_packmask)
 	return torch.zeros_like(_t_a_r_g_e_t_s_, dtype = torch.long).scatter_(-1, (path.t() - zero_padding).clamp(min = 0), torch.arange(len(path), device = log_alpha.device).expand(len(B), -1))[:, 1::2]
