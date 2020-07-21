@@ -12,7 +12,8 @@ import audio
 import transcripts
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, data_paths, labels, sample_rate, frontend = None, speakers = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, duration_filter = True, min_ref_len = None, max_ref_len = None, ref_len_filter = True, mono = True, segmented = False, time_padding_multiple = 1, audio_backend = 'sox', exclude=set()):
+	def __init__(self, data_paths, labels, sample_rate, frontend = None, speakers = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, duration_filter = True, min_ref_len = None, max_ref_len = None, ref_len_filter = True, mono = True, segmented = False, time_padding_multiple = 1, audio_backend = 'sox', exclude=set(), join_transcript=False):
+		self.join_transcript = join_transcript
 		self.max_duration = max_duration
 		self.labels = labels
 		self.frontend = frontend
@@ -31,7 +32,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		def read_transcript(data_path):
 			transcript_path = data_path + '.json' if '.json' not in data_path else data_path
 			return json.load(gzopen(transcript_path)) if os.path.exists(transcript_path) else [dict(audio_path = data_path)]
-		
+
 		self.examples = [list(g) for data_path in data_paths for k, g in itertools.groupby(sorted(read_transcript(data_path), key = transcripts.sort_key), key = transcripts.group_key)]
 		self.examples = sorted(self.examples, key = duration)
 		self.examples = list(filter(lambda example: (min_duration is None or min_duration <= duration(example)) and (max_duration is None or duration(example) <= max_duration), self.examples)) if duration_filter else self.examples
@@ -62,7 +63,10 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			ref_normalized, targets = zip(*targets)
 		else:
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = False, backend = self.audio_backend, duration=self.max_duration)
-			replace_transcript = not transcript or any(t.get('begin') is None and t.get('end') is None for t in transcript) and all(t.get('ref') is not None for t in transcript)
+			replace_transcript = self.join_transcript or \
+				not transcript or \
+				any(t.get('begin') is None and t.get('end') is None for t in transcript) and \
+				all(t.get('ref') is not None for t in transcript)
 			normalize_text = True
 
 			if replace_transcript:
@@ -78,7 +82,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			targets = [[labels.encode(t.get('ref', ''), normalize = normalize_text)[1] for t in transcript] for labels in self.labels]
 		
 		return [transcript, features] + list(targets)
-			
+
 	def __len__(self):
 		return len(self.examples)
 
@@ -97,13 +101,13 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			for j, t in enumerate(sample_y):
 				y[k, j, :t.shape[-1]] = t
 				ylen[k, j] = len(t)
-		
+
 		return tuple(zip(*batch))[:1] + (x, xlen, y, ylen)
 
 class BucketingBatchSampler(torch.utils.data.Sampler):
 	def __init__(self, dataset, bucket, batch_size = 1, mixing = None):
 		super().__init__(dataset)
-		
+
 		self.dataset = dataset
 		self.batch_size = batch_size
 		#self.mixing = mixing or ([1 / len(self.dataset.examples)] * len(self.dataset.examples))
@@ -145,7 +149,7 @@ class Labels:
 	word_start = '<'
 	word_end = '>'
 	candidate_sep = ';'
-	
+
 	space_sentencepiece = '\u2581'
 	unk_sentencepiece = '<unk>'
 
@@ -156,7 +160,7 @@ class Labels:
 		if bpe:
 			self.bpe = sentencepiece.SentencePieceProcessor()
 			self.bpe.Load(bpe)
-		
+
 		self.alphabet = self.lang.ALPHABET
 		self.blank_idx = len(self) - 1
 		self.space_idx = self.blank_idx - 1
@@ -169,9 +173,9 @@ class Labels:
 
 	def split_candidates(self, text):
 		return text.split(self.candidate_sep) if self.candidate_sep else [text]
-	
+
 	def normalize_text(self, text):
-		return self.candidate_sep.join(self.lang.normalize_text(candidate) for candidate in self.split_candidates(text))# or self.unk 
+		return self.candidate_sep.join(self.lang.normalize_text(candidate) for candidate in self.split_candidates(text))# or self.unk
 
 		#(ref, replace_full_forms = {}, replace_subwords = {}, replace_stems = {}, replace_full_forms_by_unk = [], remove_chars = []):
 		#words = ref.split()
@@ -201,13 +205,13 @@ class Labels:
 					idx[i] = self.space_idx
 
 		silence = [self.space_idx] if replace_blank is False else [self.space_idx, self.blank_idx]
-		
+
 		transcript, i = [], None
 		for j, k in enumerate(idx + [self.space_idx]):
 			if k == self.space_idx and i is not None:
 				while j == len(idx) or (j > 0 and idx[j] in silence):
 					j -= 1
-				
+
 				i_, j_ = int(i if I is None else I[i]), int(j if I is None else I[j])
 				transcript.append(dict(begin = float(ts[i_]), end = float(ts[j_]), i = i_, j = j_, channel = channel_(i_, j_), speaker = speaker_(i, j), **{key : decode_(i, j)}))
 
@@ -225,7 +229,7 @@ class Labels:
 			word = word.replace(self.space, replace_space)
 		if replace_repeat is True:
 			word = ''.join(c if i == 0 or c != self.repeat else word[i - 1] for i, c in enumerate(word))
-		
+
 		if collapse_repeat:
 			word = ''.join(c if i == 0 or c != word[i - 1] else '' for i, c in enumerate(word))
 		return word

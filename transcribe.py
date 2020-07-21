@@ -40,7 +40,7 @@ def main(args):
 	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
 
 	labels, frontend, model, decoder = setup(args)
-	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers, exclude=exclude, max_duration=args.transcribe_first_n_sec)
+	val_dataset = datasets.AudioTextDataset(data_paths, [labels], args.sample_rate, frontend = None, segmented = True, mono = args.mono, time_padding_multiple = args.batch_time_padding_multiple, audio_backend = args.audio_backend, speakers = args.speakers, exclude=exclude, max_duration=args.transcribe_first_n_sec, join_transcript=args.join_transcript)
 	num_examples = len(val_dataset)
 	print("Examples count: ", num_examples)
 	val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers)
@@ -159,6 +159,7 @@ if __name__ == '__main__':
 	parser.add_argument('--html', action = 'store_true')
 	parser.add_argument('--txt', action = 'store_true', help = 'store whole transcript in txt format need for assessments')
 	parser.add_argument('--transcribe-first-n-sec', type=int)
+	parser.add_argument('--join-transcript', action = 'store_true')
 	parser.add_argument('--pack-backpointers', action = 'store_true')
 	parser.add_argument('--oom-crash', action = 'store_true')
 	args = parser.parse_args()

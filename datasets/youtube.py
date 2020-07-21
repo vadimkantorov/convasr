@@ -6,7 +6,7 @@ import glob
 
 def main(args):
 	transcripts = []
-	for i, info_path in enumerate(glob.glob(os.path.join(args.input_path, f'*.json'))):
+	for i, info_path in enumerate(glob.glob(os.path.join(args.input_path, '*.json'))):
 		print(i)
 
 		j = json.load(open(info_path))

@@ -418,7 +418,7 @@ def compute_memory_fragmentation():
 
 def handle_out_of_memory_exception(exception, model):
 	if 'out of memory' in str(exception):
-		for p in self.model.parameters():
+		for p in model.parameters():
 			if p.grad is not None:
 				p.grad = None
 		if torch.cuda.is_available:
