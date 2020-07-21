@@ -13,16 +13,16 @@ def alignment(log_probs, targets, input_lengths, target_lengths, blank = 0, pack
 	log_alpha[:, zero_padding + 0] = log_probs[0, :, blank]
 	log_alpha[:, zero_padding + 1] = log_probs[0, B, _t_a_r_g_e_t_s_[:, 1]]
 	
-	packmask = 0b11
+	backpointers_packmask = 0b11
 	backpointers_shape = (len(log_probs), len(B), padded_t)
-	backpointers = torch.zeros(backpointers_shape if not pack_backpointers else packshape(backpointers_shape, mask = packmask)[0], device = log_probs.device, dtype = torch.uint8)
-	backpointer = torch.zeros_like(backpointers[0])
+	backpointers = torch.zeros(backpointers_shape if not pack_backpointers else packshape(backpointers_shape, mask = backpointers_packmask)[0], device = log_probs.device, dtype = torch.uint8)
+	backpointer = torch.zeros(backpointers_shape[1:], device = log_probs.device, dtype = torch.uint8)
 
 	for t in range(1, len(log_probs)):
 		prev = torch.stack([log_alpha[:, 2:], log_alpha[:, 1:-1], torch.where(diff_labels, log_alpha[:, :-2], zero)])
 		log_alpha[:, 2:] = log_probs[t].gather(-1, _t_a_r_g_e_t_s_) + prev.logsumexp(dim = 0)
 		backpointer[:, 2:] = prev.argmax(dim = 0)
-		backpointers[t] = backpointer if not pack_backpointers else packbits(backpointer, mask = packmask)
+		backpointers[t] = backpointer if not pack_backpointers else packbits(backpointer, mask = backpointers_packmask)
 
 	#l1l2 = log_alpha[input_lengths - 1, B].gather(-1, torch.stack([zero_padding + target_lengths * 2 - 1, zero_padding + target_lengths * 2], dim = -1)) 
 	l1l2 = log_alpha.gather(-1, torch.stack([zero_padding + target_lengths * 2 - 1, zero_padding + target_lengths * 2], dim = -1)) 
@@ -30,7 +30,7 @@ def alignment(log_probs, targets, input_lengths, target_lengths, blank = 0, pack
 	path = torch.zeros(len(log_probs), len(B), device = log_alpha.device, dtype = torch.long)
 	path[input_lengths - 1, B] = zero_padding + target_lengths * 2 - 1 + l1l2.argmax(dim = -1)
 	for t, indices in reversed(list(enumerate(path))[1:]):
-		backpointer = backpointers[t] if not pack_backpointers else unpackbits(backpointers[t], mask = packmask, shape = backpointers_shape[1:])
+		backpointer = backpointers[t] if not pack_backpointers else unpackbits(backpointers[t], mask = backpointers_packmask, shape = backpointers_shape[1:])
 		path[t - 1] += indices - backpointer.gather(-1, indices.unsqueeze(-1)).squeeze(-1)
 	return torch.zeros_like(_t_a_r_g_e_t_s_, dtype = torch.long).scatter_(-1, (path.t() - zero_padding).clamp(min = 0), torch.arange(len(path), device = log_alpha.device).expand(len(B), -1))[:, 1::2]
 
