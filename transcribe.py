@@ -92,35 +92,34 @@ def main(args):
 				
 				alignment = ctc.alignment(log_probs.permute(2, 0, 1), y.squeeze(1), olen, ylen.squeeze(1), blank = labels.blank_idx, pack_backpointers = args.pack_backpointers)
 				ref_segments = [labels.decode(y[i, 0, :ylen[i]].tolist(), ts[i], alignment[i], channel = channel[i], speaker = speaker[i], key = 'ref', speakers = speakers) for i in range(len(decoded))]
+		except Exception as exception:
+			if (not args.oom_crash) and models.handle_out_of_memory_exception(exception, model):
+				print('RECOVERED FROM OOM', exception)
+				print(f'Skipping {i} / {num_examples}')
+				continue
+			else:
+				raise
 			print('Alignment time: {:.02f} sec'.format(time.time() - tic_alignment))
 			
-			if args.max_segment_duration:
-				ref_transcript, hyp_transcript = [list(sorted(sum(segments, []), key = transcripts.sort_key)) for segments in [ref_segments, hyp_segments]]
-				if ref:
-					ref_segments = list(transcripts.segment(ref_transcript, args.max_segment_duration))
-					hyp_segments = list(transcripts.segment(hyp_transcript, ref_segments))
-				else:
-					hyp_segments = list(transcripts.segment(hyp_transcript, args.max_segment_duration))
-					ref_segments = [[] for _ in hyp_segments]
+		if args.max_segment_duration:
+			ref_transcript, hyp_transcript = [list(sorted(sum(segments, []), key = transcripts.sort_key)) for segments in [ref_segments, hyp_segments]]
+			if ref:
+				ref_segments = list(transcripts.segment(ref_transcript, args.max_segment_duration))
+				hyp_segments = list(transcripts.segment(hyp_transcript, ref_segments))
+			else:
+				hyp_segments = list(transcripts.segment(hyp_transcript, args.max_segment_duration))
+				ref_segments = [[] for _ in hyp_segments]
 
-			transcript = [dict(audio_path = audio_path, ref = ref, hyp = hyp, speaker = transcripts.speaker(ref = ref_transcript, hyp = hyp_transcript), cer = metrics.cer(hyp, ref), words = metrics.align_words(hyp, ref)[-1], alignment = dict(ref = ref_transcript, hyp = hyp_transcript), **transcripts.summary(hyp_transcript)) for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments) for ref, hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]]
-			filtered_transcript = list(transcripts.prune(transcript, align_boundary_words = args.align_boundary_words, cer = args.cer, duration = args.duration, gap = args.gap, unk = args.unk, num_speakers = args.num_speakers))
-			json.dump(filtered_transcript, open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+		transcript = [dict(audio_path = audio_path, ref = ref, hyp = hyp, speaker = transcripts.speaker(ref = ref_transcript, hyp = hyp_transcript), cer = metrics.cer(hyp, ref), words = metrics.align_words(hyp, ref)[-1], alignment = dict(ref = ref_transcript, hyp = hyp_transcript), **transcripts.summary(hyp_transcript)) for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments) for ref, hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]]
+		filtered_transcript = list(transcripts.prune(transcript, align_boundary_words = args.align_boundary_words, cer = args.cer, duration = args.duration, gap = args.gap, unk = args.unk, num_speakers = args.num_speakers))
+		json.dump(filtered_transcript, open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 
-			print('Filtered segments:', len(filtered_transcript), 'out of', len(transcript))
-			print(transcript_path)
-			if args.html:
-				vis.transcript(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), args.sample_rate, args.mono, transcript, filtered_transcript)
-			if args.txt:
-				open(os.path.join(args.output_path, os.path.basename(audio_path) + '.txt'), 'w').write(hyp)
-		except Exception as exception:
-			except Exception as exception:
-				if (not args.oom_crash) and models.handle_out_of_memory_exception(exception, model):
-					print('RECOVERED FROM OOM', exception)
-					print(f'Skipping {i} / {num_examples}')
-					continue
-				else:
-					raise
+		print('Filtered segments:', len(filtered_transcript), 'out of', len(transcript))
+		print(transcript_path)
+		if args.html:
+			vis.transcript(os.path.join(args.output_path, os.path.basename(audio_path) + '.html'), args.sample_rate, args.mono, transcript, filtered_transcript)
+		if args.txt:
+			open(os.path.join(args.output_path, os.path.basename(audio_path) + '.txt'), 'w').write(hyp)
 
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 

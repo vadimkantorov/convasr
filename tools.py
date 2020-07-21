@@ -14,7 +14,6 @@ import audio
 import transcripts
 import datasets
 import metrics
-import ru as lang
 import random
 import hashlib
 import multiprocessing
@@ -158,7 +157,8 @@ def rmoldcheckpoints(experiments_dir, experiment_id, keepfirstperepoch, remove):
 def bpetrain(input_path, output_prefix, vocab_size, model_type, max_sentencepiece_length):
 	sentencepiece.SentencePieceTrainer.Train(f'--input={input_path} --model_prefix={output_prefix} --vocab_size={vocab_size} --model_type={model_type}' + (f' --max_sentencepiece_length={max_sentencepiece_length}' if max_sentencepiece_length else ''))
 
-def normalize(input_path, dry = True):
+def normalize(input_path, lang, dry = True):
+	lang = datasets.Language(lang)
 	labels = datasets.Labels(lang)
 	for transcript_path in input_path:
 		with open(transcript_path) as f:
@@ -201,7 +201,8 @@ def transcode(input_path, output_path, ext, cmd):
 	json.dump(transcript, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
-def lserrorwords(input_path, output_path, comment_path, freq_path, sortdesc, sortasc, comment_filter):
+def lserrorwords(input_path, output_path, comment_path, freq_path, sortdesc, sortasc, comment_filter, lang):
+	lang = datasets.Language(lang)
 	regex = r'[ ]+-[ ]*', '-'
 	freq = {splitted[0] : int(splitted[-1]) for line in open(freq_path) for splitted in [re.sub(regex[0], regex[1], line).split()]} if freq_path else {}
 	comment = {splitted[0] : splitted[-1].strip() for line in open(comment_path) for splitted in [line.split(',')] if '#' not in line and len(splitted) > 1} if comment_path else {}
@@ -367,6 +368,7 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('normalize')
 	cmd.add_argument('input_path', nargs = '+')
 	cmd.add_argument('--dry', action = 'store_true')
+	cmd.add_argument('--lang', default = 'ru')
 	cmd.set_defaults(func = normalize)
 
 	cmd = subparsers.add_parser('summary')
@@ -382,6 +384,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--sortdesc', choices = ['diff', 'freq'])
 	cmd.add_argument('--sortasc', choices = ['diff', 'freq'])
 	cmd.add_argument('--comment-filter', default = '')
+	cmd.add_argument('--lang', default = 'ru')
 	cmd.set_defaults(func = lserrorwords)
 
 	cmd = subparsers.add_parser('split')

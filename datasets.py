@@ -12,7 +12,7 @@ import audio
 import transcripts
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	def __init__(self, data_paths, labels, sample_rate, frontend = None, speakers = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, mono = True, segmented = False, time_padding_multiple = 1, audio_backend = 'sox', exclude=set()):
+	def __init__(self, data_paths, labels, sample_rate, frontend = None, speakers = None, waveform_transform_debug_dir = None, min_duration = None, max_duration = None, duration_filter = True, min_ref_len = None, max_ref_len = None, ref_len_filter = True, mono = True, segmented = False, time_padding_multiple = 1, audio_backend = 'sox', exclude=set()):
 		self.max_duration = max_duration
 		self.labels = labels
 		self.frontend = frontend
@@ -24,7 +24,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.audio_backend = audio_backend
 		self.speakers = speakers
 
-		gzopen = lambda data_path: open(data_path) if data_path.endswith('.json') else gzip.open(data_path, 'rt')
+		gzopen = lambda data_path: gzip.open(data_path, 'rt') if data_path.endswith('.gz') else open(data_path)
 		duration = lambda example: sum(map(transcripts.compute_duration, example))
 		data_paths = data_paths if isinstance(data_paths, list) else [data_paths]
 
@@ -33,8 +33,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			return json.load(gzopen(transcript_path)) if os.path.exists(transcript_path) else [dict(audio_path = data_path)]
 		
 		self.examples = [list(g) for data_path in data_paths for k, g in itertools.groupby(sorted(read_transcript(data_path), key = transcripts.sort_key), key = transcripts.group_key)]
-		self.examples = list(sorted(self.examples, key = duration))
-		self.examples = list(filter(lambda example: (min_duration is None or min_duration <= duration(example)) and (max_duration is None or duration(example) <= max_duration), self.examples))
+		self.examples = sorted(self.examples, key = duration)
+		self.examples = list(filter(lambda example: (min_duration is None or min_duration <= duration(example)) and (max_duration is None or duration(example) <= max_duration), self.examples)) if duration_filter else self.examples
 		self.examples = [e for e in self.examples if transcripts.audio_name(e[0]) not in exclude]
 
 		'''

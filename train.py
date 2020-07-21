@@ -23,7 +23,7 @@ def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
 		set_random_seed(seed)
 
-def apply_model(data_loader, model, decoder, device, crash_on_oom):
+def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
 	for meta, x, xlen, y, ylen in data_loader:
 		x, xlen, y, ylen = x.to(device, non_blocking = True), xlen.to(device, non_blocking = True), y.to(device, non_blocking = True), ylen.to(device, non_blocking = True)
 		with torch.no_grad():
@@ -42,7 +42,7 @@ def apply_model(data_loader, model, decoder, device, crash_on_oom):
 		y = list(map(models.unpad, y, ylen))
 		yield meta, loss.cpu(), entropy_char.cpu(), hyp, logits, y
 
-def evaluate_model(args, val_data_loaders, model, decoder, epoch = None, iteration = None, adapt_bn = False):
+def evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, epoch = None, iteration = None):
 	training = epoch is not None and iteration is not None
 	columns = {}
 	for val_dataset_name, val_data_loader in val_data_loaders.items():
@@ -53,14 +53,29 @@ def evaluate_model(args, val_data_loaders, model, decoder, epoch = None, iterati
 		model.eval()
 		if args.adapt_bn:
 			models.reset_bn_running_stats_(model)
-			for _ in apply_model(val_data_loader, model, decoder, args.device, args.val_crash_oom):
+			for _ in apply_model(val_data_loader, model, labels, decoder, args.device, args.val_crash_oom):
 				pass
 		model.eval()
 		cpu_list = lambda l: [[t.cpu() for t in t_] for t_ in l]
-		for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(val_data_loader, model, decoder, args.device, args.val_crash_oom)):
+		for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(val_data_loader, model, labels, decoder, args.device, args.val_crash_oom)):
 			logits_.extend(zip(*cpu_list(logits)) if not training and args.logits else [])
 			y_.extend(cpu_list(y))
-			stats = [[metrics.analyze(l.normalize_text(zipped[2]['ref']), h, l, zipped[2]['audio_path'], phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS, full = analyze, vocab = vocab, loss = zipped[0], entropy = zipped[1]) for l, h in zip(labels, zipped[3:])] for zipped in zip(loss.tolist(), entropy.tolist(), meta, *hyp)]
+			stats = [
+				[
+					error_analyzer.analyze(
+						ref = l.normalize_text(zipped[2]['ref']),
+						hyp = h, 
+						labels = l, 
+						audio_path = zipped[2]['audio_path'], 
+						#phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS,
+						full = analyze, 
+						#vocab = vocab, 
+						loss = zipped[0], 
+						entropy = zipped[1]
+					) for l, h in zip(labels, zipped[3:])
+				] for zipped in zip(loss.tolist(), entropy.tolist(), meta, *hyp)
+			]
+			
 			for r in sum(stats, []) if args.verbose else []:
 				print(f'{val_dataset_name}@{iteration}:', batch_idx , '/', len(val_data_loader), '|', args.experiment_id)
 				print('REF: {labels} "{ref_}"'.format(ref_ = r['alignment']['ref'] if analyze else r['ref'], **r))
@@ -173,7 +188,17 @@ def main(args):
 	val_data_loaders = {os.path.basename(val_data_path) : torch.utils.data.DataLoader(val_dataset, num_workers = args.num_workers, collate_fn = val_dataset.collate_fn, pin_memory = True, shuffle = False, batch_size = args.val_batch_size, worker_init_fn = set_random_seed, timeout = args.timeout) for val_data_path in args.val_data_path for val_dataset in [datasets.AudioTextDataset(val_data_path, labels, args.sample_rate, frontend = val_frontend if not args.frontend_in_model else None, waveform_transform_debug_dir = args.val_waveform_transform_debug_dir, min_duration = args.min_duration, time_padding_multiple = args.batch_time_padding_multiple)]}
 	decoder = [decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(labels[0], lm_path = args.lm, beam_width = args.beam_width, beam_alpha = args.beam_alpha, beam_beta = args.beam_beta, num_workers = args.num_workers, topk = args.decoder_topk)] + [decoders.GreedyDecoder() for bpe in args.bpe]
 
-	vocab = set(map(str.strip, open(args.vocab))) if args.vocab else set()
+	error_analyzer_configs = dict(
+		main = dict(
+			word_include_tags = [], 
+			word_exclude_tags = [],
+			error_include_tags = [],
+			error_exclude_tags = []
+		)
+	)
+	word_tags = json.load(open(args.word_tags)) if os.path.exists(args.word_tags) else {}
+	vocab = set(map(str.strip, open(args.vocab))) if os.path.exists(args.vocab) else set()
+	error_analyzer = metrics#.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs)
 	
 	model.to(args.device)
 
@@ -183,7 +208,7 @@ def main(args):
 			model.fuse_conv_bn_eval()
 		if args.device != 'cpu':
 			model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-		evaluate_model(args, val_data_loaders, model, decoder)
+		evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer)
 		return
 
 	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder)
@@ -292,7 +317,7 @@ def main(args):
 			sampler.batch_idx += 1
 
 			if iteration > 0 and (iteration % args.val_iteration_interval == 0 or iteration == args.iterations):
-				evaluate_model(args, val_data_loaders, model, decoder, epoch, iteration)
+				evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, epoch, iteration)
 
 			if iteration and args.iterations and iteration >= args.iterations:
 				return
@@ -302,7 +327,7 @@ def main(args):
 		sampler.batch_idx = 0
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
 		if not args.skip_on_epoch_end_evaluation:
-			evaluate_model(args, val_data_loaders, model, decoder, epoch + 1, iteration)
+			evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, epoch + 1, iteration)
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -397,6 +422,7 @@ if __name__ == '__main__':
 	parser.add_argument('--vis-errors-audio', action = 'store_true')
 	parser.add_argument('--adapt-bn', action = 'store_true')
 	parser.add_argument('--vocab', default = 'data/vocab_word_list.txt')
+	parser.add_argument('--word-tags', default = 'data/word_tags.json')
 	parser.add_argument('--frontend-in-model', action = 'store_true')
 	parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
 	parser.add_argument('--train-crash-oom', action = 'store_true')
