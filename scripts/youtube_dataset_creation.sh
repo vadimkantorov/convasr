@@ -13,7 +13,7 @@ SAMPLE=''
 DATASET=youtube$SAMPLE
 DATASET_ROOT=data/$DATASET
 DATASET_AUDIO=$DATASET_ROOT/audio
-DATASET_AUDIO_MASK=$DATASET_AUDIO/*/*/*
+DATASET_AUDIO_MASK=$DATASET_AUDIO/*/*
 DATASET_TRANSCRIBE=$DATASET_ROOT/transcribe
 DATASET_SUBSET=$DATASET_ROOT/subset
 DATASET_CUT=$DATASET_ROOT/cut
@@ -32,9 +32,9 @@ TRAIN_TEST_SPLIT='--microval-duration-in-hours 0 --val-duration-in-hours 0 --tes
 #head -n $SAMPLE $DATASET_ROOT/youtube.txt > $DATASET_AUDIO/audio.txt # list of links like http://youtu.be/e8bkFQD3ZhA
 #bash datasets/youtube.sh RETR $DATASET_AUDIO/audio.txt $DATASET_AUDIO
 
-#python3 datasets/youtube.py -i $DATASET_AUDIO_MASK -o $DATASET_AUDIO.json $TRANSCRIPT_PREPROC
+python3 datasets/youtube.py -i "$DATASET_AUDIO_MASK" -o $DATASET_AUDIO.json $TRANSCRIPT_PREPROC
 
-python3 transcribe.py --checkpoint $CHECKPOINT -i $DATASET_AUDIO.json -o $DATASET_TRANSCRIBE $TRANSCRIBE
+#python3 transcribe.py --checkpoint $CHECKPOINT -i $DATASET_AUDIO.json -o $DATASET_TRANSCRIBE $TRANSCRIBE
 
 #python3 tools.py subset -i $DATASET_TRANSCRIBE -o $DATASET_SUBSET.json $SUBSET
 
