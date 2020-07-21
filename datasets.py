@@ -149,7 +149,7 @@ class Labels:
 	space_sentencepiece = '\u2581'
 	unk_sentencepiece = '<unk>'
 
-	def __init__(self, lang, bpe = None, name = '', candidate_sep = ''):
+	def __init__(self, lang, bpe = None, name = '', candidate_sep = '', normalize_text_config = {}):
 		self.lang = lang
 		self.name = name
 		self.bpe = None
@@ -165,12 +165,19 @@ class Labels:
 		self.word_end_idx = self.alphabet.index(self.word_end) if self.word_end in self.alphabet else -1
 		self.candidate_sep = candidate_sep
 		self.chr2idx = {l: i for i, l in enumerate(str(self))}
+		self.normalize_text_config = normalize_text_config
 
 	def split_candidates(self, text):
 		return text.split(self.candidate_sep) if self.candidate_sep else [text]
 	
 	def normalize_text(self, text):
 		return self.candidate_sep.join(self.lang.normalize_text(candidate) for candidate in self.split_candidates(text))# or self.unk 
+
+		#(ref, replace_full_forms = {}, replace_subwords = {}, replace_stems = {}, replace_full_forms_by_unk = [], remove_chars = []):
+		#words = ref.split()
+		#words = [replace_full_forms.get(w, w) for w in words]
+		#words = [w.replace(u, v) for w in words for u, v in replace_subwords.items()]
+		#return ' '.join(words)
 
 	def encode(self, text, normalize = True):
 		normalized = self.normalize_text(text) if normalize else text
@@ -235,9 +242,3 @@ class Labels:
 class Language:
 	def __new__(cls, lang):
 		return importlib.import_module(lang)
-
-def normalize_text_(ref, replace_full_forms = {}, replace_subwords = {}, replace_stems = {}, replace_full_forms_by_unk = [], remove_chars = []):
-	words = ref.split()
-	words = [replace_full_forms.get(w, w) for w in words]
-	words = [w.replace(u, v) for w in words for u, v in replace_subwords.items()]
-	return ' '.join(words)

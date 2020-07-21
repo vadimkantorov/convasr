@@ -149,7 +149,8 @@ def main(args):
 
 	lang = datasets.Language(args.lang)
 	#TODO: , candidate_sep = datasets.Labels.candidate_sep
-	labels = [datasets.Labels(lang, name = 'char')] + [datasets.Labels(lang, bpe = bpe, name = f'bpe{i}') for i, bpe in enumerate(args.bpe)]
+	normalize_text_config = json.load(open(args.normalize_text_config)) if os.path.exists(args.normalize_text_config) else {}
+	labels = [datasets.Labels(lang, name = 'char', normalize_text_config = normalize_text_config)] + [datasets.Labels(lang, bpe = bpe, name = f'bpe{i}', normalize_text_config = normalize_text_config) for i, bpe in enumerate(args.bpe)]
 	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, dither = args.dither, dither0 = args.dither0, stft_mode = 'conv' if args.onnx else None)
 	model = getattr(models, args.model)(num_input_features = args.num_input_features, num_classes = list(map(len, labels)), dropout = args.dropout, decoder_type = 'bpe' if args.bpe else None, frontend = frontend if args.onnx or args.frontend_in_model else None, **(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx else {}))
 
@@ -423,6 +424,7 @@ if __name__ == '__main__':
 	parser.add_argument('--adapt-bn', action = 'store_true')
 	parser.add_argument('--vocab', default = 'data/vocab_word_list.txt')
 	parser.add_argument('--word-tags', default = 'data/word_tags.json')
+	parser.add_argument('--normalize-text-config', default = 'data/normalize_text_config.json')
 	parser.add_argument('--frontend-in-model', action = 'store_true')
 	parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
 	parser.add_argument('--train-crash-oom', action = 'store_true')
