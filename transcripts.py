@@ -79,7 +79,6 @@ def prune(transcript, align_boundary_words = False, cer = None, wer = None, mer 
 			yield t
 		prev = t
 
-
 def compute_duration(t, hours = False):
 	seconds = t.get('end', 0) - t.get('begin', 0)
 	return seconds / (60 * 60) if hours else seconds

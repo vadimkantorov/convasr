@@ -114,7 +114,7 @@ def main(args):
 				hyp_segments = list(transcripts.segment(hyp_transcript, args.max_segment_duration))
 				ref_segments = [[] for _ in hyp_segments]
 
-		transcript = [dict(audio_path = audio_path, ref = ref, hyp = hyp, speaker = transcripts.speaker(ref = ref_transcript, hyp = hyp_transcript), cer = metrics.cer(hyp, ref), words = metrics.align_words(hyp, ref)[-1], alignment = dict(ref = ref_transcript, hyp = hyp_transcript), **transcripts.summary(hyp_transcript)) for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments) for ref, hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]]
+		transcript = [dict(audio_path = audio_path, ref = ref, hyp = hyp, speaker = transcripts.speaker(ref = ref_transcript, hyp = hyp_transcript), cer = metrics.cer(hyp, ref), words = metrics.align_words(hyp, ref)[-1] if args.align_words else [], alignment = dict(ref = ref_transcript, hyp = hyp_transcript), **transcripts.summary(hyp_transcript)) for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments) for ref, hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]]
 		filtered_transcript = list(transcripts.prune(transcript, align_boundary_words = args.align_boundary_words, cer = args.cer, duration = args.duration, gap = args.gap, unk = args.unk, num_speakers = args.num_speakers))
 		json.dump(filtered_transcript, open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 
@@ -150,6 +150,8 @@ if __name__ == '__main__':
 	parser.add_argument('--lm')
 	parser.add_argument('--vad', type = int, choices = [0, 1, 2, 3], default = False, nargs = '?')
 	parser.add_argument('--align', action = 'store_true')
+	parser.add_argument('--align-boundary-words', action = 'store_true')
+	parser.add_argument('--align-words', action = 'store_true')
 	parser.add_argument('--window-size-dilate', type = float, default = 1.0)
 	parser.add_argument('--max-segment-duration', type = float, default = 2)
 	parser.add_argument('--cer', type = transcripts.number_tuple)
@@ -157,7 +159,6 @@ if __name__ == '__main__':
 	parser.add_argument('--num-speakers', type = transcripts.number_tuple)
 	parser.add_argument('--gap', type = transcripts.number_tuple)
 	parser.add_argument('--unk', type = transcripts.number_tuple)
-	parser.add_argument('--align-boundary-words', action = 'store_true')
 	parser.add_argument('--speakers', nargs = '*')
 	parser.add_argument('--replace-blank-series', type = int, default = 8)
 	parser.add_argument('--html', action = 'store_true')
