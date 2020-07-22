@@ -17,6 +17,7 @@ import decoders
 import ctc
 import transcripts
 import vis
+import hacks
 
 def setup(args):
 	torch.set_grad_enabled(False)
@@ -35,6 +36,8 @@ def setup(args):
 	return labels, frontend, model, decoder
 
 def main(args):
+	hacks.enable_jit_fusion()
+	
 	os.makedirs(args.output_path, exist_ok = True)
 	data_paths = [p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f]) if os.path.isfile(p) and any(map(p.endswith, args.ext))] + [p for p in args.input_path if any(map(p.endswith, ['.json', '.json.gz']))]
 	exclude = set([os.path.splitext(basename)[0] for basename in os.listdir(args.output_path) if basename.endswith('.json')] if args.skip_processed else [])
@@ -91,18 +94,10 @@ def main(args):
 				#	ylen = torch.tensor([[y.shape[-1]]], device = log_probs.device, dtype = torch.long)
 				#	segments = [([], sum([h for r, h in segments], []))]
 				
-				gc.collect()
-				torch.cuda.empty_cache()
-				
-				torch.cuda.reset_peak_memory_stats()
-
-				print('before', 'reserved', torch.cuda.max_memory_reserved('cuda:0') / 1e6, 'mb', 'allocated', torch.cuda.max_memory_allocated('cuda:0') / 1e6, 'mb')
 				alignment = ctc.alignment(log_probs.permute(2, 0, 1), y.squeeze(1), olen, ylen.squeeze(1), blank = labels.blank_idx, pack_backpointers = args.pack_backpointers)
-				print('after', 'reserved', torch.cuda.max_memory_reserved('cuda:0') / 1e6, 'mb', 'allocated', torch.cuda.max_memory_allocated('cuda:0') / 1e6, 'mb')
 				ref_segments = [labels.decode(y[i, 0, :ylen[i]].tolist(), ts[i], alignment[i], channel = channel[i], speaker = speaker[i], key = 'ref', speakers = speakers) for i in range(len(decoded))]
-		except Exception as exception:
-			if (not args.oom_crash) and models.handle_out_of_memory_exception(exception, model):
-				print('RECOVERED FROM OOM', exception)
+		except:
+			if (not args.oom_crash) and hacks.handle_out_of_memory_exception(model.parameters()):
 				print(f'Skipping {i} / {num_examples}')
 				continue
 			else:

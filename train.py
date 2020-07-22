@@ -18,6 +18,7 @@ import optimizers
 import torch
 import transforms
 import vis
+import hacks
 
 def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
@@ -29,9 +30,8 @@ def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
 		with torch.no_grad():
 			try:
 				logits, log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'olen', 'loss'])
-			except Exception as exception:
-				if (not crash_on_oom) and models.handle_out_of_memory_exception(exception, model):
-					print('RECOVERED FROM OOM', exception)
+			except:
+				if (not crash_on_oom) and hacks.handle_out_of_memory_exception(model.parameters()):
 					continue
 				else:
 					raise
@@ -266,9 +266,8 @@ def main(args):
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
 			try:
 				log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'olen', 'loss'])
-			except Exception as exception:
-				if (not args.train_crash_oom) and models.handle_out_of_memory_exception(exception, model):
-					print('RECOVERED FROM OOM', exception)
+			except:
+				if (not args.train_crash_oom) and hacks.handle_out_of_memory_exception(model.parameters()):
 					continue
 				else:
 					raise

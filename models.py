@@ -1,5 +1,4 @@
 import os
-import gc
 import math
 import collections
 import functools
@@ -415,17 +414,6 @@ def reset_bn_running_stats_(model):
 def compute_memory_fragmentation():
 	snapshot = torch.cuda.memory_snapshot()
 	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
-
-def handle_out_of_memory_exception(exception, model):
-	if 'out of memory' in str(exception):
-		for p in model.parameters():
-			if p.grad is not None:
-				p.grad = None
-		if torch.cuda.is_available:
-			torch.cuda.empty_cache()
-		gc.collect()
-		return True
-	return False
 
 def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, opt_level = None, **kwargs):
 	data_parallel = data_parallel and torch.cuda.device_count() > 1
