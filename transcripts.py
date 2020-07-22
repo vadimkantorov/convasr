@@ -64,7 +64,7 @@ def group_key(t):
 def prune(transcript, align_boundary_words = False, cer = None, wer = None, mer = None, duration = None, gap = None, num_speakers = None, audio_name = None, unk = None, groups = None):
 	is_aligned = lambda w: w['type'] == 'ok'
 	duration_check = lambda t: duration is None or duration[0] <= compute_duration(t) <= duration[1]
-	boundary_check = lambda t: ((not t['words']) or (not align_boundary_words) or (is_aligned(t['words'][0]) and is_aligned(t['words'][-1])))
+	boundary_check = lambda t: ((not t.get('words')) or (not align_boundary_words) or (is_aligned(t['words'][0]) and is_aligned(t['words'][-1])))
 	gap_check = lambda t, prev: prev is None or gap is None or gap[0] <= t['begin'] - prev['end'] <= gap[1]
 	unk_check = lambda t: unk is None or unk[0] <= t.get('ref', '').count('*') <= unk[1]
 	speakers_check = lambda t: num_speakers is None or num_speakers[0] <= (t.get('speaker') or '').count(',') + 1 <= num_speakers[1]
