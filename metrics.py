@@ -22,7 +22,7 @@ class ErrorTagger(enum.Enum):
 	ok = 'ok'
 
 	@staticmethod
-	def tag(hyp, ref, p = 0.5, L = 3, placeholder = '|'):
+	def tag(hyp, ref, p = 0.5, L = 3, placeholder = placeholder):
 		e = sum(ch != cr and not (ch == space and cr == placeholder) for ch, cr in zip(hyp, ref))
 		ref_placeholders = ref.count(placeholder)
 		ref_chars = len(ref) - ref_placeholders

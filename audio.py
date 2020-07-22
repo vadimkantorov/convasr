@@ -7,7 +7,7 @@ import models
 f2s = lambda signal: (signal * torch.iinfo(torch.int16).max).short()
 s2f = lambda signal: signal.float() / torch.iinfo(torch.int16).max
 
-def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize = True, mono = True, byte_order = 'little', backend = 'sox', raw_s16le = None, raw_sample_rate = None, raw_num_channels = None):
+def read_audio(audio_path, sample_rate, offset = 0, duration = None, normalize = True, mono = True, byte_order = 'little', backend = 'ffmpeg', raw_s16le = None, raw_sample_rate = None, raw_num_channels = None):
 	try:
 		if audio_path is None or audio_path.endswith('.raw'):
 			if audio_path is not None:
@@ -49,3 +49,7 @@ def write_audio(audio_path, signal, sample_rate, mono = False):
 
 def resample(signal, sample_rate_, sample_rate):
 	return torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate)), sample_rate
+
+def compute_duration(audio_path, backend = 'ffmpeg'):
+	cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1'] if backend == 'ffmpeg' else ['soxi', '-D'] if backend == 'sox' else None
+	return float(subprocess.check_output(cmd + [audio_path])
