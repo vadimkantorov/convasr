@@ -11,9 +11,9 @@ def handle_out_of_memory_exception(model_parameters = []):
 		traceback.print_exception(exc_type, exc_value, exc_traceback)
 		for p in model_parameters:
 			p.grad = None
-		print_memory_stats('<BEFORE>')
+		print_memory_stats('<BEFORE FREE>')
 		free_up_memory()
-		print_memory_stats('<AFTER>')
+		print_memory_stats('<AFTER FREE>')
 		print('RECOVERING FROM OOM --- AFTER FREE')
 		return True
 	return False
