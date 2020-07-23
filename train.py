@@ -294,18 +294,23 @@ def main(args):
 			})
 		)
 		onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
-		onnxruntime_logger_severity_verbose = 0
-		onnxruntime.set_default_logger_severity(onnxruntime_logger_severity_verbose)
+		if args.verbose:
+			onnxruntime.set_default_logger_severity(0)
 		(logits_, ) = onnxruntime_session.run(None, dict(x = waveform_input.cpu().numpy()))
 		assert torch.allclose(logits.cpu(), torch.from_numpy(logits_), rtol = 1e-02, atol = 1e-03)
 		return
 
 	error_analyzer_configs = dict(
-		main = dict(word_include_tags = [], word_exclude_tags = [], error_include_tags = [], error_exclude_tags = [])
+		words_without_stop = dict(word_exclude_tags = ['stop']),
+		words_easy = dict(word_exclude_tags = ['number', 'proper', 'stop']),
+		words_easy_errors_easy = dict(word_exclude_tags = ['number', 'proper', 'stop'], error_include_tags = ['ok', 'typo_easy']),
+		words_only_number = dict(word_include_tags = ['number']),
+		words_only_proper = dict(word_include_tags = ['proper'])
 	)
+
 	word_tags = json.load(open(args.word_tags)) if os.path.exists(args.word_tags) else {}
 	vocab = set(map(str.strip, open(args.vocab))) if os.path.exists(args.vocab) else set()
-	error_analyzer = metrics  #.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs)
+	error_analyzer = metrics #.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs)
 
 
 
@@ -709,7 +714,7 @@ if __name__ == '__main__':
 	parser.add_argument('--onnx')
 	parser.add_argument('--onnx-sample-batch-size', type = int, default = 16)
 	parser.add_argument('--onnx-sample-time', type = int, default = 1024)
-	parser.add_argument('--onnx-opset', type = int, default = 10, choices = [9, 10, 11])
+	parser.add_argument('--onnx-opset', type = int, default = 12, choices = [9, 10, 11, 12])
 	parser.add_argument('--onnx-export-params', type = bool, default = True)
 	parser.add_argument('--dropout', type = float, default = 0.2)
 	parser.add_argument('--githttp')
