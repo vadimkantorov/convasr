@@ -419,7 +419,7 @@ def main(args):
 		model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay
 	) if args.optimizer == 'FusedNovoGrad' else None
 
-	if checkpoint:
+	if checkpoint and checkpoint['optimizer_state_dict'] is not None:
 		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 		if not args.skip_optimizer_reset:
 			optimizers.reset_options(optimizer)
