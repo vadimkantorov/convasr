@@ -176,23 +176,7 @@ class ErrorAnalyzer:
 			w['cer'] = cer(w['hyp'].replace(placeholder, ''), w['ref'].replace(placeholder, ''))
 		# der = sum(self.tagger.WORD_IN_VOCAB in self.tagger.tag(w) for w in hyp.split()) / (1 + hyp.count(' ')),
 
-		# word_include_tags
-		# word_exclude_tags
-		# error_include_tags
-		# error_exclude_tags
 		# error_ok_tags
-
-		# separate wer per tag: numbers, proper
-		# word_include_tags = ['number']
-
-		# separete wer for not-numbers/not-proper/not-stop
-		# word_exclude_tags = ['number', 'proper', 'stop']
-
-		# separate wer for not-stop-words
-		# word_exclude_tags = ['stop']
-
-		# separate cer/wer for typo-easy + not-stop-words
-		# word_exclude_tags = ['stop'], error_include_tags = ['ok', 'typo_easy']
 
 		# total number of words, number of erorrs, inlcuding hitting vocab
 
