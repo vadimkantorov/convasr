@@ -457,6 +457,12 @@ def main(args):
 	with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
 		json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
 
+	with open(os.path.join(args.experiment_dir, args.dump_model_config), 'w') as f:
+		model_config = {
+			'init_params': models.master_module(model).init_params, 'model': repr(models.master_module(model))
+		}
+		json.dump(model_config, f, sort_keys = True, ensure_ascii = False, indent = 2)
+
 	tic, toc_fwd, toc_bwd = time.time(), time.time(), time.time()
 	loss_avg, entropy_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0, 0.0
 
@@ -602,6 +608,9 @@ if __name__ == '__main__':
 	)
 	parser.add_argument('--logits-topk', type = int)
 	parser.add_argument('--args', default = 'args.json', help = 'save experiment arguments to the experiment dir')
+	parser.add_argument(
+		'--dump-model-config', default = 'model.json', help = 'save model configuration to the experiment dir'
+	)
 	parser.add_argument('--model', default = 'JasperNetBig')
 	parser.add_argument(
 		'--seed',

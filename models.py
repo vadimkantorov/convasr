@@ -192,6 +192,7 @@ class JasperNet(nn.Module):
 		normalize_features_temporal_mask = True
 	):
 		super().__init__()
+		self.init_params = {name: repr(value) for name, value in locals().items()}
 		dropout_prologue = dropout_prologue if dropout != 0 else 0
 		dropout_epilogue = dropout_epilogue if dropout != 0 else 0
 		dropouts = dropouts if dropout != 0 else [0] * len(dropouts)
