@@ -353,6 +353,9 @@ class ResidualActivation(nn.Module):
 
 		return y
 
+	def extra_repr(self):
+		return f'nonlinearity={self.nonlinearity}, dropout={self.dropout}, invertible={self.invertible}'
+
 	class InvertibleResidualInplaceFunction(torch.autograd.function.Function):
 		@staticmethod
 		def forward(ctx, nonlinearity, x, *residual):
