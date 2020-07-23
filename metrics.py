@@ -22,7 +22,7 @@ class ErrorTagger(enum.Enum):
 	ok = 'ok'
 
 	@staticmethod
-	def tag(hyp, ref, p = 0.5, L = 3, placeholder = placeholder):
+	def tag(hyp, ref, p = 0.5, L = 3):
 		e = sum(ch != cr and not (ch == space and cr == placeholder) for ch, cr in zip(hyp, ref))
 		ref_placeholders = ref.count(placeholder)
 		ref_chars = len(ref) - ref_placeholders
@@ -84,7 +84,6 @@ class WordTagger(collections.defaultdict):
 	def tag(self, word):
 		return [self.vocab_hit if word in self.vocab else self.vocab_miss, self[word]]
 
-
 def align(hyp, ref, score_sub = -2, score_del = -4, score_ins = -3):
 	aligner = Needleman()
 	aligner.separator = placeholder
@@ -135,12 +134,17 @@ class ErrorAnalyzer:
 		hyp_postproc, ref_postproc = map(labels.postprocess_transcript, [hyp, ref])
 		
 		res = dict(
+			labels_name = labels.name,
 			audio_path = audio_path, 
 			audio_name = os.path.basename(audio_path), 
 			ref = ref, 
 			hyp = hyp, 
 			**kwargs
 		)
+
+		hyp_postproc, ref_postproc = map(functools.partial(labels.postprocess_transcript, collapse_repeat = True), [hyp, ref])
+		res['cer'] = cer(hyp_postproc, ref_postproc)
+		res['wer'] = wer(hyp_postproc, ref_postproc)
 		
 		hyp, ref, word_alignment = align_words(hyp, ref, break_ref = True) #**config['align_words'])
 		for w in word_alignment:
@@ -169,10 +173,6 @@ class ErrorAnalyzer:
 
 		# total number of words, number of erorrs, inlcuding hitting vocab 
 		
-		# hyp_postproc, ref_postproc = map(functools.partial(labels.postprocess_transcript, **config['postprocess_transcript']), [hyp, ref])
-		# cer_postproc = cer(hyp_postproc, ref_postproc)
-		# wer_postproc = wer(hyp_postproc, ref_postproc)
-
 		def filter_words(word_alignment, word_include_tags = [], word_exclude_tags = [], error_include_tags = [], error_exclude_tags = []):
 			word_include_tags, word_exclude_tags, error_include_tags, error_exclude_tags = map(set, [word_include_tags, word_exclude_tags, error_include_tags, error_exclude_tags]) 
 			res = []
@@ -190,6 +190,8 @@ class ErrorAnalyzer:
 			num_words = len(word_alignment)
 			wer = sum(ErrorTagger.ok not in w['error_tags'] for w in word_alignment) / num_words
 			cer = sum(w['cer'] for w in word_alignment) / num_words
+
+			return dict(wer = wer, cer = cer, num_words = num_words)
 		
 		for config_name, config in self.configs.items():
 			 res[config_name] = compute_metrics(filter_words(word_alignment, **config))

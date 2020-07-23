@@ -84,6 +84,6 @@ def compute_duration(t, hours = False):
 	return seconds / (60 * 60) if hours else seconds
 
 def audio_name(t):
-	return t.get('audio_name') or os.path.basename(t['audio_path'])
+	return (t.get('audio_name') or os.path.basename(t['audio_path'])) if isinstance(t, dict) else os.path.basename(t)
 
 number_tuple = lambda s: tuple(map(lambda ip: (float(ip[1]) if '.' in ip[1] else int(ip[1])) if ip[1] else float(['-inf', 'inf'][ip[0]]), enumerate((s if '-' in s else s + '-' + s).split('-'))))
