@@ -9,6 +9,7 @@ import apex
 import librosa
 from typing import List
 
+
 class InputOutputTypeCast(nn.Module):
 	def __init__(self, model, dtype):
 		super().__init__()
@@ -16,7 +17,8 @@ class InputOutputTypeCast(nn.Module):
 		self.dtype = dtype
 
 	def forward(self, x, *args, **kwargs):
-		return self.model(x.to(self.dtype), *args, **kwargs)#.to(x.dtype)
+		return self.model(x.to(self.dtype), *args, **kwargs)  #.to(x.dtype)
+
 
 class Decoder(nn.Sequential):
 	def __init__(self, input_size, num_classes, type = None):
@@ -41,45 +43,99 @@ class Decoder(nn.Sequential):
 			y2 = self[1](x)
 			return y1, y2
 
+
 class ConvSamePadding(nn.Sequential):
 	def __init__(self, in_channels, out_channels, kernel_size, stride, dilation, bias, groups, separable):
 		padding = dilation * kernel_size // 2
 		if separable:
 			assert dilation == 1
 			super().__init__(
-				nn.Conv1d(in_channels, out_channels, kernel_size = kernel_size, stride = stride, padding = padding, dilation = dilation, groups = groups),
+				nn.Conv1d(
+					in_channels,
+					out_channels,
+					kernel_size = kernel_size,
+					stride = stride,
+					padding = padding,
+					dilation = dilation,
+					groups = groups
+				),
 				nn.ReLU(inplace = True),
 				nn.Conv1d(out_channels, out_channels, kernel_size = 1, bias = bias)
 			)
 		else:
 			super().__init__(
-				nn.Conv1d(in_channels, out_channels, kernel_size = kernel_size, stride = stride, padding = padding, dilation = dilation, groups = groups, bias = bias)
+				nn.Conv1d(
+					in_channels,
+					out_channels,
+					kernel_size = kernel_size,
+					stride = stride,
+					padding = padding,
+					dilation = dilation,
+					groups = groups,
+					bias = bias
+				)
 			)
 
+
 class ConvBn1d(nn.Module):
-	def __init__(self, num_channels, kernel_size, stride = 1, dropout = 0, groups = 1, num_channels_residual: List = [], repeat = 1, dilation = 1, separable = False, temporal_mask = True,
-		nonlinearity = ('relu',), nonlinearity_reference = True,
+	def __init__(
+		self,
+		num_channels,
+		kernel_size,
+		stride = 1,
+		dropout = 0,
+		groups = 1,
+		num_channels_residual: List = [],
+		repeat = 1,
+		dilation = 1,
+		separable = False,
+		temporal_mask = True,
+		nonlinearity = ('relu', ),
+		nonlinearity_reference = True,
 		batch_norm_momentum = 0.1,
 		inplace = False
 	):
 		super().__init__()
-		self.conv = nn.ModuleList(ConvSamePadding(num_channels[0] if i == 0 else num_channels[1], num_channels[1], kernel_size = kernel_size, stride = stride, dilation = dilation, separable = separable, bias = False, groups = groups) for i in range(repeat))
-		self.bn = nn.ModuleList(InplaceBatchNorm1d(num_channels[1], momentum = batch_norm_momentum) if inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat))
-		self.conv_residual = nn.ModuleList(nn.Identity() if in_channels is None else nn.Conv1d(in_channels, num_channels[1], kernel_size = 1) for in_channels in num_channels_residual)
-		self.bn_residual = nn.ModuleList(nn.Identity() if in_channels is None else InplaceBatchNorm1d(num_channels[1], momentum = batch_norm_momentum) if inplace else nn.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual)
+		self.conv = nn.ModuleList(
+			ConvSamePadding(
+				num_channels[0] if i == 0 else num_channels[1],
+				num_channels[1],
+				kernel_size = kernel_size,
+				stride = stride,
+				dilation = dilation,
+				separable = separable,
+				bias = False,
+				groups = groups
+			) for i in range(repeat)
+		)
+		self.bn = nn.ModuleList(
+			InplaceBatchNorm1d(num_channels[1], momentum = batch_norm_momentum) if inplace else nn
+			.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for i in range(repeat)
+		)
+		self.conv_residual = nn.ModuleList(
+			nn.Identity() if in_channels is None else nn.Conv1d(in_channels, num_channels[1], kernel_size = 1)
+			for in_channels in num_channels_residual
+		)
+		self.bn_residual = nn.ModuleList(
+			nn.Identity() if in_channels is None else
+			InplaceBatchNorm1d(num_channels[1], momentum = batch_norm_momentum) if inplace else nn
+			.BatchNorm1d(num_channels[1], momentum = batch_norm_momentum) for in_channels in num_channels_residual
+		)
 		self.activation = ResidualActivation(nonlinearity, dropout, invertible = inplace)
 		self.temporal_mask = temporal_mask
 
 	def forward(self, x, lengths_fraction = None, residual: List = []):
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
 			if i == len(self.conv) - 1:
-				assert len(self.conv_residual) == len(self.bn_residual) == len(residual) 
+				assert len(self.conv_residual) == len(self.bn_residual) == len(residual)
 				residual_inputs = [bn(conv(r)) for conv, bn, r in zip(self.conv_residual, self.bn_residual, residual)]
 			else:
 				residual_inputs = []
-			
+
 			x = self.activation(bn(conv(x)), residual = residual_inputs)
-			x = x * temporal_mask(x, lengths_fraction = lengths_fraction) if (self.temporal_mask and lengths_fraction is not None) else x
+			x = x * temporal_mask(x, lengths_fraction = lengths_fraction) if (
+				self.temporal_mask and lengths_fraction is not None
+			) else x
 		return x
 
 	def fuse_conv_bn_eval(self):
@@ -94,32 +150,71 @@ class ConvBn1d(nn.Module):
 			self.conv[i][-1] = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
 			self.bn[i] = nn.Identity()
 
+
 #TODO: figure out perfect same padding
 # Jasper 5x3: 5 blocks, each has 1 sub-blocks, each sub-block has 3 ConvBnRelu
 # Jasper 10x5: 5 blocks, each has 2 sub-blocks, each sub-block has 5 ConvBnRelu
 # residual = 'dense' | True | False
 class JasperNet(nn.Module):
-	def __init__(self, num_input_features, num_classes, repeat = 3, num_subblocks = 1, dilation = 1, residual = 'dense',
-			kernel_sizes = [11, 13, 17, 21, 25], kernel_size_prologue = 11, kernel_size_epilogue = 29,
-			base_width = 128, out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			separable = False, groups = 1,
-			dropout = 0, dropout_prologue = 0.2, dropout_epilogue = 0.4, dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
-			temporal_mask = True, nonlinearity = ('relu',), inplace = False,
-			stride1 = 2, stride2 = 1, decoder_type = None, dict = dict, frontend = None,
-			bpe_only = False,
-			normalize_features = True, normalize_features_eps = 1e-20, normalize_features_track_running_stats = False, normalize_features_legacy = True, normalize_features_temporal_mask = True
-		):
+	def __init__(
+		self,
+		num_input_features,
+		num_classes,
+		repeat = 3,
+		num_subblocks = 1,
+		dilation = 1,
+		residual = 'dense',
+		kernel_sizes = [11, 13, 17, 21, 25],
+		kernel_size_prologue = 11,
+		kernel_size_epilogue = 29,
+		base_width = 128,
+		out_width_factors = [2, 3, 4, 5, 6],
+		out_width_factors_large = [7, 8],
+		separable = False,
+		groups = 1,
+		dropout = 0,
+		dropout_prologue = 0.2,
+		dropout_epilogue = 0.4,
+		dropouts = [0.2, 0.2, 0.2, 0.3, 0.3],
+		temporal_mask = True,
+		nonlinearity = ('relu', ),
+		inplace = False,
+		stride1 = 2,
+		stride2 = 1,
+		decoder_type = None,
+		dict = dict,
+		frontend = None,
+		bpe_only = False,
+		normalize_features = True,
+		normalize_features_eps = 1e-20,
+		normalize_features_track_running_stats = False,
+		normalize_features_legacy = True,
+		normalize_features_temporal_mask = True
+	):
 		super().__init__()
 		dropout_prologue = dropout_prologue if dropout != 0 else 0
 		dropout_epilogue = dropout_epilogue if dropout != 0 else 0
 		dropouts = dropouts if dropout != 0 else [0] * len(dropouts)
 
 		in_width_factor = out_width_factors[0]
-		self.backbone = nn.ModuleList([ConvBn1d(kernel_size = kernel_size_prologue, num_channels = (num_input_features, in_width_factor * base_width), dropout = dropout_prologue, stride = stride1, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace)])
+		self.backbone = nn.ModuleList([
+			ConvBn1d(
+				kernel_size = kernel_size_prologue,
+				num_channels = (num_input_features, in_width_factor * base_width),
+				dropout = dropout_prologue,
+				stride = stride1,
+				temporal_mask = temporal_mask,
+				nonlinearity = nonlinearity,
+				inplace = inplace
+			)
+		])
 		num_channels_residual = []
 		for kernel_size, dropout, out_width_factor in zip(kernel_sizes, dropouts, out_width_factors):
 			for s in range(num_subblocks):
-				num_channels = (in_width_factor * base_width, (out_width_factor * base_width) if s == num_subblocks - 1 else (in_width_factor * base_width))
+				num_channels = (
+					in_width_factor * base_width, (out_width_factor * base_width) if s == num_subblocks - 1 else
+					(in_width_factor * base_width)
+				)
 				#num_channels = (in_width_factor * base_wdith, out_width_factor * base_width) # seems they do this in https://github.com/NVIDIA/DeepLearningExamples/blob/21120850478d875e9f2286d13143f33f35cd0c74/PyTorch/SpeechRecognition/Jasper/configs/jasper10x5dr_nomask.toml
 				if residual == 'dense':
 					num_channels_residual.append(num_channels[0])
@@ -129,18 +224,53 @@ class JasperNet(nn.Module):
 					num_channels_residual = [num_channels[0]]
 				else:
 					num_channels_residual = []
-				self.backbone.append(ConvBn1d(num_channels = num_channels, kernel_size = kernel_size, dropout = dropout, repeat = repeat, separable = separable, groups = groups, num_channels_residual = num_channels_residual, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace))
+				self.backbone.append(
+					ConvBn1d(
+						num_channels = num_channels,
+						kernel_size = kernel_size,
+						dropout = dropout,
+						repeat = repeat,
+						separable = separable,
+						groups = groups,
+						num_channels_residual = num_channels_residual,
+						temporal_mask = temporal_mask,
+						nonlinearity = nonlinearity,
+						inplace = inplace
+					)
+				)
 			in_width_factor = out_width_factor
 
 		epilogue = [
-			ConvBn1d(num_channels = (in_width_factor * base_width, out_width_factors_large[0] * base_width), kernel_size = kernel_size_epilogue, dropout = dropout_epilogue, dilation = dilation, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
-			ConvBn1d(num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width), kernel_size = 1, dropout = dropout_epilogue, temporal_mask = temporal_mask, nonlinearity = nonlinearity, inplace = inplace),
+			ConvBn1d(
+				num_channels = (in_width_factor * base_width, out_width_factors_large[0] * base_width),
+				kernel_size = kernel_size_epilogue,
+				dropout = dropout_epilogue,
+				dilation = dilation,
+				temporal_mask = temporal_mask,
+				nonlinearity = nonlinearity,
+				inplace = inplace
+			),
+			ConvBn1d(
+				num_channels = (out_width_factors_large[0] * base_width, out_width_factors_large[1] * base_width),
+				kernel_size = 1,
+				dropout = dropout_epilogue,
+				temporal_mask = temporal_mask,
+				nonlinearity = nonlinearity,
+				inplace = inplace
+			),
 		]
 		self.backbone.extend(epilogue)
 
 		self.num_epilogue_modules = len(epilogue)
 		self.frontend = frontend
-		self.normalize_features = MaskedInstanceNorm1d(num_input_features, affine = False, eps = normalize_features_eps, track_running_stats = normalize_features_track_running_stats, temporal_mask = normalize_features_temporal_mask, legacy = normalize_features_legacy) if normalize_features else None
+		self.normalize_features = MaskedInstanceNorm1d(
+			num_input_features,
+			affine = False,
+			eps = normalize_features_eps,
+			track_running_stats = normalize_features_track_running_stats,
+			temporal_mask = normalize_features_temporal_mask,
+			legacy = normalize_features_legacy
+		) if normalize_features else None
 		self.decoder = Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
 		self.residual = residual
 		self.dict = dict
@@ -150,12 +280,14 @@ class JasperNet(nn.Module):
 		#x = x.to(torch.float16)
 		x = x if x.ndim == 2 else x.squeeze(1)
 		x = self.frontend(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.frontend is not None else x
-		x = self.normalize_features(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.normalize_features is not None else x
+		x = self.normalize_features(
+			x, mask = temporal_mask(x, lengths_fraction = xlen)
+		) if self.normalize_features is not None else x
 
 		residual = []
 		for i, subblock in enumerate(self.backbone):
 			x = subblock(x, residual = residual, lengths_fraction = xlen)
-			if i >= len(self.backbone) - self.num_epilogue_modules - 1: # HACK: drop residual connections for epilogue
+			if i >= len(self.backbone) - self.num_epilogue_modules - 1:  # HACK: drop residual connections for epilogue
 				residual = []
 			elif self.residual == 'dense':
 				residual.append(x)
@@ -170,7 +302,12 @@ class JasperNet(nn.Module):
 		aux = {}
 
 		if y is not None and ylen is not None:
-			loss = [F.ctc_loss(l.permute(2, 0, 1), y[:, i], olen[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') / ylen[:, 0] for i, l in enumerate(log_probs)]
+			loss = [
+				F.
+				ctc_loss(l.permute(2, 0, 1), y[:, i], olen[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') /
+				ylen[:, 0] for i,
+				l in enumerate(log_probs)
+			]
 			aux = dict(loss = sum(loss) if not self.bpe_only else sum(loss[1:]))
 
 		return self.dict(logits = logits, log_probs = log_probs, olen = olen, **aux)
@@ -186,10 +323,11 @@ class JasperNet(nn.Module):
 	def fuse_conv_bn_eval(self, K = None):
 		for subblock in self.backbone[:K]:
 			subblock.fuse_conv_bn_eval()
-	
+
 	def set_temporal_mask_mode(self, enabled):
 		for module in self.modules():
 			module.temporal_mask = enabled
+
 
 class ResidualActivation(nn.Module):
 	def __init__(self, nonlinearity, dropout = 0, invertible = False):
@@ -205,7 +343,7 @@ class ResidualActivation(nn.Module):
 		else:
 			for r in residual:
 				y += r
-			
+
 			if self.dropout > 0 and self.training and self.nonlinearity[0] == 'relu':
 				y = relu_dropout(y, p = self.dropout, training = self.training, inplace = True)
 			else:
@@ -219,7 +357,7 @@ class ResidualActivation(nn.Module):
 		def forward(ctx, nonlinearity, x, *residual):
 			ctx.nonlinearity = nonlinearity
 			assert ctx.nonlinearity and ctx.nonlinearity[0] in ['leaky_relu']
-			
+
 			y = x.data
 			for r in residual:
 				y += r
@@ -233,15 +371,18 @@ class ResidualActivation(nn.Module):
 			x, *residual = ctx.saved_tensors
 			y = x.data
 			mask = torch.ones_like(grad_output).masked_fill_(x < 0, ctx.nonlinearity[1])
-			grad_output.mul_(mask) #grad_output = grad_output.contiguous().mul_(mask)
+			grad_output.mul_(mask)  #grad_output = grad_output.contiguous().mul_(mask)
 			y /= mask
 			for r in residual:
 				y -= r
-			return (None, ) + (grad_output,) * (1 + len(residual))
+			return (None, ) + (grad_output, ) * (1 + len(residual))
+
 
 class InplaceBatchNorm1d(nn.BatchNorm1d):
 	def forward(self, input):
-		return InplaceBatchNorm1d.Function.apply(input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training)
+		return InplaceBatchNorm1d.Function.apply(
+			input, self.weight, self.bias, self.running_mean, self.running_var, self.eps, self.momentum, self.training
+		)
 
 	class Function(torch.autograd.function.Function):
 		@staticmethod
@@ -258,13 +399,18 @@ class InplaceBatchNorm1d(nn.BatchNorm1d):
 		def backward(ctx, grad_output):
 			assert ctx.training, 'Inplace BatchNorm supports only training mode, input gradients with running stats used are not yet supported'
 			saved_output, weight, bias, mean, invstd = ctx.saved_tensors
-			saved_input = torch.batch_norm_elemt(saved_output, invstd.reciprocal(), mean, bias, weight.reciprocal(), 0, out = saved_output)
+			saved_input = torch.batch_norm_elemt(
+				saved_output, invstd.reciprocal(), mean, bias, weight.reciprocal(), 0, out = saved_output
+			)
 			sum_dy, sum_dy_xmu, grad_weight, grad_bias = torch.batch_norm_backward_reduce(grad_output, saved_input, mean, invstd, weight, *ctx.needs_input_grad[:3])
 			divisor = saved_input.numel() // saved_input.size(1)
 			mean_dy = sum_dy.div_(divisor)
 			mean_dy_xmu = sum_dy_xmu.div_(divisor)
-			grad_input = torch.batch_norm_backward_elemt(grad_output, saved_input, mean, invstd, weight, mean_dy, mean_dy_xmu)
+			grad_input = torch.batch_norm_backward_elemt(
+				grad_output, saved_input, mean, invstd, weight, mean_dy, mean_dy_xmu
+			)
 			return grad_input, grad_weight, grad_bias, None, None, None, None, None
+
 
 def relu_dropout(x, p = 0, inplace = False, training = False):
 	if not training or p == 0:
@@ -274,6 +420,7 @@ def relu_dropout(x, p = 0, inplace = False, training = False):
 	mask = torch.rand_like(x) > p1m
 	mask |= (x < 0)
 	return x.masked_fill_(mask, 0).div_(p1m) if inplace else x.masked_fill(mask, 0).div(p1m)
+
 
 class AugmentationFrontend(nn.Module):
 	def __init__(self, frontend, feature_transform = None, waveform_transform = None):
@@ -304,24 +451,42 @@ class AugmentationFrontend(nn.Module):
 	def read_audio(self):
 		return 'SoxAug' not in self.waveform_transform.__class__.__name__
 
+
 class LogFilterBankFrontend(nn.Module):
-	def __init__(self, out_channels, sample_rate, window_size, window_stride, window, dither = 1e-5, dither0 = 0.0, preemphasis = 0.97, eps = 1e-20, normalize_signal = True, stft_mode = None, window_periodic = True, normalize_features = False):
+	def __init__(
+		self,
+		out_channels,
+		sample_rate,
+		window_size,
+		window_stride,
+		window,
+		dither = 1e-5,
+		dither0 = 0.0,
+		preemphasis = 0.97,
+		eps = 1e-20,
+		normalize_signal = True,
+		stft_mode = None,
+		window_periodic = True,
+		normalize_features = False
+	):
 		super().__init__()
 		self.stft_mode = stft_mode
 		self.dither = dither
 		self.dither0 = dither0
-		self.preemphasis =  preemphasis
+		self.preemphasis = preemphasis
 		self.normalize_signal = normalize_signal
 		self.sample_rate = sample_rate
 
 		self.win_length = int(window_size * sample_rate)
 		self.hop_length = int(window_stride * sample_rate)
-		self.nfft = 2 ** math.ceil(math.log2(self.win_length))
+		self.nfft = 2**math.ceil(math.log2(self.win_length))
 		self.freq_cutoff = self.nfft // 2 + 1
 
 		self.register_buffer('window', getattr(torch, window)(self.win_length, periodic = window_periodic).float())
 		#mel_basis = torchaudio.functional.create_fb_matrix(n_fft, n_mels = num_input_features, fmin = 0, fmax = int(sample_rate/2)).t() # when https://github.com/pytorch/audio/issues/287 is fixed
-		mel_basis = torch.as_tensor(librosa.filters.mel(sample_rate, self.nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2)))
+		mel_basis = torch.as_tensor(
+			librosa.filters.mel(sample_rate, self.nfft, n_mels = out_channels, fmin = 0, fmax = int(sample_rate / 2))
+		)
 		self.mel = nn.Conv1d(mel_basis.shape[1], mel_basis.shape[0], 1).requires_grad_(False)
 		self.mel.weight.copy_(mel_basis.unsqueeze(-1))
 		self.mel.bias.fill_(eps)
@@ -329,8 +494,16 @@ class LogFilterBankFrontend(nn.Module):
 		if stft_mode == 'conv':
 			fourier_basis = torch.rfft(torch.eye(self.nfft), signal_ndim = 1, onesided = False)
 			forward_basis = fourier_basis[:self.freq_cutoff].permute(2, 0, 1).reshape(-1, 1, fourier_basis.shape[1])
-			forward_basis = forward_basis * torch.as_tensor(librosa.util.pad_center(self.window, self.nfft), dtype = forward_basis.dtype)
-			self.stft = nn.Conv1d(forward_basis.shape[1], forward_basis.shape[0], forward_basis.shape[2], bias = False, stride = self.hop_length).requires_grad_(False)
+			forward_basis = forward_basis * torch.as_tensor(
+				librosa.util.pad_center(self.window, self.nfft), dtype = forward_basis.dtype
+			)
+			self.stft = nn.Conv1d(
+				forward_basis.shape[1],
+				forward_basis.shape[0],
+				forward_basis.shape[2],
+				bias = False,
+				stride = self.hop_length
+			).requires_grad_(False)
 			self.stft.weight.copy_(forward_basis)
 		else:
 			self.stft = None
@@ -339,14 +512,19 @@ class LogFilterBankFrontend(nn.Module):
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
 		signal = normalize_signal(signal) if self.normalize_signal else signal
 		signal = signal + self.dither0 * torch.randn_like(signal) if self.dither0 > 0 else signal
-		signal = torch.cat([signal[..., :1], signal[..., 1:] - self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
+		signal = torch.cat([signal[..., :1], signal[..., 1:] -
+							self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
 		signal = signal + self.dither * torch.randn_like(signal) if self.dither > 0 else signal
 		signal = signal * mask if mask is not None else signal
 
 		pad = self.freq_cutoff - 1
-		padded_signal = F.pad(signal.unsqueeze(1), (pad, 0), mode = 'reflect').squeeze(1) # TODO: remove un/squeeze when https://github.com/pytorch/pytorch/issues/29863 is fixed
-		padded_signal = F.pad(padded_signal, (0, pad), mode = 'constant', value = 0) # TODO: avoid this second copy by doing pad manually
-		
+		padded_signal = F.pad(signal.unsqueeze(1), (pad, 0), mode = 'reflect').squeeze(
+			1
+		)  # TODO: remove un/squeeze when https://github.com/pytorch/pytorch/issues/29863 is fixed
+		padded_signal = F.pad(
+			padded_signal, (0, pad), mode = 'constant', value = 0
+		)  # TODO: avoid this second copy by doing pad manually
+
 		real_squared, imag_squared = self.stft(padded_signal.unsqueeze(dim = 1)).pow(2).split(self.freq_cutoff, dim = 1) if self.stft is not None else padded_signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = False).pow(2).unbind(dim = -1)
 		power_spectrum = real_squared + imag_squared
 		log_mel_features = self.mel(power_spectrum).log()
@@ -356,34 +534,45 @@ class LogFilterBankFrontend(nn.Module):
 	def read_audio(self):
 		return True
 
+
 def temporal_mask(x, lengths = None, lengths_fraction = None):
 	lengths = lengths if lengths is not None else compute_output_lengths(x, lengths_fraction)
-	return (torch.arange(x.shape[-1], device = x.device, dtype = lengths.dtype).unsqueeze(0) < lengths.unsqueeze(1)).view(x.shape[:1] + (1, )*(len(x.shape) - 2) + x.shape[-1:])
+	return (torch.arange(x.shape[-1], device = x.device, dtype = lengths.dtype).unsqueeze(0) <
+			lengths.unsqueeze(1)).view(x.shape[:1] + (1, ) * (len(x.shape) - 2) + x.shape[-1:])
+
 
 def entropy(log_probs, lengths = None, dim = 1, eps = 1e-9, sum = True, keepdim = False):
 	e = -(log_probs.exp() * log_probs).sum(dim = dim, keepdim = keepdim)
 	if lengths is not None:
 		e = e * temporal_mask(e, lengths)
-	return (e.sum(dim = -1) / (eps + lengths.type_as(log_probs)) if lengths is not None else e.mean(dim = -1)) if sum else e
+	return (
+		e.sum(dim = -1) / (eps + lengths.type_as(log_probs)) if lengths is not None else e.mean(dim = -1)
+	) if sum else e
+
 
 def margin(log_probs, dim = 1):
 	return torch.sub(*log_probs.exp().topk(2, dim = dim).values)
 
+
 def compute_output_lengths(x, lengths_fraction):
-	return (lengths_fraction * x.shape[-1]).ceil().long() if lengths_fraction is not None else torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.long)
+	return (lengths_fraction * x.shape[-1]).ceil().long(
+	) if lengths_fraction is not None else torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.long)
+
 
 def compute_capacity(model, scale = 1):
 	return sum(map(torch.numel, model.parameters())) / scale
 
+
 def normalize_signal(signal, dim = -1, eps = 1e-5):
 	return signal / (signal.abs().max(dim = dim, keepdim = True).values + eps) if signal.numel() > 0 else signal
+
 
 class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 	def __init__(self, *args, temporal_mask = False, legacy = True, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.temporal_mask = temporal_mask
 		self.legacy = legacy
-		
+
 	def forward(self, x, mask = None):
 		if not self.temporal_mask or mask is None:
 			if self.legacy:
@@ -400,8 +589,10 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 			std = (zero_mean_masked.pow(2).sum(dim = -1, keepdim = True) / xlen).sqrt()
 			return zero_mean_masked / (std + self.eps)
 
+
 def unpad(x, lens):
 	return [e[..., :l] for e, l in zip(x, lens)]
+
 
 def reset_bn_running_stats_(model):
 	for bn in [module for module in model.modules() if isinstance(module, nn.modules.batchnorm._BatchNorm)]:
@@ -411,9 +602,11 @@ def reset_bn_running_stats_(model):
 		bn.train()
 	return model
 
+
 def compute_memory_fragmentation():
 	snapshot = torch.cuda.memory_snapshot()
 	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
+
 
 def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, opt_level = None, **kwargs):
 	data_parallel = data_parallel and torch.cuda.device_count() > 1
@@ -425,141 +618,478 @@ def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, op
 		model, optimizer = apex.amp.initialize(nn.Sequential(model), optimizers = optimizer, opt_level = opt_level, **kwargs) if optimizer is not None else (apex.amp.initialize(nn.Sequential(model), opt_level = opt_level, **kwargs), None)
 		model = torch.nn.DataParallel(model[0])
 		model.forward = lambda *args, old_fwd = model.forward, input_caster = lambda tensor: tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_type']) if tensor.is_floating_point() else tensor, output_caster = lambda tensor: (tensor.to(apex.amp._amp_state.opt_properties.options['cast_model_outputs'] if apex.amp._amp_state.opt_properties.options.get('cast_model_outputs') is not None else torch.float32)) if tensor.is_floating_point() else tensor, **kwargs: apex.amp._initialize.applier(old_fwd(*apex.amp._initialize.applier(args, input_caster), **apex.amp._initialize.applier(kwargs, input_caster)), output_caster)
-	
+
 	else:
 		model, optimizer = apex.amp.initialize(model, optimizers = optimizer, opt_level = opt_level, **kwargs) if optimizer is not None else (apex.amp.initialize(model, opt_level = opt_level, **kwargs), None)
-		
+
 	return model, optimizer
+
 
 def silence_space_mask(log_probs, speech, blank_idx, space_idx, kernel_size = 101):
 	# major dilation
 	greedy_decoded = log_probs.max(dim = 1).indices
 	silence = ~speech & (greedy_decoded == blank_idx)
-	return silence[:, None, :] * (~F.one_hot(torch.tensor(space_idx), log_probs.shape[1]).to(device = silence.device, dtype = silence.dtype))[None, :, None]
+	return silence[:, None, :] * (
+		~F.one_hot(torch.tensor(space_idx), log_probs.shape[1]).to(device = silence.device, dtype = silence.dtype)
+	)[None, :, None]
+
 
 def sparse_topk(x, k, dim = -1, largest = True, indices_dtype = None, values_dtype = None, fill_value = 0.0):
 	topk = x.topk(k, dim = dim, largest = largest)
-	return dict(k = k, dim = dim, largest = largest, shape = x.shape, dtype = x.dtype, device = x.device, fill_value = fill_value, indices = topk.indices.to(dtype = indices_dtype), values = topk.values.to(dtype = values_dtype))
+	return dict(
+		k = k,
+		dim = dim,
+		largest = largest,
+		shape = x.shape,
+		dtype = x.dtype,
+		device = x.device,
+		fill_value = fill_value,
+		indices = topk.indices.to(dtype = indices_dtype),
+		values = topk.values.to(dtype = values_dtype)
+	)
+
 
 def sparse_topk_todense(saved, device = None):
 	device = device or saved['device']
-	return torch.full(saved['shape'], saved['fill_value'], dtype = saved['dtype'], device = device).scatter_(saved['dim'], saved['indices'].to(dtype = torch.int64, device = device), saved['values'].to(dtype = saved['dtype'], device = device))
+	return torch.full(saved['shape'], saved['fill_value'], dtype = saved['dtype'], device = device).scatter_(
+		saved['dim'],
+		saved['indices'].to(dtype = torch.int64, device = device),
+		saved['values'].to(dtype = saved['dtype'], device = device)
+	)
+
 
 def master_module(model):
 	return model.module if isinstance(model, nn.DataParallel) else model
 
+
 ########CONFIGS########
 
+
 class Wav2Letter(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 6, decoder_type = None, normalize_features = True, frontend = None):
-		super().__init__(num_input_features, num_classes, base_width = base_width,
-			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
-			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
-			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			residual = False, dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+	def __init__(
+		self,
+		num_input_features,
+		num_classes,
+		dropout = 0.2,
+		base_width = 128,
+		nonlinearity = ('hardtanh', 0, 20),
+		kernel_size_prologue = 11,
+		kernel_size_epilogue = 29,
+		kernel_sizes = [11, 13, 17, 21, 25],
+		dilation = 2,
+		num_blocks = 6,
+		decoder_type = None,
+		normalize_features = True,
+		frontend = None
+	):
+		super().__init__(
+			num_input_features,
+			num_classes,
+			base_width = base_width,
+			dropout = dropout,
+			dropout_prologue = dropout,
+			dropout_epilogue = dropout,
+			dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue,
+			kernel_size_epilogue = kernel_size_epilogue,
+			kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6],
+			out_width_factors_large = [7, 8],
+			residual = False,
+			dilation = dilation,
+			nonlinearity = nonlinearity,
+			decoder_type = decoder_type,
+			normalize_features = normalize_features,
+			frontend = frontend
 		)
+
 
 class Wav2LetterResidual(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
-		super().__init__(num_input_features, num_classes, base_width = base_width,
-			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
-			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
-			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			residual = True, dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+	def __init__(
+		self,
+		num_input_features,
+		num_classes,
+		dropout = 0.2,
+		base_width = 128,
+		nonlinearity = ('hardtanh', 0, 20),
+		kernel_size_prologue = 11,
+		kernel_size_epilogue = 29,
+		kernel_sizes = [11, 13, 17, 21, 25],
+		dilation = 2,
+		num_blocks = 5,
+		decoder_type = None,
+		normalize_features = True,
+		frontend = None
+	):
+		super().__init__(
+			num_input_features,
+			num_classes,
+			base_width = base_width,
+			dropout = dropout,
+			dropout_prologue = dropout,
+			dropout_epilogue = dropout,
+			dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue,
+			kernel_size_epilogue = kernel_size_epilogue,
+			kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6],
+			out_width_factors_large = [7, 8],
+			residual = True,
+			dilation = dilation,
+			nonlinearity = nonlinearity,
+			decoder_type = decoder_type,
+			normalize_features = normalize_features,
+			frontend = frontend
 		)
+
 
 class Wav2LetterResidualNoDilation(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 1, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
-		super().__init__(num_input_features, num_classes, base_width = base_width,
-			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
-			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
-			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			residual = True, dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+	def __init__(
+		self,
+		num_input_features,
+		num_classes,
+		dropout = 0.2,
+		base_width = 128,
+		nonlinearity = ('hardtanh', 0, 20),
+		kernel_size_prologue = 11,
+		kernel_size_epilogue = 29,
+		kernel_sizes = [11, 13, 17, 21, 25],
+		dilation = 1,
+		num_blocks = 5,
+		decoder_type = None,
+		normalize_features = True,
+		frontend = None
+	):
+		super().__init__(
+			num_input_features,
+			num_classes,
+			base_width = base_width,
+			dropout = dropout,
+			dropout_prologue = dropout,
+			dropout_epilogue = dropout,
+			dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue,
+			kernel_size_epilogue = kernel_size_epilogue,
+			kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6],
+			out_width_factors_large = [7, 8],
+			residual = True,
+			dilation = dilation,
+			nonlinearity = nonlinearity,
+			decoder_type = decoder_type,
+			normalize_features = normalize_features,
+			frontend = frontend
 		)
+
 
 class Wav2LetterResidualBig(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
-		super().__init__(num_input_features, num_classes, base_width = base_width, num_subblocks=2,
-			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
-			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
-			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			residual = True, dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+	def __init__(
+		self,
+		num_input_features,
+		num_classes,
+		dropout = 0.2,
+		base_width = 128,
+		nonlinearity = ('hardtanh', 0, 20),
+		kernel_size_prologue = 11,
+		kernel_size_epilogue = 29,
+		kernel_sizes = [11, 13, 17, 21, 25],
+		dilation = 2,
+		num_blocks = 5,
+		decoder_type = None,
+		normalize_features = True,
+		frontend = None
+	):
+		super().__init__(
+			num_input_features,
+			num_classes,
+			base_width = base_width,
+			num_subblocks = 2,
+			dropout = dropout,
+			dropout_prologue = dropout,
+			dropout_epilogue = dropout,
+			dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue,
+			kernel_size_epilogue = kernel_size_epilogue,
+			kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6],
+			out_width_factors_large = [7, 8],
+			residual = True,
+			dilation = dilation,
+			nonlinearity = nonlinearity,
+			decoder_type = decoder_type,
+			normalize_features = normalize_features,
+			frontend = frontend
 		)
+
 
 class Wav2LetterDense(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
-		super().__init__(num_input_features, num_classes, base_width = base_width,
-			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
-			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
-			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			residual = 'dense', dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+	def __init__(
+		self,
+		num_input_features,
+		num_classes,
+		dropout = 0.2,
+		base_width = 128,
+		nonlinearity = ('hardtanh', 0, 20),
+		kernel_size_prologue = 11,
+		kernel_size_epilogue = 29,
+		kernel_sizes = [11, 13, 17, 21, 25],
+		dilation = 2,
+		num_blocks = 5,
+		decoder_type = None,
+		normalize_features = True,
+		frontend = None
+	):
+		super().__init__(
+			num_input_features,
+			num_classes,
+			base_width = base_width,
+			dropout = dropout,
+			dropout_prologue = dropout,
+			dropout_epilogue = dropout,
+			dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue,
+			kernel_size_epilogue = kernel_size_epilogue,
+			kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6],
+			out_width_factors_large = [7, 8],
+			residual = 'dense',
+			dilation = dilation,
+			nonlinearity = nonlinearity,
+			decoder_type = decoder_type,
+			normalize_features = normalize_features,
+			frontend = frontend
 		)
+
 
 class Wav2LetterDenseNoDilation(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 1, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
-		super().__init__(num_input_features, num_classes, base_width = base_width,
-			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
-			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
-			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			residual = 'dense', dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+	def __init__(
+		self,
+		num_input_features,
+		num_classes,
+		dropout = 0.2,
+		base_width = 128,
+		nonlinearity = ('hardtanh', 0, 20),
+		kernel_size_prologue = 11,
+		kernel_size_epilogue = 29,
+		kernel_sizes = [11, 13, 17, 21, 25],
+		dilation = 1,
+		num_blocks = 5,
+		decoder_type = None,
+		normalize_features = True,
+		frontend = None
+	):
+		super().__init__(
+			num_input_features,
+			num_classes,
+			base_width = base_width,
+			dropout = dropout,
+			dropout_prologue = dropout,
+			dropout_epilogue = dropout,
+			dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue,
+			kernel_size_epilogue = kernel_size_epilogue,
+			kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6],
+			out_width_factors_large = [7, 8],
+			residual = 'dense',
+			dilation = dilation,
+			nonlinearity = nonlinearity,
+			decoder_type = decoder_type,
+			normalize_features = normalize_features,
+			frontend = frontend
 		)
+
 
 class Wav2LetterDenseLargeKernels(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
-		super().__init__(num_input_features, num_classes, base_width = base_width,
-			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
-			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = kernel_sizes,
-			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			residual = 'dense', dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+	def __init__(
+		self,
+		num_input_features,
+		num_classes,
+		dropout = 0.2,
+		base_width = 128,
+		nonlinearity = ('hardtanh', 0, 20),
+		kernel_size_prologue = 11,
+		kernel_size_epilogue = 29,
+		kernel_sizes = [11, 13, 17, 21, 25],
+		dilation = 2,
+		num_blocks = 5,
+		decoder_type = None,
+		normalize_features = True,
+		frontend = None
+	):
+		super().__init__(
+			num_input_features,
+			num_classes,
+			base_width = base_width,
+			dropout = dropout,
+			dropout_prologue = dropout,
+			dropout_epilogue = dropout,
+			dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue,
+			kernel_size_epilogue = kernel_size_epilogue,
+			kernel_sizes = kernel_sizes,
+			out_width_factors = [2, 3, 4, 5, 6],
+			out_width_factors_large = [7, 8],
+			residual = 'dense',
+			dilation = dilation,
+			nonlinearity = nonlinearity,
+			decoder_type = decoder_type,
+			normalize_features = normalize_features,
+			frontend = frontend
 		)
+
 
 class Wav2LetterDenseNoDilationLargeKernels(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 1, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
-		super().__init__(num_input_features, num_classes, base_width = base_width,
-			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
-			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = kernel_sizes,
-			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			residual = 'dense', dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+	def __init__(
+		self,
+		num_input_features,
+		num_classes,
+		dropout = 0.2,
+		base_width = 128,
+		nonlinearity = ('hardtanh', 0, 20),
+		kernel_size_prologue = 11,
+		kernel_size_epilogue = 29,
+		kernel_sizes = [11, 13, 17, 21, 25],
+		dilation = 1,
+		num_blocks = 5,
+		decoder_type = None,
+		normalize_features = True,
+		frontend = None
+	):
+		super().__init__(
+			num_input_features,
+			num_classes,
+			base_width = base_width,
+			dropout = dropout,
+			dropout_prologue = dropout,
+			dropout_epilogue = dropout,
+			dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue,
+			kernel_size_epilogue = kernel_size_epilogue,
+			kernel_sizes = kernel_sizes,
+			out_width_factors = [2, 3, 4, 5, 6],
+			out_width_factors_large = [7, 8],
+			residual = 'dense',
+			dilation = dilation,
+			nonlinearity = nonlinearity,
+			decoder_type = decoder_type,
+			normalize_features = normalize_features,
+			frontend = frontend
 		)
+
 
 class Wav2LetterDenseBig(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout = 0.2, base_width = 128, nonlinearity = ('hardtanh', 0, 20), kernel_size_prologue = 11, kernel_size_epilogue = 29, kernel_sizes = [11, 13, 17, 21, 25], dilation = 2, num_blocks = 5, decoder_type = None, normalize_features = True, frontend = None):
-		super().__init__(num_input_features, num_classes, base_width = base_width, num_subblocks=2,
-			dropout = dropout, dropout_prologue = dropout, dropout_epilogue = dropout, dropouts = [dropout] * num_blocks,
-			kernel_size_prologue = kernel_size_prologue, kernel_size_epilogue = kernel_size_epilogue, kernel_sizes = [kernel_size_prologue] * num_blocks,
-			out_width_factors = [2, 3, 4, 5, 6], out_width_factors_large = [7, 8],
-			residual = 'dense', dilation = dilation, nonlinearity = nonlinearity, decoder_type = decoder_type, normalize_features = normalize_features, frontend = frontend
+	def __init__(
+		self,
+		num_input_features,
+		num_classes,
+		dropout = 0.2,
+		base_width = 128,
+		nonlinearity = ('hardtanh', 0, 20),
+		kernel_size_prologue = 11,
+		kernel_size_epilogue = 29,
+		kernel_sizes = [11, 13, 17, 21, 25],
+		dilation = 2,
+		num_blocks = 5,
+		decoder_type = None,
+		normalize_features = True,
+		frontend = None
+	):
+		super().__init__(
+			num_input_features,
+			num_classes,
+			base_width = base_width,
+			num_subblocks = 2,
+			dropout = dropout,
+			dropout_prologue = dropout,
+			dropout_epilogue = dropout,
+			dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue,
+			kernel_size_epilogue = kernel_size_epilogue,
+			kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [2, 3, 4, 5, 6],
+			out_width_factors_large = [7, 8],
+			residual = 'dense',
+			dilation = dilation,
+			nonlinearity = nonlinearity,
+			decoder_type = decoder_type,
+			normalize_features = normalize_features,
+			frontend = frontend
 		)
 
+
 class Wav2LetterFlat(JasperNet):
-	def __init__(self, num_input_features, num_classes, dropout=0.2, base_width=128, nonlinearity=('hardtanh', 0, 20), kernel_size_prologue=13, kernel_size_epilogue=29, kernel_sizes=[11, 13, 17, 21, 25], dilation=2, num_blocks=5, decoder_type=None, normalize_features=True, frontend=None):
-		super().__init__(num_input_features, num_classes, base_width=base_width,
-			dropout=dropout, dropout_prologue=dropout, dropout_epilogue=dropout, dropouts=[dropout] * num_blocks,
-			kernel_size_prologue=kernel_size_prologue, kernel_size_epilogue=kernel_size_epilogue, kernel_sizes=[kernel_size_prologue] * num_blocks,
-			out_width_factors=[6] * num_blocks, out_width_factors_large=[16, 16],
-			residual='flat', dilation=dilation, nonlinearity=nonlinearity, decoder_type=decoder_type, normalize_features=normalize_features, frontend=frontend)
+	def __init__(
+		self,
+		num_input_features,
+		num_classes,
+		dropout = 0.2,
+		base_width = 128,
+		nonlinearity = ('hardtanh', 0, 20),
+		kernel_size_prologue = 13,
+		kernel_size_epilogue = 29,
+		kernel_sizes = [11, 13, 17, 21, 25],
+		dilation = 2,
+		num_blocks = 5,
+		decoder_type = None,
+		normalize_features = True,
+		frontend = None
+	):
+		super().__init__(
+			num_input_features,
+			num_classes,
+			base_width = base_width,
+			dropout = dropout,
+			dropout_prologue = dropout,
+			dropout_epilogue = dropout,
+			dropouts = [dropout] * num_blocks,
+			kernel_size_prologue = kernel_size_prologue,
+			kernel_size_epilogue = kernel_size_epilogue,
+			kernel_sizes = [kernel_size_prologue] * num_blocks,
+			out_width_factors = [6] * num_blocks,
+			out_width_factors_large = [16, 16],
+			residual = 'flat',
+			dilation = dilation,
+			nonlinearity = nonlinearity,
+			decoder_type = decoder_type,
+			normalize_features = normalize_features,
+			frontend = frontend
+		)
+
 
 class JasperNetSeparable(JasperNet):
 	def __init__(self, *args, separable = True, groups = 128, **kwargs):
 		super().__init__(*args, separable = separable, groups = groups, **kwargs)
 
+
 class JasperNetSmall(JasperNet):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, num_subblocks = 1, temporal_mask = False, **kwargs)
+
 
 class JasperNetBig(JasperNet):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, num_subblocks = 2, temporal_mask = False, **kwargs)
 
+
 class JasperNetBigBpeOnly(JasperNet):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, num_subblocks = 2, temporal_mask = False, bpe_only = True, **kwargs)
+
 
 class JasperNetResidualBig(JasperNet):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, num_subblocks = 2, temporal_mask = False, residual = True, **kwargs)
 
+
 class JasperNetBigInplace(JasperNet):
 	def __init__(self, *args, **kwargs):
 		inplace = kwargs.pop('inplace', True)
-		super().__init__(*args, num_subblocks = 2, temporal_mask = False, inplace = inplace, nonlinearity = ('leaky_relu', 0.01), **kwargs)
+		super().__init__(
+			*args,
+			num_subblocks = 2,
+			temporal_mask = False,
+			inplace = inplace,
+			nonlinearity = ('leaky_relu', 0.01),
+			**kwargs
+		)

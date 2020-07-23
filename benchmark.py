@@ -11,17 +11,21 @@ import datasets
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--checkpoint')
-parser.add_argument('--device', default = 'cuda', help ='TODO: proper device choosing')
+parser.add_argument('--device', default = 'cuda', help = 'TODO: proper device choosing')
 parser.add_argument('--iterations', type = int, default = 16)
 parser.add_argument('--iterations-warmup', type = int, default = 16)
 parser.add_argument('--frontend', action = 'store_true')
 parser.add_argument('--fp16', choices = ['', 'O0', 'O1', 'O2', 'O3'], default = None)
-parser.add_argument('--num-input-features', default = 64, help = 'num of mel-scale features produced by logfbank frontend')
+parser.add_argument(
+	'--num-input-features', default = 64, help = 'num of mel-scale features produced by logfbank frontend'
+)
 parser.add_argument('--sample-rate', type = int, default = 8_000, help = 'for frontend')
 parser.add_argument('--window-size', type = float, default = 0.02, help = 'for frontend, in seconds')
 parser.add_argument('--window-stride', type = float, default = 0.01, help = 'for frontend, in seconds')
 parser.add_argument('--lang', default = 'ru')
-parser.add_argument('--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'], help = 'for frontend')
+parser.add_argument(
+	'--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'], help = 'for frontend'
+)
 parser.add_argument('--model', default = 'JasperNetBig')
 parser.add_argument('--onnx')
 parser.add_argument('--stft-mode', choices = ['conv', ''], default = '')
@@ -47,32 +51,51 @@ if args.onnx:
 	load_batch = lambda x: x.numpy()
 
 else:
-	frontend = models.LogFilterBankFrontend(args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, stft_mode = args.stft_mode) if args.frontend else None
-	model = getattr(models, args.model)(args.num_input_features, [len(labels)], frontend = frontend, dict = lambda logits, log_probs, olen, **kwargs: logits[0])
+	frontend = models.LogFilterBankFrontend(
+		args.num_input_features,
+		args.sample_rate,
+		args.window_size,
+		args.window_stride,
+		args.window,
+		stft_mode = args.stft_mode
+	) if args.frontend else None
+	model = getattr(models, args.model)(
+		args.num_input_features, [len(labels)],
+		frontend = frontend,
+		dict = lambda logits,
+		log_probs,
+		olen,
+		**kwargs: logits[0]
+	)
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'])
 	model.to(args.device)
-	
+
 	if not args.backward:
 		model.eval()
 		model.fuse_conv_bn_eval()
-	
-	model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16) if args.data_parallel else (model,)
+
+	model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16) if args.data_parallel else (model, )
 	load_batch = lambda x: x.to(args.device, non_blocking = True)
 
 tictoc = lambda: (use_cuda and torch.cuda.synchronize()) or time.time()
 
-batch_shape = [args.B, args.T * args.sample_rate] if args.frontend else [args.B, args.num_input_features, int(args.T / args.window_stride)]
+batch_shape = [args.B, args.T * args.sample_rate
+				] if args.frontend else [args.B, args.num_input_features, int(args.T / args.window_stride)]
 if batch_shape[-1] % 128 != 0:
 	batch_shape[-1] = int(math.ceil(batch_shape[-1] / 128) * 128)
 example_time = batch_shape[-1] / args.sample_rate if args.frontend else batch_shape[-1] * args.window_stride
 
 batch = torch.rand(*batch_shape)
 batch = batch.pin_memory()
-	
+
 print(args)
 print()
-print('batch {} | stride {:.02f} sec | audio {:.02f} sec'.format('x'.join(map(str, batch_shape)), args.window_stride, args.B * example_time))
+print(
+	'batch {} | stride {:.02f} sec | audio {:.02f} sec'.format(
+		'x'.join(map(str, batch_shape)), args.window_stride, args.B * example_time
+	)
+)
 print()
 
 print('Warming up for', args.iterations_warmup, 'iterations')
@@ -121,4 +144,13 @@ if args.profile_autograd:
 	autograd_profiler.__exit__(None, None, None)
 	autograd_profiler.export_chrome_trace(args.profile_autograd)
 
-print('load+fwd {:.02f} msec | bwd {:.02f} msec | cudamemreserved {:.02f} mb | cudamemallocated {:.02f} mb | cudamemutilization: {:.02f}'.format(float(times_fwd.mean()) * 1e3, float(times_bwd.mean()) * 1e3, mem_reserved * 1e-6, mem_allocated * 1e-6, float(fragmentation.mean())))
+print(
+	'load+fwd {:.02f} msec | bwd {:.02f} msec | cudamemreserved {:.02f} mb | cudamemallocated {:.02f} mb | cudamemutilization: {:.02f}'
+	.format(
+		float(times_fwd.mean()) * 1e3,
+		float(times_bwd.mean()) * 1e3,
+		mem_reserved * 1e-6,
+		mem_allocated * 1e-6,
+		float(fragmentation.mean())
+	)
+)
