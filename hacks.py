@@ -21,16 +21,16 @@ def handle_out_of_memory_exception(model_parameters = []):
 
 def free_up_memory(reset_counters = False):
 	gc.collect()
-	if torch.cuda.is_available:
+	if torch.cuda.is_available():
 		torch.cuda.empty_cache()
+		if reset_counters:
+			torch.cuda.reset_peak_memory_stats()
 	gc.collect()
-	if torch.cuda.is_available and reset_counters:
-		torch.cuda.reset_peak_memory_stats()
 
 
 def print_memory_stats(prefix = '', scaler = dict(mb = 1e6)):
 	k, v = next(iter(scaler.items()))
-	for device in range(torch.cuda.is_available and torch.cuda.device_count() or 0):
+	for device in range(torch.cuda.device_count()):
 		print(
 			'MEMORY',
 			prefix,
