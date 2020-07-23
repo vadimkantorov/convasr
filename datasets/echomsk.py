@@ -17,7 +17,10 @@ args = parser.parse_args()
 
 gzopen = lambda file_path, mode = 'r': gzip.open(file_path, mode + 't') if file_path.endswith('.gz') else open(file_path, mode)
 episodes = json.load(gzopen(args.input_path))
-episodes = [e for e in episodes if args.min_speakers <= len(e['speakers']) <= args.max_speakers and args.min_seconds <= e['sound_seconds'] <= args.max_seconds and len(e['sound']) == 1]
+episodes = [
+	e for e in episodes if args.min_speakers <= len(e['speakers']) <= args.max_speakers
+	and args.min_seconds <= e['sound_seconds'] <= args.max_seconds and len(e['sound']) == 1
+]
 random.seed(args.seed)
 random.shuffle(episodes)
 episodes = episodes[:args.sample]
@@ -25,7 +28,13 @@ episodes = episodes[:args.sample]
 os.makedirs(args.output_path, exist_ok = True)
 
 for e in episodes:
-	transcript = [dict(audio_path = os.path.join(args.output_path, os.path.basename(e['sound'][0])), ref = t['ref'], speaker = t['speaker']) for t in e['transcript']]
+	transcript = [
+		dict(
+			audio_path = os.path.join(args.output_path, os.path.basename(e['sound'][0])),
+			ref = t['ref'],
+			speaker = t['speaker']
+		) for t in e['transcript']
+	]
 	transcript_path = transcript[0]['audio_path'] + '.json'
 	json.dump(transcript, open(transcript_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 

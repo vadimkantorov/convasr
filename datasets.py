@@ -104,9 +104,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		else:
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = False, backend = self.audio_backend, duration=self.max_duration)
 			replace_transcript = self.join_transcript or \
-                      not transcript or \
-                      (any(t.get('begin') is None and t.get('end') is None for t in transcript) and \
-                       all(t.get('ref') is not None for t in transcript))
+                               not transcript or \
+                               (any(t.get('begin') is None and t.get('end') is None for t in transcript) and \
+                                all(t.get('ref') is not None for t in transcript))
 			normalize_text = True
 
 			if replace_transcript:

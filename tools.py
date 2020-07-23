@@ -79,7 +79,7 @@ def cut_audio(output_path, sample_rate, mono, dilate, strip_prefix, audio_backen
 		if strip_prefix:
 			segment_path = segment_path[len(strip_prefix):] if segment_path.startswith(strip_prefix) else segment_path
 			t['audio_path'] = t['audio_path'][len(strip_prefix):] if t['audio_path'].startswith(strip_prefix) else \
-                     t['audio_path']
+                              t['audio_path']
 
 		t = dict(
 			audio_path = segment_path,

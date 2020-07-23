@@ -19,31 +19,37 @@ def main(args):
 		if total_ref_len > args.skip_transcript_large_than_char:
 			continue
 
-		transcripts_ = [dict(
-				audio_path=info_path.replace('.json', ''),
-				**{k: v for k, v in t.items() if k not in args.strip})
-			for t in j.get('transcript', [])]
+		transcripts_ = [
+			dict(audio_path = info_path.replace('.json', ''), **{k: v
+																	for k, v in t.items()
+																	if k not in args.strip})
+			for t in j.get('transcript', [])
+		]
 		transcripts_ = [t for t in transcripts_ if t['end'] <= args.skip_transcript_after_seconds]
 		transcripts.extend(transcripts_)
 
-	json.dump(transcripts, open(args.output_path, 'w'), ensure_ascii=False, indent=2, sort_keys=True)
+	json.dump(transcripts, open(args.output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	if args.split_by_parts:
 		step = len(transcripts) // args.split_by_parts + 1
 		for i in range(args.split_by_parts):
-			json.dump(transcripts[i * step:(i + 1) * step],
-					open(args.output_path.replace('.json', '') + f'{i}' + '.json', 'w'), ensure_ascii=False, indent=2,
-					sort_keys=True)
+			json.dump(
+				transcripts[i * step:(i + 1) * step],
+				open(args.output_path.replace('.json', '') + f'{i}' + '.json', 'w'),
+				ensure_ascii = False,
+				indent = 2,
+				sort_keys = True
+			)
 	print(args.output_path)
 
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--split-by-parts', type=int, default=2, required=True)
-	parser.add_argument('--skip-files-longer-than-hours', type=float, default=float('inf'))
-	parser.add_argument('--skip-transcript-large-than-char', type=float, default=float('inf'))
-	parser.add_argument('--skip-transcript-after-seconds', type=float, default=float('inf'))
-	parser.add_argument('--input-path', '-i', required=True)
-	parser.add_argument('--output-path', '-o', required=True)
-	parser.add_argument('--strip', nargs='*', default=[])
+	parser.add_argument('--split-by-parts', type = int, default = 2, required = True)
+	parser.add_argument('--skip-files-longer-than-hours', type = float, default = float('inf'))
+	parser.add_argument('--skip-transcript-large-than-char', type = float, default = float('inf'))
+	parser.add_argument('--skip-transcript-after-seconds', type = float, default = float('inf'))
+	parser.add_argument('--input-path', '-i', required = True)
+	parser.add_argument('--output-path', '-o', required = True)
+	parser.add_argument('--strip', nargs = '*', default = [])
 	args = parser.parse_args()
 	main(args)
