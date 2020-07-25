@@ -94,7 +94,7 @@ def prune(
 	unk = None,
 	groups = None
 ):
-	is_aligned = lambda w: w['type'] == 'ok'
+	is_aligned = lambda w: (w.get('type') or w.get('error_tag')) == 'ok'
 	duration_check = lambda t: duration is None or duration[0] <= compute_duration(t) <= duration[1]
 	boundary_check = lambda t: ((not t.get('words')) or (not align_boundary_words) or
 								(is_aligned(t['words'][0]) and is_aligned(t['words'][-1])))

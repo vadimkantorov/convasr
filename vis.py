@@ -556,12 +556,13 @@ def histc_vega(tensor, min, max, bins):
 def word_alignment(transcript, ref = None, hyp = None, flat = False, tag = '<pre>', prefix = True):
 	span = lambda word, t = None: '<span style="{style}" title="{word_alignment_error_type}">{word}</span>'.format(word = word, style = ('background-color:' + dict(ok = 'green', missing = 'red', missing_ref = 'darkred', typo_easy = 'lightgreen', typo_hard = 'pink')[t]) if t is not None else '', word_alignment_error_type = t)
 
+	error_tag = w.get('type') or w.get('error_tag') 
 	if flat:
 		ref_ = transcript.get('ref', '')
 		hyp_ = transcript.get('hyp', '')
 	else:
-		ref_ = ' '.join(span(w['ref'], w['type'] if w['type'] == 'ok' else None) for w in transcript)
-		hyp_ = ' '.join(span(w['hyp'], w['type']) for w in transcript)
+		ref_ = ' '.join(span(w['ref'], 'ok' if error_tag == 'ok' else None) for w in transcript)
+		hyp_ = ' '.join(span(w['hyp'], error_tag) for w in transcript)
 
 	ref_ = ('ref: ' if prefix else '') + ref_
 	hyp_ = ('hyp: ' if prefix else '') + hyp_

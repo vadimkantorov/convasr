@@ -140,7 +140,7 @@ def align_words(hyp, ref, break_ref = False):
 		words = words_
 
 	word_alignment = [
-		dict(hyp = ''.join(hyp), ref = ''.join(ref), type = t) for hyp,
+		dict(hyp = ''.join(hyp), ref = ''.join(ref), error_tag = t, hyp_orig = ''.join(hyp).replace(placeholder, ''), ref_orig = ''.join(ref).replace(placeholder, '')) for hyp,
 		ref in words for t,
 		e in [ErrorTagger.tag(hyp, ref)]
 	]
@@ -165,16 +165,12 @@ class ErrorAnalyzer:
 			**kwargs
 		)
 
-		hyp_postproc, ref_postproc = map(functools.partial(labels.postprocess_transcript, collapse_repeat = True), [hyp, ref])
-		res['cer'] = cer(hyp_postproc, ref_postproc)
-		res['wer'] = wer(hyp_postproc, ref_postproc)
-
 		hyp, ref, word_alignment = align_words(hyp, ref, break_ref = True)  #**config['align_words'])
 		for w in word_alignment:
-			w['word_tags'] = set(self.word_tagger.tag(w['ref']))
+			w['ref_tags'] = set(self.word_tagger.tag(w['ref']))
+			w['hyp_tags'] = set(self.word_tagger.tag(w['hyp']))
 			w['error_tags'] = set(ErrorTagger.tag(w['hyp'], w['ref']))
-			w['cer'] = cer(w['hyp'].replace(placeholder, ''), w['ref'].replace(placeholder, ''))
-		# der = sum(self.tagger.WORD_IN_VOCAB in self.tagger.tag(w) for w in hyp.split()) / (1 + hyp.count(' ')),
+			w['cer'] = cer(w['hyp_orig'], w['ref_orig'])
 
 		# error_ok_tags
 
@@ -185,30 +181,41 @@ class ErrorAnalyzer:
 			word_include_tags = [],
 			word_exclude_tags = [],
 			error_include_tags = [],
-			error_exclude_tags = []
+			error_exclude_tags = [],
+			**kwargs
 		):
 			word_include_tags, word_exclude_tags, error_include_tags, error_exclude_tags = map(set, [word_include_tags, word_exclude_tags, error_include_tags, error_exclude_tags])
 			res = []
 			for w in word_alignment:
-				if bool(w['word_tags'] & word_exclude_tags) or bool(w['error_tags'] & error_exclude_tags):
+				if bool(w['ref_tags'] & word_exclude_tags) or bool(w['error_tags'] & error_exclude_tags):
 					continue
 
-				if (word_include_tags and not bool(w['word_tags'] & word_exclude_tags)) or (
+				if (word_include_tags and not bool(w['ref_tags'] & word_exclude_tags)) or (
 					error_include_tags and not bool(w['error_tags'] & error_include_tags)):
 					continue
 
 				res.append(w)
 			return res
 
-		def compute_metrics(word_alignment):
+		def compute_metrics(word_alignment, collapse_repeat = False, phonetic_replace_groups = [], **kwargs):
 			num_words = len(word_alignment)
-			wer = sum(ErrorTagger.ok not in w['error_tags'] for w in word_alignment) / num_words
-			cer = sum(w['cer'] for w in word_alignment) / num_words
+			#TODO: take into account other error tags
+			num_words_ok = sum(ErrorTagger.ok not in w['error_tags'] for w in word_alignment)
+			wer_wordwise = num_words_ok / num_words if num_words != 0 else 0
+			cer_wordwise = sum(w['cer'] for w in word_alignment) / num_words if num_words != 0 else 0
 
-			return dict(wer = wer, cer = cer, num_words = num_words)
+			hyp, ref = space.join(w['hyp_orig'] for w in word_alignment), space.join(w['ref_orig'] for w in word_alignment)
+			hyp, ref = map(functools.partial(labels.postprocess_transcript, collapse_repeat = collapse_repeat, phonetic_replace_groups = phonetic_replace_groups), [hyp, ref])
+			
+			wer_postproc = wer(hyp = hyp, ref = ref)
+			cer_postproc = cer(hyp = hyp, ref = ref)
+			hyp_der, ref_der = [sum(self.word_tagger.vocab_hit in w[k] for w in word_alignment) / num_words if num_words != 0 else 0 for k in ['hyp_tags', 'ref_tags']]
 
+			return dict(wer_wordwise = wer_wordwise, cer_wordwise = cer_wordwise, num_words = num_words, num_words_ok = num_words_ok, wer = wer_postproc, cer = cer_postproc, ref_der = ref_der, hyp_der = hyp_der)
+		
 		for config_name, config in self.configs.items():
-			res[config_name] = compute_metrics(filter_words(word_alignment, **config))
+			res[config_name] = compute_metrics(filter_words(word_alignment, **config), **config)
+		res.update(res.pop('default'))
 
 		return res
 
@@ -269,7 +276,7 @@ def analyze(
 		}
 
 		errors = {
-			t: [dict(hyp = r['hyp'], ref = r['ref']) for r in word_alignment if r['type'] == t]
+			t: [dict(hyp = r['hyp'], ref = r['ref']) for r in word_alignment if r['error_tag'] == t]
 			for t in error_types
 		}
 

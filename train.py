@@ -46,7 +46,7 @@ def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
 		yield meta, loss.cpu(), entropy_char.cpu(), hyp, logits, y
 
 
-def evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, epoch = None, iteration = None):
+def evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, optimizer, sampler, tensorboard = None, epoch = None, iteration = None):
 	training = epoch is not None and iteration is not None
 	columns = {}
 	for val_dataset_name, val_data_loader in val_data_loaders.items():
@@ -301,6 +301,7 @@ def main(args):
 		return
 
 	error_analyzer_configs = dict(
+		default = dict(phonetic_replace_groups = ['её'], collapse_repeat = True),
 		words_without_stop = dict(word_exclude_tags = ['stop']),
 		words_easy = dict(word_exclude_tags = ['number', 'proper', 'stop']),
 		words_easy_errors_easy = dict(word_exclude_tags = ['number', 'proper', 'stop'], error_include_tags = ['ok', 'typo_easy']),
@@ -310,24 +311,25 @@ def main(args):
 
 	word_tags = json.load(open(args.word_tags)) if os.path.exists(args.word_tags) else {}
 	vocab = set(map(str.strip, open(args.vocab))) if os.path.exists(args.vocab) else set()
-	error_analyzer = metrics #.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs)
+	error_analyzer = metrics.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs)
 
 
 
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
-	if args.val_waveform_transform_debug_dir:
-		args.val_waveform_transform_debug_dir = os.path.join(
-			args.val_waveform_transform_debug_dir,
-			str(val_waveform_transform) if isinstance(val_waveform_transform, transforms.RandomCompose) else
-			val_waveform_transform.__class__.__name__
-		)
-		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
-
 	val_frontend = models.AugmentationFrontend(
 		frontend,
 		waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob),
 		feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob)
 	)
+	
+	if args.val_waveform_transform_debug_dir:
+		args.val_waveform_transform_debug_dir = os.path.join(
+			args.val_waveform_transform_debug_dir,
+			str(val_frontend.waveform_transform) if isinstance(val_frontend.waveform_transform, transforms.RandomCompose) else
+			val.waveform_transform.__class__.__name__
+		)
+		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
+
 	val_data_loaders = {
 		os.path.basename(val_data_path): torch.utils.data.DataLoader(
 			val_dataset,
@@ -371,7 +373,7 @@ def main(args):
 			model.fuse_conv_bn_eval()
 		if args.device != 'cpu':
 			model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-		evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer)
+		evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, optimizer, sampler, tensorboard)
 		return
 
 	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder)
@@ -545,7 +547,7 @@ def main(args):
 			sampler.batch_idx += 1
 
 			if iteration > 0 and (iteration % args.val_iteration_interval == 0 or iteration == args.iterations):
-				evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, epoch, iteration)
+				evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, optimizer, sampler, tensorboard, epoch, iteration)
 
 			if iteration and args.iterations and iteration >= args.iterations:
 				return
@@ -555,7 +557,7 @@ def main(args):
 		sampler.batch_idx = 0
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
 		if not args.skip_on_epoch_end_evaluation:
-			evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, epoch + 1, iteration)
+			evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, optimizer, sampler, tensorboard, epoch + 1, iteration)
 
 
 if __name__ == '__main__':

@@ -298,15 +298,15 @@ def lserrorwords(input_path, output_path, comment_path, freq_path, sortdesc, sor
 		for line in open(comment_path) for splitted in [line.split(',')] if '#' not in line and len(splitted) > 1
 	} if comment_path else {}
 	transcript = json.load(open(input_path))
-	transcript = list(filter(lambda t: [w['type'] for w in t['words']].count('missing_ref') <= 2, transcript))
+	transcript = list(filter(lambda t: [(w.get('type') or w.get('error_tag')) for w in t['words']].count('missing_ref') <= 2, transcript))
 
 	stem = lambda word: (lang.stem(word), len(word))
-	words_ok = [w['ref'].replace(metrics.placeholder, '') for t in transcript for w in t['words'] if w['type'] == 'ok']
+	words_ok = [w['ref'].replace(metrics.placeholder, '') for t in transcript for w in t['words'] if (w.get('type') or w.get('error_tag')) == 'ok']
 	words_error = [
 		w['ref'].replace(metrics.placeholder, '')
 		for t in transcript
 		for w in t['words']
-		if w['type'] not in ['ok', 'missing_ref']
+		if (w.get('type') or w.get('error_tag')) not in ['ok', 'missing_ref']
 	]
 	words_error = set(ref for ref in words_error if len(ref) > 1)
 	usage = {
