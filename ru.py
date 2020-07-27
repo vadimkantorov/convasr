@@ -249,14 +249,18 @@ def normalize_text(text, remove_unk = True):
 	return text
 
 
-def stem(word, inflections = []):
+def stem(word, inflections = [], inflection = False):
 	if not inflections:
-		return word[:-3] if len(word) > 8 else word[:-2] if len(word) > 5 else word
+		stem = word[:-3] if len(word) > 8 else word[:-2] if len(word) > 5 else word
+	
 	else:
-		for inflection in (inflections if len(word) > 5 else []):
-			if word.endswith(inflection):
-				return word[:-len(inflection)]
-		return word
+		for infl in (inflections if len(word) > 5 else []):
+			if word.endswith(infl):
+				stem = word[:-len(infl)]
+				break
+	
+	infl = word[len(stem):]
+	return (stem, infl) if inflection else stem
 
 
 if __name__ == '__main__':
