@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import apex
 import librosa
+import shaping
 from typing import List
 
 
@@ -17,7 +18,7 @@ class InputOutputTypeCast(nn.Module):
 		self.dtype = dtype
 
 	def forward(self, x, *args, **kwargs):
-		return self.model(x.to(self.dtype), *args, **kwargs)  #.to(x.dtype)
+		return self.model(x.to(self.dtype), *args, **kwargs).to(x.dtype)
 
 
 class Decoder(nn.Sequential):
@@ -277,7 +278,7 @@ class JasperNet(nn.Module):
 		self.dict = dict
 		self.bpe_only = bpe_only
 
-	def forward(self, x, xlen = None, y = None, ylen = None):
+	def forward(self, x : shaping.BCT, xlen : shaping.B = None, y : shaping.BY = None, ylen : shaping.B = None) -> shaping.BCt:
 		#x = x.to(torch.float16)
 		x = x if x.ndim == 2 else x.squeeze(1)
 		x = self.frontend(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.frontend is not None else x
@@ -512,7 +513,7 @@ class LogFilterBankFrontend(nn.Module):
 		else:
 			self.stft = None
 
-	def forward(self, signal, mask = None):
+	def forward(self, signal : shaping.BT, mask : shaping.BT = None) -> shaping.BCT:
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
 		signal = normalize_signal(signal) if self.normalize_signal else signal
 		signal = signal + self.dither0 * torch.randn_like(signal) if self.dither0 > 0 else signal

@@ -5,6 +5,7 @@ import gzip
 import math
 import json
 import itertools
+import functools
 import importlib
 import torch.utils.data
 import sentencepiece
@@ -245,16 +246,26 @@ class Labels:
 	def split_candidates(self, text):
 		return text.split(self.candidate_sep) if self.candidate_sep else [text]
 
+	def normalize_word(self, word):
+		#TODO: use https://www.oreilly.com/library/view/python-cookbook/0596001673/ch03s15.html
+		_w_ = lambda w: self.space + word + self.space
+		def replace_stem(acc, u, v):
+			stem, inflection = self.lang.stem(acc, inflection = True)
+			return stem.replace(self.space + u, v) + invlection
+		
+		word = _w_(word)
+		word = functools.reduce(lambda acc, uv: acc.replace(*uv), [(_w_(u), _w_(v)) for u, v in self.replace_full_forms.items()], word)
+		word = functools.reduce(lambda acc, uv: acc.replace(*uv), self.replace_subwords_forms.items(), word)
+		word = functools.reduce(lambda acc, uv: acc.replace(*uv), [(_w_(u), self.unk) for u, v in self.replace_full_forms_by_unk], word)
+		word = functools.reduce(lambda acc, uv: replace(acc, *uv), self.replace_stems.items(), word)
+		word = word.translate({c : None for c in self.remove_chars})
+
+		return word.strip()
+
 	def normalize_text(self, text):
 		return self.candidate_sep.join(
-			self.lang.normalize_text(candidate) for candidate in self.split_candidates(text)
+			self.space.join(map(self.normalize_word, self.lang.normalize_text(candidate).split(self.space)) for candidate in self.split_candidates(text)
 		)  # or self.unk
-
-		#(ref, replace_full_forms = {}, replace_subwords = {}, replace_stems = {}, replace_full_forms_by_unk = [], remove_chars = []):
-		#words = ref.split()
-		#words = [replace_full_forms.get(w, w) for w in words]
-		#words = [w.replace(u, v) for w in words for u, v in replace_subwords.items()]
-		#return ' '.join(words)
 
 	def encode(self, text, normalize = True):
 		normalized = self.normalize_text(text) if normalize else text

@@ -180,9 +180,9 @@ def evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyze
 		torch.save(
 			dict(
 				model_state_dict = models.master_module(model).state_dict(),
-				optimizer_state_dict = optimizer.state_dict(),
+				optimizer_state_dict = optimizer.state_dict() if optimizer is not None else None,
 				amp_state_dict = apex.amp.state_dict() if args.fp16 else None,
-				sampler_state_dict = sampler.state_dict(),
+				sampler_state_dict = sampler.state_dict() if sampler is not None else None,
 				epoch = epoch,
 				iteration = iteration,
 				args = vars(args),
@@ -373,7 +373,7 @@ def main(args):
 			model.fuse_conv_bn_eval()
 		if args.device != 'cpu':
 			model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-		evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, optimizer, sampler, tensorboard)
+		evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer)
 		return
 
 	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder)
