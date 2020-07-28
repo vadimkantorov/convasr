@@ -98,7 +98,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			transcript = transcript[0]
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend, duration=self.max_duration) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
 
-			transcript = dict(dict(audio_name = os.path.basename(transcript['audio_path'])), ref = transcript['ref'])
+			transcript = dict(dict(audio_name = os.path.basename(transcript['audio_path'])), ref = transcript['ref'], audio_path = transcript['audio_path'])
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug
 										).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
