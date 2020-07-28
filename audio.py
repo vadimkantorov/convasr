@@ -3,6 +3,9 @@ import scipy.io.wavfile
 import librosa
 import torch
 import models
+import unittest
+import time
+import soundfile
 
 f2s = lambda signal: (signal * torch.iinfo(torch.int16).max).short()
 s2f = lambda signal: signal.float() / torch.iinfo(torch.int16).max
@@ -19,8 +22,10 @@ def read_audio(
 	backend = 'ffmpeg',
 	raw_s16le = None,
 	raw_sample_rate = None,
-	raw_num_channels = None
+	raw_num_channels = None,
+	show_time = False
 ):
+	start = time.time()
 	try:
 		if audio_path is None or audio_path.endswith('.raw'):
 			if audio_path is not None:
@@ -30,9 +35,32 @@ def read_audio(
 		elif audio_path.endswith('.wav'):
 			sample_rate_, signal = scipy.io.wavfile.read(audio_path)
 			signal = torch.as_tensor(signal[None, :] if len(signal.shape) == 1 else signal.T)
+		elif audio_path.endswith('.gsm'):
+			signal, sample_rate_ = soundfile.read(audio_path, dtype = 'float32')
+			signal = torch.as_tensor(signal[None, :] if len(signal.shape) == 1 else signal.T)
 		elif backend == 'sox':
 			num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path])) if not mono else 1
-			sample_rate_, signal = sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', str(num_channels), '-t', 'raw', '-']), byte_order = byte_order)).reshape(-1, num_channels).t()
+			params = [
+				'sox',
+				'-V0',
+				audio_path,
+				'-b',
+				'16',
+				'-e',
+				'signed',
+				'--endian',
+				byte_order,
+				'-r',
+				str(sample_rate),
+				'-c',
+				str(num_channels),
+				'-t',
+				'raw',
+				'-'
+			]
+			sample_rate_, signal = sample_rate, \
+             torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(
+				params), byte_order = byte_order)).reshape(-1, num_channels).t()
 		elif backend == 'ffmpeg':
 			num_channels = int(
 				subprocess.check_output([
@@ -49,7 +77,25 @@ def read_audio(
 					'0'
 				])
 			) if not mono else 1
-			sample_rate_, signal = sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['ffmpeg', '-i', audio_path, '-nostdin', '-hide_banner', '-nostats', '-loglevel', 'quiet', '-f', 's16le', '-ar', str(sample_rate), '-ac', str(num_channels), '-']), byte_order = byte_order)).reshape(-1, num_channels).t()
+			params = [
+				'ffmpeg',
+				'-i',
+				audio_path,
+				'-nostdin',
+				'-hide_banner',
+				'-nostats',
+				'-loglevel',
+				'quiet',
+				'-f',
+				's16le',
+				'-ar',
+				str(sample_rate),
+				'-ac',
+				str(num_channels),
+				'-'
+			]
+			sample_rate_, signal = sample_rate, \
+             torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(params), byte_order = byte_order)).reshape(-1, num_channels).t()
 	except:
 		print(f'Error when reading [{audio_path}]')
 		sample_rate_, signal = sample_rate, torch.tensor([[]], dtype = torch.int16)
@@ -70,6 +116,9 @@ def read_audio(
 	if sample_rate_ != sample_rate:
 		signal, sample_rate_ = resample(signal, sample_rate_, sample_rate)
 
+	if show_time:
+		print('read audio time: ', time.time() - start)
+
 	return signal, sample_rate_
 
 
@@ -88,3 +137,57 @@ def compute_duration(audio_path, backend = 'ffmpeg'):
 	cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1'
 			] if backend == 'ffmpeg' else ['soxi', '-D'] if backend == 'sox' else None
 	return float(subprocess.check_output(cmd + [audio_path]))
+
+
+class AudioTests(unittest.TestCase):
+	def test_should_read_gsm_file(self):
+		audio_path = 'data/tests/audio.gsm'
+		self.sample_rate = 8000
+		self.mono = True
+		self.audio_backend = 'ffmpeg'
+
+		for i in range(100):
+			signal, sample_rate = read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend)
+			assert sample_rate == 8000
+
+	def test_should_read_amr_file(self):
+		audio_path = 'data/tests/audio.amr'
+		self.sample_rate = 8000
+		self.mono = True
+		self.audio_backend = 'ffmpeg'
+
+		for i in range(100):
+			signal, sample_rate = read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend)
+			assert sample_rate == 8000
+
+	def test_should_read_wav_file(self):
+		audio_path = 'data/tests/yg9FM5Zky2s.opus.0-99.900009-103.640007.wav'
+		self.sample_rate = 8000
+		self.mono = True
+		self.audio_backend = 'ffmpeg'
+
+		for i in range(100):
+			signal, sample_rate = read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend, show_time=False)
+			assert sample_rate == 8000
+
+	def test_should_read_opus_file(self):
+		audio_path = 'data/tests/audio.opus'
+		self.sample_rate = 8000
+		self.mono = True
+		self.audio_backend = 'ffmpeg'
+
+		for i in range(100):
+			signal, sample_rate = read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend, show_time=False)
+			assert sample_rate == 8000
+
+
+if __name__ == '__main__':
+	audio_path = 'data/tests/audio.wav'
+	sample_rate = 8000
+	mono = True
+	audio_backend = 'ffmpeg'
+
+	for i in range(100):
+		signal, sample_rate = read_audio(audio_path, sample_rate=sample_rate, mono=mono, normalize=True,
+			backend=audio_backend)
+		assert sample_rate == 8000

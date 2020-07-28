@@ -1,5 +1,4 @@
 #TODO: support forced mono even if transcript is given
-
 import os
 import gzip
 import math
@@ -68,7 +67,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				self.examples
 			)
 		) if duration_filter else self.examples
-		self.examples = [e for e in self.examples if transcripts.audio_name(e[0]) not in exclude]
+
+		self.examples = [e for e in self.examples
+							if transcripts.audio_name(e[0]) not in exclude] if len(exclude) > 0 else self.examples
 		'''
 		def safe_coding_for_audio_lenghts:
 			duration = max(transcripts.compute_duration(t, hours=True) for t in meta)
@@ -96,7 +97,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			transcript = transcript[0]
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend, duration=self.max_duration) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
 
-			transcript = dict(dict(audio_name = os.path.basename(transcript['audio_path'])), **transcript)
+			transcript = dict(dict(audio_name = os.path.basename(transcript['audio_path'])), ref = transcript['ref'])
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug
 										).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
@@ -104,9 +105,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		else:
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = False, backend = self.audio_backend, duration=self.max_duration)
 			replace_transcript = self.join_transcript or \
-                               not transcript or \
-                               (any(t.get('begin') is None and t.get('end') is None for t in transcript) and \
-                                all(t.get('ref') is not None for t in transcript))
+                                        not transcript or \
+                                        (any(t.get('begin') is None and t.get('end') is None for t in transcript) and \
+                                         all(t.get('ref') is not None for t in transcript))
 			normalize_text = True
 
 			if replace_transcript:
