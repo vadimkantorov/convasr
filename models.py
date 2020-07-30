@@ -603,6 +603,7 @@ def reset_bn_running_stats_(model):
 	for bn in [module for module in model.modules() if isinstance(module, nn.modules.batchnorm._BatchNorm)]:
 		nn.init.zeros_(bn.running_mean)
 		nn.init.ones_(bn.running_var)
+		nn.init.zeros_(bn.num_batches_tracked)
 		bn.momentum = None
 		bn.train()
 	return model
