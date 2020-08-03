@@ -27,7 +27,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   sox \
   libsox-dev \
   libsox-fmt-all \
-  ffmpeg \
+  ffmpeg libavcodec-dev libavformat-dev libavfilter-dev \
   vim \
   sudo \
   wget \
@@ -37,21 +37,20 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
 
 RUN  echo "    IdentityFile /root/.ssh/id_rsa" >> /etc/ssh/ssh_config
 
-RUN curl -so /miniconda.sh https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh \
+RUN curl -L -so /miniconda.sh https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh \
  && chmod +x /miniconda.sh \
  && /miniconda.sh -b -p /miniconda \
  && rm /miniconda.sh
-ENV PATH=/miniconda/bin:$PATH
 
+ENV PATH=/miniconda/bin:$PATH
 
 # Prerequisites for building PyTorch from source (just in case)
 RUN conda install -y scipy scikit-learn numba numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing pillow
 
 RUN pip install ipython seaborn altair
-RUN pip install https://github.com/matplotlib/matplotlib/archive/v3.2.0rc2.tar.gz
+RUN pip install matplotlib #https://github.com/matplotlib/matplotlib/archive/v3.2.0rc2.tar.gz
 
 RUN conda install -y -c pytorch magma-cuda${CUDAVERSION}
-
 
 RUN conda install -y pytorch cudatoolkit=$CUDAVERSIONPOINT -c pytorch
 # RUN conda install -y pytorch cudatoolkit=$CUDAVERSIONOPOINT -c pytorch-nightly
@@ -65,8 +64,7 @@ RUN pip install awscli --ignore-installed PyYAML
 RUN pip install sentencepiece
 RUN pip install webrtcvad
 RUN pip install onnxruntime
+RUN pip install yapf
 
 RUN git clone https://github.com/parlance/ctcdecode --recursive && sed -i 's/11/14/g' ctcdecode/build.py && pip install ./ctcdecode
 RUN pip install cxxfilt && pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex
-
-RUN pip install yapf
