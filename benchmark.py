@@ -117,7 +117,7 @@ if args.profile_cuda:
 	torch.autograd.profiler.emit_nvtx()
 	torch.cuda.profiler.start()
 if args.profile_autograd:
-	autograd_profiler = torch.autograd.profiler.profile(use_cuda = use_cuda, enabled = True)
+	autograd_profiler = torch.autograd.profiler.profile(use_cuda = use_cuda, enabled = True, profile_memory = True, record_shapes = True)
 	autograd_profiler.__enter__()
 
 print('Starting benchmark for', args.iterations, 'iterations:', 'fwd', '+ bwd' if args.backward else '')
