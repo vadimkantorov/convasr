@@ -265,7 +265,7 @@ class Labels:
 
 	def normalize_text(self, text):
 		return self.candidate_sep.join(
-			self.space.join(map(self.normalize_word, self.lang.normalize_text(candidate).split(self.space)) for candidate in self.split_candidates(text)
+			self.space.join(map(self.normalize_word, self.lang.normalize_text(candidate).split(self.space))) for candidate in self.split_candidates(text)
 		)  # or self.unk
 
 	def encode(self, text, normalize = True):

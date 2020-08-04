@@ -46,7 +46,7 @@ def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
 		yield meta, loss.cpu(), entropy_char.cpu(), hyp, logits, y
 
 
-def evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, optimizer, sampler, tensorboard = None, epoch = None, iteration = None):
+def evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, optimizer = None, sampler = None, tensorboard = None, epoch = None, iteration = None):
 	training = epoch is not None and iteration is not None
 	columns = {}
 	for val_dataset_name, val_data_loader in val_data_loaders.items():
@@ -317,10 +317,10 @@ def main(args):
 	error_analyzer_configs = dict(
 		default = dict(phonetic_replace_groups = ['её'], collapse_repeat = True),
 		words_without_stop = dict(word_exclude_tags = ['stop']),
-		words_easy = dict(word_exclude_tags = ['number', 'proper', 'stop']),
-		words_easy_errors_easy = dict(word_exclude_tags = ['number', 'proper', 'stop'], error_include_tags = ['ok', 'typo_easy']),
-		words_only_number = dict(word_include_tags = ['number']),
-		words_only_proper = dict(word_include_tags = ['proper'])
+		words_easy = dict(word_exclude_tags = ['number', 'proper', 'stop', 'SEP', 'num','comp','name','abbr']),
+		words_easy_errors_easy = dict(word_exclude_tags = ['number', 'proper', 'stop', 'SEP', 'num','comp','name','abbr'], error_include_tags = ['ok', 'typo_easy']),
+		words_only_number = dict(word_include_tags = ['number', 'SEP', 'num']),
+		words_only_proper = dict(word_include_tags = ['proper', 'SEP', 'comp', 'name', 'abbr'])
 	)
 
 	word_tags = json.load(open(args.word_tags)) if os.path.exists(args.word_tags) else {}
