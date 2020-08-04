@@ -314,8 +314,13 @@ class JasperNet(nn.Module):
 
 		return self.dict(logits = logits, log_probs = log_probs, olen = olen, **aux)
 
-	def freeze(self, backbone = 0, decoder0 = False):
-		for m in (list(self.backbone[:backbone]) if backbone else []) + (list(self.decoder)[:1] if decoder0 else []):
+	def freeze(self, backbone = 0, decoder0 = False, frontend = False):
+		freezed_modules_list = []
+		freezed_modules_list += list(self.backbone[:backbone]) if backbone else []
+		freezed_modules_list += (list(self.decoder)[:1] if decoder0 else [])
+		freezed_modules_list += ([self.frontend] if frontend and self.frontend is not None else [])
+
+		for m in freezed_modules_list:
 			for module in filter(lambda module: isinstance(module, nn.modules.batchnorm._BatchNorm), m.modules()):
 				module.eval()
 				module.train = lambda training: None
@@ -456,6 +461,46 @@ class AugmentationFrontend(nn.Module):
 	def read_audio(self):
 		return 'SoxAug' not in self.waveform_transform.__class__.__name__
 
+class Wav2VecFrontend(nn.Module):
+	def __init__(self,
+				 out_channels,
+				 *args,
+				 preemphasis = 0.0,
+				 use_context_features = True,
+				 fairseq_args = None,
+				 **kwargs):
+		from fairseq.models.wav2vec import Wav2VecModel
+
+		if fairseq_args.aggregator == 'cnn':
+			agg_layers = eval(fairseq_args.conv_aggregator_layers)
+			agg_dim = agg_layers[-1][0]
+			assert out_channels == fairseq_args.gru_dim, f'Out channels {out_channels} is not equal to frontend output dim {agg_dim}, use --num-input-features {agg_dim}'
+		elif fairseq_args.aggregator == 'gru':
+			assert out_channels == fairseq_args.gru_dim, f'Out channels {out_channels} is not equal to frontend output dim {fairseq_args.gru_dim}, use --num-input-features {fairseq_args.gru_dim}'
+		else:
+			raise RuntimeError(f'Wrong wav2vec aggregator {fairseq_args.aggregator}. Use cnn or gru instead.')
+
+		super().__init__()
+		self.fairseq_args = fairseq_args
+		self.use_context_features = use_context_features
+		self.model = Wav2VecModel.build_model(fairseq_args, None).eval()
+
+	def forward(self, signal : shaping.BT, mask : shaping.BT = None) -> shaping.BCT:
+		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
+		signal = torch.cat([signal[..., :1], signal[..., 1:] -
+							self.preemphasis * signal[..., :-1]], dim=-1) if self.preemphasis > 0 else signal
+		signal = signal * mask if mask is not None else signal
+
+		raw_features = self.model.feature_extractor(signal)
+		if isinstance(raw_features, tuple):
+			raw_features = raw_features[0]
+
+		if self.use_context_features:
+			context_features = self.model.feature_aggregator(raw_features)
+			return context_features
+		else:
+			return raw_features
+
 
 class LogFilterBankFrontend(nn.Module):
 	def __init__(
@@ -465,6 +510,7 @@ class LogFilterBankFrontend(nn.Module):
 		window_size,
 		window_stride,
 		window,
+		*args,
 		dither = 1e-5,
 		dither0 = 0.0,
 		preemphasis = 0.97,
@@ -472,7 +518,8 @@ class LogFilterBankFrontend(nn.Module):
 		normalize_signal = True,
 		stft_mode = None,
 		window_periodic = True,
-		normalize_features = False
+		normalize_features = False,
+		**kwargs
 	):
 		super().__init__()
 		self.stft_mode = stft_mode

@@ -204,8 +204,17 @@ def main(args):
 			for k in checkpoint['model_state_dict']
 		}
 
+	if args.frontend_checkpoint:
+		frontend_checkpoint = torch.load(args.frontend_checkpoint, map_location = 'cpu')
+		frontend_fariseq_args = frontend_checkpoint['args']
+		frontend_checkpoint = frontend_checkpoint['model']
+	else:
+		frontend_fariseq_args = None
+		frontend_checkpoint = None
+
 	args.experiment_id = args.experiment_id.format(
 		model = args.model,
+		frontend = args.frontend,
 		train_batch_size = args.train_batch_size,
 		optimizer = args.optimizer,
 		lr = args.lr,
@@ -242,7 +251,7 @@ def main(args):
 		datasets.Labels(lang, bpe = bpe, name = f'bpe{i}', normalize_text_config = normalize_text_config) for i,
 		bpe in enumerate(args.bpe)
 	]
-	frontend = models.LogFilterBankFrontend(
+	frontend = getattr(models, args.frontend)(
 		args.num_input_features,
 		args.sample_rate,
 		args.window_size,
@@ -250,7 +259,8 @@ def main(args):
 		args.window,
 		dither = args.dither,
 		dither0 = args.dither0,
-		stft_mode = 'conv' if args.onnx else None
+		stft_mode = 'conv' if args.onnx else None,
+		fairseq_args = frontend_fariseq_args
 	)
 	model = getattr(models, args.model)(
 		num_input_features = args.num_input_features,
@@ -265,6 +275,10 @@ def main(args):
 
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'], strict = False)
+
+	if frontend_checkpoint:
+		frontend_checkpoint = {'model.'+name : weight for name, weight in frontend_checkpoint.items()} ##TODO remove after save checkpoint naming fix
+		frontend.load_state_dict(frontend_checkpoint)
 
 	if args.onnx:
 		torch.set_grad_enabled(False)
@@ -376,7 +390,7 @@ def main(args):
 		evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer)
 		return
 
-	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder)
+	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder, frontend=args.freeze_frontend)
 
 	train_frontend = models.AugmentationFrontend(
 		frontend,
@@ -596,6 +610,7 @@ if __name__ == '__main__':
 		default = [],
 		help = 'simple checkpoint weight averaging, for advanced weight averaging see Stochastic Weight Averaging'
 	)
+	parser.add_argument('--frontend-checkpoint', help = 'fariseq wav2vec checkpoint for frontend initialization')
 	parser.add_argument('--checkpoint-skip', action = 'store_true')
 	parser.add_argument('--skip-on-epoch-end-evaluation', action = 'store_true')
 	parser.add_argument('--experiments-dir', default = 'data/experiments')
@@ -619,6 +634,7 @@ if __name__ == '__main__':
 		'--dump-model-config', default = 'model.json', help = 'save model configuration to the experiment dir'
 	)
 	parser.add_argument('--model', default = 'JasperNetBig')
+	parser.add_argument('--frontend', default = 'LogFilterBankFrontend')
 	parser.add_argument(
 		'--seed',
 		type = int,
@@ -711,8 +727,9 @@ if __name__ == '__main__':
 	parser.add_argument('--exphtml', default = '../stt_results')
 	parser.add_argument('--freeze-backbone', type = int, default = 0, help = 'freeze number of backbone layers')
 	parser.add_argument('--freeze-decoder', action = 'store_true', help = 'freeze decoder0')
+	parser.add_argument('--freeze-frontend', action = 'store_true', help = 'freeze frontend')
 	parser.add_argument(
-		'--num-input-features', default = 64, help = 'num of mel-scale features produced by logfbank frontend'
+		'--num-input-features', default = 64, help = 'num of features produced by frontend'
 	)
 	parser.add_argument('--sample-rate', type = int, default = 8_000, help = 'for frontend')
 	parser.add_argument('--window-size', type = float, default = 0.02, help = 'for frontend, in seconds')
