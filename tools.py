@@ -369,6 +369,21 @@ def lserrorwords(input_path, output_path, comment_path, freq_path, sortdesc, sor
 	print(output_path)
 
 
+def wordtags(output_path, comment_path, map_tag, stop_tag):
+	comment = {
+		splitted[0]: splitted[-1].strip()
+		for line in open(comment_path)
+		for splitted in [line.split(',')]
+		if '#' not in line and len(splitted) > 1 and splitted[-1].strip()
+	} if comment_path else {}
+	
+	key = lambda t: t[1]
+	value = lambda t: t[0]
+	tags = { map_tag.get(k, k) : list(map(value, g)) for k, g in itertools.groupby(sorted(comment.items(), key = key), key = key)}
+	tags['stop'] = tags.get('stop', []) + stop_tag
+	json.dump(tags, open(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	print(output_path)
+
 def processcomments(input_path, output_path, comment_path):
 	transcript = json.load(open(input_path))
 	comment = {
@@ -563,6 +578,14 @@ if __name__ == '__main__':
 	cmd.add_argument('--output-path', '-o', default = 'data')
 	cmd.add_argument('--comment-path', '-c')
 	cmd.set_defaults(func = processcomments)
+	
+	cmd = subparsers.add_parser('wordtags')
+	cmd.add_argument('--output-path', '-o', default = 'data/word_tags.json')
+	cmd.add_argument('--comment-path', '-c')
+	cmd.add_argument('--map-tag', action = type('', (argparse.Action, ), dict(__call__ = lambda a, p, n, v, o: getattr(n, a.dest).update(dict([v.split('=')])))), default = dict())
+	cmd.add_argument('--stop-tag', action = 'append', default = [])
+	
+	cmd.set_defaults(func = wordtags)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')
