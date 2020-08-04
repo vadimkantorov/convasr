@@ -311,7 +311,7 @@ def main(args):
 
 	word_tags = json.load(open(args.word_tags)) if os.path.exists(args.word_tags) else {}
 	vocab = set(map(str.strip, open(args.vocab))) if os.path.exists(args.vocab) else set()
-	error_analyzer = metrics#.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs)
+	error_analyzer = metrics.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs)
 
 
 
