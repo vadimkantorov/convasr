@@ -729,7 +729,7 @@ if __name__ == '__main__':
 	parser.add_argument('--freeze-decoder', action = 'store_true', help = 'freeze decoder0')
 	parser.add_argument('--freeze-frontend', action = 'store_true', help = 'freeze frontend')
 	parser.add_argument(
-		'--num-input-features', default = 64, help = 'num of features produced by frontend'
+		'--num-input-features', type = int, default = 64, help = 'num of features produced by frontend'
 	)
 	parser.add_argument('--sample-rate', type = int, default = 8_000, help = 'for frontend')
 	parser.add_argument('--window-size', type = float, default = 0.02, help = 'for frontend, in seconds')

@@ -474,7 +474,7 @@ class Wav2VecFrontend(nn.Module):
 		if fairseq_args.aggregator == 'cnn':
 			agg_layers = eval(fairseq_args.conv_aggregator_layers)
 			agg_dim = agg_layers[-1][0]
-			assert out_channels == fairseq_args.gru_dim, f'Out channels {out_channels} is not equal to frontend output dim {agg_dim}, use --num-input-features {agg_dim}'
+			assert out_channels == agg_dim, f'Out channels {out_channels} is not equal to frontend output dim {agg_dim}, use --num-input-features {agg_dim}'
 		elif fairseq_args.aggregator == 'gru':
 			assert out_channels == fairseq_args.gru_dim, f'Out channels {out_channels} is not equal to frontend output dim {fairseq_args.gru_dim}, use --num-input-features {fairseq_args.gru_dim}'
 		else:
@@ -482,6 +482,7 @@ class Wav2VecFrontend(nn.Module):
 
 		super().__init__()
 		self.fairseq_args = fairseq_args
+		self.preemphasis = preemphasis
 		self.use_context_features = use_context_features
 		self.model = Wav2VecModel.build_model(fairseq_args, None).eval()
 
