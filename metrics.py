@@ -96,7 +96,9 @@ class WordTagger(collections.defaultdict):
 		return self[word]
 
 	def tag(self, word):
-		return [self.vocab_hit if word in self.vocab else self.vocab_miss, self[word]]
+		vocab_tags = [self.vocab_hit if word in self.vocab else self.vocab_miss]
+		word_tag = self[word] 
+		return vocab_tags + ([word_tag] if word_tag else [])
 
 
 def align(hyp, ref, score_sub = -2, score_del = -4, score_ins = -3):
@@ -165,14 +167,14 @@ class ErrorAnalyzer:
 			**kwargs
 		)
 
-		hyp, ref, word_alignment = align_words(hyp, ref, break_ref = True)  #**config['align_words'])
+		_hyp_, _ref_, word_alignment = align_words(hyp, ref, break_ref = True)  #**config['align_words'])
 		for w in word_alignment:
 			w['ref_tags'] = set(self.word_tagger.tag(w['ref']))
 			w['hyp_tags'] = set(self.word_tagger.tag(w['hyp']))
-			w['error_tags'] = set(ErrorTagger.tag(w['hyp'], w['ref']))
+			w['error_tags'] = set([ErrorTagger.tag(w['hyp'], w['ref'])[0]])
 			w['cer'] = cer(w['hyp_orig'], w['ref_orig'])
 
-		#import IPython; IPython.embed()
+		import IPython; IPython.embed()
 
 		# error_ok_tags
 
@@ -192,7 +194,7 @@ class ErrorAnalyzer:
 				if bool(w['ref_tags'] & word_exclude_tags) or bool(w['error_tags'] & error_exclude_tags):
 					continue
 
-				if (word_include_tags and not bool(w['ref_tags'] & word_exclude_tags)) or (
+				if (word_include_tags and not bool(w['ref_tags'] & word_include_tags)) or (
 					error_include_tags and not bool(w['error_tags'] & error_include_tags)):
 					continue
 

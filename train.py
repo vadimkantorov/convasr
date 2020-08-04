@@ -311,7 +311,7 @@ def main(args):
 
 	word_tags = json.load(open(args.word_tags)) if os.path.exists(args.word_tags) else {}
 	vocab = set(map(str.strip, open(args.vocab))) if os.path.exists(args.vocab) else set()
-	error_analyzer = metrics#.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs)
+	error_analyzer = metrics.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs) if args.analyze_new else metrics
 
 
 
@@ -738,4 +738,5 @@ if __name__ == '__main__':
 	parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
 	parser.add_argument('--train-crash-oom', action = 'store_true')
 	parser.add_argument('--val-crash-oom', action = 'store_true')
+	parser.add_argument('--analyze-new', action = 'store_true')
 	main(parser.parse_args())
