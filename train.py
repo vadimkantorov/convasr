@@ -206,10 +206,10 @@ def main(args):
 
 	if args.frontend_checkpoint:
 		frontend_checkpoint = torch.load(args.frontend_checkpoint, map_location = 'cpu')
-		frontend_fariseq_args = frontend_checkpoint['args']
+		frontend_extra_args = frontend_checkpoint['args']
 		frontend_checkpoint = frontend_checkpoint['model']
 	else:
-		frontend_fariseq_args = None
+		frontend_extra_args = None
 		frontend_checkpoint = None
 
 	args.experiment_id = args.experiment_id.format(
@@ -252,15 +252,15 @@ def main(args):
 		bpe in enumerate(args.bpe)
 	]
 	frontend = getattr(models, args.frontend)(
-		args.num_input_features,
-		args.sample_rate,
-		args.window_size,
-		args.window_stride,
-		args.window,
+		out_channels = args.num_input_features,
+		sample_rate = args.sample_rate,
+		window_size = args.window_size,
+		window_stride = args.window_stride,
+		window = args.window,
 		dither = args.dither,
 		dither0 = args.dither0,
 		stft_mode = 'conv' if args.onnx else None,
-		fairseq_args = frontend_fariseq_args
+		extra_args = frontend_extra_args
 	)
 	model = getattr(models, args.model)(
 		num_input_features = args.num_input_features,
