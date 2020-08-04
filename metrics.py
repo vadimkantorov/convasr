@@ -174,8 +174,6 @@ class ErrorAnalyzer:
 			w['error_tags'] = set([ErrorTagger.tag(w['hyp'], w['ref'])[0]])
 			w['cer'] = cer(w['hyp_orig'], w['ref_orig'])
 
-		import IPython; IPython.embed()
-
 		# error_ok_tags
 
 		# total number of words, number of erorrs, inlcuding hitting vocab
