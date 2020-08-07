@@ -46,7 +46,19 @@ def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
 		yield meta, loss.cpu(), entropy_char.cpu(), hyp, logits, y
 
 
-def evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, optimizer = None, sampler = None, tensorboard = None, epoch = None, iteration = None):
+def evaluate_model(
+	args,
+	val_data_loaders,
+	model,
+	labels,
+	decoder,
+	error_analyzer,
+	optimizer = None,
+	sampler = None,
+	tensorboard = None,
+	epoch = None,
+	iteration = None
+):
 	training = epoch is not None and iteration is not None
 	columns = {}
 	for val_dataset_name, val_data_loader in val_data_loaders.items():
@@ -204,8 +216,17 @@ def main(args):
 			for k in checkpoint['model_state_dict']
 		}
 
+	if args.frontend_checkpoint:
+		frontend_checkpoint = torch.load(args.frontend_checkpoint, map_location = 'cpu')
+		frontend_extra_args = frontend_checkpoint['args']
+		frontend_checkpoint = frontend_checkpoint['model']
+	else:
+		frontend_extra_args = None
+		frontend_checkpoint = None
+
 	args.experiment_id = args.experiment_id.format(
 		model = args.model,
+		frontend = args.frontend,
 		train_batch_size = args.train_batch_size,
 		optimizer = args.optimizer,
 		lr = args.lr,
@@ -242,15 +263,16 @@ def main(args):
 		datasets.Labels(lang, bpe = bpe, name = f'bpe{i}', normalize_text_config = normalize_text_config) for i,
 		bpe in enumerate(args.bpe)
 	]
-	frontend = models.LogFilterBankFrontend(
-		args.num_input_features,
-		args.sample_rate,
-		args.window_size,
-		args.window_stride,
-		args.window,
+	frontend = getattr(models, args.frontend)(
+		out_channels = args.num_input_features,
+		sample_rate = args.sample_rate,
+		window_size = args.window_size,
+		window_stride = args.window_stride,
+		window = args.window,
 		dither = args.dither,
 		dither0 = args.dither0,
-		stft_mode = 'conv' if args.onnx else None
+		stft_mode = 'conv' if args.onnx else None,
+		extra_args = frontend_extra_args
 	)
 	model = getattr(models, args.model)(
 		num_input_features = args.num_input_features,
@@ -265,6 +287,13 @@ def main(args):
 
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'], strict = False)
+
+	if frontend_checkpoint:
+		frontend_checkpoint = {
+			'model.' + name: weight
+			for name, weight in frontend_checkpoint.items()
+		}  ##TODO remove after save checkpoint naming fix
+		frontend.load_state_dict(frontend_checkpoint)
 
 	if args.onnx:
 		torch.set_grad_enabled(False)
@@ -303,17 +332,19 @@ def main(args):
 	error_analyzer_configs = dict(
 		default = dict(phonetic_replace_groups = ['её'], collapse_repeat = True),
 		words_without_stop = dict(word_exclude_tags = ['stop']),
-		words_easy = dict(word_exclude_tags = ['number', 'proper', 'stop', 'SEP', 'num','comp','name','abbr']),
-		words_easy_errors_easy = dict(word_exclude_tags = ['number', 'proper', 'stop', 'SEP', 'num','comp','name','abbr'], error_include_tags = ['ok', 'typo_easy']),
+		words_easy = dict(word_exclude_tags = ['number', 'proper', 'stop', 'SEP', 'num', 'comp', 'name', 'abbr']),
+		words_easy_errors_easy = dict(
+			word_exclude_tags = ['number', 'proper', 'stop', 'SEP', 'num', 'comp', 'name', 'abbr'],
+			error_include_tags = ['ok', 'typo_easy']
+		),
 		words_only_number = dict(word_include_tags = ['number', 'SEP', 'num']),
 		words_only_proper = dict(word_include_tags = ['proper', 'SEP', 'comp', 'name', 'abbr'])
 	)
 
 	word_tags = json.load(open(args.word_tags)) if os.path.exists(args.word_tags) else {}
 	vocab = set(map(str.strip, open(args.vocab))) if os.path.exists(args.vocab) else set()
-	error_analyzer = metrics.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs) if args.analyze_new else metrics
 
-
+	error_analyzer = metrics  #.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs)
 
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
 	val_frontend = models.AugmentationFrontend(
@@ -321,11 +352,12 @@ def main(args):
 		waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob),
 		feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob)
 	)
-	
+
 	if args.val_waveform_transform_debug_dir:
 		args.val_waveform_transform_debug_dir = os.path.join(
 			args.val_waveform_transform_debug_dir,
-			str(val_frontend.waveform_transform) if isinstance(val_frontend.waveform_transform, transforms.RandomCompose) else
+			str(val_frontend.waveform_transform)
+			if isinstance(val_frontend.waveform_transform, transforms.RandomCompose) else
 			val.waveform_transform.__class__.__name__
 		)
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
@@ -376,7 +408,7 @@ def main(args):
 		evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer)
 		return
 
-	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder)
+	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder, frontend = args.freeze_frontend)
 
 	train_frontend = models.AugmentationFrontend(
 		frontend,
@@ -547,7 +579,19 @@ def main(args):
 			sampler.batch_idx += 1
 
 			if iteration > 0 and (iteration % args.val_iteration_interval == 0 or iteration == args.iterations):
-				evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, optimizer, sampler, tensorboard, epoch, iteration)
+				evaluate_model(
+					args,
+					val_data_loaders,
+					model,
+					labels,
+					decoder,
+					error_analyzer,
+					optimizer,
+					sampler,
+					tensorboard,
+					epoch,
+					iteration
+				)
 
 			if iteration and args.iterations and iteration >= args.iterations:
 				return
@@ -557,7 +601,19 @@ def main(args):
 		sampler.batch_idx = 0
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
 		if not args.skip_on_epoch_end_evaluation:
-			evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, optimizer, sampler, tensorboard, epoch + 1, iteration)
+			evaluate_model(
+				args,
+				val_data_loaders,
+				model,
+				labels,
+				decoder,
+				error_analyzer,
+				optimizer,
+				sampler,
+				tensorboard,
+				epoch + 1,
+				iteration
+			)
 
 
 if __name__ == '__main__':
@@ -596,6 +652,7 @@ if __name__ == '__main__':
 		default = [],
 		help = 'simple checkpoint weight averaging, for advanced weight averaging see Stochastic Weight Averaging'
 	)
+	parser.add_argument('--frontend-checkpoint', help = 'fariseq wav2vec checkpoint for frontend initialization')
 	parser.add_argument('--checkpoint-skip', action = 'store_true')
 	parser.add_argument('--skip-on-epoch-end-evaluation', action = 'store_true')
 	parser.add_argument('--experiments-dir', default = 'data/experiments')
@@ -619,6 +676,7 @@ if __name__ == '__main__':
 		'--dump-model-config', default = 'model.json', help = 'save model configuration to the experiment dir'
 	)
 	parser.add_argument('--model', default = 'JasperNetBig')
+	parser.add_argument('--frontend', default = 'LogFilterBankFrontend')
 	parser.add_argument(
 		'--seed',
 		type = int,
@@ -711,9 +769,8 @@ if __name__ == '__main__':
 	parser.add_argument('--exphtml', default = '../stt_results')
 	parser.add_argument('--freeze-backbone', type = int, default = 0, help = 'freeze number of backbone layers')
 	parser.add_argument('--freeze-decoder', action = 'store_true', help = 'freeze decoder0')
-	parser.add_argument(
-		'--num-input-features', default = 64, help = 'num of mel-scale features produced by logfbank frontend'
-	)
+	parser.add_argument('--freeze-frontend', action = 'store_true', help = 'freeze frontend')
+	parser.add_argument('--num-input-features', type = int, default = 64, help = 'num of features produced by frontend')
 	parser.add_argument('--sample-rate', type = int, default = 8_000, help = 'for frontend')
 	parser.add_argument('--window-size', type = float, default = 0.02, help = 'for frontend, in seconds')
 	parser.add_argument('--window-stride', type = float, default = 0.01, help = 'for frontend, in seconds')
