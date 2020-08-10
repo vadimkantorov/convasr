@@ -343,9 +343,8 @@ def main(args):
 
 	word_tags = json.load(open(args.word_tags)) if os.path.exists(args.word_tags) else {}
 	vocab = set(map(str.strip, open(args.vocab))) if os.path.exists(args.vocab) else set()
+
 	error_analyzer = metrics  #.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs)
-
-
 
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
 	val_frontend = models.AugmentationFrontend(
@@ -796,4 +795,5 @@ if __name__ == '__main__':
 	parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
 	parser.add_argument('--train-crash-oom', action = 'store_true')
 	parser.add_argument('--val-crash-oom', action = 'store_true')
+	parser.add_argument('--analyze-new', action = 'store_true')
 	main(parser.parse_args())
