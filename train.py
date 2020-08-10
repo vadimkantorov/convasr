@@ -102,15 +102,12 @@ def evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyze
 		)
 		for r_ in zip(*transcript):
 			labels_name = r_[0]['labels_name']
-			stats = metrics.aggregate(r_)
+			stats = error_analyzer.aggregate(r_)
 			if analyze:
-				with open(f'{transcripts_path}.missing.txt', 'w') as f:
-					f.writelines('{hyp},{ref},missing\n'.format(**a).replace('|', '') for a in stats['missing'])
-				with open(f'{transcripts_path}.typo.txt', 'w') as f:
-					for t in ['typo_easy', 'typo_hard']:
-						f.writelines('{hyp},{ref},{t}\n'.format(t = t, **a).replace('|', '') for a in stats[t])
+				with open(f'{transcripts_path}.errors.csv', 'w') as f:
+					f.writelines('{hyp},{ref},{error_tag}\n'.format(**w) for w in stats['errors']['words'])
 
-			print('errors', stats['errors_distribution'])
+			print('errors', stats['errors']['distribution'])
 			cer = torch.FloatTensor([r['cer'] for r in r_])
 			loss = torch.FloatTensor([r['loss'] for r in r_])
 			print('cer', metrics.quantiles(cer))
@@ -119,7 +116,7 @@ def evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyze
 				f'{args.experiment_id} {val_dataset_name} {labels_name}',
 				f'| epoch {epoch} iter {iteration}' if training else '',
 				f'| {transcripts_path} |',
-				'Entropy: {entropy_avg:.02f} Loss: {loss_avg:.02f} | WER:  {wer_avg:.02%} CER: {cer_avg:.02%} [{cer_easy_avg:.02%} - {cer_hard_avg:.02%} - {cer_missing_avg:.02%}]  MER: {mer_avg:.02%} DER: {der_avg:.02%}\n'
+				('Entropy: {entropy:.02f} Loss: {loss:.02f} | WER:  {wer:.02%} CER: {cer:.02%} [{words_easy_errors_easy__cer:.02%}],  MER: {mer_wordwise:.02%} DER: {hyp_der:.02%}/{ref_der:.02%}\n')
 				.format(**stats)
 			)
 			#columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_name', 'cer', 'mer', 'alignment')] + [(r['audio_name'], r['cer'], r['mer'], vis.word_alignment(r['words'])) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
@@ -127,9 +124,9 @@ def evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyze
 				tensorboard.add_scalars(
 					'datasets/' + val_dataset_name + '_' + labels_name,
 					dict(
-						wer_avg = stats['wer_avg'] * 100.0,
-						cer_avg = stats['cer_avg'] * 100.0,
-						loss_avg = stats['loss_avg']
+						wer = stats['wer'] * 100.0,
+						cer = stats['cer'] * 100.0,
+						loss = stats['loss']
 					),
 					iteration
 				)
@@ -267,14 +264,18 @@ def main(args):
 		model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 
 	if args.onnx:
+		#import onnx.tools.net_drawer # import GetPydotGraph, GetOpNodeProducer
+		#pydot_graph = GetPydotGraph(model_def.graph, name=model_def.graph.name, rankdir="TB", node_producer=GetOpNodeProducer("docstring", color="yellow", fillcolor="yellow", style="filled"))
+		#pydot_graph.write_dot("pipeline_transpose2x.dot")
+		#os.system('dot -O -Gdpi=300 -Tpng pipeline_transpose2x.dot')
+
 		torch.set_grad_enabled(False)
 		model.eval()
 		model.to(args.device)
 		model.fuse_conv_bn_eval()
 
 		if args.fp16:
-			model = model.to(torch.float16)
-			#model = models.InputOutputTypeCast(model, dtype = torch.float16)
+			model = models.InputOutputTypeCast(model.to(torch.float16), dtype = torch.float16)
 
 		waveform_input = torch.rand(args.onnx_sample_batch_size, args.onnx_sample_time, device = args.device)
 		logits = model(waveform_input)
@@ -300,19 +301,12 @@ def main(args):
 		assert torch.allclose(logits.cpu(), torch.from_numpy(logits_), rtol = 1e-02, atol = 1e-03)
 		return
 
-	error_analyzer_configs = dict(
-		default = dict(phonetic_replace_groups = ['её'], collapse_repeat = True),
-		words_without_stop = dict(word_exclude_tags = ['stop']),
-		words_easy = dict(word_exclude_tags = ['number', 'proper', 'stop', 'SEP', 'num','comp','name','abbr']),
-		words_easy_errors_easy = dict(word_exclude_tags = ['number', 'proper', 'stop', 'SEP', 'num','comp','name','abbr'], error_include_tags = ['ok', 'typo_easy']),
-		words_only_number = dict(word_include_tags = ['number', 'SEP', 'num']),
-		words_only_proper = dict(word_include_tags = ['proper', 'SEP', 'comp', 'name', 'abbr'])
-	)
-
+	val_config = json.load(open(args.val_config)) if os.path.exists(args.val_config) else {}
 	word_tags = json.load(open(args.word_tags)) if os.path.exists(args.word_tags) else {}
+	for word_tag, words in val_config.get('word_tags', {}).items():
+		word_tags[word_tag] = word_tags.get(word_tag, []) + words
 	vocab = set(map(str.strip, open(args.vocab))) if os.path.exists(args.vocab) else set()
-	error_analyzer = metrics.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs) if args.analyze_new else metrics
-
+	error_analyzer = metrics.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), metrics.ErrorTagger(vocab = vocab), val_config.get('error_analyzer', {}))
 
 
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
@@ -738,5 +732,5 @@ if __name__ == '__main__':
 	parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
 	parser.add_argument('--train-crash-oom', action = 'store_true')
 	parser.add_argument('--val-crash-oom', action = 'store_true')
-	parser.add_argument('--analyze-new', action = 'store_true')
+	parser.add_argument('--val-config', default = 'configs/ru_val_config.json')
 	main(parser.parse_args())

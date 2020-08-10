@@ -26,6 +26,8 @@ import models
 import ctc
 import transcripts
 
+def get_alignment(t):
+	return t.get('alignment') or t.get('words') or []
 
 def audio_data_uri(audio_path, sample_rate = None):
 	if isinstance(audio_path, str):
@@ -146,10 +148,10 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	)
 	html.writelines(
 		f'<tr class="channel{c}">' + (
-			f'<td class="top">{fmt_link(0, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(hyp, ij = True))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}<template>{word_alignment(t["words"], tag = "", hyp = True)}</template></td>'
+			f'<td class="top">{fmt_link(0, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(hyp, ij = True))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}<template>{word_alignment(get_alignment(t), tag = "", hyp = True)}</template></td>'
 			if has_hyp else ''
 		) + (
-			f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}<template>{word_alignment(t["words"], tag = "", ref = True)}</template></td><td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td><td class="top">{t["cer"]:.2%}</td>'
+			f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}<template>{word_alignment(get_alignment(t), tag = "", ref = True)}</template></td><td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td><td class="top">{t["cer"]:.2%}</td>'
 			if ref else ('<td></td>' * 5 if has_ref else '')
 		) + f'''<td class="top {ok and 'ok'}">{speaker}</td></tr>''' for t in transcripts.sort(transcript)
 		for ok in [t in filtered_transcript] for c,
@@ -325,7 +327,7 @@ def errors(
 	wer = None,
 	mer = None,
 	filter_transcripts = None,
-	strip_audio_path_prefix = None
+	strip_audio_path_prefix = ''
 ):
 	include, exclude = (set(sum([list(map(transcripts.audio_name, json.load(open(file_path)))) if file_path.endswith('.json') else open(file_path).read().splitlines() for file_path in clude], [])) for clude in [include, exclude])
 	read_transcript = lambda path: list(
@@ -368,11 +370,11 @@ def errors(
 			'<tr><td class="br">{input_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td>{mer:.02%}</td></tr>'
 			.format(
 				input_name = os.path.basename(input_path[i]),
-				cer_easy = metrics.nanmean(c, 'cer_easy'),
 				cer = metrics.nanmean(c, 'cer'),
-				wer_easy = metrics.nanmean(c, 'wer_easy'),
 				wer = metrics.nanmean(c, 'wer'),
-				mer = metrics.nanmean(c, 'mer')
+				mer = metrics.nanmean(c, 'mer'),
+				cer_easy = metrics.nanmean(c, 'words_easy_errors_easy.cer'),
+				wer_easy = metrics.nanmean(c, 'words_easy_errors_easy.wer'),
 			) for i,
 			c in enumerate(zip(*cat))
 		)
@@ -385,11 +387,11 @@ def errors(
 					'<tr><td class="br">{input_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td>{mer:.02%}</td></tr>'
 					.format(
 						input_name = os.path.basename(input_path[i]),
-						cer_easy = metrics.nanmean(c, 'cer_easy'),
 						cer = metrics.nanmean(c, 'cer'),
-						wer_easy = metrics.nanmean(c, 'wer_easy'),
 						wer = metrics.nanmean(c, 'wer'),
-						mer = metrics.nanmean(c, 'mer')
+						mer = metrics.nanmean(c, 'mer'),
+						cer_easy = metrics.nanmean(c, 'words_easy_errors_easy.cer'),
+						wer_easy = metrics.nanmean(c, 'words_easy_errors_easy.wer'),
 					) for i,
 					c in enumerate(zip(*labels_transcripts))
 				)
@@ -398,12 +400,12 @@ def errors(
 	f.write(
 		'\n'.join(
 			f'''<tr class="first"><td colspan="6">''' + (
-				f'<audio controls src="{audio_data_uri(utt[0]["audio_path"][len(strip_audio_prefix):])}"></audio>'
+				f'<audio controls src="{audio_data_uri(utt[0]["audio_path"][len(strip_audio_path_prefix):])}"></audio>'
 				if audio else ''
 			) +
 			f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{word_alignment(utt[0], ref = True, flat = True)}</td><td>{word_alignment(utt[0], ref = True, flat = True)}</td></tr>'
 			+ '\n'.join(
-				f'<tr class="any"><td class="br">{transcripts.audio_name(input_path[i])}</td><td>{a.get("cer_easy", 1):.02%}</td><td>{a.get("cer", 1):.02%}</td><td>{a.get("wer_easy", 1):.02%}</td><td>{a.get("wer", 1):.02%}</td><td class="br">{a.get("mer", 1):.02%}</td><td>{word_alignment(a.get("words", []))}</td><td>{word_alignment(a, hyp = True, flat = True)}</td></tr>'
+				f'<tr class="any"><td class="br">{transcripts.audio_name(input_path[i])}</td><td>{a.get("words_easy_errors_easy__cer__avg", 1):.02%}</td><td>{a.get("cer", 1):.02%}</td><td>{a.get("words_easy_errors_easy__wer__avg", 1):.02%}</td><td>{a.get("wer", 1):.02%}</td><td class="br">{a.get("mer", 1):.02%}</td><td>{word_alignment(get_alignment(a))}</td><td>{word_alignment(a, hyp = True, flat = True)}</td></tr>'
 				for i,
 				a in enumerate(utt)
 			)
@@ -595,7 +597,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--include', nargs = '*', default = [])
 	cmd.add_argument('--exclude', nargs = '*', default = [])
 	cmd.add_argument('--audio', action = 'store_true')
-	cmd.add_argument('--sortdesc', choices = ['cer', 'wer', 'mer', 'cer_easy'])
+	cmd.add_argument('--sortdesc', choices = ['cer', 'wer', 'mer'])
 	cmd.add_argument('--topk', type = int)
 	cmd.add_argument('--cer', type = transcripts.number_tuple)
 	cmd.add_argument('--wer', type = transcripts.number_tuple)

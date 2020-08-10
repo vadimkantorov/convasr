@@ -2,7 +2,6 @@ import os
 import math
 import collections
 import json
-import enum
 import functools
 import torch
 import Levenshtein
@@ -11,25 +10,25 @@ placeholder = '|'
 space = ' '
 silence = placeholder + space
 
-
-def exp_moving_average(avg, val, max = 0, K = 50):
-	return (1. / K) * min(val, max) + (1 - 1. / K) * avg
-
-
-class ErrorTagger(enum.Enum):
+class ErrorTagger:
 	typo_easy = 'typo_easy'
 	typo_hard = 'typo_hard'
 	missing = 'missing'
 	missing_ref = 'missing_ref'
 	ok = 'ok'
 
-	@staticmethod
-	def tag(hyp, ref, p = 0.5, L = 3):
+	error_tags = [typo_easy, typo_hard, missing, missing_ref]
+
+	def __init__(self, vocab = set()):
+		self.vocab = vocab
+
+	def tag(self, hyp, ref, p = 0.5, L = 3, clamp = False):
 		e = sum(ch != cr and not (ch == space and cr == placeholder) for ch, cr in zip(hyp, ref))
 		ref_placeholders = ref.count(placeholder)
 		ref_chars = len(ref) - ref_placeholders
-		is_typo = (0 < ref_chars < L and len(hyp) <= L
-					) or (e >= 0 and ((hyp.count(placeholder) < p * len(ref) and ref_placeholders < p * len(ref))))
+		vocab_hit = ''.join(hyp).replace(placeholder, '') in self.vocab
+		is_typo = (ref_chars == 0 and vocab_hit) or (0 < ref_chars < L and len(hyp) <= L
+					) or (e >= 0 and ((hyp.count(placeholder) < p * len(ref) and ref_placeholders < p * len(ref)))) or len(ref) == 1 or (ref_chars == 0 and len(hyp) < L)
 		if hyp == ref:
 			err = ErrorTagger.ok
 		elif is_typo:
@@ -45,7 +44,174 @@ class ErrorTagger(enum.Enum):
 		else:
 			err = ErrorTagger.missing_ref if ref_placeholders >= p * len(ref) else ErrorTagger.missing
 
-		return err.value, e
+		if clamp:
+			e = e if err == ErrorTagger.typo_easy else -1 if err == ErrorTagger.typo_hard else -2
+		
+		return err, e
+
+
+class WordTagger(collections.defaultdict):
+	vocab_hit = 'vocab_hit'
+	vocab_miss = 'vocab_miss'
+
+	def __init__(self, lang = None, word_tags = {}, vocab = set()):
+		self.lang = lang
+		self.vocab = vocab
+		self.stem2tag = {lang.stem(word) if self.lang is not None else word: tag for tag, words in word_tags.items() for word in words}
+
+	def __missing__(self, word):
+		self[word] = self.get(word) or self.stem2tag.get(self.lang.stem(word) if self.lang is not None else word)
+		return self[word]
+
+	def tag(self, word):
+		vocab_tags = [self.vocab_hit if word in self.vocab else self.vocab_miss]
+		word_tag = self[word] 
+		return vocab_tags + ([word_tag] if word_tag else [])
+
+class ErrorAnalyzer:
+	def __init__(self, word_tagger = WordTagger(), error_tagger = ErrorTagger(), configs = {}):
+		self.word_tagger = word_tagger
+		self.error_tagger = error_tagger
+		self.configs = configs or dict(default = {})
+
+	def aggregate(self, analyzed):
+		keys = [k for k, v in analyzed[0].items() if isinstance(v, float) or isinstance(v, int)]
+		stats = {(c + '__' + k).replace('default__', '') : nanmean(analyzed, (c + '.' + k).replace('default.', '')) for c in self.configs for k in keys}
+		error_chars = collections.defaultdict(int)
+		error_words = []
+		for a in analyzed:
+			for w in a.get('alignment', []):
+				_, e = self.error_tagger.tag(hyp = w['hyp'], ref = w['ref'], clamp = True)
+				error_chars[e] += 1
+				if w['error_tag'] != ErrorTagger.ok:
+					error_words.append(w)
+
+		stats['errors'] = dict(distribution = dict(collections.OrderedDict(sorted(error_chars.items()))), words = error_words)
+		return stats
+
+	def analyze(self, *, ref, hyp, labels, audio_path = '', full = False, **kwargs):
+		hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
+		hyp_postproc, ref_postproc = map(labels.postprocess_transcript, [hyp, ref])
+		
+		#hyp_postproc, ref_postproc = map(functools.partial(labels.postprocess_transcript, collapse_repeat = True), [hyp, ref])
+		#hypref_pseudo = {
+		#	t: (
+		#		' '.join((
+		#			r_ if self.error_tagger.tag(h_, r_)[0] in dict(
+		#				typo_easy = ['typo_easy'],
+		#				typo_hard = ['typo_easy', 'typo_hard'],
+		#				missing = ['missing'],
+		#				missing_ref = ['missing_ref']
+		#			)[t] else h_
+		#		).replace(placeholder, '') for w in word_alignment for r_,
+		#					h_ in [(w['ref'], w['hyp'])]),
+		#		ref.replace(placeholder, '')
+		#	)
+		#	for t in ErrorTagger.error_tags
+		#}
+		#cer_easy = cer(*hypref_pseudo['typo_easy']),
+		#wer_easy = wer(*hypref_pseudo['typo_easy']),
+		#errors = {
+		#	t: [dict(hyp = r['hyp'], ref = r['ref']) for r in word_alignment if r['error_tag'] == t]
+		#	for t in ErrorTagger.error_tags
+		#}
+		#error_stats = dict(
+		#	spaces = dict(
+		#		delete = sum(ref[i] == space and hyp[i] != space for i in range(len(ref))),
+		#		insert = sum(hyp[i] == space and ref[i] != space for i in range(len(ref))),
+		#		total = sum(ref[i] == space for i in range(len(ref)))
+		#	),
+		#	chars = dict(
+		#		ok = sum(ref[i] == hyp[i] for i in range(len(ref))),
+		#		replace = sum(
+		#			ref[i] != placeholder and ref[i] != hyp[i] and hyp[i] != placeholder
+		#			for i in range(len(ref))
+		#		),
+		#		delete = sum(
+		#			ref[i] != placeholder and ref[i] != hyp[i] and hyp[i] == placeholder
+		#			for i in range(len(ref))
+		#		),
+		#		insert = sum(ref[i] == placeholder and hyp[i] != placeholder for i in range(len(ref))),
+		#		total = len(ref)
+		#	),
+		#	words = dict(
+		#		missing_prefix = sum(w['hyp'][0] in silence for w in word_alignment),
+		#		missing_suffix = sum(w['hyp'][-1] in silence for w in word_alignment),
+		#		ok_prefix_suffix = sum(
+		#			w['hyp'][0] not in silence and w['hyp'][-1] not in silence for w in word_alignment
+		#		),
+		#		delete = sum(w['hyp'].count('|') > len(w['ref']) // 2 for w in word_alignment),
+		#		total = len(word_alignment),
+		#		errors = errors,
+		#	),
+		#),
+
+		res = dict(
+			labels_name = labels.name,
+			audio_path = audio_path,
+			audio_name = os.path.basename(audio_path),
+			ref = ref,
+			hyp = hyp,
+			**kwargs
+		)
+
+		_hyp_, _ref_, word_alignment = align_words(hyp = hyp, ref = ref, error_tagger = self.error_tagger) # **config['align_words']) 
+		for w in word_alignment:
+			w['ref_tags'] = self.word_tagger.tag(w['ref']) 
+			w['hyp_tags'] = self.word_tagger.tag(w['hyp']) 
+			w['error_tags'] = [self.error_tagger.tag(w['hyp'], w['ref'])[0]]
+			w['cer'] = cer(w['hyp_orig'], w['ref_orig'])
+
+		res['alignment'] = word_alignment
+
+		# error_ok_tags
+
+		# total number of words, number of erorrs, inlcuding hitting vocab
+
+		def filter_words(
+			word_alignment,
+			word_include_tags = [],
+			word_exclude_tags = [],
+			error_include_tags = [],
+			error_exclude_tags = [],
+			**kwargs
+		):
+			word_include_tags, word_exclude_tags, error_include_tags, error_exclude_tags = map(set, [word_include_tags, word_exclude_tags, error_include_tags, error_exclude_tags])
+			res = []
+			for w in word_alignment:
+				if bool(set(w['ref_tags']) & word_exclude_tags) or bool(set(w['error_tags']) & error_exclude_tags):
+					continue
+
+				if (word_include_tags and not bool(set(w['ref_tags']) & word_include_tags)) or (
+					error_include_tags and not bool(set(w['error_tags']) & error_include_tags)):
+					continue
+
+				res.append(w)
+			return res
+
+		def compute_metrics(word_alignment, collapse_repeat = False, phonetic_replace_groups = [], **kwargs):
+			num_words = len(word_alignment)
+			num_words_ok = sum(ErrorTagger.ok not in w['error_tags'] for w in word_alignment)
+			num_words_missing = sum(ErrorTagger.missing in w['error_tags'] for w in word_alignment)
+			
+			wer_wordwise = num_words_ok / num_words if num_words != 0 else 0
+			mer_wordwise = num_words_missing / num_words if num_words != 0 else 0
+			cer_wordwise = sum(w['cer'] for w in word_alignment) / num_words if num_words != 0 else 0
+
+			hyp, ref = space.join(w['hyp_orig'] for w in word_alignment), space.join(w['ref_orig'] for w in word_alignment)
+			hyp, ref = map(functools.partial(labels.postprocess_transcript, collapse_repeat = collapse_repeat, phonetic_replace_groups = phonetic_replace_groups), [hyp, ref])
+			
+			wer_postproc = wer(hyp = hyp, ref = ref)
+			cer_postproc = cer(hyp = hyp, ref = ref)
+			hyp_der, ref_der = [sum(self.word_tagger.vocab_hit in w[k] for w in word_alignment) / num_words if num_words != 0 else 0 for k in ['hyp_tags', 'ref_tags']]
+
+			return dict(wer_wordwise = wer_wordwise, cer_wordwise = cer_wordwise, mer_wordwise = mer_wordwise, num_words = num_words, num_words_ok = num_words_ok, num_words_missing = num_words_missing, wer = wer_postproc, cer = cer_postproc, ref_der = ref_der, hyp_der = hyp_der)
+		
+		for config_name, config in self.configs.items():
+			res[config_name] = compute_metrics(filter_words(word_alignment, **config), **config)
+		res.update(res.pop('default'))
+
+		return res
 
 
 class PerformanceMeter(dict):
@@ -81,24 +247,106 @@ class PerformanceMeter(dict):
 			)
 		)
 
+def nanmean(dictlist, key):
+	prefix, suffix = ('', key) if '.' not in key else key.split('.')
+	tensor = torch.FloatTensor([r_[suffix] for r in dictlist for r_ in [r.get(prefix, r)] if suffix in r_])
+	isfinite = torch.isfinite(tensor)
+	return float(tensor[isfinite].mean()) if isfinite.any() else -1.0
 
-class WordTagger(collections.defaultdict):
-	vocab_hit = 'vocab_hit'
-	vocab_miss = 'vocab_miss'
 
-	def __init__(self, lang, word_tags = {}, vocab = set()):
-		self.lang = lang
-		self.vocab = vocab
-		self.stem2tag = {lang.stem(word): tag for tag, words in word_tags.items() for word in words}
+def quantiles(tensor):
+	tensor = tensor.sort().values
+	return {k: '{:.2f}'.format(float(tensor[int(len(tensor) * k / 100)])) for k in range(0, 100, 10)}
 
-	def __missing__(self, word):
-		self[word] = self.get(word) or self.stem2tag.get(self.lang.stem(word))
-		return self[word]
+def exp_moving_average(avg, val, max = 0, K = 50):
+	return (1. / K) * min(val, max) + (1 - 1. / K) * avg
 
-	def tag(self, word):
-		vocab_tags = [self.vocab_hit if word in self.vocab else self.vocab_miss]
-		word_tag = self[word] 
-		return vocab_tags + ([word_tag] if word_tag else [])
+
+def align_words(*, hyp, ref, error_tagger = ErrorTagger(), postproc = True):
+	def split_by_space(*, hyp, ref, left = True):
+		assert isinstance(hyp, list) and isinstance(ref, list) and len(hyp) == len(ref)
+
+		k, words = None, []
+		ref += [space]
+		hyp += [space]
+
+		for i in range(len(ref)):
+			ipp = i + 1
+			if ref[i] == space:
+				
+				if not ref[k:i]:
+					continue
+				
+				l = ipp
+				if hyp[i] in silence:
+					j = i
+				else:
+					ref[i] = placeholder
+					
+					if left:
+						j = ipp
+						l = ipp
+					else:
+						j = i
+						l = i
+
+				words.append((hyp[k:j], ref[k:j]))
+				k = l
+
+		return words
+
+	def prefer_replacement(*, hyp, ref):
+		for k in range(len(ref) - 1):
+			if ref[k] == placeholder and hyp[k] != placeholder and ref[k + 1] != placeholder and hyp[k + 1] == placeholder:
+				ref[k] = ref[k + 1]
+				ref[k + 1] = placeholder
+			elif hyp[k] == placeholder and ref[k] != placeholder and hyp[k + 1] != placeholder and ref[k + 1] == placeholder:
+				hyp[k] = hyp[k + 1]
+				hyp[k + 1] = placeholder
+		hyp, ref = zip(*[(ch, cr) for ch, cr in zip(hyp, ref) if not (cr == ch == placeholder)])
+		return hyp, ref
+		
+
+	hyp, ref = map(list, align(hyp, ref))
+	#print(split_by_space(hyp = ['н', 'а', 'д', 'а', 'л', 'а'], ref = ['|', ' ', 'д', 'а', 'л', 'а'], left = True))
+
+	words = split_by_space(hyp = list(hyp), ref = list(ref))
+	if postproc:
+		words_ = []
+		for i, (hyp_word, ref_word) in enumerate(words):
+			hyp_word, ref_word = prefer_replacement(hyp = hyp_word, ref = ref_word)
+			hyp_word_, ref_word_ = ''.join(hyp_word).replace(placeholder, ''), ''.join(ref_word).replace(placeholder, '')
+			split_by_space_left = True
+
+			if hyp_word_ == ref_word_:
+				pass
+
+			elif hyp_word_.startswith(ref_word_):
+				ref_word, hyp_word = [space if hyp_word_[i] == space or i == len(ref_word_) else placeholder if i > len(ref_word_) else hyp_word_[i] for i in range(len(hyp_word_))], list(hyp_word_)
+				split_by_space_left = False
+
+			elif hyp_word_.endswith(ref_word_):
+				ref_word, hyp_word = [space if hyp_word_[i] == space or i == len(hyp_word_) - len(ref_word_) - 1 else placeholder if i < len(hyp_word_) - len(ref_word_) - 1 else hyp_word_[i] for i in range(len(hyp_word_))], list(hyp_word_)
+				split_by_space_left = True
+
+			#else:
+			#	ref_charinds = [i for i, c in enumerate(ref_word) if c != placeholder]
+			#	ref_word, hyp_word = list(ref_word), list(hyp_word)
+			#	for i in range(len(ref_word)):
+			#		if (not ref_charinds or i < ref_charinds[0]
+			#			or i > ref_charinds[-1]) and hyp_word[i] == space and ref_word[i] == placeholder:
+			#			ref_word[i] = space
+
+			words_.extend(split_by_space(hyp = list(hyp_word), ref = list(ref_word), left = split_by_space_left))
+		
+		words = words_
+
+	word_alignment = [
+		dict(hyp = ''.join(hyp), ref = ''.join(ref), error_tag = error_tag, hyp_orig = ''.join(hyp).replace(placeholder, ''), ref_orig = ''.join(ref).replace(placeholder, '')) for hyp,
+		ref in words for error_tag,
+		e in [error_tagger.tag(hyp, ref)]
+	]
+	return ''.join(hyp), ''.join(ref), word_alignment
 
 
 def align(hyp, ref, score_sub = -2, score_del = -4, score_ins = -3):
@@ -109,267 +357,6 @@ def align(hyp, ref, score_sub = -2, score_del = -4, score_ins = -3):
 	aligner.score_ins = score_ins
 	ref, hyp = aligner.align(list(ref), list(hyp))
 	return ''.join(hyp), ''.join(ref)
-
-
-def split_by_space(hyp, ref):
-	words = []
-	k = None
-	for i in range(1 + len(ref)):
-		if i == len(ref) or ref[i] == space:
-			ref_word, hyp_word = ref[k:i], hyp[k:i]
-			if ref_word:
-				words.append((hyp_word, ref_word))
-			k = i + 1
-	return words
-
-
-def align_words(hyp, ref, break_ref = False):
-	hyp, ref = map(list, align(hyp, ref))
-
-	words = split_by_space(hyp, ref)
-
-	if break_ref:
-		words_ = []
-		for hyp_word, ref_word in words:
-			ref_charinds = [i for i, c in enumerate(ref_word) if c != placeholder]
-			ref_word, hyp_word = list(ref_word), list(hyp_word)
-			for i in range(len(ref_word)):
-				if (not ref_charinds or i < ref_charinds[0]
-					or i > ref_charinds[-1]) and hyp_word[i] == space and ref_word[i] == placeholder:
-					ref_word[i] = space
-			words_.extend(split_by_space(hyp_word, ref_word))
-
-		words = words_
-
-	word_alignment = [
-		dict(hyp = ''.join(hyp), ref = ''.join(ref), error_tag = t, hyp_orig = ''.join(hyp).replace(placeholder, ''), ref_orig = ''.join(ref).replace(placeholder, '')) for hyp,
-		ref in words for t,
-		e in [ErrorTagger.tag(hyp, ref)]
-	]
-	return ''.join(hyp), ''.join(ref), word_alignment
-
-
-class ErrorAnalyzer:
-	def __init__(self, word_tagger, configs):
-		self.word_tagger = word_tagger
-		self.configs = configs
-
-	def analyze(self, *, ref, hyp, labels, audio_path = None, full = False, **kwargs):
-		hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
-		hyp_postproc, ref_postproc = map(labels.postprocess_transcript, [hyp, ref])
-
-		res = dict(
-			labels_name = labels.name,
-			audio_path = audio_path,
-			audio_name = os.path.basename(audio_path),
-			ref = ref,
-			hyp = hyp,
-			**kwargs
-		)
-
-		_hyp_, _ref_, word_alignment = align_words(hyp, ref, break_ref = True)  #**config['align_words'])
-		for w in word_alignment:
-			w['ref_tags'] = set(self.word_tagger.tag(w['ref']))
-			w['hyp_tags'] = set(self.word_tagger.tag(w['hyp']))
-			w['error_tags'] = set([ErrorTagger.tag(w['hyp'], w['ref'])[0]])
-			w['cer'] = cer(w['hyp_orig'], w['ref_orig'])
-
-		# error_ok_tags
-
-		# total number of words, number of erorrs, inlcuding hitting vocab
-
-		def filter_words(
-			word_alignment,
-			word_include_tags = [],
-			word_exclude_tags = [],
-			error_include_tags = [],
-			error_exclude_tags = [],
-			**kwargs
-		):
-			word_include_tags, word_exclude_tags, error_include_tags, error_exclude_tags = map(set, [word_include_tags, word_exclude_tags, error_include_tags, error_exclude_tags])
-			res = []
-			for w in word_alignment:
-				if bool(w['ref_tags'] & word_exclude_tags) or bool(w['error_tags'] & error_exclude_tags):
-					continue
-
-				if (word_include_tags and not bool(w['ref_tags'] & word_include_tags)) or (
-					error_include_tags and not bool(w['error_tags'] & error_include_tags)):
-					continue
-
-				res.append(w)
-			return res
-
-		def compute_metrics(word_alignment, collapse_repeat = False, phonetic_replace_groups = [], **kwargs):
-			num_words = len(word_alignment)
-			#TODO: take into account other error tags
-			num_words_ok = sum(ErrorTagger.ok not in w['error_tags'] for w in word_alignment)
-			wer_wordwise = num_words_ok / num_words if num_words != 0 else 0
-			cer_wordwise = sum(w['cer'] for w in word_alignment) / num_words if num_words != 0 else 0
-
-			hyp, ref = space.join(w['hyp_orig'] for w in word_alignment), space.join(w['ref_orig'] for w in word_alignment)
-			hyp, ref = map(functools.partial(labels.postprocess_transcript, collapse_repeat = collapse_repeat, phonetic_replace_groups = phonetic_replace_groups), [hyp, ref])
-			
-			wer_postproc = wer(hyp = hyp, ref = ref)
-			cer_postproc = cer(hyp = hyp, ref = ref)
-			hyp_der, ref_der = [sum(self.word_tagger.vocab_hit in w[k] for w in word_alignment) / num_words if num_words != 0 else 0 for k in ['hyp_tags', 'ref_tags']]
-
-			return dict(wer_wordwise = wer_wordwise, cer_wordwise = cer_wordwise, num_words = num_words, num_words_ok = num_words_ok, wer = wer_postproc, cer = cer_postproc, ref_der = ref_der, hyp_der = hyp_der)
-		
-		for config_name, config in self.configs.items():
-			res[config_name] = compute_metrics(filter_words(word_alignment, **config), **config)
-		res.update(res.pop('default'))
-
-		return res
-
-
-error_types = [e.value for e in ErrorTagger if e != ErrorTagger.ok]
-
-
-def analyze(
-	*,
-	ref,
-	hyp,
-	labels,
-	audio_path = '',
-	phonetic_replace_groups = [],
-	vocab = set(),
-	full = False,
-	break_ref_alignment = True,
-	**kwargs
-):
-	hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
-	hyp_postproc, ref_postproc = map(functools.partial(labels.postprocess_transcript, collapse_repeat = True), [hyp, ref])
-	hyp_phonetic, ref_phonetic = map(functools.partial(labels.postprocess_transcript, phonetic_replace_groups = phonetic_replace_groups), [hyp_postproc, ref_postproc])
-
-	a = dict(
-		labels_name = labels.name,
-		labels = str(labels),
-		audio_path = audio_path,
-		audio_name = os.path.basename(audio_path),
-		hyp_postrpoc = hyp_postproc,
-		ref_postproc = ref_postproc,
-		ref = ref,
-		hyp = hyp,
-		cer = cer(hyp_postproc, ref_postproc),
-		wer = wer(hyp_postproc, ref_postproc),
-		per = cer(hyp_phonetic, ref_phonetic),
-		phonetic = dict(ref = ref_phonetic, hyp = hyp_phonetic),
-		der = sum(w in vocab for w in hyp.split()) / (1 + hyp.count(' ')),
-		**kwargs
-	)
-
-	if full:
-		hyp, ref, word_alignment = align_words(hyp, ref, break_ref = break_ref_alignment)
-		phonetic_group = lambda c: ([i for i, g in enumerate(phonetic_replace_groups) if c in g] + [c])[0]
-		hypref_pseudo = {
-			t: (
-				' '.join((
-					r_ if ErrorTagger.tag(h_, r_)[0] in dict(
-						typo_easy = ['typo_easy'],
-						typo_hard = ['typo_easy', 'typo_hard'],
-						missing = ['missing'],
-						missing_ref = ['missing_ref']
-					)[t] else h_
-				).replace(placeholder, '') for w in word_alignment for r_,
-							h_ in [(w['ref'], w['hyp'])]),
-				ref.replace(placeholder, '')
-			)
-			for t in error_types
-		}
-
-		errors = {
-			t: [dict(hyp = r['hyp'], ref = r['ref']) for r in word_alignment if r['error_tag'] == t]
-			for t in error_types
-		}
-
-		a.update(
-			dict(
-				alignment = dict(ref = ref, hyp = hyp),
-				words = word_alignment,
-				error_stats = dict(
-					spaces = dict(
-						delete = sum(ref[i] == space and hyp[i] != space for i in range(len(ref))),
-						insert = sum(hyp[i] == space and ref[i] != space for i in range(len(ref))),
-						total = sum(ref[i] == space for i in range(len(ref)))
-					),
-					chars = dict(
-						ok = sum(ref[i] == hyp[i] for i in range(len(ref))),
-						replace = sum(
-							ref[i] != placeholder and ref[i] != hyp[i] and hyp[i] != placeholder
-							for i in range(len(ref))
-						),
-						replace_phonetic = sum(
-							ref[i] != placeholder and ref[i] != hyp[i] and hyp[i] != placeholder
-							and phonetic_group(ref[i]) == phonetic_group(hyp[i]) for i in range(len(ref))
-						),
-						delete = sum(
-							ref[i] != placeholder and ref[i] != hyp[i] and hyp[i] == placeholder
-							for i in range(len(ref))
-						),
-						insert = sum(ref[i] == placeholder and hyp[i] != placeholder for i in range(len(ref))),
-						total = len(ref)
-					),
-					words = dict(
-						missing_prefix = sum(w['hyp'][0] in silence for w in word_alignment),
-						missing_suffix = sum(w['hyp'][-1] in silence for w in word_alignment),
-						ok_prefix_suffix = sum(
-							w['hyp'][0] not in silence and w['hyp'][-1] not in silence for w in word_alignment
-						),
-						delete = sum(w['hyp'].count('|') > len(w['ref']) // 2 for w in word_alignment),
-						total = len(word_alignment),
-						errors = errors,
-					),
-				),
-				mer = len(errors['missing']) / len(word_alignment),
-				cer_easy = cer(*hypref_pseudo['typo_easy']),
-				wer_easy = wer(*hypref_pseudo['typo_easy']),
-				cer_hard = cer(*hypref_pseudo['typo_hard']),
-				cer_missing = cer(*hypref_pseudo['missing'])
-			)
-		)
-
-	return a
-
-
-def aggregate(analyzed, p = 0.5):
-	stats = dict(
-		loss_avg = nanmean(analyzed, 'loss'),
-		entropy_avg = nanmean(analyzed, 'entropy'),
-		cer_avg = nanmean(analyzed, 'cer'),
-		wer_avg = nanmean(analyzed, 'wer'),
-		mer_avg = nanmean(analyzed, 'mer'),
-		cer_easy_avg = nanmean(analyzed, 'cer_easy'),
-		wer_easy_avg = nanmean(analyzed, 'wer_easy'),
-		cer_hard_avg = nanmean(analyzed, 'cer_hard'),
-		cer_missing_avg = nanmean(analyzed, 'cer_missing'),
-		der_avg = nanmean(analyzed, 'der')
-	)
-
-	errs = collections.defaultdict(int)
-	errs_words = {t: [] for t in error_types}
-	for a in analyzed:
-		if 'words' in a:
-			for hyp, ref in map(lambda b: (b['hyp'], b['ref']), sum(a['error_stats']['words']['errors'].values(), [])):
-				t, e = ErrorTagger.tag(hyp, ref)
-				e = e if t == 'typo_easy' else -1 if t == 'typo_hard' else -2
-				errs[e] += 1
-				errs_words[t].append(dict(ref = ref, hyp = hyp))
-	stats['errors_distribution'] = dict(collections.OrderedDict(sorted(errs.items())))
-	stats.update(errs_words)
-
-	return stats
-
-
-def nanmean(dictlist, key):
-	tensor = torch.FloatTensor([r[key] for r in dictlist if key in r])
-	isfinite = torch.isfinite(tensor)
-	return float(tensor[isfinite].mean()) if isfinite.any() else -1.0
-
-
-def quantiles(tensor):
-	tensor = tensor.sort().values
-	return {k: '{:.2f}'.format(float(tensor[int(len(tensor) * k / 100)])) for k in range(0, 100, 10)}
-
 
 def cer(hyp, ref, edit_distance = Levenshtein.distance):
 	cer_ref_len = len(ref.replace(' ', '')) or 1
@@ -620,12 +607,13 @@ if __name__ == '__main__':
 	cmd.add_argument('--hyp', required = True)
 	cmd.add_argument('--ref', required = True)
 	cmd.add_argument('--lang', default = 'ru')
+	cmd.add_argument('--val-config', default = 'configs/ru_val_config.json')
 	cmd.set_defaults(
 		func = lambda hyp,
-		ref,
+		ref, val_config,
 		lang: print(
 			json.dumps(
-				analyze(hyp = hyp, ref = ref, labels = datasets.Labels(datasets.Language(lang)), full = True),
+				ErrorAnalyzer(**(dict(configs = json.load(open(val_config))['error_analyzer'], word_tagger = WordTagger(word_tags = json.load(open(val_config))['word_tags'])) if os.path.exists(val_config) else {})).analyze(hyp = hyp, ref = ref, labels = datasets.Labels(datasets.Language(lang)), full = True),
 				ensure_ascii = False,
 				indent = 2,
 				sort_keys = True
@@ -638,9 +626,9 @@ if __name__ == '__main__':
 	cmd.add_argument('--ref', required = True)
 	cmd.set_defaults(
 		func = lambda hyp,
-		ref: (
+		ref, break_ref: (
 			print('\n'.join(f'{k}: {v}' for k, v in zip(['hyp', 'ref'], align(hyp = hyp, ref = ref)))),
-			print('\n'.join(map(str, align_words(hyp, ref, break_ref = True)[-1])))
+			print('\n'.join(map(str, align_words(hyp = hyp, ref = ref)[-1])))
 		)
 	)
 

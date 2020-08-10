@@ -1,0 +1,12 @@
+{
+	"word_tags" : {"stop" : ["ну", "вот", "это", "а", "бы", "б"]},
+	"error_analyzer" :
+	{
+		"default": {"phonetic_replace_groups" : ["её"], "collapse_repeat" : true},
+		"words_without_stop": {"word_exclude_tags" : ["stop"]},
+		"words_easy" : {"word_exclude_tags" : ["stop", "num","comp","name","abbr"]},
+		"words_easy_errors_easy": {"word_exclude_tags" : ["stop", "num","comp","name","abbr"], "error_include_tags" : ["ok", "typo_easy"]},
+		"words_only_number" : {"word_include_tags" : ["num"]},
+		"words_only_proper" : {"word_include_tags" : ["comp", "name", "abbr"]}
+	}
+}
