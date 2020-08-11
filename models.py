@@ -187,7 +187,7 @@ class JasperNet(nn.Module):
 		frontend = None,
 		bpe_only = False,
 		normalize_features = True,
-		normalize_features_eps = 1e-20,
+		normalize_features_eps = torch.finfo(torch.float16).tiny,
 		normalize_features_track_running_stats = False,
 		normalize_features_legacy = True,
 		normalize_features_temporal_mask = True
@@ -515,7 +515,7 @@ class LogFilterBankFrontend(nn.Module):
 		dither = 1e-5,
 		dither0 = 0.0,
 		preemphasis = 0.97,
-		eps = 1e-20,
+		eps = torch.finfo(torch.float16).tiny,
 		normalize_signal = True,
 		stft_mode = None,
 		window_periodic = True,
