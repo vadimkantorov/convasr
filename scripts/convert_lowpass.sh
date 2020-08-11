@@ -21,5 +21,3 @@ for f in "$DIR"/*/*/*; do
 done
 
 
-
-

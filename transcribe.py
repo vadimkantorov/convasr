@@ -92,7 +92,7 @@ def main(args):
 	for i, (meta, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
 
-		audio_path, speakers = map(meta[0].get, ['audio_path', 'speakers'])
+		audio_path, speakers, begin, end = map(meta[0].get, ['audio_path', 'speakers', 'begin', 'end'])
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
 
 		try:
@@ -163,7 +163,6 @@ def main(args):
 					olen,
 					ylen.squeeze(1),
 					blank = labels.blank_idx,
-					pack_backpointers = args.pack_backpointers
 				)
 				ref_segments = [
 					labels.decode(
@@ -219,7 +218,9 @@ def main(args):
 				num_speakers = args.num_speakers
 			)
 		)
-		json.dump(filtered_transcript, open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+
+		if not args.skip_json:
+			json.dump(filtered_transcript, open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 
 		print('Filtered segments:', len(filtered_transcript), 'out of', len(transcript))
 		print(transcript_path)
@@ -232,7 +233,10 @@ def main(args):
 				filtered_transcript
 			)
 		if args.txt:
-			open(os.path.join(args.output_path, os.path.basename(audio_path) + '.txt'), 'w').write(hyp)
+			if args.monofile:
+				open(os.path.join(args.output_path, 'dataset.txt'), 'a+').write(audio_path + '\t' + str(hyp) + '\t' + str(begin) + '\t' + str(end) + '\n')
+			else:
+				open(os.path.join(args.output_path, os.path.basename(audio_path) + '.txt'), 'w').write(hyp)
 
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
@@ -272,9 +276,10 @@ if __name__ == '__main__':
 	parser.add_argument('--speakers', nargs = '*')
 	parser.add_argument('--replace-blank-series', type = int, default = 8)
 	parser.add_argument('--html', action = 'store_true')
-	parser.add_argument(
-		'--txt', action = 'store_true', help = 'store whole transcript in txt format need for assessments'
-	)
+	parser.add_argument('--txt', action = 'store_true', help = 'store whole transcript in txt format need for assessments')
+	parser.add_argument('--monofile', action = 'store_true', help = 'store whole transcript in one txt')
+	parser.add_argument('--skip-json', action = 'store_true')
+	parser.add_argument('--skip-with-cer-large-than',  type = int, default = 80)
 	parser.add_argument('--transcribe-first-n-sec', type = int)
 	parser.add_argument('--join-transcript', action = 'store_true')
 	parser.add_argument('--pack-backpointers', action = 'store_true')

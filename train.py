@@ -1,16 +1,18 @@
 import argparse
+import gc
 import json
 import math
 import os
 import random
 import shutil
 import time
+
+import torch.nn
 import torch.utils.data
 import torch.utils.tensorboard
 import apex
 import datasets
 import decoders
-import exphtml
 import metrics
 import models
 import onnxruntime
@@ -46,7 +48,19 @@ def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
 		yield meta, loss.cpu(), entropy_char.cpu(), hyp, logits, y
 
 
-def evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, epoch = None, iteration = None):
+def evaluate_model(
+	args,
+	val_data_loaders,
+	model,
+	labels,
+	decoder,
+	error_analyzer,
+	tensorboard,
+	optimizer,
+	sampler,
+	epoch = None,
+	iteration = None
+):
 	training = epoch is not None and iteration is not None
 	columns = {}
 	for val_dataset_name, val_data_loader in val_data_loaders.items():
@@ -224,7 +238,11 @@ def main(args):
 		experiments_dir = args.experiments_dir, experiment_id = args.experiment_id
 	)
 	if checkpoint:
+		if args.window_size:
+			ws = args.window_size
 		args.lang, args.model, args.num_input_features, args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['lang', 'model', 'num_input_features', 'sample_rate', 'window', 'window_size', 'window_stride'])
+		print('window_size: ', ws)
+		args.window_size = ws
 
 	print('\n', 'Arguments:', args)
 	print('\n', 'Experiment id:', args.experiment_id, '\n')
@@ -303,14 +321,16 @@ def main(args):
 	error_analyzer_configs = dict(
 		words_without_stop = dict(word_exclude_tags = ['stop']),
 		words_easy = dict(word_exclude_tags = ['number', 'proper', 'stop']),
-		words_easy_errors_easy = dict(word_exclude_tags = ['number', 'proper', 'stop'], error_include_tags = ['ok', 'typo_easy']),
+		words_easy_errors_easy = dict(
+			word_exclude_tags = ['number', 'proper', 'stop'], error_include_tags = ['ok', 'typo_easy']
+		),
 		words_only_number = dict(word_include_tags = ['number']),
 		words_only_proper = dict(word_include_tags = ['proper'])
 	)
 
 	word_tags = json.load(open(args.word_tags)) if os.path.exists(args.word_tags) else {}
 	vocab = set(map(str.strip, open(args.vocab))) if os.path.exists(args.vocab) else set()
-	error_analyzer = metrics #.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs)
+	error_analyzer = metrics  #.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), error_analyzer_configs)
 
 
 
@@ -371,7 +391,7 @@ def main(args):
 			model.fuse_conv_bn_eval()
 		if args.device != 'cpu':
 			model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-		evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer)
+		evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, None, None, None)
 		return
 
 	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder)
@@ -391,6 +411,7 @@ def main(args):
 		time_padding_multiple = args.batch_time_padding_multiple
 	)
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
+
 	sampler = datasets.BucketingBatchSampler(
 		train_dataset,
 		batch_size = args.train_batch_size,
@@ -401,6 +422,7 @@ def main(args):
 			)
 		)
 	)  #+1 mean bug fix with bucket sizing
+
 	train_data_loader = torch.utils.data.DataLoader(
 		train_dataset,
 		num_workers = args.num_workers,
@@ -410,6 +432,7 @@ def main(args):
 		worker_init_fn = set_random_seed,
 		timeout = args.timeout
 	)
+
 	optimizer = torch.optim.SGD(
 		model.parameters(),
 		lr = args.lr,
@@ -470,6 +493,7 @@ def main(args):
 		time_epoch_start = time.time()
 		for batch_idx, (meta, x, xlen, y, ylen) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc_data = time.time()
+
 			lr = optimizer.param_groups[0]['lr']
 			lr_avg = metrics.exp_moving_average(lr_avg, lr, max = 1)
 
@@ -497,12 +521,11 @@ def main(args):
 						apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm
 					)
 					optimizer.step()
-
 					if iteration % args.log_iteration_interval == 0:
 						tensorboard.add_scalars(
-							f'datasets/{train_dataset_name}',
-							dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4),
-							iteration
+								f'datasets/{train_dataset_name}',
+								dict(loss_avg=loss_avg, lr_avg_x1e4=lr_avg * 1e4),
+								iteration
 						)
 						for name, value in performance_meter.items():
 							tensorboard.add_scalar(name, value, iteration)
@@ -513,14 +536,12 @@ def main(args):
 							norm, grad_norm = param.norm(), param.grad.norm()
 							ratio = grad_norm / (1e-9 + norm)
 							tensorboard.add_scalars(
-								tag,
-								dict(norm = float(norm), grad_norm = float(grad_norm), ratio = float(ratio)),
-								iteration
+									tag, dict(norm=float(norm), grad_norm=float(grad_norm), ratio=float(ratio)),
+									iteration
 							)
 							if args.log_weight_distribution:
 								tensorboard.add_histogram(tag, param, iteration)
 								tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
-
 					performance_meter.update_memory_metrics()
 					optimizer.zero_grad()
 					scheduler.step(iteration)
@@ -539,17 +560,47 @@ def main(args):
 			sampler.batch_idx += 1
 
 			if iteration > 0 and (iteration % args.val_iteration_interval == 0 or iteration == args.iterations):
-				evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, epoch, iteration)
+				evaluate_model(
+					args,
+					val_data_loaders,
+					model,
+					labels,
+					decoder,
+					error_analyzer,
+					tensorboard,
+					optimizer,
+					sampler,
+					epoch,
+					iteration
+				)
 
 			if iteration and args.iterations and iteration >= args.iterations:
 				return
+
+			if args.iterations_per_epoch and iteration > 0 and iteration % args.iterations_per_epoch == 0:
+				break
+
+			if iteration > 0 and (iteration % 1000 == 0):
+				gc.collect()
 
 			tic = time.time()
 
 		sampler.batch_idx = 0
 		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
 		if not args.skip_on_epoch_end_evaluation:
-			evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer, epoch + 1, iteration)
+			evaluate_model(
+				args,
+				val_data_loaders,
+				model,
+				labels,
+				decoder,
+				error_analyzer,
+				tensorboard,
+				optimizer,
+				sampler,
+				epoch + 1,
+				iteration
+			)
 
 
 if __name__ == '__main__':
@@ -575,6 +626,7 @@ if __name__ == '__main__':
 	parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
 	parser.add_argument('--epochs', type = int, default = 5)
 	parser.add_argument('--iterations', type = int, default = None)
+	parser.add_argument('--iterations-per-epoch', type = int, default = None)
 	parser.add_argument('--train-data-path', nargs = '*', default = [])
 	parser.add_argument('--train-data-mixing', type = float, nargs = '*')
 	parser.add_argument('--val-data-path', nargs = '*', default = [])

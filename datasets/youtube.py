@@ -2,21 +2,34 @@ import os
 import json
 import argparse
 import glob
-
+import random
 
 def main(args):
 	transcripts = []
-	for i, info_path in enumerate(glob.glob(os.path.join(args.input_path, '*.json'))):
+
+	paths = glob.glob(os.path.join(args.input_path, '*.json'))
+	random.shuffle(paths)
+
+	for i, info_path in enumerate(paths):
 		print(i)
 
 		j = json.load(open(info_path))
 
 		total_ref_len = sum(len(t.get('ref', '')) for t in j.get('transcript', []))
 
+		print(
+			i,
+			total_ref_len,
+			j.get('duration', 0) / 3600.0, (j.get('duration', 0) / total_ref_len) if total_ref_len > 0 else 0
+		)
+
 		if j.get('duration', 0) / 3600.0 >= args.skip_files_longer_than_hours:
 			continue
 
 		if total_ref_len > args.skip_transcript_large_than_char:
+			continue
+
+		if total_ref_len < 2000:
 			continue
 
 		transcripts_ = [

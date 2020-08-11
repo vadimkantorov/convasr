@@ -6,6 +6,7 @@ import models
 import unittest
 import time
 import soundfile
+import numpy as np
 
 f2s = lambda signal: (signal * torch.iinfo(torch.int16).max).short()
 s2f = lambda signal: signal.float() / torch.iinfo(torch.int16).max
@@ -130,7 +131,7 @@ def write_audio(audio_path, signal, sample_rate, mono = False):
 
 
 def resample(signal, sample_rate_, sample_rate):
-	return torch.from_numpy(librosa.resample(signal.numpy(), sample_rate_, sample_rate)), sample_rate
+	return torch.from_numpy(np.expand_dims(librosa.resample(np.squeeze(signal.numpy()), sample_rate_, sample_rate), axis=0)), sample_rate
 
 
 def compute_duration(audio_path, backend = 'ffmpeg'):
@@ -179,6 +180,17 @@ class AudioTests(unittest.TestCase):
 		for i in range(100):
 			signal, sample_rate = read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend, show_time=False)
 			assert sample_rate == 8000
+
+
+	def test_should_resample_wav_file(self):
+		audio_path = 'data/tests/yg9FM5Zky2s.opus.0-99.900009-103.640007.wav'
+		self.sample_rate = 4000
+		self.mono = True
+		self.audio_backend = 'ffmpeg'
+
+		for i in range(100):
+			signal, sample_rate = read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend, show_time=False)
+			assert sample_rate == 4000
 
 
 if __name__ == '__main__':

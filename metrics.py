@@ -363,12 +363,17 @@ def quantiles(tensor):
 
 
 def cer(hyp, ref, edit_distance = Levenshtein.distance):
+	#hyp = hyp.replace('ё', 'е')
+	#ref = ref.replace('ё', 'е')
+
 	cer_ref_len = len(ref.replace(' ', '')) or 1
 	return edit_distance(hyp.replace(' ', '').lower(), ref.replace(' ', '').lower()) / cer_ref_len if hyp != ref else 0
 
 
 def wer(hyp, ref, edit_distance = Levenshtein.distance):
 	# build mapping of words to integers, Levenshtein package only accepts strings
+	#hyp = hyp.replace('ё', 'е')
+	#ref = ref.replace('ё', 'е')
 	b = set(hyp.split() + ref.split())
 	word2char = dict(zip(b, range(len(b))))
 	wer_ref_len = len(ref.split()) or 1

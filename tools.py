@@ -79,7 +79,7 @@ def cut_audio(output_path, sample_rate, mono, dilate, strip_prefix, audio_backen
 		if strip_prefix:
 			segment_path = segment_path[len(strip_prefix):] if segment_path.startswith(strip_prefix) else segment_path
 			t['audio_path'] = t['audio_path'][len(strip_prefix):] if t['audio_path'].startswith(strip_prefix) else \
-                              t['audio_path']
+                                       t['audio_path']
 
 		t = dict(
 			audio_path = segment_path,
@@ -125,7 +125,7 @@ def cut(
 
 	json.dump(
 		transcripts.strip(transcript_cat, strip),
-		open(os.path.join(output_path, os.path.basename(output_path) + '2.json'), 'w'),
+		open(os.path.join(output_path, os.path.basename(output_path) + '3.json'), 'w'),
 		ensure_ascii = False,
 		sort_keys = True,
 		indent = 2
@@ -167,15 +167,34 @@ def csv2json(input_path, gz, group, reset_duration):
 		begin, end = map(float, os.path.splitext(audio_name)[0].split('_')[-2:])
 		return end - begin
 
+	'''
 	transcript = [
 		dict(
 			audio_path = s[0],
-			ref = s[1],
+			audio_name = s[1],
 			begin = 0.0,
-			end = float(s[2]) if not reset_duration else duration(os.path.basename(s[0])),
+			channel = s[2],
+			end = float(s[3]) if not reset_duration else duration(os.path.basename(s[0])),
 			**(dict(group = s[0].split('/')[group]) if group >= 0 else {})
-		) for l in gzopen(input_path) if '"' not in l for s in [l.strip().split(',')]
+		) for l in gzopen(input_path) if '"' not in l for s in [l.strip().split('\t')]
 	]
+
+	'''
+
+	transcript = [
+		dict(
+			audio_path = s[0],
+			begin = 0.0,
+			ref = s[1],
+			end = float(s[3]) if not reset_duration else duration(os.path.basename(s[0])),
+			**(dict(group = s[0].split('/')[group]) if group >= 0 else {})
+		) for l in gzopen(input_path) if '"' not in l for s in [l.strip().split('\t')]
+	]
+
+
+	#transcript = [t for t in transcript if 'unsup_dataset/0' in t['audio_path']]
+	transcript = [t for t in transcript if len(t['ref']) > 2]
+
 	output_path = input_path + '.json' + ('.gz' if gz else '')
 	json.dump(transcript, gzopen(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
@@ -418,8 +437,12 @@ def split(
 	random.shuffle(transcripts_train)
 
 	for t in transcripts_train:
-		t.pop('alignment')
-		t.pop('words')
+		if 'alignment' in t:
+			t.pop('alignment')
+		if 'words' in t:
+			t.pop('words')
+		if 'meta' in t:
+			t.pop('meta')
 
 	if old_microval_path:
 		old_microval = json.load(open(os.path.join(output_path, old_microval_path)))
@@ -427,11 +450,13 @@ def split(
 		transcripts_train = [e for e in transcripts_train if e['audio_path'] not in old_microval_pahts]
 
 	for set_name, duration in [('test', test_duration_in_hours), ('val', val_duration_in_hours), ('microval', microval_duration_in_hours)]:
+		if old_microval_path and set_name == 'microval':
+			continue
 		if duration is not None:
 			print(set_name)
 			s = []
 			set_duration = 0
-			while set_duration <= duration:
+			while set_duration < duration:
 				t = transcripts_train.pop()
 				set_duration += transcripts.compute_duration(t, hours = True)
 				s.append(t)
@@ -442,7 +467,7 @@ def split(
 				sort_keys = True,
 				indent = 2
 			)
-
+	return
 	json.dump(
 		transcripts_train,
 		open(os.path.join(output_path, os.path.basename(output_path) + '_train.json'), 'w'),
@@ -452,7 +477,7 @@ def split(
 	)
 
 
-def copy_dataset(dataset_path, new_dir):
+def copy_dataset(dataset_path, new_dir, extension = None):
 	from shutil import copyfile
 
 	print(dataset_path)
@@ -465,12 +490,22 @@ def copy_dataset(dataset_path, new_dir):
 		dst = '/'.join([new_dir] + transctipt['audio_path'].split('/')[1:])
 		transctipt['audio_path'] = dst
 
-		os.makedirs('/'.join(dst.split('/')[:-1]), exist_ok=True)
+		if extension:
+			transctipt['audio_path'] = transctipt['audio_path'][:-3] + extension
+			transctipt['audio_name'] = transctipt['audio_name'][:-3] + extension
+
+		os.makedirs('/'.join(dst.split('/')[:-1]), exist_ok = True)
 
 		copyfile(src, dst)
 
-	os.makedirs('/'.join([new_dir] + dataset_path.split('/')[1:-1]), exist_ok=True)
-	json.dump(dataset, open('/'.join([new_dir] + dataset_path.split('/')[1:]), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+	os.makedirs('/'.join([new_dir] + dataset_path.split('/')[1:-1]), exist_ok = True)
+	json.dump(
+		dataset,
+		open('/'.join([new_dir] + dataset_path.split('/')[1:]), 'w'),
+		ensure_ascii = False,
+		sort_keys = True,
+		indent = 2
+	)
 
 
 if __name__ == '__main__':
@@ -580,8 +615,9 @@ if __name__ == '__main__':
 	cmd.set_defaults(func = split)
 
 	cmd = subparsers.add_parser('copy')
-	cmd.add_argument('--dataset-path', required = True, type=str)
-	cmd.add_argument('--new-dir', type=str)
+	cmd.add_argument('--dataset-path', required = True, type = str)
+	cmd.add_argument('--new-dir', type = str)
+	cmd.add_argument('--extension', type = str)
 	cmd.set_defaults(func = copy_dataset)
 
 	cmd = subparsers.add_parser('processcomments')

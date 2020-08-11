@@ -3,8 +3,8 @@ set -e
 python3 train.py $@ \
   --exphtml= --githttp https://github.com/vadimkantorov/convasr/commit/%h \
   --analyze \
-  --checkpoint data/speechcore/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs1024____long-train_bs1024_step6_430k_checkpoint_epoch259_iter0468272.pt \
-  --val-data-path kontur_calls_micro/kontur_calls_micro.csv.json --frontend-in-model #--batch-time-padding-multiple 1
+  --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs512____youtube_3000h_after_selftrain_2try_simple1M/checkpoint_epoch410_iter0470000.pt \
+  --val-data-path data/kfold_splits/22052020/valset_kfold_22052020.0_fold_0.csv.json --frontend-in-model #--batch-time-padding-multiple 1
 
 #--checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs256____fp16O2/checkpoint_epoch05_iter0040000.pt \
 
