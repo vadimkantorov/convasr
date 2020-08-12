@@ -137,16 +137,17 @@ def compute_duration(audio_path, backend = 'ffmpeg'):
 	return float(subprocess.check_output(cmd + [audio_path]))
 
 
-def timeit(audio_path, numbers, sample_rate, mono, audio_backend, delimiter):
+def timeit(audio_path, number, sample_rate, mono, audio_backend, scale):
 	start_process_time = time.process_time_ns()
 	start_perf_counter = time.perf_counter_ns()
-	for i in range(numbers):
-		signal, sample_rate = read_audio(audio_path, sample_rate = sample_rate, mono = mono, backend = audio_backend)
+	for i in range(number):
+		signal, sample_rate = read_audio(audio_path, sample_rate = sample_rate, mono = mono, backend = audio_backend, normalize=False)
 	end_process_time = time.process_time_ns()
 	end_perf_counter = time.perf_counter_ns()
-	process_time = (end_process_time - start_process_time) / delimiter
-	perf_counter = (end_perf_counter - start_perf_counter) / delimiter
-	print(audio_path, numbers, audio_backend, process_time, perf_counter)
+	process_time = (end_process_time - start_process_time) / scale / number
+	perf_counter = (end_perf_counter - start_perf_counter) / scale / number
+
+	print(f'|{audio_path:>20}|{number:>5}|{audio_backend:>10}|{process_time:9.0f}|{perf_counter:9.0f}|')
 
 
 if __name__ == '__main__':
@@ -160,8 +161,8 @@ if __name__ == '__main__':
 	cmd.add_argument('--sample-rate', type = int, default = 8000)
 	cmd.add_argument('--mono', action = 'store_true')
 	cmd.add_argument('--audio-backend', type = str, required = True)
-	cmd.add_argument('--numbers', type = int, default = 100)
-	cmd.add_argument('--delimiter', type = int, default = 1000000)
+	cmd.add_argument('--number', type = int, default = 100)
+	cmd.add_argument('--scale', type = int, default = 1000)
 	cmd.set_defaults(func = timeit)
 
 	args = vars(parser.parse_args())

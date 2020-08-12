@@ -200,17 +200,20 @@ python3 scripts/stt_google.py --endpoint localhost:50051 --lang ru --api-key-cre
 ```shell
 bash scripts/read_audio_performance.sh
 ```
-| file       | reads count |  backend | process_time ms| perf_counter ms| 
-|------------|:--:|---------:|--------------:|-------------:|
-|test_5s.wav |100 |soundfile |4597.299309    | 800.03763    |
-|test_1m.wav |100 |soundfile |6265.692848    | 181.911164   |
-|test_1h.wav |100 |soundfile |798421.159778  | 20928.38722  |
-|test_5s.wav |100 |ffmpeg    |342366.973278  | 10578.396987 |
-|test_1m.wav |100 |ffmpeg    |465228.399581  | 18704.01081  |
-|test_1h.wav |100 |ffmpeg    |1172338.427479 | 55700.88492  |
-|test_5s.wav |100 |sox       |31470.667719   | 1023.972022  |
-|test_1m.wav |100 |sox       |50433.883961   | 1617.13903   |
-|test_1h.wav |100 |sox       |1171568.604075 | 44307.498397 |
+| file       | reads count |  backend | process_time us| perf_counter us| 
+|-----------:|---:|---------:|--------------:|-------------:|
+|data/tests/test_5s.wav|  100|       sox|   431341|    11886|
+|data/tests/test_1m.wav|  100|       sox|   455051|    12593|
+|data/tests/test_1h.wav|  100|       sox|  8939791|   458676|
+|data/tests/test_5s.wav|  100|    ffmpeg|  5147064|   140222|
+|data/tests/test_1m.wav|  100|    ffmpeg|  3941069|   306300|
+|data/tests/test_1h.wav|  100|    ffmpeg| 10509560|   628091|
+|data/tests/test_5s.wav|  100| soundfile|    42835|     1680|
+|data/tests/test_1m.wav|  100| soundfile|    36295|     1006|
+|data/tests/test_1h.wav|  100| soundfile|  4311895|   215836|
+|data/tests/test_5s.wav|  100|     scipy|    30163|     1583|
+|data/tests/test_1m.wav|  100|     scipy|    35958|     1092|
+|data/tests/test_1h.wav|  100|     scipy|  3579850|   215113|
 
 # Configuring Jigasi Meet transcription for Jitsi
 [Docs](https://nikvaessen.github.io/jekyll/update/2017/08/24/gsoc2017_work_product_submission.html)
