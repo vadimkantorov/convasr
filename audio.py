@@ -36,7 +36,7 @@ def read_audio(
 			signal = torch.as_tensor(signal[None, :] if len(signal.shape) == 1 else signal.T)
 
 		elif backend == 'soundfile':
-			signal, sample_rate_ = soundfile.read(audio_path, dtype='int16')
+			signal, sample_rate_ = soundfile.read(audio_path, dtype = 'int16')
 			signal = torch.as_tensor(signal[None, :] if len(signal.shape) == 1 else signal.T)
 
 		elif backend == 'sox':
@@ -60,7 +60,7 @@ def read_audio(
 				'-'
 			]
 			sample_rate_, signal = sample_rate, \
-                               torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(
+                                        torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(
 				params), byte_order = byte_order)).reshape(-1, num_channels).t()
 		elif backend == 'ffmpeg':
 			num_channels = int(
@@ -96,7 +96,7 @@ def read_audio(
 				'-'
 			]
 			sample_rate_, signal = sample_rate, \
-                               torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(params), byte_order = byte_order)).reshape(-1, num_channels).t()
+                                        torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(params), byte_order = byte_order)).reshape(-1, num_channels).t()
 
 	except:
 		print(f'Error when reading [{audio_path}]')
@@ -142,7 +142,7 @@ def timeit(audio_path, numbers, sample_rate, mono, audio_backend, delimiter):
 	start_process_time = time.process_time_ns()
 	start_perf_counter = time.perf_counter_ns()
 	for i in range(numbers):
-		signal, sample_rate = read_audio(audio_path, sample_rate=sample_rate, mono=mono, backend=audio_backend)
+		signal, sample_rate = read_audio(audio_path, sample_rate = sample_rate, mono = mono, backend = audio_backend)
 	end_process_time = time.process_time_ns()
 	end_perf_counter = time.perf_counter_ns()
 	process_time = (end_process_time - start_process_time) / delimiter
@@ -161,7 +161,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--audio-backend', type = str, required = True)
 	cmd.add_argument('--numbers', type = int, default = 100)
 	cmd.add_argument('--delimiter', type = int, default = 1000000)
-	cmd.set_defaults(func=timeit)
+	cmd.set_defaults(func = timeit)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')
