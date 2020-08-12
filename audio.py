@@ -1,4 +1,3 @@
-import argparse
 import subprocess
 import scipy.io.wavfile
 import librosa
@@ -151,6 +150,8 @@ def timeit(audio_path, numbers, sample_rate, mono, audio_backend, delimiter):
 
 
 if __name__ == '__main__':
+	import argparse
+
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
 	cmd = subparsers.add_parser('timeit')
