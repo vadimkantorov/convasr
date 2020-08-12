@@ -23,21 +23,22 @@ def read_audio(
 	raw_s16le = None,
 	raw_sample_rate = None,
 	raw_num_channels = None,
-	show_time = False
 ):
-	start = time.time()
 	try:
 		if audio_path is None or audio_path.endswith('.raw'):
 			if audio_path is not None:
 				with open(audio_path, 'rb') as f:
 					raw_s16le = f.read()
 			sample_rate_, signal = raw_sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(raw_s16le, byte_order = byte_order)).reshape(-1, raw_num_channels).t()
-		elif audio_path.endswith('.wav'):
+
+		elif backend == 'scipy' and audio_path.endswith('.wav'):
 			sample_rate_, signal = scipy.io.wavfile.read(audio_path)
 			signal = torch.as_tensor(signal[None, :] if len(signal.shape) == 1 else signal.T)
-		elif backend == 'soundfile' and audio_path.endswith('.gsm'):
-			signal, sample_rate_ = soundfile.read(audio_path, dtype = 'float32')
+
+		elif backend == 'soundfile':
+			signal, sample_rate_ = soundfile.read(audio_path, dtype='int16')
 			signal = torch.as_tensor(signal[None, :] if len(signal.shape) == 1 else signal.T)
+
 		elif backend == 'sox':
 			num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path])) if not mono else 1
 			params = [
@@ -96,6 +97,7 @@ def read_audio(
 			]
 			sample_rate_, signal = sample_rate, \
                                torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(params), byte_order = byte_order)).reshape(-1, num_channels).t()
+
 	except:
 		print(f'Error when reading [{audio_path}]')
 		sample_rate_, signal = sample_rate, torch.tensor([[]], dtype = torch.int16)
@@ -115,9 +117,6 @@ def read_audio(
 		signal = models.normalize_signal(signal, dim = -1)
 	if sample_rate_ != sample_rate:
 		signal, sample_rate_ = resample(signal, sample_rate_, sample_rate)
-
-	if show_time:
-		print('read audio time: ', time.time() - start)
 
 	return signal, sample_rate_
 
@@ -139,18 +138,31 @@ def compute_duration(audio_path, backend = 'ffmpeg'):
 	return float(subprocess.check_output(cmd + [audio_path]))
 
 
+def timeit(audio_path, numbers, sample_rate, mono, audio_backend, delimiter):
+	start_process_time = time.process_time_ns()
+	start_perf_counter = time.perf_counter_ns()
+	for i in range(numbers):
+		signal, sample_rate = read_audio(audio_path, sample_rate=sample_rate, mono=mono, backend=audio_backend)
+	end_process_time = time.process_time_ns()
+	end_perf_counter = time.perf_counter_ns()
+	process_time = (end_process_time - start_process_time) / delimiter
+	perf_counter = (end_perf_counter - start_perf_counter) / delimiter
+	print(audio_path, numbers, audio_backend, process_time, perf_counter)
+
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--audio_path', type = str, required = True)
-	parser.add_argument('--sample-rate', type = int, default = 8000, required = True)
-	parser.add_argument('--mono', type = bool, action = 'store_true')
-	parser.add_argument('--audio-backend', type = str, required = True)
-	parser.add_argument('--show-time', type = str, action = 'store_true')
-	parser.add_argument('--n-times', type = int, default = 100)
-	args = parser.parse_args()
+	subparsers = parser.add_subparsers()
+	cmd = subparsers.add_parser('timeit')
 
-	start = time.time()
-	for i in range(args.n_times):
-		signal, sample_rate = read_audio(args.audio_path, sample_rate=args.sample_rate, mono=args.mono, backend=args.audio_backend, show_time=args.show_time)
-	print(f'Sum time per {args.n_times} times: ', time.time() - start)
-	print(f'Average time per try: ', (time.time() - start) / args.n_times)
+	cmd.add_argument('--audio-path', type = str, required = True)
+	cmd.add_argument('--sample-rate', type = int, default = 8000)
+	cmd.add_argument('--mono', action = 'store_true')
+	cmd.add_argument('--audio-backend', type = str, required = True)
+	cmd.add_argument('--numbers', type = int, default = 100)
+	cmd.add_argument('--delimiter', type = int, default = 1000000)
+	cmd.set_defaults(func=timeit)
+
+	args = vars(parser.parse_args())
+	func = args.pop('func')
+	func(**args)
