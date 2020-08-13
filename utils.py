@@ -6,8 +6,8 @@ import torch
 
 def reset_cpu_threads(num_threads):
 	torch.set_num_threads(num_threads)
-	os.environ['OMP_NUM_THREADS'] = str(num_threads)
-	os.environ['MKL_NUM_THREADS'] = str(num_threads)
+	#os.environ['OMP_NUM_THREADS'] = str(num_threads)
+	#os.environ['MKL_NUM_THREADS'] = str(num_threads)
 
 def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed
