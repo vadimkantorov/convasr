@@ -3,6 +3,8 @@ import scipy.io.wavfile
 import librosa
 import torch
 import models
+import time
+import soundfile
 
 f2s = lambda signal: (signal * torch.iinfo(torch.int16).max).short()
 s2f = lambda signal: signal.float() / torch.iinfo(torch.int16).max
@@ -19,7 +21,7 @@ def read_audio(
 	backend = 'ffmpeg',
 	raw_s16le = None,
 	raw_sample_rate = None,
-	raw_num_channels = None
+	raw_num_channels = None,
 ):
 	try:
 		if audio_path is None or audio_path.endswith('.raw'):
@@ -27,12 +29,38 @@ def read_audio(
 				with open(audio_path, 'rb') as f:
 					raw_s16le = f.read()
 			sample_rate_, signal = raw_sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(raw_s16le, byte_order = byte_order)).reshape(-1, raw_num_channels).t()
-		elif audio_path.endswith('.wav'):
+
+		elif backend == 'scipy' and audio_path.endswith('.wav'):
 			sample_rate_, signal = scipy.io.wavfile.read(audio_path)
 			signal = torch.as_tensor(signal[None, :] if len(signal.shape) == 1 else signal.T)
+
+		elif backend == 'soundfile':
+			signal, sample_rate_ = soundfile.read(audio_path, dtype = 'int16')
+			signal = torch.as_tensor(signal[None, :] if len(signal.shape) == 1 else signal.T)
+
 		elif backend == 'sox':
 			num_channels = int(subprocess.check_output(['soxi', '-V0', '-c', audio_path])) if not mono else 1
-			sample_rate_, signal = sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['sox', '-V0', audio_path, '-b', '16', '-e', 'signed', '--endian', byte_order, '-r', str(sample_rate), '-c', str(num_channels), '-t', 'raw', '-']), byte_order = byte_order)).reshape(-1, num_channels).t()
+			params = [
+				'sox',
+				'-V0',
+				audio_path,
+				'-b',
+				'16',
+				'-e',
+				'signed',
+				'--endian',
+				byte_order,
+				'-r',
+				str(sample_rate),
+				'-c',
+				str(num_channels),
+				'-t',
+				'raw',
+				'-'
+			]
+			sample_rate_, signal = sample_rate, \
+                                        torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(
+				params), byte_order = byte_order)).reshape(-1, num_channels).t()
 		elif backend == 'ffmpeg':
 			num_channels = int(
 				subprocess.check_output([
@@ -49,7 +77,26 @@ def read_audio(
 					'0'
 				])
 			) if not mono else 1
-			sample_rate_, signal = sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(['ffmpeg', '-i', audio_path, '-nostdin', '-hide_banner', '-nostats', '-loglevel', 'quiet', '-f', 's16le', '-ar', str(sample_rate), '-ac', str(num_channels), '-']), byte_order = byte_order)).reshape(-1, num_channels).t()
+			params = [
+				'ffmpeg',
+				'-i',
+				audio_path,
+				'-nostdin',
+				'-hide_banner',
+				'-nostats',
+				'-loglevel',
+				'quiet',
+				'-f',
+				's16le',
+				'-ar',
+				str(sample_rate),
+				'-ac',
+				str(num_channels),
+				'-'
+			]
+			sample_rate_, signal = sample_rate, \
+                                        torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(params), byte_order = byte_order)).reshape(-1, num_channels).t()
+
 	except:
 		print(f'Error when reading [{audio_path}]')
 		sample_rate_, signal = sample_rate, torch.tensor([[]], dtype = torch.int16)
@@ -88,3 +135,36 @@ def compute_duration(audio_path, backend = 'ffmpeg'):
 	cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1'
 			] if backend == 'ffmpeg' else ['soxi', '-D'] if backend == 'sox' else None
 	return float(subprocess.check_output(cmd + [audio_path]))
+
+
+def timeit(audio_path, number, sample_rate, mono, audio_backend, scale):
+	start_process_time = time.process_time_ns()
+	start_perf_counter = time.perf_counter_ns()
+	for i in range(number):
+		signal, sample_rate = read_audio(audio_path, sample_rate = sample_rate, mono = mono, backend = audio_backend, normalize=False)
+	end_process_time = time.process_time_ns()
+	end_perf_counter = time.perf_counter_ns()
+	process_time = (end_process_time - start_process_time) / scale / number
+	perf_counter = (end_perf_counter - start_perf_counter) / scale / number
+
+	print(f'|{audio_path:>20}|{number:>5}|{audio_backend:>10}|{process_time:9.0f}|{perf_counter:9.0f}|')
+
+
+if __name__ == '__main__':
+	import argparse
+
+	parser = argparse.ArgumentParser()
+	subparsers = parser.add_subparsers()
+	cmd = subparsers.add_parser('timeit')
+
+	cmd.add_argument('--audio-path', type = str, required = True)
+	cmd.add_argument('--sample-rate', type = int, default = 8000)
+	cmd.add_argument('--mono', action = 'store_true')
+	cmd.add_argument('--audio-backend', type = str, required = True)
+	cmd.add_argument('--number', type = int, default = 100)
+	cmd.add_argument('--scale', type = int, default = 1000)
+	cmd.set_defaults(func = timeit)
+
+	args = vars(parser.parse_args())
+	func = args.pop('func')
+	func(**args)

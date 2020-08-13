@@ -187,7 +187,7 @@ class JasperNet(nn.Module):
 		frontend = None,
 		bpe_only = False,
 		normalize_features = True,
-		normalize_features_eps = 1e-20,
+		normalize_features_eps = torch.finfo(torch.float16).tiny,
 		normalize_features_track_running_stats = False,
 		normalize_features_legacy = True,
 		normalize_features_temporal_mask = True
@@ -278,7 +278,9 @@ class JasperNet(nn.Module):
 		self.dict = dict
 		self.bpe_only = bpe_only
 
-	def forward(self, x : shaping.BCT, xlen : shaping.B = None, y : shaping.BY = None, ylen : shaping.B = None) -> shaping.BCt:
+	def forward(
+		self, x: shaping.BCT, xlen: shaping.B = None, y: shaping.BY = None, ylen: shaping.B = None
+	) -> shaping.BCt:
 		#x = x.to(torch.float16)
 		x = x if x.ndim == 2 else x.squeeze(1)
 		x = self.frontend(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.frontend is not None else x
@@ -314,8 +316,13 @@ class JasperNet(nn.Module):
 
 		return self.dict(logits = logits, log_probs = log_probs, olen = olen, **aux)
 
-	def freeze(self, backbone = 0, decoder0 = False):
-		for m in (list(self.backbone[:backbone]) if backbone else []) + (list(self.decoder)[:1] if decoder0 else []):
+	def freeze(self, backbone = 0, decoder0 = False, frontend = False):
+		frozen_modules_list = []
+		frozen_modules_list += list(self.backbone[:backbone]) if backbone else []
+		frozen_modules_list += (list(self.decoder)[:1] if decoder0 else [])
+		frozen_modules_list += ([self.frontend] if frontend and self.frontend is not None else [])
+
+		for m in frozen_modules_list:
 			for module in filter(lambda module: isinstance(module, nn.modules.batchnorm._BatchNorm), m.modules()):
 				module.eval()
 				module.train = lambda training: None
@@ -457,6 +464,46 @@ class AugmentationFrontend(nn.Module):
 		return 'SoxAug' not in self.waveform_transform.__class__.__name__
 
 
+class Wav2VecFrontend(nn.Module):
+	def __init__(
+		self, out_channels, sample_rate, preemphasis = 0.0, use_context_features = True, extra_args = None, **kwargs
+	):
+		from fairseq.models.wav2vec import Wav2VecModel
+
+		assert sample_rate == extra_args.sample_rate, f'Sample rate {sample_rate} is not equal to frontend sample rate {extra_args.sample_rate}, use --sample-rate {extra_args.sample_rate}'
+
+		if extra_args.aggregator == 'cnn':
+			agg_layers = eval(extra_args.conv_aggregator_layers)
+			agg_dim = agg_layers[-1][0]
+			assert out_channels == agg_dim, f'Out channels {out_channels} is not equal to frontend output dim {agg_dim}, use --num-input-features {agg_dim}'
+		elif extra_args.aggregator == 'gru':
+			assert out_channels == extra_args.gru_dim, f'Out channels {out_channels} is not equal to frontend output dim {extra_args.gru_dim}, use --num-input-features {extra_args.gru_dim}'
+		else:
+			raise RuntimeError(f'Wrong wav2vec aggregator {extra_args.aggregator}. Use cnn or gru instead.')
+
+		super().__init__()
+		self.fairseq_args = extra_args
+		self.preemphasis = preemphasis
+		self.use_context_features = use_context_features
+		self.model = Wav2VecModel.build_model(extra_args, None).eval()
+
+	def forward(self, signal: shaping.BT, mask: shaping.BT = None) -> shaping.BCT:
+		assert signal.is_floating_point(), f'Wrong signal type {signal.dtype}, use normalized floating point signal instead.'
+		signal = torch.cat([signal[..., :1], signal[..., 1:] -
+							self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
+		signal = signal * mask if mask is not None else signal
+
+		raw_features = self.model.feature_extractor(signal)
+		if isinstance(raw_features, tuple):
+			raw_features = raw_features[0]
+
+		if self.use_context_features:
+			context_features = self.model.feature_aggregator(raw_features)
+			return context_features
+		else:
+			return raw_features
+
+
 class LogFilterBankFrontend(nn.Module):
 	def __init__(
 		self,
@@ -468,11 +515,12 @@ class LogFilterBankFrontend(nn.Module):
 		dither = 1e-5,
 		dither0 = 0.0,
 		preemphasis = 0.97,
-		eps = 1e-20,
+		eps = torch.finfo(torch.float16).tiny,
 		normalize_signal = True,
 		stft_mode = None,
 		window_periodic = True,
-		normalize_features = False
+		normalize_features = False,
+		**kwargs
 	):
 		super().__init__()
 		self.stft_mode = stft_mode
@@ -513,7 +561,7 @@ class LogFilterBankFrontend(nn.Module):
 		else:
 			self.stft = None
 
-	def forward(self, signal : shaping.BT, mask : shaping.BT = None) -> shaping.BCT:
+	def forward(self, signal: shaping.BT, mask: shaping.BT = None) -> shaping.BCT:
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
 		signal = normalize_signal(signal) if self.normalize_signal else signal
 		signal = signal + self.dither0 * torch.randn_like(signal) if self.dither0 > 0 else signal
@@ -1262,6 +1310,11 @@ class JasperNetSmallTrainableInstanceNorm(JasperNet):
 class JasperNetBig(JasperNet):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, num_subblocks = 2, temporal_mask = False, **kwargs)
+
+
+class JasperNetBigNoStride(JasperNet):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, num_subblocks = 2, stride1 = 1, temporal_mask = False, **kwargs)
 
 
 class JasperNetBigBpeOnly(JasperNet):
