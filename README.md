@@ -196,6 +196,25 @@ python3 serve_google_api.py --endpoint localhost:50051 --checkpoint ...
 python3 scripts/stt_google.py --endpoint localhost:50051 --lang ru --api-key-credentials= -i calls_micro/calls_micro.json
 ```
 
+# Frontend performance metrics
+```shell
+bash scripts/read_audio_performance.sh
+```
+| file       | reads count |  backend | process_time us| perf_counter us| 
+|-----------:|---:|---------:|--------------:|-------------:|
+|data/tests/test_5s.wav|  100|       sox|   431341|    11886|
+|data/tests/test_1m.wav|  100|       sox|   455051|    12593|
+|data/tests/test_1h.wav|  100|       sox|  8939791|   458676|
+|data/tests/test_5s.wav|  100|    ffmpeg|  5147064|   140222|
+|data/tests/test_1m.wav|  100|    ffmpeg|  3941069|   306300|
+|data/tests/test_1h.wav|  100|    ffmpeg| 10509560|   628091|
+|data/tests/test_5s.wav|  100| soundfile|    42835|     1680|
+|data/tests/test_1m.wav|  100| soundfile|    36295|     1006|
+|data/tests/test_1h.wav|  100| soundfile|  4311895|   215836|
+|data/tests/test_5s.wav|  100|     scipy|    30163|     1583|
+|data/tests/test_1m.wav|  100|     scipy|    35958|     1092|
+|data/tests/test_1h.wav|  100|     scipy|  3579850|   215113|
+
 # Configuring Jigasi Meet transcription for Jitsi
 [Docs](https://nikvaessen.github.io/jekyll/update/2017/08/24/gsoc2017_work_product_submission.html)
 
