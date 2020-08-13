@@ -242,7 +242,7 @@ def main(args):
 	print('\n', 'Experiment id:', args.experiment_id, '\n')
 	if args.dry:
 		return
-	set_random_seed(args.seed)
+	utils.set_random_seed(args.seed)
 	if args.cudnn == 'benchmark':
 		torch.backends.cudnn.benchmark = True
 
