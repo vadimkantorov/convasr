@@ -26,7 +26,7 @@ class SpeechServicerImpl(pb2_grpc.SpeechServicer):
 	def Recognize(self, req, ctx):
 		assert req.config.encoding == pb2.RecognitionConfig.LINEAR16
 
-		signal, sample_rate = audio.read_audio(None, raw_s16le = req.audio.content, raw_sample_rate = req.config.sample_rate_hertz, raw_num_channels = req.config.audio_channel_count, sample_rate = self.frontend.sample_rate, mono = True, normalize = True)
+		signal, sample_rate = audio.read_audio(None, raw_bytes = req.audio.content, raw_sample_rate = req.config.sample_rate_hertz, raw_num_channels = req.config.audio_channel_count, dtype = 'int16', sample_rate = self.frontend.sample_rate, mono = True)
 		x = signal
 		logits, olen = self.model(x.to(self.device))
 		decoded = self.decoder.decode(logits, olen)

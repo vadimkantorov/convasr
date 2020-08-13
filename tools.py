@@ -57,7 +57,7 @@ def cut_audio(output_path, sample_rate, mono, dilate, strip_prefix, audio_backen
 	prev_audio_path = ''
 	for t in audio_transcripts:
 		audio_path = t['audio_path']
-		signal = audio.read_audio(audio_path, sample_rate, normalize = False,
+		signal = audio.read_audio(audio_path, sample_rate, 
 									backend = audio_backend)[0] if audio_path != prev_audio_path else signal
 
 		if signal.numel() == 0:  # bug with empty audio files witch produce empty cut file

@@ -99,7 +99,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 		if not self.segmented:
 			transcript = transcript[0]
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = True, backend = self.audio_backend, duration=self.max_duration) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration=self.max_duration) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
 
 			transcript = dict(dict(audio_name = os.path.basename(transcript['audio_path'])), **transcript)
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug
@@ -107,7 +107,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
 			ref_normalized, targets = zip(*targets)
 		else:
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, normalize = False, backend = self.audio_backend, duration=self.max_duration)
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration=self.max_duration)
 			replace_transcript = self.join_transcript or \
                                not transcript or \
                                (any(t.get('begin') is None and t.get('end') is None for t in transcript) and \
