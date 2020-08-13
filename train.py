@@ -18,13 +18,7 @@ import optimizers
 import torch
 import transforms
 import vis
-import hacks
-
-
-def set_random_seed(seed):
-	for set_random_seed in [random.seed, torch.manual_seed
-							] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
-		set_random_seed(seed)
+import utils
 
 
 def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
@@ -34,7 +28,7 @@ def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
 			try:
 				logits, log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'olen', 'loss'])
 			except:
-				if (not crash_on_oom) and hacks.handle_out_of_memory_exception(model.parameters()):
+				if (not crash_on_oom) and utils.handle_out_of_memory_exception(model.parameters()):
 					continue
 				else:
 					raise
@@ -329,7 +323,7 @@ def main(args):
 		#pydot_graph = GetPydotGraph(model_def.graph, name=model_def.graph.name, rankdir="TB", node_producer=GetOpNodeProducer("docstring", color="yellow", fillcolor="yellow", style="filled"))
 		#pydot_graph.write_dot("pipeline_transpose2x.dot")
 		#os.system('dot -O -Gdpi=300 -Tpng pipeline_transpose2x.dot')
-
+		# add metadata to model
 		return
 
 	val_config = json.load(open(args.val_config)) if os.path.exists(args.val_config) else {}
@@ -363,7 +357,7 @@ def main(args):
 			pin_memory = True,
 			shuffle = False,
 			batch_size = args.val_batch_size,
-			worker_init_fn = set_random_seed,
+			worker_init_fn = datasets.worker_init_fn,
 			timeout = args.timeout
 		)
 		for val_data_path in args.val_data_path for val_dataset in [
@@ -434,7 +428,7 @@ def main(args):
 		collate_fn = train_dataset.collate_fn,
 		pin_memory = True,
 		batch_sampler = sampler,
-		worker_init_fn = set_random_seed,
+		worker_init_fn = datasets.worker_init_fn,
 		timeout = args.timeout
 	)
 	optimizer = torch.optim.SGD(
@@ -510,7 +504,7 @@ def main(args):
 			try:
 				log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'olen', 'loss'])
 			except:
-				if (not args.train_crash_oom) and hacks.handle_out_of_memory_exception(model.parameters()):
+				if (not args.train_crash_oom) and utils.handle_out_of_memory_exception(model.parameters()):
 					continue
 				else:
 					raise

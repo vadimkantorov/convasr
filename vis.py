@@ -336,7 +336,8 @@ def errors(
 			json.load(open(path)) if isinstance(path, str) else path
 		)
 	) if path is not None else []
-	ours, theirs = transcripts.prune(read_transcript(input_path[0]), duration = duration, cer = cer, wer = wer, mer = mer), [{r['audio_name'] : r for r in read_transcript(transcript)} for transcript in input_path[1:]]
+	ours, theirs = list(transcripts.prune(read_transcript(input_path[0]), duration = duration, cer = cer, wer = wer, mer = mer)), [{r['audio_name'] : r for r in read_transcript(transcript)} for transcript in input_path[1:]]
+	
 	if filter_transcripts is None:
 		if sortdesc is not None:
 			filter_transcripts = lambda cat: list(sorted(cat, key = lambda utt: utt[0][sortdesc], reverse = True))
@@ -346,13 +347,13 @@ def errors(
 	cat = filter_transcripts([[a] + list(filter(None, [t.get(a['audio_name'], None)
 														for t in theirs]))
 								for a in ours])[slice(topk)]
-	cat_by_labels = dict()
+	cat_by_labels = collections.defaultdict(list)
 	for c in cat:
-		transcripts_by_labels = dict()
+		transcripts_by_labels = collections.defaultdict(list)
 		for transcript in c:
-			transcripts_by_labels.setdefault(transcript['labels_name'], []).extend(c)
+			transcripts_by_labels[transcript['labels_name']] += c
 		for labels_name, grouped_transcripts in transcripts_by_labels.items():
-			cat_by_labels.setdefault(labels_name, []).append(grouped_transcripts)
+			cat_by_labels[labels_name] += grouped_transcripts
 
 	# TODO: add sorting https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
 	html_path = output_path or (input_path[0] + '.html')
@@ -373,8 +374,8 @@ def errors(
 				cer = metrics.nanmean(c, 'cer'),
 				wer = metrics.nanmean(c, 'wer'),
 				mer = metrics.nanmean(c, 'mer'),
-				cer_easy = metrics.nanmean(c, 'words_easy_errors_easy.cer'),
-				wer_easy = metrics.nanmean(c, 'words_easy_errors_easy.wer'),
+				cer_easy = metrics.nanmean(c, 'words_easy_errors_easy.cer_pseudo'),
+				wer_easy = metrics.nanmean(c, 'words_easy_errors_easy.wer_pseudo'),
 			) for i,
 			c in enumerate(zip(*cat))
 		)
@@ -389,9 +390,9 @@ def errors(
 						input_name = os.path.basename(input_path[i]),
 						cer = metrics.nanmean(c, 'cer'),
 						wer = metrics.nanmean(c, 'wer'),
-						mer = metrics.nanmean(c, 'mer'),
-						cer_easy = metrics.nanmean(c, 'words_easy_errors_easy.cer'),
-						wer_easy = metrics.nanmean(c, 'words_easy_errors_easy.wer'),
+						mer = metrics.nanmean(c, 'mer_wordwise'),
+						cer_easy = metrics.nanmean(c, 'words_easy_errors_easy.cer_pseudo'),
+						wer_easy = metrics.nanmean(c, 'words_easy_errors_easy.wer_pseudo'),
 					) for i,
 					c in enumerate(zip(*labels_transcripts))
 				)
@@ -405,7 +406,7 @@ def errors(
 			) +
 			f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{word_alignment(utt[0], ref = True, flat = True)}</td><td>{word_alignment(utt[0], ref = True, flat = True)}</td></tr>'
 			+ '\n'.join(
-				f'<tr class="any"><td class="br">{transcripts.audio_name(input_path[i])}</td><td>{a.get("words_easy_errors_easy__cer__avg", 1):.02%}</td><td>{a.get("cer", 1):.02%}</td><td>{a.get("words_easy_errors_easy__wer__avg", 1):.02%}</td><td>{a.get("wer", 1):.02%}</td><td class="br">{a.get("mer", 1):.02%}</td><td>{word_alignment(get_alignment(a))}</td><td>{word_alignment(a, hyp = True, flat = True)}</td></tr>'
+				'<tr class="any"><td class="br">{audio_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td class="br">{mer:.02%}</td><td>{word_alignment}</td><td>{word_alignment_flat}</td></tr>'.format(audio_name = transcripts.audio_name(input_path[i]), cer_easy = a.get("words_easy_errors_easy", {}).get("cer_pseudo", -1), cer = a.get("cer", 1), wer_easy = a.get("words_easy_errors_easy", {}).get("wer_pseudo", -1), wer = a.get("wer", 1), mer = a.get("mer_wordwise", 1), word_alignment = word_alignment(get_alignment(a)), word_alignment_flat = word_alignment(a, hyp = True, flat = True))
 				for i,
 				a in enumerate(utt)
 			)

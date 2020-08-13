@@ -17,7 +17,7 @@ import decoders
 import ctc
 import transcripts
 import vis
-import hacks
+import utils
 
 
 def setup(args):
@@ -55,7 +55,7 @@ def setup(args):
 
 
 def main(args):
-	hacks.enable_jit_fusion()
+	utils.enable_jit_fusion()
 
 	os.makedirs(args.output_path, exist_ok = True)
 	data_paths = [
@@ -176,7 +176,7 @@ def main(args):
 					) for i in range(len(decoded))
 				]
 		except:
-			if (not args.oom_crash) and hacks.handle_out_of_memory_exception(model.parameters()):
+			if (not args.oom_crash) and utils.handle_out_of_memory_exception(model.parameters()):
 				print(f'Skipping {i} / {num_examples}')
 				continue
 			else:

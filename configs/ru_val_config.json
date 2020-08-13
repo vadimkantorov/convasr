@@ -1,5 +1,5 @@
 {
-	"word_tags" : {"stop" : ["ну", "вот", "это", "а", "бы", "б"]},
+	"word_tags" : {"stop" : ["ну", "вот", "это", "эта", "бы", "б", "а", "и", "у", "о"]},
 	"error_analyzer" :
 	{
 		"default": {"phonetic_replace_groups" : ["её"], "collapse_repeat" : true},

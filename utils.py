@@ -1,7 +1,14 @@
 import gc
 import sys
 import traceback
+import random
 import torch
+
+def set_random_seed(seed):
+	for set_random_seed in [random.seed, torch.manual_seed
+							] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
+		set_random_seed(seed)
+
 
 
 def handle_out_of_memory_exception(model_parameters = []):
