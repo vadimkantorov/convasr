@@ -15,9 +15,7 @@ import transcripts
 
 def worker_init_fn(worker_id, num_threads = 1):
 	utils.set_random_seed(worker_id)
-	torch.set_num_threads(num_threads)
-	os.environ['OMP_NUM_THREADS'] = str(num_threads)
-	os.environ['MKL_NUM_THREADS'] = str(num_threads)
+	utils.reset_cpu_threads(num_threads)
 
 class AudioTextDataset(torch.utils.data.Dataset):
 	def __init__(

@@ -4,12 +4,15 @@ import traceback
 import random
 import torch
 
+def reset_cpu_threads(num_threads):
+	torch.set_num_threads(num_threads)
+	os.environ['OMP_NUM_THREADS'] = str(num_threads)
+	os.environ['MKL_NUM_THREADS'] = str(num_threads)
+
 def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed
 							] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
 		set_random_seed(seed)
-
-
 
 def handle_out_of_memory_exception(model_parameters = []):
 	exc_type, exc_value, exc_traceback = sys.exc_info()

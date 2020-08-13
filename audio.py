@@ -140,6 +140,7 @@ def compute_duration(audio_path, backend = 'ffmpeg'):
 
 
 def timeit(audio_path, number, sample_rate, mono, audio_backend, scale):
+	utils.reset_cpu_threads(1)
 	for i in range(3):
 		read_audio(audio_path, sample_rate = sample_rate, mono = mono, backend = audio_backend, normalize=False)
 	
