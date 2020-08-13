@@ -31,7 +31,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		mono = True,
 		segmented = False,
 		time_padding_multiple = 1,
-		audio_backend = 'sox',
+		audio_backend = None,
 		exclude = set(),
 		join_transcript = False
 	):
@@ -330,26 +330,28 @@ class Labels:
 
 	def postprocess_transcript(
 		self,
-		word,
+		text,
 		replace_blank = True,
 		replace_space = False,
 		replace_repeat = True,
 		replace_unk = True,
 		collapse_repeat = False,
+		strip = True,
 		phonetic_replace_groups = []
 	):
+		if strip:
+			text = text.strip()
 		if replace_blank is not False:
-			word = word.replace(self.blank, '' if replace_blank is True else replace_blank)
+			text = text.replace(self.blank, '' if replace_blank is True else replace_blank)
 		if replace_unk is True:
-			word = word.replace(self.unk, '' if replace_unk is True else replace_unk)
+			text = text.replace(self.unk, '' if replace_unk is True else replace_unk)
 		if replace_space is not False:
-			word = word.replace(self.space, replace_space)
+			text = text.replace(self.space, replace_space)
 		if replace_repeat is True:
-			word = ''.join(c if i == 0 or c != self.repeat else word[i - 1] for i, c in enumerate(word))
-
+			text = ''.join(c if i == 0 or c != self.repeat else text[i - 1] for i, c in enumerate(text))
 		if collapse_repeat:
-			word = ''.join(c if i == 0 or c != word[i - 1] else '' for i, c in enumerate(word))
-		return word
+			text = ''.join(c if i == 0 or c != text[i - 1] else '' for i, c in enumerate(text))
+		return text
 
 	def __getitem__(self, idx):
 		return {

@@ -18,7 +18,7 @@ def read_audio(
 	normalize = True,
 	mono = True,
 	byte_order = 'little',
-	backend = 'ffmpeg',
+	backend = None,
 	raw_s16le = None,
 	raw_sample_rate = None,
 	raw_num_channels = None,
@@ -30,7 +30,7 @@ def read_audio(
 					raw_s16le = f.read()
 			sample_rate_, signal = raw_sample_rate, torch.ShortTensor(torch.ShortStorage.from_buffer(raw_s16le, byte_order = byte_order)).reshape(-1, raw_num_channels).t()
 
-		elif backend == 'scipy' and audio_path.endswith('.wav'):
+		elif backend in ['scipy', None] and audio_path.endswith('.wav'):
 			sample_rate_, signal = scipy.io.wavfile.read(audio_path)
 			signal = torch.as_tensor(signal[None, :] if len(signal.shape) == 1 else signal.T)
 
@@ -61,7 +61,7 @@ def read_audio(
 			sample_rate_, signal = sample_rate, \
                                         torch.ShortTensor(torch.ShortStorage.from_buffer(subprocess.check_output(
 				params), byte_order = byte_order)).reshape(-1, num_channels).t()
-		elif backend == 'ffmpeg':
+		elif backend in ['ffmpeg', None]:
 			num_channels = int(
 				subprocess.check_output([
 					'ffprobe',
