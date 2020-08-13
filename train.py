@@ -116,7 +116,7 @@ def evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyze
 				f'{args.experiment_id} {val_dataset_name} {labels_name}',
 				f'| epoch {epoch} iter {iteration}' if training else '',
 				f'| {transcripts_path} |',
-				('Entropy: {entropy:.02f} Loss: {loss:.02f} | WER:  {wer:.02%} CER: {cer:.02%} [{words_easy_errors_easy__cer:.02%}],  MER: {mer_wordwise:.02%} DER: {hyp_der:.02%}/{ref_der:.02%}\n')
+				('Entropy: {entropy:.02f} Loss: {loss:.02f} | WER:  {wer:.02%} CER: {cer:.02%} [{words_easy_errors_easy__cer_pseudo:.02%}],  MER: {mer_wordwise:.02%} DER: {hyp_der:.02%}/{ref_der:.02%}\n')
 				.format(**stats)
 			)
 			#columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_name', 'cer', 'mer', 'alignment')] + [(r['audio_name'], r['cer'], r['mer'], vis.word_alignment(r['words'])) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
@@ -264,11 +264,6 @@ def main(args):
 		model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 
 	if args.onnx:
-		#import onnx.tools.net_drawer # import GetPydotGraph, GetOpNodeProducer
-		#pydot_graph = GetPydotGraph(model_def.graph, name=model_def.graph.name, rankdir="TB", node_producer=GetOpNodeProducer("docstring", color="yellow", fillcolor="yellow", style="filled"))
-		#pydot_graph.write_dot("pipeline_transpose2x.dot")
-		#os.system('dot -O -Gdpi=300 -Tpng pipeline_transpose2x.dot')
-
 		torch.set_grad_enabled(False)
 		model.eval()
 		model.to(args.device)
@@ -299,6 +294,13 @@ def main(args):
 			onnxruntime.set_default_logger_severity(0)
 		(logits_, ) = onnxruntime_session.run(None, dict(x = waveform_input.cpu().numpy()))
 		assert torch.allclose(logits.cpu(), torch.from_numpy(logits_), rtol = 1e-02, atol = 1e-03)
+		
+		#model_def = onnx.load(args.onnx)
+		#import onnx.tools.net_drawer # import GetPydotGraph, GetOpNodeProducer
+		#pydot_graph = GetPydotGraph(model_def.graph, name=model_def.graph.name, rankdir="TB", node_producer=GetOpNodeProducer("docstring", color="yellow", fillcolor="yellow", style="filled"))
+		#pydot_graph.write_dot("pipeline_transpose2x.dot")
+		#os.system('dot -O -Gdpi=300 -Tpng pipeline_transpose2x.dot')
+
 		return
 
 	val_config = json.load(open(args.val_config)) if os.path.exists(args.val_config) else {}
@@ -306,7 +308,7 @@ def main(args):
 	for word_tag, words in val_config.get('word_tags', {}).items():
 		word_tags[word_tag] = word_tags.get(word_tag, []) + words
 	vocab = set(map(str.strip, open(args.vocab))) if os.path.exists(args.vocab) else set()
-	error_analyzer = metrics.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), metrics.ErrorTagger(vocab = vocab), val_config.get('error_analyzer', {}))
+	error_analyzer = metrics.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags), metrics.ErrorTagger(), val_config.get('error_analyzer', {}))
 
 
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
