@@ -1,6 +1,7 @@
 data/
 __pycache__/
 data/__pycache__/
+convasr_scripts/
 *.pyc
 *.pt
 scripts/experiments
