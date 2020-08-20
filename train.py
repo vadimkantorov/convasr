@@ -502,6 +502,7 @@ def main(args):
 
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
 			try:
+				#TODO check nan values in tensors, they can break running_stats in bn
 				log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'olen', 'loss'])
 			except:
 				if (not args.train_crash_oom) and utils.handle_out_of_memory_exception(model.parameters()):
