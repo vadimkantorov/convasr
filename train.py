@@ -94,9 +94,9 @@ def evaluate_model(
 
 			for r in sum(stats, []) if args.verbose else []:
 				print(f'{val_dataset_name}@{iteration}:', batch_idx, '/', len(val_data_loader), '|', args.experiment_id)
-				print('REF: "{ref_}"'.format(ref_ = r['alignment']['ref'] if analyze else r['ref'], **r))
-				print('HYP: "{hyp_}"'.format(hyp_ = r['alignment']['hyp'] if analyze else r['hyp'], **r))
-				print('WER: {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
+				print('REF: {labels_name} "{ref_}"'.format(ref_ = r['alignment']['ref'] if analyze else r['ref'], **r))
+				print('HYP: {labels_name} "{hyp_}"'.format(hyp_ = r['alignment']['hyp'] if analyze else r['hyp'], **r))
+				print('WER: {labels_name} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
 			transcript.extend(stats)
 
 		transcripts_path = os.path.join(
