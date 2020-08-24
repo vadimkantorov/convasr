@@ -94,9 +94,9 @@ def evaluate_model(
 
 			for r in sum(stats, []) if args.verbose else []:
 				print(f'{val_dataset_name}@{iteration}:', batch_idx, '/', len(val_data_loader), '|', args.experiment_id)
-				print('REF: {labels} "{ref_}"'.format(ref_ = r['alignment']['ref'] if analyze else r['ref'], **r))
-				print('HYP: {labels} "{hyp_}"'.format(hyp_ = r['alignment']['hyp'] if analyze else r['hyp'], **r))
-				print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
+				print('REF: "{ref_}"'.format(ref_ = r['alignment']['ref'] if analyze else r['ref'], **r))
+				print('HYP: "{hyp_}"'.format(hyp_ = r['alignment']['hyp'] if analyze else r['hyp'], **r))
+				print('WER: {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
 			transcript.extend(stats)
 
 		transcripts_path = os.path.join(
@@ -584,6 +584,9 @@ def main(args):
 			if iteration and args.iterations and iteration >= args.iterations:
 				return
 
+			if args.iterations_per_epoch and iteration > 0 and iteration % args.iterations_per_epoch == 0:
+				break
+
 			tic = time.time()
 
 		sampler.batch_idx = 0
@@ -627,6 +630,7 @@ if __name__ == '__main__':
 	parser.add_argument('--fp16-keep-batchnorm-fp32', default = None, action = 'store_true')
 	parser.add_argument('--epochs', type = int, default = 5)
 	parser.add_argument('--iterations', type = int, default = None)
+	parser.add_argument('--iterations-per-epoch', type = int, default = None)
 	parser.add_argument('--train-data-path', nargs = '*', default = [])
 	parser.add_argument('--train-data-mixing', type = float, nargs = '*')
 	parser.add_argument('--val-data-path', nargs = '*', default = [])

@@ -131,7 +131,7 @@ def write_audio(audio_path, signal, sample_rate, mono = False):
 
 
 def resample(signal, sample_rate_, sample_rate):
-	return torch.as_tensor(librosa.resample(numpy.asarray(signal), sample_rate_, sample_rate)), sample_rate
+	return torch.from_numpy(np.expand_dims(librosa.resample(np.squeeze(signal.numpy()), sample_rate_, sample_rate), axis=0)), sample_rate
 
 
 def compute_duration(audio_path, backend = 'ffmpeg'):
