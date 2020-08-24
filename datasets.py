@@ -73,11 +73,10 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				self.examples
 			)
 		) if duration_filter else self.examples
-		
 		self.examples = [e for e in self.examples if transcripts.audio_name(e[0]) not in exclude] if len(exclude) > 0 else self.examples
 		'''
 		# TODO: don't forget to add this to transcribe.py!
-                def safe_coding_for_audio_lenghts:
+		def safe_coding_for_audio_lenghts:
 			duration = max(transcripts.compute_duration(t, hours=True) for t in meta)
 			if x.numel() == 0 or (args.skip_file_longer_than_hours and duration > args.skip_file_longer_than_hours):
 				print(
@@ -103,7 +102,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			transcript = transcript[0]
 			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration=self.max_duration) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
 
-			transcript = dict(dict(audio_name = os.path.basename(transcript['audio_path'])), ref = transcript['ref'], audio_path=transcript['audio_path'])#)#**transcript
+			transcript = dict(dict(audio_name = os.path.basename(transcript['audio_path'])), ref = transcript['ref'], audio_path=transcript['audio_path'])
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug
 										).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
