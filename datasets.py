@@ -76,7 +76,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		
 		self.examples = [e for e in self.examples if transcripts.audio_name(e[0]) not in exclude] if len(exclude) > 0 else self.examples
 		'''
-		def safe_coding_for_audio_lenghts:
+		# TODO: don't forget to add this to transcribe.py!
+                def safe_coding_for_audio_lenghts:
 			duration = max(transcripts.compute_duration(t, hours=True) for t in meta)
 			if x.numel() == 0 or (args.skip_file_longer_than_hours and duration > args.skip_file_longer_than_hours):
 				print(
