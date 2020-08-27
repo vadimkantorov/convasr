@@ -111,22 +111,18 @@ class ErrorAnalyzer:
 			w['cer'] = cer(w['hyp_orig'], w['ref_orig'])
 
 		res['alignment'] = word_alignment
-		res['char_stats'] = dict(
-			ok = sum(_ref_[i] == _hyp_[i] for i in range(len(_ref_))),
-			replace = sum(
-				_ref_[i] != placeholder and _ref_[i] != _hyp_[i] and _hyp_[i] != placeholder
-				for i in range(len(_ref_))
-			),
-			delete = sum(
-				_ref_[i] != placeholder and _ref_[i] != _hyp_[i] and _hyp_[i] == placeholder
-				for i in range(len(_ref_))
-			),
-			insert = sum(_ref_[i] == placeholder and _hyp_[i] != placeholder for i in range(len(_ref_))),
-			delete_spaces = sum(_ref_[i] == space and _hyp_[i] != space for i in range(len(_ref_))),
-			insert_spaces = sum(_hyp_[i] == space and _ref_[i] != space for i in range(len(_ref_))),
-			total_spaces = sum(_ref_[i] == space for i in range(len(_ref_)))
-		),
-		# error_ok_tags
+		res['char_stats'] = char_stats = dict(
+			ok = 0, replace = 0, delete = 0, insert = 0, delete_spaces = 0, insert_spaces = 0, total_spaces = 0)
+		for ch, cr in zip(_hyp_, _ref_):
+			char_stats['ok'] += (cr == ch)
+			char_stats['replace'] += (cr != placeholder and cr != ch and ch != placeholder)
+			char_stats['delete'] += (cr != placeholder and cr != ch and ch == placeholder)
+			char_stats['insert'] += (cr == placeholder and ch != placeholder)
+			char_stats['delete_spaces'] += (cr == space and ch != space)
+			char_stats['insert_spaces'] += (ch == space and cr != space)
+			char_stats['total_spaces'] += (cr == space)
+		res['char_stats'] = dict(char_stats)
+		# TODO: add error_ok_tags
 
 		def filter_words(
 			word_alignment,
