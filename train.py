@@ -67,37 +67,43 @@ def evaluate_model(
 				pass
 		model.eval()
 		cpu_list = lambda l: [[t.cpu() for t in t_] for t_ in l]
-		for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(val_data_loader,
-																						model,
-																						labels,
-																						decoder,
-																						args.device,
-																						args.val_crash_oom)):
+
+		tic = time.time()
+		ref_, hyp_, audio_path_, loss_, entropy_ = [], [], [], [], []
+		for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(
+				val_data_loader, model, labels, decoder, args.device, args.val_crash_oom)):
+			loss_.extend(loss.tolist())
+			entropy_.extend(entropy.tolist())
 			logits_.extend(zip(*cpu_list(logits)) if not training and args.logits else [])
 			y_.extend(cpu_list(y))
-			stats = [
-				[
-					error_analyzer.analyze(
-						ref = l.normalize_text(zipped[2]['ref']),
-						hyp = h,
-						labels = l,
-						audio_path = zipped[2]['audio_path'],
-						#phonetic_replace_groups = lang.PHONETIC_REPLACE_GROUPS,
-						full = analyze,
-						#vocab = vocab,
-						loss = zipped[0],
-						entropy = zipped[1]
-					) for l,
-					h in zip(labels, zipped[3:])
-				] for zipped in zip(loss.tolist(), entropy.tolist(), meta, *hyp)
-			]
+			audio_path_.extend(m['audio_path'] for m in meta)
+			ref_.extend(labels[0].normalize_text(m['ref']) for m in meta)
+			hyp_.extend(zip(*hyp))  # .T , [[95] * (1 or 2)] -> [tuple(1 or 2) * 95]
+		toc_apply_model = time.time()
+		print(f"Apply model {toc_apply_model - tic:.3f} sec")
 
-			for r in sum(stats, []) if args.verbose else []:
-				print(f'{val_dataset_name}@{iteration}:', batch_idx, '/', len(val_data_loader), '|', args.experiment_id)
-				print('REF: {labels} "{ref_}"'.format(ref_ = r['alignment']['ref'] if analyze else r['ref'], **r))
-				print('HYP: {labels} "{hyp_}"'.format(hyp_ = r['alignment']['hyp'] if analyze else r['hyp'], **r))
-				print('WER: {labels} {wer:.02%} | CER: {cer:.02%}\n'.format(**r))
-			transcript.extend(stats)
+		for i, (ref, hyp_tuple, audio_path, loss, entropy) in enumerate(zip(ref_, hyp_, audio_path_, loss_, entropy_)):
+			for label, hyp in zip(labels, hyp_tuple):
+				new_transcript = error_analyzer.analyze(
+					ref = ref,
+					hyp = hyp,
+					labels = label,
+					audio_path = audio_path,
+					full = analyze,
+					loss = loss,
+					entropy = entropy
+				)
+				transcript.append(new_transcript)
+				if args.verbose:
+					print(f'{val_dataset_name}@{iteration}:', i, '/', len(audio_path_), '|', args.experiment_id)
+					# TODO: don't forget to fix aligned hyp & ref output!
+					# hyp = new_transcript['alignment']['hyp'] if analyze else new_transcript['hyp']
+					# ref = new_transcript['alignment']['ref'] if analyze else new_transcript['ref']
+					print('REF: {labels_name} "{ref}"'.format(**new_transcript))
+					print('HYP: {labels_name} "{hyp}"'.format(**new_transcript))
+					print('WER: {labels_name} {wer:.02%} | CER: {cer:.02%}\n'.format(**new_transcript))
+		toc_analyze = time.time()
+		print(f"Analyze {toc_analyze - toc_apply_model:.3f} sec")
 
 		transcripts_path = os.path.join(
 			args.experiment_dir,
@@ -106,20 +112,20 @@ def evaluate_model(
 		) if training else args.val_transcripts_format.format(
 			val_dataset_name = val_dataset_name, decoder = args.decoder
 		)
-		for r_ in zip(*transcript):
-			labels_name = r_[0]['labels_name']
-			stats = error_analyzer.aggregate(r_)
+		for i, label in enumerate(labels):
+			transcript_by_label = transcript[i:: len(labels)]
+			stats = error_analyzer.aggregate(transcript_by_label)
 			if analyze:
 				with open(f'{transcripts_path}.errors.csv', 'w') as f:
 					f.writelines('{hyp},{ref},{error_tag}\n'.format(**w) for w in stats['errors']['words'])
 
 			print('errors', stats['errors']['distribution'])
-			cer = torch.FloatTensor([r['cer'] for r in r_])
-			loss = torch.FloatTensor([r['loss'] for r in r_])
+			cer = torch.FloatTensor([r['cer'] for r in transcript_by_label])
+			loss = torch.FloatTensor([r['loss'] for r in transcript_by_label])
 			print('cer', metrics.quantiles(cer))
 			print('loss', metrics.quantiles(loss))
 			print(
-				f'{args.experiment_id} {val_dataset_name} {labels_name}',
+				f'{args.experiment_id} {val_dataset_name} {label.name}',
 				f'| epoch {epoch} iter {iteration}' if training else '',
 				f'| {transcripts_path} |',
 				('Entropy: {entropy:.02f} Loss: {loss:.02f} | WER:  {wer:.02%} CER: {cer:.02%} [{words_easy_errors_easy__cer_pseudo:.02%}],  MER: {mer_wordwise:.02%} DER: {hyp_der:.02%}/{ref_der:.02%}\n')
@@ -128,7 +134,7 @@ def evaluate_model(
 			#columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_name', 'cer', 'mer', 'alignment')] + [(r['audio_name'], r['cer'], r['mer'], vis.word_alignment(r['words'])) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
 			if training:
 				tensorboard.add_scalars(
-					'datasets/' + val_dataset_name + '_' + labels_name,
+					'datasets/' + val_dataset_name + '_' + label.name,
 					dict(
 						wer = stats['wer'] * 100.0,
 						cer = stats['cer'] * 100.0,
@@ -139,37 +145,34 @@ def evaluate_model(
 				tensorboard.flush()
 
 		with open(transcripts_path, 'w') as f:
-			json.dump([r for t in sorted(transcript, key = lambda t: t[0]['cer'], reverse = True) for r in t],
-						f,
-						ensure_ascii = False,
-						indent = 2,
-						sort_keys = True)
+			json.dump(transcript, f, ensure_ascii = False, indent = 2, sort_keys = True)
 		if analyze:
 			vis.errors([transcripts_path], audio = args.vis_errors_audio)
 
-		if args.logits:
-			logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
-			torch.save(
-				list(
-					sorted([
-						dict(
-							**r_,
-							logits = l_ if not args.logits_topk else models.sparse_topk(l_, args.logits_topk, dim = 0),
-							y = y_,
-							ydecoded = labels_.decode(y_.tolist())
-						) for r,
-						l,
-						y in zip(transcript, logits_, y_) for labels_,
-						r_,
-						l_,
-						y_ in zip(labels, r, l, y)
-					],
-							key = lambda r: r['cer'],
-							reverse = True)
-				),
-				logits_file_path
-			)
-			print('Logits saved:', logits_file_path)
+		# TODO: transcript got flattened make this code work:
+		# if args.logits:
+		# 	logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
+		# 	torch.save(
+		# 		list(
+		# 			sorted([
+		# 				dict(
+		# 					**r_,
+		# 					logits = l_ if not args.logits_topk else models.sparse_topk(l_, args.logits_topk, dim = 0),
+		# 					y = y_,
+		# 					ydecoded = labels_.decode(y_.tolist())
+		# 				) for r,
+		# 				l,
+		# 				y in zip(transcript, logits_, y_) for labels_,
+		# 				r_,
+		# 				l_,
+		# 				y_ in zip(labels, r, l, y)
+		# 			],
+		# 					key = lambda r: r['cer'],
+		# 					reverse = True)
+		# 		),
+		# 		logits_file_path
+		# 	)
+		# 	print('Logits saved:', logits_file_path)
 
 	checkpoint_path = os.path.join(
 		args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)
