@@ -5,6 +5,7 @@ import json
 import functools
 import torch
 import Levenshtein
+import psutil
 
 placeholder = '|'
 space = ' '
@@ -188,7 +189,7 @@ class PerformanceMeter(dict):
 			self[avg_name] = exp_moving_average(self.get(avg_name, 0), value)
 			self[max_name] = max(self.get(max_name, 0), value)
 
-	def update_memory_metrics(self, byte_scaler = 1024**3):
+	def update_memory_metrics(self, byte_scaler = 1024**3, measure_pss_ram = False):
 		device_count = torch.cuda.device_count()
 		total_allocated = 0
 		total_reserved = 0
@@ -202,6 +203,14 @@ class PerformanceMeter(dict):
 			self.update(dict(allocated = allocated, reserved = reserved), f'cuda:{i}')
 
 		self.update(dict(allocated = total_allocated, reserved = total_reserved), 'total')
+
+		if measure_pss_ram:
+			process = psutil.Process()
+			children = process.children(recursive=True)
+			total_pss_ram = process.memory_full_info().pss + sum(
+				child.memory_full_info().pss for child in children
+			)
+			self.update(dict(pss_ram = total_pss_ram / byte_scaler))
 
 	def update_time_metrics(self, time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model):
 		self.update(
