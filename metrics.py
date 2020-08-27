@@ -5,6 +5,7 @@ import json
 import functools
 import torch
 import Levenshtein
+import psutil
 
 placeholder = '|'
 space = ' '
@@ -110,22 +111,18 @@ class ErrorAnalyzer:
 			w['cer'] = cer(hyp = w['hyp_orig'], ref = w['ref_orig'])
 
 		res['alignment'] = word_alignment
-		res['char_stats'] = dict(
-			ok = sum(_ref_[i] == _hyp_[i] for i in range(len(_ref_))),
-			replace = sum(
-				_ref_[i] != placeholder and _ref_[i] != _hyp_[i] and _hyp_[i] != placeholder
-				for i in range(len(_ref_))
-			),
-			delete = sum(
-				_ref_[i] != placeholder and _ref_[i] != _hyp_[i] and _hyp_[i] == placeholder
-				for i in range(len(_ref_))
-			),
-			insert = sum(_ref_[i] == placeholder and _hyp_[i] != placeholder for i in range(len(_ref_))),
-			delete_spaces = sum(_ref_[i] == space and _hyp_[i] != space for i in range(len(_ref_))),
-			insert_spaces = sum(_hyp_[i] == space and _ref_[i] != space for i in range(len(_ref_))),
-			total_spaces = sum(_ref_[i] == space for i in range(len(_ref_)))
-		),
-		# error_ok_tags
+		res['char_stats'] = char_stats = dict(
+			ok = 0, replace = 0, delete = 0, insert = 0, delete_spaces = 0, insert_spaces = 0, total_spaces = 0)
+		for ch, cr in zip(_hyp_, _ref_):
+			char_stats['ok'] += (cr == ch)
+			char_stats['replace'] += (cr != placeholder and cr != ch and ch != placeholder)
+			char_stats['delete'] += (cr != placeholder and cr != ch and ch == placeholder)
+			char_stats['insert'] += (cr == placeholder and ch != placeholder)
+			char_stats['delete_spaces'] += (cr == space and ch != space)
+			char_stats['insert_spaces'] += (ch == space and cr != space)
+			char_stats['total_spaces'] += (cr == space)
+		res['char_stats'] = dict(char_stats)
+		# TODO: add error_ok_tags
 
 		def filter_words(
 			word_alignment,
@@ -187,7 +184,7 @@ class PerformanceMeter(dict):
 			self[avg_name] = exp_moving_average(self.get(avg_name, 0), value)
 			self[max_name] = max(self.get(max_name, 0), value)
 
-	def update_memory_metrics(self, byte_scaler = 1024**3):
+	def update_memory_metrics(self, byte_scaler = 1024**3, measure_pss_ram = False):
 		device_count = torch.cuda.device_count()
 		total_allocated = 0
 		total_reserved = 0
@@ -201,6 +198,14 @@ class PerformanceMeter(dict):
 			self.update(dict(allocated = allocated, reserved = reserved), f'cuda:{i}')
 
 		self.update(dict(allocated = total_allocated, reserved = total_reserved), 'total')
+
+		if measure_pss_ram:
+			process = psutil.Process()
+			children = process.children(recursive=True)
+			total_pss_ram = process.memory_full_info().pss + sum(
+				child.memory_full_info().pss for child in children
+			)
+			self.update(dict(pss_ram = total_pss_ram / byte_scaler))
 
 	def update_time_metrics(self, time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model):
 		self.update(
