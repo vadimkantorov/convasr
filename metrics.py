@@ -95,7 +95,7 @@ class ErrorAnalyzer:
 		return stats
 
 	def analyze(self, *, ref, hyp, labels, audio_path = '', full = False, **kwargs):
-		hyp, ref = min((cer(h, r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
+		hyp, ref = min((cer(hyp = h, ref = r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
 		hyp_postproc, ref_postproc = map(labels.postprocess_transcript, [hyp, ref])
 		res = dict(
 			labels_name = labels.name,
@@ -107,7 +107,7 @@ class ErrorAnalyzer:
 		)
 		_hyp_, _ref_, word_alignment = align_words(hyp = hyp, ref = ref, word_tagger = self.word_tagger, error_tagger = self.error_tagger) # **config['align_words']) 
 		for w in word_alignment:
-			w['cer'] = cer(w['hyp_orig'], w['ref_orig'])
+			w['cer'] = cer(hyp = w['hyp_orig'], ref = w['ref_orig'])
 
 		res['alignment'] = word_alignment
 		res['char_stats'] = dict(
@@ -152,24 +152,23 @@ class ErrorAnalyzer:
 			postprocess_transcript = functools.partial(labels.postprocess_transcript, collapse_repeat = collapse_repeat, phonetic_replace_groups = phonetic_replace_groups)
 			
 			num_words = len(filtered_alignment)
-			num_words_ok = sum(ErrorTagger.ok not in w['error_tags'] for w in filtered_alignment)
+			num_words_ok = sum(ErrorTagger.ok in w['error_tags'] for w in filtered_alignment)
 			num_words_missing = sum(ErrorTagger.missing in w['error_tags'] for w in filtered_alignment)
 			
 			mer_wordwise = num_words_missing / num_words if num_words != 0 else 0
 			wer_wordwise = num_words_ok / num_words if num_words != 0 else 0
-			mer_wordwise = num_words_missing / num_words if num_words != 0 else 0
 			cer_wordwise = sum(w['cer'] for w in filtered_alignment) / num_words if num_words != 0 else 0
 
-			hyp_all, ref_all = space.join(w['ref_orig'] if w in filtered_alignment else w['hyp_orig'] for w in word_alignment), space.join(w['ref_orig'] for w in word_alignment)
-			hyp_all, ref_all = map(postprocess_transcript, [hyp_all, ref_all])
-			cer_all, wer_all = cer(hyp = hyp_all, ref = ref_all), wer(hyp = hyp_all, ref = ref_all)
+			hyp_pseudo, ref_pseudo = space.join(w['ref_orig'] if w in filtered_alignment else w['hyp_orig'] for w in word_alignment), space.join(w['ref_orig'] for w in word_alignment)
+			hyp_pseudo, ref_pseudo = map(postprocess_transcript, [hyp_pseudo, ref_pseudo])
+			cer_pseudo, wer_pseudo = cer(hyp = hyp_pseudo, ref = ref_pseudo), wer(hyp = hyp_pseudo, ref = ref_pseudo)
 
 			hyp_only, ref_only = space.join(w['hyp_orig'] for w in filtered_alignment), space.join(w['ref_orig'] for w in filtered_alignment)
 			hyp_only, ref_only = map(postprocess_transcript, [hyp_only, ref_only])
 			cer_only, wer_only = cer(hyp = hyp_only, ref = ref_only), wer(hyp = hyp_only, ref = ref_only)
 			hyp_der, ref_der = [sum(self.word_tagger.vocab_hit in w[k] for w in filtered_alignment) / num_words if num_words != 0 else 0 for k in ['hyp_tags', 'ref_tags']]
 
-			return dict(cer_wordwise = cer_wordwise, wer_wordwise = wer_wordwise, mer_wordwise = mer_wordwise, num_words = num_words, num_words_ok = num_words_ok, num_words_missing = num_words_missing, ref_der = ref_der, hyp_der = hyp_der, cer = cer_only, wer = wer_only, cer_pseudo = cer_all, wer_pseudo = wer_all)
+			return dict(cer_wordwise = cer_wordwise, wer_wordwise = wer_wordwise, mer_wordwise = mer_wordwise, num_words = num_words, num_words_ok = num_words_ok, num_words_missing = num_words_missing, ref_der = ref_der, hyp_der = hyp_der, cer = cer_only, wer = wer_only, cer_pseudo = cer_pseudo, wer_pseudo = wer_pseudo)
 		
 		for config_name, config in self.configs.items():
 			filtered_alignment = filter_words(word_alignment, **config)
@@ -323,12 +322,12 @@ def align(hyp, ref, score_sub = -2, score_del = -4, score_ins = -3):
 	ref, hyp = aligner.align(list(ref), list(hyp))
 	return ''.join(hyp), ''.join(ref)
 
-def cer(hyp, ref, edit_distance = Levenshtein.distance):
+def cer(*, hyp, ref, edit_distance = Levenshtein.distance):
 	cer_ref_len = len(ref.replace(' ', '')) or 1
 	return edit_distance(hyp.replace(' ', '').lower(), ref.replace(' ', '').lower()) / cer_ref_len if hyp != ref else 0
 
 
-def wer(hyp, ref, edit_distance = Levenshtein.distance):
+def wer(*, hyp, ref, edit_distance = Levenshtein.distance):
 	# build mapping of words to integers, Levenshtein package only accepts strings
 	b = set(hyp.split() + ref.split())
 	word2char = dict(zip(b, range(len(b))))
