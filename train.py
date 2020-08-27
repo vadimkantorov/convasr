@@ -95,7 +95,7 @@ def evaluate_model(
 				)
 				transcript.append(new_transcript)
 				if args.verbose:
-					print(f'{val_dataset_name}@{iteration}:', i, '/', len(audio_path), '|', args.experiment_id)
+					print(f'{val_dataset_name}@{iteration}:', i, '/', len(audio_path_), '|', args.experiment_id)
 					# TODO: don't forget to fix aligned hyp & ref output!
 					# hyp = new_transcript['alignment']['hyp'] if analyze else new_transcript['hyp']
 					# ref = new_transcript['alignment']['ref'] if analyze else new_transcript['ref']
@@ -145,37 +145,34 @@ def evaluate_model(
 				tensorboard.flush()
 
 		with open(transcripts_path, 'w') as f:
-			json.dump([r for t in sorted(transcript, key = lambda t: t[0]['cer'], reverse = True) for r in t],
-						f,
-						ensure_ascii = False,
-						indent = 2,
-						sort_keys = True)
+			json.dump(transcript, f, ensure_ascii = False, indent = 2, sort_keys = True)
 		if analyze:
 			vis.errors([transcripts_path], audio = args.vis_errors_audio)
 
-		if args.logits:
-			logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
-			torch.save(
-				list(
-					sorted([
-						dict(
-							**r_,
-							logits = l_ if not args.logits_topk else models.sparse_topk(l_, args.logits_topk, dim = 0),
-							y = y_,
-							ydecoded = labels_.decode(y_.tolist())
-						) for r,
-						l,
-						y in zip(transcript, logits_, y_) for labels_,
-						r_,
-						l_,
-						y_ in zip(labels, r, l, y)
-					],
-							key = lambda r: r['cer'],
-							reverse = True)
-				),
-				logits_file_path
-			)
-			print('Logits saved:', logits_file_path)
+		# TODO: transcript got flattened make this code work:
+		# if args.logits:
+		# 	logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
+		# 	torch.save(
+		# 		list(
+		# 			sorted([
+		# 				dict(
+		# 					**r_,
+		# 					logits = l_ if not args.logits_topk else models.sparse_topk(l_, args.logits_topk, dim = 0),
+		# 					y = y_,
+		# 					ydecoded = labels_.decode(y_.tolist())
+		# 				) for r,
+		# 				l,
+		# 				y in zip(transcript, logits_, y_) for labels_,
+		# 				r_,
+		# 				l_,
+		# 				y_ in zip(labels, r, l, y)
+		# 			],
+		# 					key = lambda r: r['cer'],
+		# 					reverse = True)
+		# 		),
+		# 		logits_file_path
+		# 	)
+		# 	print('Logits saved:', logits_file_path)
 
 	checkpoint_path = os.path.join(
 		args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)
