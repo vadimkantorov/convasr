@@ -51,14 +51,14 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.audio_backend = audio_backend
 		self.speakers = speakers
 
-		gzopen = lambda data_path: gzip.open(data_path, 'rt') if data_path.endswith('.gz') else open(data_path)
+		maybegzopen = lambda data_path: gzip.open(data_path, 'rt') if data_path.endswith('.gz') else open(data_path)
 		duration = lambda example: sum(map(transcripts.compute_duration, example))
 		data_paths = data_paths if isinstance(data_paths, list) else [data_paths]
 
 		def read_transcript(data_path):
 			transcript_path = data_path + '.json' if '.json' not in data_path else data_path
-			return json.load(gzopen(transcript_path)
-								) if os.path.exists(transcript_path) else [dict(audio_path = data_path)]
+			return json.load(maybegzopen(transcript_path)
+								) if any(map(transcript_path.endswith, ['.json', '.json.gz'])) else [dict(audio_path = data_path)]
 
 		self.examples = [
 			list(g) for data_path in data_paths for k,
@@ -73,6 +73,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				self.examples
 			)
 		) if duration_filter else self.examples
+
 		self.examples = [e for e in self.examples if transcripts.audio_name(e[0]) not in exclude]
 		'''
 		def safe_coding_for_audio_lenghts:
@@ -230,14 +231,15 @@ class Labels:
 	unk_sentencepiece = '<unk>'
 
 	def __init__(self, lang, bpe = None, name = '', candidate_sep = '', normalize_text_config = {}):
-		self.lang = lang
 		self.name = name
 		self.bpe = None
 		if bpe:
 			self.bpe = sentencepiece.SentencePieceProcessor()
 			self.bpe.Load(bpe)
 
-		self.alphabet = self.lang.ALPHABET
+		self.alphabet = lang.ALPHABET
+		self.lang_normalize_text = lang.normalize_text
+		self.lang_stem = lang.stem
 		self.blank_idx = len(self) - 1
 		self.space_idx = self.blank_idx - 1
 		self.repeat_idx = self.blank_idx - 2
@@ -269,7 +271,7 @@ class Labels:
 
 	def normalize_text(self, text):
 		return self.candidate_sep.join(
-			self.space.join(map(self.normalize_word, self.lang.normalize_text(candidate).split(self.space))) for candidate in self.split_candidates(text)
+			self.space.join(map(self.normalize_word, self.lang_normalize_text(candidate).split(self.space))) for candidate in self.split_candidates(text)
 		)  # or self.unk
 
 	def encode(self, text, normalize = True):
