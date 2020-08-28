@@ -95,20 +95,18 @@ class ErrorAnalyzer:
 		stats['errors'] = dict(distribution = dict(collections.OrderedDict(sorted(error_chars.items()))), words = error_words)
 		return stats
 
-	def analyze(self, *, ref, hyp, labels, audio_path = '', full = False, **kwargs):
-		hyp, ref = min((cer(hyp = h, ref = r), (h, r)) for r in labels.split_candidates(ref) for h in labels.split_candidates(hyp))[1]
-		hyp_postproc, ref_postproc = map(labels.postprocess_transcript, [hyp, ref])
+	def analyze(self, hyp, ref, full = False, postprocess_transcript = (lambda s, *args, **kwargs: s), split_candidates = (lambda s: [s]), extra = {}):
+		# TODO: add error_ok_tags
+		# TODO: respect full flag
+
+		hyp, ref = min((cer(hyp = h, ref = r), (h, r)) for r in split_candidates(ref) for h in split_candidates(hyp))[1] 
+		hyp_postproc, ref_postproc = map(postprocess_transcript, [hyp, ref])
 		res = dict(
-			labels_name = labels.name,
-			audio_path = audio_path,
-			audio_name = os.path.basename(audio_path),
 			ref = ref,
 			hyp = hyp,
-			**kwargs
+			**extra
 		)
-		_hyp_, _ref_, word_alignment = align_words(hyp = hyp, ref = ref, word_tagger = self.word_tagger, error_tagger = self.error_tagger) # **config['align_words']) 
-		for w in word_alignment:
-			w['cer'] = cer(hyp = w['hyp_orig'], ref = w['ref_orig'])
+		_hyp_, _ref_, word_alignment = align_words(hyp = hyp, ref = ref, word_tagger = self.word_tagger, error_tagger = self.error_tagger, compute_cer = True) # **config['align_words']) 
 
 		res['alignment'] = word_alignment
 		res['char_stats'] = char_stats = dict(
@@ -121,8 +119,6 @@ class ErrorAnalyzer:
 			char_stats['delete_spaces'] += (cr == space and ch != space)
 			char_stats['insert_spaces'] += (ch == space and cr != space)
 			char_stats['total_spaces'] += (cr == space)
-		res['char_stats'] = dict(char_stats)
-		# TODO: add error_ok_tags
 
 		def filter_words(
 			word_alignment,
@@ -146,7 +142,7 @@ class ErrorAnalyzer:
 			return res
 
 		def compute_metrics(word_alignment, filtered_alignment, collapse_repeat = False, phonetic_replace_groups = [], **kwargs):
-			postprocess_transcript = functools.partial(labels.postprocess_transcript, collapse_repeat = collapse_repeat, phonetic_replace_groups = phonetic_replace_groups)
+			postprocess_transcript_reified = functools.partial(postprocess_transcript, collapse_repeat = collapse_repeat, phonetic_replace_groups = phonetic_replace_groups)
 			
 			num_words = len(filtered_alignment)
 			num_words_ok = sum(ErrorTagger.ok in w['error_tags'] for w in filtered_alignment)
@@ -157,11 +153,11 @@ class ErrorAnalyzer:
 			cer_wordwise = sum(w['cer'] for w in filtered_alignment) / num_words if num_words != 0 else 0
 
 			hyp_pseudo, ref_pseudo = space.join(w['ref_orig'] if w in filtered_alignment else w['hyp_orig'] for w in word_alignment), space.join(w['ref_orig'] for w in word_alignment)
-			hyp_pseudo, ref_pseudo = map(postprocess_transcript, [hyp_pseudo, ref_pseudo])
+			hyp_pseudo, ref_pseudo = map(postprocess_transcript_reified, [hyp_pseudo, ref_pseudo])
 			cer_pseudo, wer_pseudo = cer(hyp = hyp_pseudo, ref = ref_pseudo), wer(hyp = hyp_pseudo, ref = ref_pseudo)
 
 			hyp_only, ref_only = space.join(w['hyp_orig'] for w in filtered_alignment), space.join(w['ref_orig'] for w in filtered_alignment)
-			hyp_only, ref_only = map(postprocess_transcript, [hyp_only, ref_only])
+			hyp_only, ref_only = map(postprocess_transcript_reified, [hyp_only, ref_only])
 			cer_only, wer_only = cer(hyp = hyp_only, ref = ref_only), wer(hyp = hyp_only, ref = ref_only)
 			hyp_der, ref_der = [sum(self.word_tagger.vocab_hit in w[k] for w in filtered_alignment) / num_words if num_words != 0 else 0 for k in ['hyp_tags', 'ref_tags']]
 
@@ -232,7 +228,7 @@ def exp_moving_average(avg, val, max = 0, K = 50):
 	return (1. / K) * min(val, max) + (1 - 1. / K) * avg
 
 
-def align_words(*, hyp, ref, word_tagger = WordTagger(), error_tagger = ErrorTagger(), postproc = True):
+def align_words(*, hyp, ref, word_tagger = WordTagger(), error_tagger = ErrorTagger(), postproc = True, compute_cer = False):
 	def split_by_space(*, hyp, ref, copy_space = False):
 		assert len(hyp) == len(ref)
 		hyp, ref = list(hyp)[:], list(ref)[:]
@@ -314,6 +310,8 @@ def align_words(*, hyp, ref, word_tagger = WordTagger(), error_tagger = ErrorTag
 		w['error_tags'] = [error_tagger.tag(hyp = w['hyp'], ref = w['ref'], hyp_tags = w['hyp_tags'], ref_tags = w['ref_tags'])[0]]
 		w['error_tag'] = w['error_tags'][0]
 		w['len'] = len(w['ref_orig'])
+		if compute_cer:
+			w['cer'] = cer(hyp = w['hyp_orig'], ref = w['ref_orig'])
 		word_alignment.append(w)
 	return ''.join(hyp), ''.join(ref), word_alignment
 

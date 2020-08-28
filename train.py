@@ -7,19 +7,19 @@ import shutil
 import time
 import torch.utils.data
 import torch.utils.tensorboard
+import onnxruntime
 import apex
 import datasets
 import decoders
 import exphtml
 import metrics
 import models
-import onnxruntime
 import optimizers
 import torch
 import transforms
 import vis
 import utils
-
+import transcripts
 
 def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
 	for meta, x, xlen, y, ylen in data_loader:
@@ -85,13 +85,17 @@ def evaluate_model(
 		for i, (ref, hyp_tuple, audio_path, loss, entropy) in enumerate(zip(ref_, hyp_, audio_path_, loss_, entropy_)):
 			for label, hyp in zip(labels, hyp_tuple):
 				new_transcript = error_analyzer.analyze(
-					ref = ref,
 					hyp = hyp,
-					labels = label,
-					audio_path = audio_path,
+					ref = ref,
 					full = analyze,
-					loss = loss,
-					entropy = entropy
+					postprocess_transcript = label.postprocess_transcript,
+					extra = dict(
+						labels_name = label.name,
+						audio_path = audio_path,
+						audio_name = transcripts.audio_name(audio_path),
+						loss = loss,
+						entropy = entropy
+					)
 				)
 				transcript.append(new_transcript)
 				if args.verbose:

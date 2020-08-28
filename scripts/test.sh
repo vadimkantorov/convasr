@@ -1,10 +1,19 @@
 set -e
 
 python3 train.py $@ \
-  --exphtml= --githttp https://github.com/vadimkantorov/convasr/commit/%h \
   --analyze \
-  --checkpoint data/speechcore/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs1024____long-train_bs1024_step6_430k_checkpoint_epoch259_iter0468272.pt \
-  --val-data-path kontur_calls_micro/kontur_calls_micro.csv.json --frontend-in-model #--batch-time-padding-multiple 1
+  --device cpu \
+  --val-data-path kontur_calls_micro/kontur_calls_micro.csv.json # data/speechcore/best_checkpoint_and_valset_2508/valset_16082020.csv.json --frontend-in-model 
+
+#  --checkpoint data/speechcore/best_checkpoint_and_valset_2508/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs512____longtrain_finetune_after_self_train_checkpoint_epoch400_iter0740000.pt \
+
+#  --fp16 O2 \
+
+#python3 train.py $@ \
+#  --exphtml= --githttp https://github.com/vadimkantorov/convasr/commit/%h \
+#  --analyze \
+#  --checkpoint data/speechcore/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs1024____long-train_bs1024_step6_430k_checkpoint_epoch259_iter0468272.pt \
+#  --val-data-path kontur_calls_micro/kontur_calls_micro.csv.json --frontend-in-model #--batch-time-padding-multiple 1
 
 #--checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs256____fp16O2/checkpoint_epoch05_iter0040000.pt \
 
