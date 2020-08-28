@@ -20,6 +20,7 @@ import transforms
 import vis
 import utils
 import transcripts
+import multiprocessing
 
 def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
 	for meta, x, xlen, y, ylen in data_loader:
@@ -78,36 +79,44 @@ def evaluate_model(
 			y_.extend(cpu_list(y))
 			audio_path_.extend(m['audio_path'] for m in meta)
 			ref_.extend(labels[0].normalize_text(m['ref']) for m in meta)
-			hyp_.extend(zip(*hyp))  # .T , [[95] * (1 or 2)] -> [tuple(1 or 2) * 95]
+			hyp_.extend(zip(*hyp))
 		toc_apply_model = time.time()
-		print(f"Apply model {toc_apply_model - tic:.3f} sec")
+		print(f"Apply model {toc_apply_model - tic:.1f} sec", end=", ")
 
-		for i, (ref, hyp_tuple, audio_path, loss, entropy) in enumerate(zip(ref_, hyp_, audio_path_, loss_, entropy_)):
-			for label, hyp in zip(labels, hyp_tuple):
-				new_transcript = error_analyzer.analyze(
-					hyp = hyp,
-					ref = ref,
-					full = analyze,
-					postprocess_transcript = label.postprocess_transcript,
-					extra = dict(
-						labels_name = label.name,
-						audio_path = audio_path,
-						audio_name = transcripts.audio_name(audio_path),
-						loss = loss,
-						entropy = entropy
-					)
-				)
-				transcript.append(new_transcript)
+		analyze_inputs_gen = (
+			(
+				hyp,
+				ref,
+				analyze,
+				dict(
+					labels_name=label.name,
+					audio_path=audio_path,
+					audio_name=transcripts.audio_name(audio_path),
+					loss=loss,
+					entropy=entropy
+				),
+				label.postprocess_transcript,
+			)
+			for ref, hyp_tuple, audio_path, loss, entropy in zip(ref_, hyp_, audio_path_, loss_, entropy_)
+			for label, hyp in zip(labels, hyp_tuple)
+		)
+		if args.analyze_num_workers <= 0:
+			transcript = []
+			for i, analyze_args in enumerate(analyze_inputs_gen):
+				transcript.append(error_analyzer.analyze(*analyze_args))
 				if args.verbose:
-					print(f'{val_dataset_name}@{iteration}:', i, '/', len(audio_path_), '|', args.experiment_id)
+					print(f'{val_dataset_name}@{iteration}: {i // len(labels)}/{len(audio_path_)}|{args.experiment_id}')
 					# TODO: don't forget to fix aligned hyp & ref output!
 					# hyp = new_transcript['alignment']['hyp'] if analyze else new_transcript['hyp']
 					# ref = new_transcript['alignment']['ref'] if analyze else new_transcript['ref']
-					print('REF: {labels_name} "{ref}"'.format(**new_transcript))
-					print('HYP: {labels_name} "{hyp}"'.format(**new_transcript))
-					print('WER: {labels_name} {wer:.02%} | CER: {cer:.02%}\n'.format(**new_transcript))
+					print('REF: {labels_name} "{ref}"'.format(**transcript[-1]))
+					print('HYP: {labels_name} "{hyp}"'.format(**transcript[-1]))
+					print('WER: {labels_name} {wer:.02%} | CER: {cer:.02%}\n'.format(**transcript[-1]))
+		else:
+			with multiprocessing.pool.Pool(processes=args.analyze_num_workers) as pool:
+				transcript = pool.starmap(error_analyzer.analyze, analyze_inputs_gen)
 		toc_analyze = time.time()
-		print(f"Analyze {toc_analyze - toc_apply_model:.3f} sec")
+		print(f"Analyze {toc_analyze - toc_apply_model:.1f} sec, Total {toc_analyze - tic:.1f} sec")
 
 		transcripts_path = os.path.join(
 			args.experiment_dir,
@@ -791,4 +800,5 @@ if __name__ == '__main__':
 	parser.add_argument('--train-crash-oom', action = 'store_true')
 	parser.add_argument('--val-crash-oom', action = 'store_true')
 	parser.add_argument('--val-config', default = 'configs/ru_val_config.json')
+	parser.add_argument('--analyze-num-workers', type = int, default = 0)
 	main(parser.parse_args())

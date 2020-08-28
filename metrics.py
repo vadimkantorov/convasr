@@ -95,7 +95,7 @@ class ErrorAnalyzer:
 		stats['errors'] = dict(distribution = dict(collections.OrderedDict(sorted(error_chars.items()))), words = error_words)
 		return stats
 
-	def analyze(self, hyp, ref, full = False, postprocess_transcript = (lambda s, *args, **kwargs: s), split_candidates = (lambda s: [s]), extra = {}):
+	def analyze(self, hyp, ref, full = False, extra = {}, postprocess_transcript = (lambda s, *args, **kwargs: s), split_candidates = (lambda s: [s])):
 		# TODO: add error_ok_tags
 		# TODO: respect full flag
 

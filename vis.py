@@ -511,7 +511,8 @@ def tabulate(
 	der,
 	lang
 ):
-	labels = datasets.Labels(datasets.Language(lang))
+	# TODO: bring back custom name to the filtration process, or remove filtration by labels_name entirely.
+	labels = datasets.Labels(lang=datasets.Language(lang), name='char')
 
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
@@ -521,7 +522,7 @@ def tabulate(
 		val_dataset_name = f[f.find('transcripts_') + len('transcripts_'):eidx]
 		checkpoint = os.path.join(experiment_dir, 'checkpoint_' + f[eidx:].replace('.json', '.pt')) if not json_ else f
 		metric = 'wer' if wer else 'entropy' if entropy else 'loss' if loss else 'per' if per else 'der' if der else 'cer'
-		val = torch.tensor([j[metric] for j in json.load(open(f)) if j['labels'].startswith(labels.alphabet)] or [0.0])
+		val = torch.tensor([j[metric] for j in json.load(open(f)) if j['labels_name'] == labels.name] or [0.0])
 		val = val[~(torch.isnan(val) | torch.isinf(val))]
 
 		if cer10 or cer20 or cer30 or cer40 or cer50:
