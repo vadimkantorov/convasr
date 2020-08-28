@@ -511,6 +511,7 @@ def tabulate(
 	der,
 	lang
 ):
+	# TODO: bring back custom name to the filtration process, or remove filtration by labels_name entirely.
 	labels = datasets.Labels(lang=datasets.Language(lang), name='char')
 
 	res = collections.defaultdict(list)
