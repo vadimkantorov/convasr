@@ -601,6 +601,7 @@ def temporal_mask(x: shaping.BT, lengths: shaping.B):
 
 @torch.jit.script
 def apply_dither(x: shaping.BT, dither: float):
+	# dither extracted to ScriptFunction, because JIT does not trace randn_like correctly https://github.com/pytorch/pytorch/issues/43767
 	if dither > 0.0:
 		return x + dither * torch.randn_like(x)
 	else:
