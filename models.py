@@ -134,9 +134,9 @@ class ConvBn1d(nn.Module):
 				residual_inputs = []
 
 			x = self.activation(bn(conv(x)), residual = residual_inputs)
-			x = x * temporal_mask(x, lengths_fraction = lengths_fraction) if (
-				self.temporal_mask and lengths_fraction is not None
-			) else x
+			if self.temporal_mask and lengths_fraction is not None:
+				lengths = compute_output_lengths(x, lengths_fraction)
+				x = x * temporal_mask(x, lengths)
 		return x
 
 	def fuse_conv_bn_eval(self):
@@ -283,10 +283,13 @@ class JasperNet(nn.Module):
 	) -> shaping.BCt:
 		#x = x.to(torch.float16)
 		x = x if x.ndim == 2 else x.squeeze(1)
-		x = self.frontend(x, mask = temporal_mask(x, lengths_fraction = xlen)) if self.frontend is not None else x
-		x = self.normalize_features(
-			x, mask = temporal_mask(x, lengths_fraction = xlen)
-		) if self.normalize_features is not None else x
+		if self.frontend is not None:
+			lengths = compute_output_lengths(x, xlen)
+			x = self.frontend(x, mask = temporal_mask(x, lengths))
+
+		if self.normalize_features is not None:
+			lengths = compute_output_lengths(x, xlen)
+			x = self.normalize_features(x, mask = temporal_mask(x, lengths))
 
 		residual = []
 		for i, subblock in enumerate(self.backbone):
@@ -564,10 +567,10 @@ class LogFilterBankFrontend(nn.Module):
 	def forward(self, signal: shaping.BT, mask: shaping.BT = None) -> shaping.BCT:
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
 		signal = normalize_signal(signal) if self.normalize_signal else signal
-		signal = signal + self.dither0 * torch.randn_like(signal) if self.dither0 > 0 else signal
+		signal = apply_dither(signal, self.dither0)
 		signal = torch.cat([signal[..., :1], signal[..., 1:] -
 							self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
-		signal = signal + self.dither * torch.randn_like(signal) if self.dither > 0 else signal
+		signal = apply_dither(signal, self.dither)
 		signal = signal * mask if mask is not None else signal
 
 		pad = self.freq_cutoff - 1
@@ -587,12 +590,22 @@ class LogFilterBankFrontend(nn.Module):
 	def read_audio(self):
 		return True
 
+@torch.jit.script
+def compute_output_lengths(x: shaping.BT, lengths_fraction: shaping.B):
+	return (lengths_fraction * x.shape[-1]).ceil().long()
 
-def temporal_mask(x, lengths = None, lengths_fraction = None):
-	lengths = lengths if lengths is not None else compute_output_lengths(x, lengths_fraction)
+@torch.jit.script
+def temporal_mask(x: shaping.BT, lengths: shaping.B):
 	return (torch.arange(x.shape[-1], device = x.device, dtype = lengths.dtype).unsqueeze(0) <
 			lengths.unsqueeze(1)).view(x.shape[:1] + (1, ) * (len(x.shape) - 2) + x.shape[-1:])
 
+@torch.jit.script
+def apply_dither(x: shaping.BT, dither: float):
+	# dither extracted to ScriptFunction, because JIT does not trace randn_like correctly https://github.com/pytorch/pytorch/issues/43767
+	if dither > 0.0:
+		return x + dither * torch.randn_like(x)
+	else:
+		return x
 
 def entropy(log_probs, lengths = None, dim = 1, eps = 1e-9, sum = True, keepdim = False):
 	e = -(log_probs.exp() * log_probs).sum(dim = dim, keepdim = keepdim)
@@ -605,12 +618,6 @@ def entropy(log_probs, lengths = None, dim = 1, eps = 1e-9, sum = True, keepdim 
 
 def margin(log_probs, dim = 1):
 	return torch.sub(*log_probs.exp().topk(2, dim = dim).values)
-
-
-def compute_output_lengths(x, lengths_fraction):
-	return (lengths_fraction * x.shape[-1]).ceil().long(
-	) if lengths_fraction is not None else torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.long)
-
 
 def compute_capacity(model, scale = 1):
 	return sum(map(torch.numel, model.parameters())) / scale
