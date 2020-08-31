@@ -22,6 +22,30 @@ import utils
 import transcripts
 import multiprocessing
 
+def dump_weight_stats_to_tensorboard(iteration, tensorboard, model, log_weight_distribution):
+	for param_name, param in models.master_module(model).named_parameters():
+		if param.grad is None:
+			continue
+
+		tag = 'params/' + param_name.replace('.', '/')
+		norm, grad_norm = param.norm(), param.grad.norm()
+		ratio = grad_norm / (1e-9 + norm)
+		tensorboard.add_scalars(
+			tag,
+			dict(norm = float(norm), grad_norm = float(grad_norm), ratio = float(ratio)),
+			iteration
+		)
+		
+		if log_weight_distribution:
+			tensorboard.add_histogram(tag, param, iteration)
+			tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
+
+def dump_meter_to_tensorboard(iteration, tensorboard, meter, lr_scaler = 1e4):
+	tensorboard.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = meter['avg_loss'], lr_avg_scaled = meter['avg_lr'] * lr_scaler, iteration)
+	#TODO: was add_scalar before
+	tensorboard.add_scalar('meter', meter, iteration)
+	
+
 def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
 	for meta, s, x, xlen, y, ylen in data_loader:
 		x, xlen, y, ylen = x.to(device, non_blocking = True), xlen.to(device, non_blocking = True), y.to(device, non_blocking = True), ylen.to(device, non_blocking = True)
@@ -127,12 +151,12 @@ def evaluate_model(
 		)
 		for i, label in enumerate(labels):
 			transcript_by_label = transcript[i:: len(labels)]
-			stats = error_analyzer.aggregate(transcript_by_label)
+			aggregated = error_analyzer.aggregate(transcript_by_label)
 			if analyze:
 				with open(f'{transcripts_path}.errors.csv', 'w') as f:
-					f.writelines('{hyp},{ref},{error_tag}\n'.format(**w) for w in stats['errors']['words'])
+					f.writelines('{hyp},{ref},{error_tag}\n'.format(**w) for w in aggregated['errors']['words'])
 
-			print('errors', stats['errors']['distribution'])
+			print('errors', aggregated['errors']['distribution'])
 			cer = torch.FloatTensor([r['cer'] for r in transcript_by_label])
 			loss = torch.FloatTensor([r['loss'] for r in transcript_by_label])
 			print('cer', metrics.quantiles(cer))
@@ -142,16 +166,17 @@ def evaluate_model(
 				f'| epoch {epoch} iter {iteration}' if training else '',
 				f'| {transcripts_path} |',
 				('Entropy: {entropy:.02f} Loss: {loss:.02f} | WER:  {wer:.02%} CER: {cer:.02%} [{words_easy_errors_easy__cer_pseudo:.02%}],  MER: {mer_wordwise:.02%} DER: {hyp_der:.02%}/{ref_der:.02%}\n')
-				.format(**stats)
+				.format(**aggregated)
 			)
-			#columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_name', 'cer', 'mer', 'alignment')] + [(r['audio_name'], r['cer'], r['mer'], vis.word_alignment(r['words'])) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
+			#columns[val_dataset_name + '_' + labels_name] = {'cer' : aggregated['cer_avg'], '.wer' : aggregated['wer_avg'], '.loss' : aggregated['loss_avg'], '.entropy' : aggregated['entropy_avg'], '.cer_easy' : aggregated['cer_easy_avg'], '.cer_hard':  aggregated['cer_hard_avg'], '.cer_missing' : aggregated['cer_missing_avg'], 'E' : dict(value = aggregated['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_name', 'cer', 'mer', 'alignment')] + [(r['audio_name'], r['cer'], r['mer'], vis.word_alignment(r['words'])) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
+			
 			if training:
 				tensorboard.add_scalars(
 					'datasets/' + val_dataset_name + '_' + label.name,
 					dict(
-						wer = stats['wer'] * 100.0,
-						cer = stats['cer'] * 100.0,
-						loss = stats['loss']
+						wer = aggregated['wer'] * 100.0,
+						cer = aggregated['cer'] * 100.0,
+						loss = aggregated['loss']
 					),
 					iteration
 				)
@@ -509,18 +534,21 @@ def main(args):
 		if os.path.exists(tensorboard_dir_checkpoint) and not os.path.exists(tensorboard_dir):
 			shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
 	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
-	performance_meter = metrics.PerformanceMeter()
+
+	perf = metrics.PerformanceMeter(loss = 50, memory_cuda_allocated = 50, time_validation = 1)
+	#lr_avg = metrics.exp_moving_average(lr_avg, lr, max = 1)
+	#loss_avg = metrics.exp_moving_average(loss_avg, loss_cur, max = 1000)
+	#entropy_avg = metrics.exp_moving_average(entropy_avg, entropy, max = 4)
+	#time_ms_avg = metrics.exp_moving_average(time_ms_avg, time_ms_data + time_ms_model, max = 10_000)
+	
 	with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
 		json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
 
 	with open(os.path.join(args.experiment_dir, args.dump_model_config), 'w') as f:
-		model_config = {
-			'init_params': models.master_module(model).init_params, 'model': repr(models.master_module(model))
-		}
+		model_config = dict(init_params = models.master_module(model).init_params, model = repr(models.master_module(model)))
 		json.dump(model_config, f, sort_keys = True, ensure_ascii = False, indent = 2)
 
 	tic, toc_fwd, toc_bwd = time.time(), time.time(), time.time()
-	loss_avg, entropy_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0, 0.0
 
 	for epoch in range(epoch, args.epochs):
 		sampler.shuffle(epoch + args.seed_sampler)
@@ -532,7 +560,7 @@ def main(args):
 				print('Time data loader launch @ ', epoch, ':', time_ms_launch_data_loader / 1000, 'sec')
 			
 			lr = optimizer.param_groups[0]['lr']
-			lr_avg = metrics.exp_moving_average(lr_avg, lr, max = 1)
+			perf.update(dict(lr = lr))
 
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
 			try:
@@ -545,8 +573,12 @@ def main(args):
 					raise
 			example_weights = ylen[:, 0]
 			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, float(loss.mean())
+
+			perf.update(dict(loss = loss_cur))
+
 			entropy = float(models.entropy(log_probs[0], olen[0], dim = 1).mean())
 			toc_fwd = time.time()
+			#TODO: inf/nan still corrupts BN stats
 			if not (torch.isinf(loss) or torch.isnan(loss)):
 				if args.fp16:
 					with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -561,42 +593,21 @@ def main(args):
 					optimizer.step()
 
 					if iteration % args.log_iteration_interval == 0:
-						tensorboard.add_scalars(
-							f'datasets/{train_dataset_name}',
-							dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4),
-							iteration
-						)
-						for name, value in performance_meter.items():
-							tensorboard.add_scalar(name, value, iteration)
-						for param_name, param in models.master_module(model).named_parameters():
-							if param.grad is None:
-								continue
-							tag = 'params/' + param_name.replace('.', '/')
-							norm, grad_norm = param.norm(), param.grad.norm()
-							ratio = grad_norm / (1e-9 + norm)
-							tensorboard.add_scalars(
-								tag,
-								dict(norm = float(norm), grad_norm = float(grad_norm), ratio = float(ratio)),
-								iteration
-							)
-							if args.log_weight_distribution:
-								tensorboard.add_histogram(tag, param, iteration)
-								tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
+						dump_meter_to_tensorboard(iteration, tensorboard, performace_meter)
+						dump_weight_stats_to_tensorboard(iteration, tensorboard, model)
 
-					performance_meter.update_memory_metrics()
+					perf.update(utils.compute_memory_stats())
 					optimizer.zero_grad()
 					scheduler.step(iteration)
-
-				loss_avg = metrics.exp_moving_average(loss_avg, loss_cur, max = 1000)
-				entropy_avg = metrics.exp_moving_average(entropy_avg, entropy, max = 4)
+				perf.update(dict(entropy = entropy))
 			toc_bwd = time.time()
 
 			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = map(lambda sec: sec * 1000, [toc_data - tic, toc_fwd - toc_data, toc_bwd - toc_fwd, toc_bwd - toc_data])
-			performance_meter.update_time_metrics(time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model)
-			time_ms_avg = metrics.exp_moving_average(time_ms_avg, time_ms_data + time_ms_model, max = 10_000)
-			print(
-				f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}> loss: {loss_cur:.2f} <{loss_avg:.2f}> time: ({"x".join(map(str, x.shape))}) {time_ms_data:.2f}+{time_ms_fwd:4.0f}+{time_ms_bwd:4.0f} <{time_ms_avg:.0f}> | lr: {lr:.5f}'
-			)
+			perf.update(dict(time_ms_data = time_ms_data, time_ms_fwd = time_ms_fwd, time_ms_bwd = time_ms_bwd, time_ms_iteration = time_ms_data + time_ms_model))
+
+			print_left = f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] {"x".join(map(str, x.shape))}'
+			print_right = 'ent: <{avg_entropy:.2f}> loss: {cur_loss:.2f} <{avg_loss:.2f}> time: {cur_time_ms_data:.2f}+{cur_time_ms_fwd:4.0f}+{cur_time_ms_bwd:4.0f} <{avg_time_ms_iteration:.0f}> | lr: {cur_lr:.5f}'.format(**perf)
+			print(print_left, print_right)
 			iteration += 1
 			sampler.batch_idx += 1
 
@@ -829,4 +840,7 @@ if __name__ == '__main__':
 	parser.add_argument('--val-crash-oom', action = 'store_true')
 	parser.add_argument('--val-config', default = 'configs/ru_val_config.json')
 	parser.add_argument('--analyze-num-workers', type = int, default = 0)
+	
+	#TODO: set up logging, RotatingFileHandler, StdoutHandler
+	#TODO: try-except
 	main(parser.parse_args())
