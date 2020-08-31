@@ -5,7 +5,6 @@ import json
 import functools
 import torch
 import Levenshtein
-import psutil
 
 placeholder = '|'
 space = ' '
@@ -171,47 +170,21 @@ class ErrorAnalyzer:
 
 		return res
 
-
 class PerformanceMeter(dict):
-	def update(self, kwargs, subtag = None):
+	def __init__(self, *, K = 50, max = 1000, **config):
+		self.config = config
+		self.K = K
+		self.max = max
+
+	def update(self, kwargs):
 		for name, value in kwargs.items():
-			avg_name = f'performance/{name}_avg' + (f'/{subtag}' if subtag else '')
-			max_name = f'performance/{name}_max' + (f'/{subtag}' if subtag else '')
-			self[avg_name] = exp_moving_average(self.get(avg_name, 0), value)
+			avg_name, max_name, cur_name = 'avg_' + name, 'max_' + name, 'cur_' + name 
+			self[avg_name] = exp_moving_average(self.get(avg_name, 0), value, K = self.config.get(name, {}).get('K', self.K), max = self.config.get(name, {}).get('max', self.max))
 			self[max_name] = max(self.get(max_name, 0), value)
-
-	def update_memory_metrics(self, byte_scaler = 1024**3, measure_pss_ram = False):
-		device_count = torch.cuda.device_count()
-		total_allocated = 0
-		total_reserved = 0
-		for i in range(device_count):
-			device_stats = torch.cuda.memory_stats(i)
-			allocated = device_stats['allocated_bytes.all.peak'] / byte_scaler
-			total_allocated += allocated
-
-			reserved = device_stats[f'reserved_bytes.all.peak'] / byte_scaler
-			total_reserved += reserved
-			self.update(dict(allocated = allocated, reserved = reserved), f'cuda:{i}')
-
-		self.update(dict(allocated = total_allocated, reserved = total_reserved), 'total')
-
-		if measure_pss_ram:
-			process = psutil.Process()
-			children = process.children(recursive=True)
-			total_pss_ram = process.memory_full_info().pss + sum(
-				child.memory_full_info().pss for child in children
-			)
-			self.update(dict(pss_ram = total_pss_ram / byte_scaler))
-
-	def update_time_metrics(self, time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model):
-		self.update(
-			dict(
-				time_data = time_ms_data,
-				time_forward = time_ms_fwd,
-				time_backward = time_ms_bwd,
-				time_iteration = time_ms_data + time_ms_model
-			)
-		)
+			self[cur_name] = value
+	
+	def __missing__(self, key):
+		return 0.0
 
 def nanmean(dictlist, key):
 	prefix, suffix = ('', key) if '.' not in key else key.split('.')

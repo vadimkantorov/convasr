@@ -4,9 +4,38 @@ import traceback
 import random
 import torch
 import gzip
+import psutil
 
 def open_maybe_gz(data_path):
 	return gzip.open(data_path, 'rt') if data_path.endswith('.gz') else open(data_path)
+
+def compute_memory_stats(byte_scaler = 1024**3, measure_pss_ram = False):
+	device_count = torch.cuda.device_count()
+	total_allocated = 0
+	total_reserved = 0
+
+	res = {}
+	for i in range(device_count):
+		device_stats = torch.cuda.memory_stats(i)
+		allocated = device_stats['allocated_bytes.all.peak'] / byte_scaler
+		total_allocated += allocated
+
+		reserved = device_stats[f'reserved_bytes.all.peak'] / byte_scaler
+		total_reserved += reserved
+		res[f'allocated_cuda{i}'] = allocated
+		res[f'reserved_cuda{i}'] = reserved
+
+	res['allocated'] = total_allocated
+	res['reserved'] = total_reserved 
+
+	if measure_pss_ram:
+		process = psutil.Process()
+		children = process.children(recursive=True)
+		total_pss_ram = process.memory_full_info().pss + sum(
+			child.memory_full_info().pss for child in children
+		)
+		res['pss_ram'] = total_pss_ram / byte_scaler
+	return res
 
 def reset_cpu_threads(num_threads):
 	torch.set_num_threads(num_threads)
@@ -19,6 +48,7 @@ def set_random_seed(seed):
 		set_random_seed(seed)
 
 def handle_out_of_memory_exception(model_parameters = []):
+	# TODO: count OOM
 	exc_type, exc_value, exc_traceback = sys.exc_info()
 	if 'out of memory' in str(exc_value):
 		print('RECOVERING FROM OOM --- BEFORE FREE')
