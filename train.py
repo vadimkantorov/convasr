@@ -5,6 +5,7 @@ import os
 import random
 import shutil
 import time
+import multiprocessing
 import torch.utils.data
 import torch.utils.tensorboard
 import onnxruntime
@@ -20,30 +21,47 @@ import transforms
 import vis
 import utils
 import transcripts
-import multiprocessing
 
-def dump_weight_stats_to_tensorboard(iteration, tensorboard, model, log_weight_distribution):
-	for param_name, param in models.master_module(model).named_parameters():
-		if param.grad is None:
-			continue
+class TensorboardSink:
+	def __init__(self, summary_writer):
+		self.summary_writer = summary_writer
 
-		tag = 'params/' + param_name.replace('.', '/')
-		norm, grad_norm = param.norm(), param.grad.norm()
-		ratio = grad_norm / (1e-9 + norm)
-		tensorboard.add_scalars(
-			tag,
-			dict(norm = float(norm), grad_norm = float(grad_norm), ratio = float(ratio)),
+	def val_stats(self, iteration, val_dataset_name, labels_name, perf):
+		prefix = f'datasets/{val_dataset_name}_{labels_name}_'
+		self.summary_writer.add_scalars(
+			dict(
+				wer = perf[prefix + 'wer'] * 100.0,
+				cer = perf[prefix + 'cer'] * 100.0,
+				loss = perf[perfix + 'loss']
+			),
 			iteration
 		)
-		
-		if log_weight_distribution:
-			tensorboard.add_histogram(tag, param, iteration)
-			tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
 
-def dump_meter_to_tensorboard(iteration, tensorboard, meter, lr_scaler = 1e4):
-	tensorboard.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = meter['avg_loss'], lr_avg_scaled = meter['avg_lr'] * lr_scaler, iteration)
-	#TODO: was add_scalar before
-	tensorboard.add_scalar('meter', meter, iteration)
+		# https://github.com/pytorch/pytorch/issues/24234
+		self.summary_writer.flush()
+
+	def weight_stats(self, iteration, model, log_weight_distribution, eps = 1e-9):
+		for param_name, param in models.master_module(model).named_parameters():
+			if param.grad is None:
+				continue
+
+			tag = 'params/' + param_name.replace('.', '/')
+			norm, grad_norm = param.norm(), param.grad.norm()
+			ratio = grad_norm / (eps + norm)
+			self.summary_writer.add_scalars(
+				tag,
+				dict(norm = float(norm), grad_norm = float(grad_norm), ratio = float(ratio)),
+				iteration
+			)
+			
+			if log_weight_distribution:
+				self.summary_writer.add_histogram(tag, param, iteration)
+				self.summary_writer.add_histogram(tag + '/grad', param.grad, iteration)
+
+	def perf(self, iteration, train_dataset_name, perf, lr_scaler = 1e4):
+		self.summary_writer.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = perf['avg_loss'], lr_avg_scaled = perf['avg_lr'] * lr_scaler), iteration)
+		#TODO: was add_scalar before, do not dump everything, or filter by prefix
+		self.summary_writer.add_scalars('perf', {k.replace('datasets_', 'datasets/') : v for k, v in perf.items()}, iteration)
 	
 
 def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
@@ -72,9 +90,11 @@ def evaluate_model(
 	labels,
 	decoder,
 	error_analyzer,
+	perf,
 	optimizer = None,
 	sampler = None,
 	tensorboard = None,
+	tensorboard_sink = None,
 	epoch = None,
 	iteration = None
 ):
@@ -105,9 +125,11 @@ def evaluate_model(
 			ref_.extend(labels[0].normalize_text(m['ref']) for m in meta)
 			hyp_.extend(zip(*hyp))
 		toc_apply_model = time.time()
-		print(f"Apply model {toc_apply_model - tic:.1f} sec", end=", ")
+		time_sec_val_apply_model = toc_apply_model - tic
+		perf.update(dict(time_sec_val_apply_model = time_sec_val_apply_model), prefix = f'datasets_{val_dataset_name}')
+		print(f"Apply model {time_sec_val_apply_model:.1f} sec", end=", ")
 
-		analyze_inputs_gen = (
+		analyze_args_gen = (
 			(
 				hyp,
 				ref,
@@ -124,23 +146,27 @@ def evaluate_model(
 			for ref, hyp_tuple, audio_path, loss, entropy in zip(ref_, hyp_, audio_path_, loss_, entropy_)
 			for label, hyp in zip(labels, hyp_tuple)
 		)
+
 		if args.analyze_num_workers <= 0:
-			transcript = []
-			for i, analyze_args in enumerate(analyze_inputs_gen):
-				transcript.append(error_analyzer.analyze(*analyze_args))
-				if args.verbose:
-					print(f'{val_dataset_name}@{iteration}: {i // len(labels)}/{len(audio_path_)}|{args.experiment_id}')
-					# TODO: don't forget to fix aligned hyp & ref output!
-					# hyp = new_transcript['alignment']['hyp'] if analyze else new_transcript['hyp']
-					# ref = new_transcript['alignment']['ref'] if analyze else new_transcript['ref']
-					print('REF: {labels_name} "{ref}"'.format(**transcript[-1]))
-					print('HYP: {labels_name} "{hyp}"'.format(**transcript[-1]))
-					print('WER: {labels_name} {wer:.02%} | CER: {cer:.02%}\n'.format(**transcript[-1]))
+			transcript = [error_analyzer.analyze(*args) for args in analyze_args_gen]
 		else:
-			with multiprocessing.pool.Pool(processes=args.analyze_num_workers) as pool:
-				transcript = pool.starmap(error_analyzer.analyze, analyze_inputs_gen)
+			with multiprocessing.pool.Pool(processes = args.analyze_num_workers) as pool:
+				transcript = pool.starmap(error_analyzer.analyze, analyze_args_gen)
+
 		toc_analyze = time.time()
-		print(f"Analyze {toc_analyze - toc_apply_model:.1f} sec, Total {toc_analyze - tic:.1f} sec")
+		time_sec_analyze = toc_analyze - toc_apply_model
+		time_sec_total = toc_analyze - tic
+		perf.update(dict(time_sec_val_analyze = time_sec_val_analyze, time_sec_val_total = time_sec_val_total), prefix = f'datasets_{val_dataset_name}')
+		print(f"Analyze {time_sec_val_analyze:.1f} sec, Total {time_sec_val_total:.1f} sec")
+		
+		for i, t in enumerate(transcript if args.verbose else []):		
+			print(f'{val_dataset_name}@{iteration}: {i // len(labels)} / {len(audio_path_)} | {args.experiment_id}')
+			# TODO: don't forget to fix aligned hyp & ref output!
+			# hyp = new_transcript['alignment']['hyp'] if analyze else new_transcript['hyp']
+			# ref = new_transcript['alignment']['ref'] if analyze else new_transcript['ref']
+			print('REF: {labels_name} "{ref}"'.format(**t))
+			print('HYP: {labels_name} "{hyp}"'.format(**t))
+			print('WER: {labels_name} {wer:.02%} | CER: {cer:.02%}\n'.format(**t))
 
 		transcripts_path = os.path.join(
 			args.experiment_dir,
@@ -171,16 +197,13 @@ def evaluate_model(
 			#columns[val_dataset_name + '_' + labels_name] = {'cer' : aggregated['cer_avg'], '.wer' : aggregated['wer_avg'], '.loss' : aggregated['loss_avg'], '.entropy' : aggregated['entropy_avg'], '.cer_easy' : aggregated['cer_easy_avg'], '.cer_hard':  aggregated['cer_hard_avg'], '.cer_missing' : aggregated['cer_missing_avg'], 'E' : dict(value = aggregated['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_name', 'cer', 'mer', 'alignment')] + [(r['audio_name'], r['cer'], r['mer'], vis.word_alignment(r['words'])) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
 			
 			if training:
-				tensorboard.add_scalars(
-					'datasets/' + val_dataset_name + '_' + label.name,
-					dict(
-						wer = aggregated['wer'] * 100.0,
-						cer = aggregated['cer'] * 100.0,
+				perf.update(dict(
+						wer = aggregated['wer'],
+						cer = aggregated['cer'],
 						loss = aggregated['loss']
-					),
-					iteration
+					), prefix = f'datasets_val_{val_dataset_name}_{labels.name}'
 				)
-				tensorboard.flush()
+				tensorboard_sink.val_stats(iteration, val_dataset_name, label.name, perf)
 
 		with open(transcripts_path, 'w') as f:
 			json.dump(transcript, f, ensure_ascii = False, indent = 2, sort_keys = True)
@@ -534,12 +557,9 @@ def main(args):
 		if os.path.exists(tensorboard_dir_checkpoint) and not os.path.exists(tensorboard_dir):
 			shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
 	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
+	tensorboard_sink = TensorboardSink(tensorboard)
 
-	perf = metrics.PerformanceMeter(loss = 50, memory_cuda_allocated = 50, time_validation = 1)
-	#lr_avg = metrics.exp_moving_average(lr_avg, lr, max = 1)
-	#loss_avg = metrics.exp_moving_average(loss_avg, loss_cur, max = 1000)
-	#entropy_avg = metrics.exp_moving_average(entropy_avg, entropy, max = 4)
-	#time_ms_avg = metrics.exp_moving_average(time_ms_avg, time_ms_data + time_ms_model, max = 10_000)
+	perf = metrics.PerformanceMeterDict(loss = dict(K = 50, max = 1000), memory_cuda_allocated = dict(K = 50), entropy = dict(K = 4), time_ms_iteration = dict(K = 50, max = 10_000), lr = dict(K = 50, max = 1))
 	
 	with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
 		json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
@@ -592,9 +612,9 @@ def main(args):
 					)
 					optimizer.step()
 
-					if iteration % args.log_iteration_interval == 0:
-						dump_meter_to_tensorboard(iteration, tensorboard, performace_meter)
-						dump_weight_stats_to_tensorboard(iteration, tensorboard, model)
+					if iteration > 0 and iteration % args.log_iteration_interval == 0:
+						tensorboard_sink.perf(iteration, train_dataset_name, perf)
+						tensorboard_sink.weight_stats(iteration, model, args.log_weight_distribution)
 
 					perf.update(utils.compute_memory_stats())
 					optimizer.zero_grad()
@@ -622,6 +642,7 @@ def main(args):
 					optimizer,
 					sampler,
 					tensorboard,
+					tensorboard_sink,
 					epoch,
 					iteration
 				)
@@ -647,6 +668,7 @@ def main(args):
 				optimizer,
 				sampler,
 				tensorboard,
+				tensorboard_sink,
 				epoch + 1,
 				iteration
 			)

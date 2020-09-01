@@ -281,6 +281,8 @@ class JasperNet(nn.Module):
 	def forward(
 		self, x: shaping.BCT, xlen: shaping.B = None, y: shaping.BY = None, ylen: shaping.B = None
 	) -> shaping.BCt:
+		assert x.ndim == 3
+
 		#x = x.to(torch.float16)
 		x = x if x.ndim == 2 else x.squeeze(1)
 		if self.frontend is not None:
@@ -565,6 +567,8 @@ class LogFilterBankFrontend(nn.Module):
 			self.stft = None
 
 	def forward(self, signal: shaping.BT, mask: shaping.BT = None) -> shaping.BCT:
+		assert signal.ndim == 2
+
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
 		signal = normalize_signal(signal) if self.normalize_signal else signal
 		signal = apply_dither(signal, self.dither0)
