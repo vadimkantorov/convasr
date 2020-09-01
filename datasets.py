@@ -60,7 +60,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	def __init__(
 		self,
 		data_paths,
-		labels,
+		labels : list,
 		sample_rate,
 		frontend = None,
 		speaker_names = None,
@@ -81,6 +81,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		bucket = None,
 		pop_meta = False
 	):
+		assert isinstance(labels, list)
+		
 		self.join_transcript = join_transcript
 		self.max_duration = max_duration
 		self.labels = labels
