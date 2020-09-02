@@ -57,10 +57,9 @@ def setup(args):
 def main(args):
 	utils.enable_jit_fusion()
 
-	if args.output_format == 'csv':
-		assert not os.path.exists(args.output_path), 'such csv filename already exists!'
-	else:
-		os.makedirs(args.output_path, exist_ok = True)
+	assert args.output_json or args.output_html or args.output_txt or args.output_tsv, \
+		"at least one of the output formats must be provided"
+	os.makedirs(args.output_path, exist_ok = True)
 	data_paths = [
 		p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f])
 		if os.path.isfile(p) and any(map(p.endswith, args.ext))
@@ -91,7 +90,7 @@ def main(args):
 	val_data_loader = torch.utils.data.DataLoader(
 		val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers
 	)
-	output_lines = []  # only used if args.output_format == 'csv'
+	output_lines = []  # only used if args.output_tsv is True
 
 	for i, (meta, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
@@ -229,24 +228,30 @@ def main(args):
 
 		print('Filtered segments:', len(filtered_transcript), 'out of', len(transcript))
 
-		if args.output_format == 'csv':
-			output_lines.append(f'{audio_path}\t{hyp}\t{begin}\t{end}\n')
-		else:
-			transcript_path = os.path.join(args.output_path, f'{os.path.basename(audio_path)}.{args.output_format}')
+		if args.output_json:
+			transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
 			print(transcript_path)
-			if args.output_format == 'json':
-				with open(transcript_path, 'w') as f:
-					json.dump(filtered_transcript, f, ensure_ascii = False, sort_keys = True, indent = 2)
-			elif args.output_format == 'html':
-				vis.transcript(transcript_path, args.sample_rate, args.mono, transcript, filtered_transcript)
-			elif args.output_format == 'txt':
-				with open(transcript_path, 'w') as f:
-					f.write(hyp)
+			with open(transcript_path, 'w') as f:
+				json.dump(filtered_transcript, f, ensure_ascii = False, sort_keys = True, indent = 2)
+
+		if args.output_html:
+			transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.html')
+			print(transcript_path)
+			vis.transcript(transcript_path, args.sample_rate, args.mono, transcript, filtered_transcript)
+
+		if args.output_txt:
+			transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.txt')
+			print(transcript_path)
+			with open(transcript_path, 'w') as f:
+				f.write(hyp)
+
+		if args.output_tsv:
+			output_lines.append(f'{audio_path}\t{hyp}\t{begin}\t{end}\n')
 
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
-	if args.output_format == 'csv':
-		with open(args.output_path, 'w') as f:
+	if args.output_tsv:
+		with open(os.path.join(args.output_path, "transcripts.tsv"), 'w') as f:
 			f.writelines(output_lines)
 
 
@@ -260,13 +265,10 @@ if __name__ == '__main__':
 	parser.add_argument('--skip-processed', action = 'store_true')
 	parser.add_argument('--input-path', '-i', nargs = '+')
 	parser.add_argument('--output-path', '-o', default = 'data/transcribe')
-	parser.add_argument(
-		'--output-format',
-		default = 'json',
-		choices = ['json', 'html', 'csv', 'txt'],
-		help = 'output transcripts format: json - separate json files, html - separate html files, csv - one united ' +
-		'csv dataset, txt - separate txt files, needed for assessments'
-	)
+	parser.add_argument('--output-json', action = 'store_true', help = 'write transcripts to separate json files')
+	parser.add_argument('--output-html', action = 'store_true', help = 'write transcripts to separate html files')
+	parser.add_argument('--output-txt', action = 'store_true', help = 'write transcripts to separate txt files')
+	parser.add_argument('--output-tsv', action = 'store_true', help = 'write transcripts to a transcripts.tsv file')
 	parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
 	parser.add_argument('--num-workers', type = int, default = 0)
