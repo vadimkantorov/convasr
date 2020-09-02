@@ -57,7 +57,10 @@ def setup(args):
 def main(args):
 	utils.enable_jit_fusion()
 
-	os.makedirs(args.output_path, exist_ok = True)
+	if args.output_format == 'csv':
+		assert not os.path.exists(args.output_path), 'such csv filename already exists!'
+	else:
+		os.makedirs(args.output_path, exist_ok = True)
 	data_paths = [
 		p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f])
 		if os.path.isfile(p) and any(map(p.endswith, args.ext))
@@ -88,12 +91,12 @@ def main(args):
 	val_data_loader = torch.utils.data.DataLoader(
 		val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers
 	)
+	output_lines = []  # only used if args.output_format == 'csv'
 
 	for i, (meta, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
 
 		audio_path, speakers, begin, end = map(meta[0].get, ['audio_path', 'speakers', 'begin', 'end'])
-		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
 
 		if x.numel() == 0:
 			print(f'Skipping [{audio_path}].')
@@ -224,28 +227,27 @@ def main(args):
 			)
 		)
 
-		if not args.skip_json:
-			json.dump(filtered_transcript, open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
-
 		print('Filtered segments:', len(filtered_transcript), 'out of', len(transcript))
-		print(transcript_path)
-		if args.html:
-			vis.transcript(
-				os.path.join(args.output_path, os.path.basename(audio_path) + '.html'),
-				args.sample_rate,
-				args.mono,
-				transcript,
-				filtered_transcript
-			)
-		if args.txt:
-			if args.monofile:
-				with open(os.path.join(args.output_path, 'dataset.txt'), 'a+') as f:
-					f.write(audio_path + '\t' + str(hyp) + '\t' + str(begin) + '\t' + str(end) + '\n')
-			else:
-				with open(os.path.join(args.output_path, os.path.basename(audio_path) + '.txt'), 'w') as f:
+
+		if args.output_format == 'csv':
+			output_lines.append(f'{audio_path}\t{hyp}\t{begin}\t{end}\n')
+		else:
+			transcript_path = os.path.join(args.output_path, f'{os.path.basename(audio_path)}.{args.output_format}')
+			print(transcript_path)
+			if args.output_format == 'json':
+				with open(transcript_path, 'w') as f:
+					json.dump(filtered_transcript, f, ensure_ascii = False, sort_keys = True, indent = 2)
+			elif args.output_format == 'html':
+				vis.transcript(transcript_path, args.sample_rate, args.mono, transcript, filtered_transcript)
+			elif args.output_format == 'txt':
+				with open(transcript_path, 'w') as f:
 					f.write(hyp)
 
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
+
+	if args.output_format == 'csv':
+		with open(args.output_path, 'w') as f:
+			f.writelines(output_lines)
 
 
 if __name__ == '__main__':
@@ -258,6 +260,13 @@ if __name__ == '__main__':
 	parser.add_argument('--skip-processed', action = 'store_true')
 	parser.add_argument('--input-path', '-i', nargs = '+')
 	parser.add_argument('--output-path', '-o', default = 'data/transcribe')
+	parser.add_argument(
+		'--output-format',
+		default = 'json',
+		choices = ['json', 'html', 'csv', 'txt'],
+		help = 'output transcripts format: json - separate json files, html - separate html files, csv - one united ' +
+		'csv dataset, txt - separate txt files, needed for assessments'
+	)
 	parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
 	parser.add_argument('--num-workers', type = int, default = 0)
@@ -282,12 +291,6 @@ if __name__ == '__main__':
 	parser.add_argument('--unk', type = transcripts.number_tuple)
 	parser.add_argument('--speakers', nargs = '*')
 	parser.add_argument('--replace-blank-series', type = int, default = 8)
-	parser.add_argument('--html', action = 'store_true')
-	parser.add_argument(
-		'--txt', action = 'store_true', help = 'store whole transcript in txt format need for assessments'
-	)
-	parser.add_argument('--monofile', action = 'store_true', help = 'store whole transcript in one txt')
-	parser.add_argument('--skip-json', action = 'store_true')
 	parser.add_argument('--transcribe-first-n-sec', type = int)
 	parser.add_argument('--join-transcript', action = 'store_true')
 	parser.add_argument('--pack-backpointers', action = 'store_true')
