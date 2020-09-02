@@ -51,14 +51,17 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.audio_backend = audio_backend
 		self.speakers = speakers
 
-		maybegzopen = lambda data_path: gzip.open(data_path, 'rt') if data_path.endswith('.gz') else open(data_path)
+		maybe_gzopen = lambda data_path: gzip.open(data_path, 'rt') if data_path.endswith('.gz') else open(data_path)
 		duration = lambda example: sum(map(transcripts.compute_duration, example))
 		data_paths = data_paths if isinstance(data_paths, list) else [data_paths]
 
 		def read_transcript(data_path):
-			transcript_path = data_path + '.json' if '.json' not in data_path else data_path
-			return json.load(maybegzopen(transcript_path)
-								) if any(map(transcript_path.endswith, ['.json', '.json.gz'])) else [dict(audio_path = data_path)]
+			assert os.path.exists(data_path)
+			if data_path.endswith('.json') or data_path.endswith('.json.gz'):
+				return json.load(maybe_gzopen(data_path))
+			if os.path.exists(data_path + '.json'):
+				return json.load(open(data_path + '.json'))
+			return [dict(audio_path = data_path)]
 
 		self.examples = [
 			list(g) for data_path in data_paths for k,
