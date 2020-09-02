@@ -262,7 +262,7 @@ if __name__ == '__main__':
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
 	parser.add_argument('--num-workers', type = int, default = 0)
 	parser.add_argument('--mono', action = 'store_true')
-	parser.add_argument('--audio-backend', default = 'ffmpeg', choices = ['sox', 'ffmpeg'])
+	parser.add_argument('--audio-backend', default = None, choices = ['sox', 'ffmpeg'])
 	parser.add_argument('--decoder', default = 'GreedyDecoder', choices = ['GreedyDecoder', 'BeamSearchDecoder'])
 	parser.add_argument('--decoder-topk', type = int, default = 1)
 	parser.add_argument('--beam-width', type = int, default = 5000)
