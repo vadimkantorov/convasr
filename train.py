@@ -483,6 +483,13 @@ def main(args):
 				epoch += 1
 		else:
 			epoch += 1
+	if args.iterations_per_epoch:
+		epoch_skip_fraction = 1 - args.iterations_per_epoch / len(train_data_loader)
+		if epoch_skip_fraction > args.max_epoch_skip_fraction:
+			raise Exception(
+				f'Expected args.iterations_per_epoch to not skip more than {args.max_epoch_skip_fraction:.1%}' +
+				f'of each epoch. Instead, {epoch_skip_fraction:.1%} will be skipped!'
+			)
 
 	if args.device != 'cpu':
 		model, optimizer = models.data_parallel_and_autocast(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
@@ -650,6 +657,12 @@ if __name__ == '__main__':
 	parser.add_argument('--epochs', type = int, default = 5)
 	parser.add_argument('--iterations', type = int, default = None)
 	parser.add_argument('--iterations-per-epoch', type = int, default = None)
+	parser.add_argument(
+		'--max-epoch-skip-fraction',
+		type = float,
+		default = 0.20,
+		help = 'limitation on how many samples will be skipped from each epoch, using some --iterations-per-epoch value'
+	)
 	parser.add_argument('--train-data-path', nargs = '*', default = [])
 	parser.add_argument('--train-data-mixing', type = float, nargs = '*')
 	parser.add_argument('--val-data-path', nargs = '*', default = [])
