@@ -55,7 +55,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		data_paths = data_paths if isinstance(data_paths, list) else [data_paths]
 
 		def read_transcript(data_path):
-			if data_path.endswith('.json.gz') and os.path.exists(data_path):
+			assert os.path.exists(data_path)
+			if data_path.endswith('.json.gz'):
 				return json.load(gzip.open(data_path, 'rt'))
 			transcript_path = data_path if data_path.endswith('.json') else data_path + '.json'
 			if os.path.exists(transcript_path):
