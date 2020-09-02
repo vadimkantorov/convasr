@@ -77,6 +77,7 @@ def main(args):
 		segmented = True,
 		mono = args.mono,
 		time_padding_multiple = args.batch_time_padding_multiple,
+		audio_backend = args.audio_backend,
 		speakers = args.speakers,
 		exclude = exclude,
 		max_duration = args.transcribe_first_n_sec,
@@ -91,8 +92,12 @@ def main(args):
 	for i, (meta, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
 
-		audio_path, speakers = map(meta[0].get, ['audio_path', 'speakers'])
+		audio_path, speakers, begin, end = map(meta[0].get, ['audio_path', 'speakers', 'begin', 'end'])
 		transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
+
+		if x.numel() == 0:
+			print(f'Skipping [{audio_path}].')
+			continue
 
 		try:
 			tic = time.time()
@@ -141,7 +146,7 @@ def main(args):
 			ref, hyp = '\n'.join(transcripts.join(ref = r) for r in ref_segments).strip(), '\n'.join(transcripts.join(hyp = h) for h in hyp_segments).strip()
 			if args.verbose:
 				print('HYP:', hyp)
-			print('CER: {cer:.02%}'.format(cer = metrics.cer(hyp, ref)))
+			print('CER: {cer:.02%}'.format(cer = metrics.cer(hyp=hyp, ref=ref)))
 
 			tic_alignment = time.time()
 			if args.align and y.numel() > 0:
@@ -199,8 +204,8 @@ def main(args):
 				ref = ref,
 				hyp = hyp,
 				speaker = transcripts.speaker(ref = ref_transcript, hyp = hyp_transcript),
-				cer = metrics.cer(hyp, ref),
-				words = metrics.align_words(hyp, ref)[-1] if args.align_words else [],
+				cer = metrics.cer(hyp = hyp, ref = ref),
+				words = metrics.align_words(hyp = hyp, ref = ref)[-1] if args.align_words else [],
 				alignment = dict(ref = ref_transcript, hyp = hyp_transcript),
 				**transcripts.summary(hyp_transcript)
 			) for ref_transcript,
@@ -218,7 +223,9 @@ def main(args):
 				num_speakers = args.num_speakers
 			)
 		)
-		json.dump(filtered_transcript, open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+
+		if not args.skip_json:
+			json.dump(filtered_transcript, open(transcript_path, 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 
 		print('Filtered segments:', len(filtered_transcript), 'out of', len(transcript))
 		print(transcript_path)
@@ -231,7 +238,12 @@ def main(args):
 				filtered_transcript
 			)
 		if args.txt:
-			open(os.path.join(args.output_path, os.path.basename(audio_path) + '.txt'), 'w').write(hyp)
+			if args.monofile:
+				with open(os.path.join(args.output_path, 'dataset.txt'), 'a+') as f:
+					f.write(audio_path + '\t' + str(hyp) + '\t' + str(begin) + '\t' + str(end) + '\n')
+			else:
+				with open(os.path.join(args.output_path, os.path.basename(audio_path) + '.txt'), 'w') as f:
+					f.write(hyp)
 
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
@@ -250,6 +262,7 @@ if __name__ == '__main__':
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
 	parser.add_argument('--num-workers', type = int, default = 0)
 	parser.add_argument('--mono', action = 'store_true')
+	parser.add_argument('--audio-backend', default = 'ffmpeg', choices = ['sox', 'ffmpeg'])
 	parser.add_argument('--decoder', default = 'GreedyDecoder', choices = ['GreedyDecoder', 'BeamSearchDecoder'])
 	parser.add_argument('--decoder-topk', type = int, default = 1)
 	parser.add_argument('--beam-width', type = int, default = 5000)
@@ -273,6 +286,8 @@ if __name__ == '__main__':
 	parser.add_argument(
 		'--txt', action = 'store_true', help = 'store whole transcript in txt format need for assessments'
 	)
+	parser.add_argument('--monofile', action = 'store_true', help = 'store whole transcript in one txt')
+	parser.add_argument('--skip-json', action = 'store_true')
 	parser.add_argument('--transcribe-first-n-sec', type = int)
 	parser.add_argument('--join-transcript', action = 'store_true')
 	parser.add_argument('--pack-backpointers', action = 'store_true')
