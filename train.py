@@ -485,11 +485,8 @@ def main(args):
 			epoch += 1
 	if args.iterations_per_epoch:
 		epoch_skip_fraction = 1 - args.iterations_per_epoch / len(train_data_loader)
-		if epoch_skip_fraction > args.max_epoch_skip_fraction:
-			raise Exception(
-				f'Expected args.iterations_per_epoch to not skip more than {args.max_epoch_skip_fraction:.1%}' +
-				f'of each epoch. Instead, {epoch_skip_fraction:.1%} will be skipped!'
-			)
+		assert epoch_skip_fraction < args.max_epoch_skip_fraction, \
+			f'args.iterations_per_epoch must not skip more than {args.max_epoch_skip_fraction:.1%} of each epoch'
 
 	if args.device != 'cpu':
 		model, optimizer = models.data_parallel_and_autocast(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
