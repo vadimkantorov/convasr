@@ -15,9 +15,19 @@ import transcripts
 
 class TensorBackedStringArray:
 	def __init__(self, strings, encoding = 'utf-8'):
-		encoded = [torch.ByteTensor(torch.ByteStorage.from_buffer(s.encode(encoding))) for s in strings]
-		self.cumlen = torch.cat((torch.zeros(1, dtype = torch.int64), torch.as_tensor(list(map(len, encoded)), dtype = torch.int64))).cumsum(dim = 0)
-		self.data = torch.cat(encoded)
+		if encoding == 'ascii':
+			bytelens = list(map(len, strings))
+			bytes = ''.join(strings).encode(encoding)
+		else:
+			bytelens = []
+			bytes = bytearray()
+			for s in strings:
+				e = s.encode(encoding)
+				bytelens.append(len(e))
+				bytes.extend(e)
+
+		self.cumlen = torch.cat((torch.zeros(1, dtype = torch.int64), torch.as_tensor(lens, dtype = torch.int64))).cumsum(dim = 0)
+		self.data = torch.ByteTensor(torch.ByteStorage.from_buffer(bytes))
 		self.encoding = encoding
 
 	def __getitem__(self, i):
@@ -107,14 +117,13 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		#	t['begin'] = t.get('begin', 0.0)
 		#	if t.get('end') is None:
 		#		t['end'] = audio.compute_duration(t['audio_path'])
-
 		self.ref = TensorBackedStringArray(t.get('ref', '') for t in transcript)
 		self.begin = torch.FloatTensor([t.get('begin', -1) for t in transcript])
 		self.end = torch.FloatTensor([t.get('end', -1) for t in transcript])
 		self.channel = torch.CharTensor([t.get('channel', -1) for t in transcript])
 		self.speaker = torch.LongTensor([t.get('speaker', -1) for t in transcript])
 		self.audio_path = TensorBackedStringArray(e[0]['audio_path'] for e in self.examples)
-		tmp = (torch.zeros(1, dtype = torch.int64), torch.as_tensor(list(map(len, self.examples))))
+		
 		self.cumlen = torch.cat((torch.zeros(1, dtype = torch.int64), torch.as_tensor(list(map(len, self.examples)), dtype = torch.int64))).cumsum(dim = 0)
 		self.speakers = (speakers or list(sorted(set(t['speaker'] for t in transcript if t.get('speaker') is not None)))) + [None]
 
