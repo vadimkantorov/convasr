@@ -15,16 +15,12 @@ import transcripts
 
 class TensorBackedStringArray:
 	def __init__(self, strings, encoding = 'utf-8'):
-		if encoding == 'ascii':
-			bytelens = list(map(len, strings))
-			bytes = ''.join(strings).encode(encoding)
-		else:
-			bytelens = []
-			bytes = bytearray()
-			for s in strings:
-				e = s.encode(encoding)
-				bytelens.append(len(e))
-				bytes.extend(e)
+		bytelens = []
+		bytes = bytearray()
+		for s in strings:
+			e = s.encode(encoding)
+			bytelens.append(len(e))
+			bytes.extend(e)
 
 		self.cumlen = torch.cat((torch.zeros(1, dtype = torch.int64), torch.as_tensor(lens, dtype = torch.int64))).cumsum(dim = 0)
 		self.data = torch.ByteTensor(torch.ByteStorage.from_buffer(bytes))
