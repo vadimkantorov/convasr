@@ -146,8 +146,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		) if self.waveform_transform_debug_dir else None
 
 		audio_path = self.audio_path[index]
-		ge_zero_or_none = lambda x: x if x >= 0 else None
-		transcript = [dict(audio_path = audio_path, ref = self.ref[i], begin = ge_zero_or_none(float(self.begin[i])), end = ge_zero_or_none(float(self.end[i])), channel = ge_zero_or_none(int(self.channel[i])), speaker = int(self.speaker[i])) for i in range(int(self.cumlen[index]), int(self.cumlen[index + 1]))]
+		ge_zero_or = lambda x, default = None: x if x is not None and x >= 0 else default
+		transcript = [dict(audio_path = audio_path, ref = self.ref[i], begin = ge_zero_or(float(self.begin[i])), end = ge_zero_or(float(self.end[i])), channel = ge_zero_or(int(self.channel[i])), speaker = int(self.speaker[i])) for i in range(int(self.cumlen[index]), int(self.cumlen[index + 1]))]
 		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration=self.max_duration) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
 
 		if not self.segmented:
@@ -186,9 +186,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 					example_id = self.example_id(t),
 
 					channel = channel,
-					speaker = self.speakers[channel] if self.speakers else None,
-					begin = 0,
-					end = signal.shape[1] / sample_rate
+					speaker = ge_zero_or(t['speaker'], channel),
+					begin = ge_zero_or(t['begin'], 0.0),
+					end = ge_zero_or(t['end'], signal.shape[1] / sample_rate)
 				)
 				for t in sorted(transcript, key = transcripts.sort_key)
 				for channel in ([t['channel']] if t['channel'] is not None else range(len(signal)))
