@@ -4,10 +4,9 @@ import numpy as np
 import librosa
 import soundfile
 import scipy.io.wavfile
-import models
 
 smax = torch.iinfo(torch.int16).max
-f2s_numpy = lambda signal, max = np.float32(smax): np.multiply(signal, max, dtype = 'int16')
+f2s_numpy = lambda signal, max = np.float32(smax): np.multiply(signal, max).astype('int16')
 s2f_numpy = lambda signal, max = np.float32(smax): np.divide(signal, max, dtype = 'float32')
 
 def read_audio(
@@ -109,18 +108,19 @@ def read_audio(
 	assert signal.dtype in [np.int16, np.float32]
 	signal = signal.T
 	
-	if signal.dtype is np.int16 and dtype == 'float32':
+	if signal.dtype == np.int16 and dtype == 'float32':
 		signal = s2f_numpy(signal)
 	
 	if mono and len(signal) > 1:
-		assert signal.dtype is np.float32
+		assert signal.dtype == np.float32
 		signal = signal.mean(0, keepdims = True)
 
+	signal = torch.as_tensor(signal)
+
 	if sample_rate_ != sample_rate:
-		assert signal.dtype is np.float32
 		signal, sample_rate_ = resample(signal, sample_rate_, sample_rate)
 
-	return torch.as_tensor(signal.copy()), sample_rate_
+	return signal, sample_rate_
 
 
 def write_audio(audio_path, signal, sample_rate, mono = False):
@@ -131,7 +131,15 @@ def write_audio(audio_path, signal, sample_rate, mono = False):
 
 
 def resample(signal, sample_rate_, sample_rate):
-	return torch.as_tensor(librosa.resample(numpy.asarray(signal), sample_rate_, sample_rate)), sample_rate
+	assert signal.dtype == torch.float32
+	mono = len(signal) == 1
+	if mono:
+		signal = signal.squeeze(0)
+	# librosa does not like mono 1T signals
+	signal = torch.as_tensor(librosa.resample(signal.numpy(), sample_rate_, sample_rate))
+	if mono:
+		signal = signal.unsqueeze(0)
+	return signal, sample_rate
 
 
 def compute_duration(audio_path, backend = 'ffmpeg'):

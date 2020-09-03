@@ -109,12 +109,13 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		#		t['end'] = audio.compute_duration(t['audio_path'])
 
 		self.ref = TensorBackedStringArray(t.get('ref', '') for t in transcript)
-		self.begin = torch.FloatTensor([t.get('begin', -1) for in transcript])
-		self.end = torch.FloatTensor([t.get('end', -1) for in transcript])
-		self.channel = torch.CharTensor([t.get('channel', -1) for in transcript])
-		self.speaker = torch.LongTensor([t.get('speaker', -1) for in transcript])
-		self.audio_path = TensorBackedStringArray(e[0]['audio_path'] for t in self.examples)
-		self.cumlen = torch.cat((torch.zeros(1, dtype = torch.int64), torch.as_tensor(list(map(len, self.examples))), dtype = torch.int64))).cumsum(dim = 0)
+		self.begin = torch.FloatTensor([t.get('begin', -1) for t in transcript])
+		self.end = torch.FloatTensor([t.get('end', -1) for t in transcript])
+		self.channel = torch.CharTensor([t.get('channel', -1) for t in transcript])
+		self.speaker = torch.LongTensor([t.get('speaker', -1) for t in transcript])
+		self.audio_path = TensorBackedStringArray(e[0]['audio_path'] for e in self.examples)
+		tmp = (torch.zeros(1, dtype = torch.int64), torch.as_tensor(list(map(len, self.examples))))
+		self.cumlen = torch.cat((torch.zeros(1, dtype = torch.int64), torch.as_tensor(list(map(len, self.examples)), dtype = torch.int64))).cumsum(dim = 0)
 		self.speakers = (speakers or list(sorted(set(t['speaker'] for t in transcript if t.get('speaker') is not None)))) + [None]
 
 	def get_meta(self, example_id):
@@ -137,15 +138,15 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 		audio_path = self.audio_path[index]
 		ge_zero_or_none = lambda x: x if x >= 0 else None
-		transcript = [dict(ref = self.ref[i], begin = ge_zero_or_none(float(self.begin[i])), end = ge_zero_or_none(float(self.end[i])), channel = ge_zero_or_none(int(self.channel[i])), speaker = ge_zero_or_none(int(self.speaker[i]))) for i in range(int(self.cumlen[index]), int(self.cumlen[index]))]
-
+		transcript = [dict(audio_path = audio_path, ref = self.ref[i], begin = ge_zero_or_none(float(self.begin[i])), end = ge_zero_or_none(float(self.end[i])), channel = ge_zero_or_none(int(self.channel[i])), speaker = int(self.speaker[i])) for i in range(int(self.cumlen[index]), int(self.cumlen[index + 1]))]
 		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration=self.max_duration) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
 
 		if not self.segmented:
 			transcript = dict(
 				audio_path = audio_path, 
 				ref = transcript[0]['ref'],
-				example_id = self.example_id(transcript[0]), 
+				example_id = self.example_id(transcript[0]),
+				speaker = transcript[0]['speaker']
 			)
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug
 										).squeeze(0) if self.frontend is not None else signal
@@ -173,7 +174,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				dict(
 					audio_path = audio_path,
 					ref = t['ref'],
-					example_id = self.example_id(t)
+					example_id = self.example_id(t),
 
 					channel = channel,
 					speaker = self.speakers[channel] if self.speakers else None,
@@ -194,7 +195,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 						for t in transcript]
 						for labels in self.labels]
 
-		return [transcript] + [features, speaker] + list(targets)
+		return [transcript] + [speaker, features] + list(targets)
 
 	def __len__(self):
 		return len(self.examples)
@@ -203,12 +204,12 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		if self.segmented:
 			batch = list(zip(*batch))
 
-		meta, sample_x, *sample_y = batch[0]
-		xmax_len, *ymax_len = [int(math.ceil(max(b[k].shape[-1] for b in batch) / self.time_padding_multiple)) * self.time_padding_multiple for k in range(1, len(batch[0]))]
+		meta, speaker, sample_x, *sample_y = batch[0]
+		xmax_len, *ymax_len = [int(math.ceil(max(b[k].shape[-1] for b in batch) / self.time_padding_multiple)) * self.time_padding_multiple for k in range(2, len(batch[0]))]
 		x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = sample_x.dtype)
 		y = torch.zeros(len(batch), len(sample_y), max(ymax_len), dtype = torch.long)
 		xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.long)
-		for k, (meta, sample_x, *sample_y) in enumerate(batch):
+		for k, (meta, speaker, sample_x, *sample_y) in enumerate(batch):
 			xlen[k] = sample_x.shape[-1] / x.shape[-1] if x.shape[-1] > 0 else 1.0
 			x[k, ..., :sample_x.shape[-1]] = sample_x
 			for j, t in enumerate(sample_y):
