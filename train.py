@@ -11,7 +11,7 @@ import onnxruntime
 import apex
 import datasets
 import decoders
-import exphtml
+#import exphtml
 import metrics
 import models
 import optimizers
@@ -374,7 +374,7 @@ def main(args):
 			shuffle = False,
 			batch_size = args.val_batch_size,
 			worker_init_fn = datasets.worker_init_fn,
-			timeout = args.timeout
+			timeout = args.timeout if args.num_workers > 0 else 0
 		)
 		for val_data_path in args.val_data_path for val_dataset in [
 			datasets.AudioTextDataset(
@@ -445,7 +445,7 @@ def main(args):
 		pin_memory = True,
 		batch_sampler = sampler,
 		worker_init_fn = datasets.worker_init_fn,
-		timeout = args.timeout
+		timeout = args.timeout if args.num_workers > 0 else 0
 	)
 	optimizer = torch.optim.SGD(
 		model.parameters(),

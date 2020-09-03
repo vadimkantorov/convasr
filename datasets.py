@@ -13,6 +13,22 @@ import audio
 import utils
 import transcripts
 
+class TensorBackedStringArray:
+	def __init__(self, strings, encoding = 'utf-8'):
+		encoded = [torch.ByteTensor(torch.ByteStorage.from_buffer(s.encode(encoding))) for s in strings]
+		self.cumlen = torch.cat((torch.zeros(1, dtype = torch.int64), torch.as_tensor(list(map(len, encoded)), dtype = torch.int64))).cumsum(dim = 0)
+		self.data = torch.cat(encoded)
+		self.encoding = encoding
+
+	def __getitem__(self, i):
+		return bytes(self.data[self.cumlen[i] : self.cumlen[i + 1]]).decode(self.encoding)
+
+	def __len__(self):
+		return len(self.cumlen) - 1
+
+	def __list__(self):
+		return [self[i] for i in range(len(self))]
+
 def worker_init_fn(worker_id, num_threads = 1):
 	utils.set_random_seed(worker_id)
 	utils.reset_cpu_threads(num_threads)
@@ -77,22 +93,38 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			)
 		) if duration_filter else self.examples
 
-		if len(exclude) > 0:
-			self.examples = [e for e in self.examples if transcripts.audio_name(e[0]) not in exclude]
-		'''
-		# TODO: don't forget to add this to transcribe.py!
-		def safe_coding_for_audio_lenghts:
-			duration = max(transcripts.compute_duration(t, hours=True) for t in meta)
-			if x.numel() == 0 or (args.skip_file_longer_than_hours and duration > args.skip_file_longer_than_hours):
-				print(
-						f'Skipping [{audio_path}]. Size: {x.numel()}, duration: {duration} hours (>{args.skip_file_longer_than_hours})')
-				continue
-		'''
+		exclude = set(exclude)
+		self.examples = [e for e in self.examples if transcripts.audio_name(e[0]) not in exclude]
+
+		transcript = [t for e in self.examples for t in e]
+
+		self.meta = { self.example_id(t) : t for t in transcript }
+		
+		# t.copy()
+		#for t in self.meta.values():
+		#	assert t.get('audio_path') is not None
+		#	t['channel'] = t.get('channel', None)
+		#	t['begin'] = t.get('begin', 0.0)
+		#	if t.get('end') is None:
+		#		t['end'] = audio.compute_duration(t['audio_path'])
+
+		self.ref = TensorBackedStringArray(t.get('ref', '') for t in transcript)
+		self.begin = torch.FloatTensor([t.get('begin', -1) for in transcript])
+		self.end = torch.FloatTensor([t.get('end', -1) for in transcript])
+		self.channel = torch.CharTensor([t.get('channel', -1) for in transcript])
+		self.speaker = torch.LongTensor([t.get('speaker', -1) for in transcript])
+		self.audio_path = TensorBackedStringArray(e[0]['audio_path'] for t in self.examples)
+		self.cumlen = torch.cat((torch.zeros(1, dtype = torch.int64), torch.as_tensor(list(map(len, self.examples))), dtype = torch.int64))).cumsum(dim = 0)
+		self.speakers = (speakers or list(sorted(set(t['speaker'] for t in transcript if t.get('speaker') is not None)))) + [None]
+
+	def get_meta(self, example_id):
+		return self.meta[example_id]
+
+	@staticmethod
+	def example_id(t):
+		return '{{ "audio_path" : "{audio_path}", "begin" : {begin}, "end" : {end}, "channel" : {channel} }}'.format(audio_path = t['audio_path'], begin = t.get('begin', None), end = t.get('end', None), channel = t.get('channel', None))
 
 	def __getitem__(self, index):
-		transcript = self.examples[index]
-		audio_path = transcript[0]['audio_path']
-
 		waveform_transform_debug = (
 			lambda audio_path,
 			sample_rate,
@@ -103,60 +135,66 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			)
 		) if self.waveform_transform_debug_dir else None
 
-		if not self.segmented:
-			transcript = transcript[0]
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration=self.max_duration) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
+		audio_path = self.audio_path[index]
+		ge_zero_or_none = lambda x: x if x >= 0 else None
+		transcript = [dict(ref = self.ref[i], begin = ge_zero_or_none(float(self.begin[i])), end = ge_zero_or_none(float(self.end[i])), channel = ge_zero_or_none(int(self.channel[i])), speaker = ge_zero_or_none(int(self.speaker[i]))) for i in range(int(self.cumlen[index]), int(self.cumlen[index]))]
 
-			transcript = dict(dict(audio_name = os.path.basename(transcript['audio_path'])), **transcript)
+		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration=self.max_duration) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
+
+		if not self.segmented:
+			transcript = dict(
+				audio_path = audio_path, 
+				ref = transcript[0]['ref'],
+				example_id = self.example_id(transcript[0]), 
+			)
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug
 										).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(transcript['ref']) for labels in self.labels]
 			ref_normalized, targets = zip(*targets)
+			speaker = torch.tensor(transcript['speaker'])
 		else:
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration=self.max_duration)
-			replace_transcript = self.join_transcript or \
-                               not transcript or \
-                               (any(t.get('begin') is None and t.get('end') is None for t in transcript) and \
-                                all(t.get('ref') is not None for t in transcript))
+			some_segments_have_not_begin_end = any(t.get('begin') is None and t.get('end') is None for t in transcript)
+			some_segments_have_ref = any(bool(t.get('ref')) for t in transcript)
+			replace_transcript = self.join_transcript or (not transcript) or (some_segments_have_not_begin_end and all_segments_have_ref)
 			normalize_text = True
 
 			if replace_transcript:
 				assert len(signal) == 1
 				ref_full = [self.labels[0].normalize_text(t['ref']) for t in transcript]
-				speakers = [None] + list(sorted(set(t['speaker'] for t in transcript if t.get('speaker') is not None)))
 				speaker = torch.cat([
 					torch.full((len(ref) + 1, ), speakers.index(t.get('speaker')),
 								dtype = torch.uint8).scatter_(0, torch.tensor(len(ref)), 0) for t,
 					ref in zip(transcript, ref_full)
 				])[:-1]
-				transcript = [dict(speaker = speaker, speakers = speakers, ref = ' '.join(ref_full))]
+				transcript = [dict(ref = ' '.join(ref_full))]
 				normalize_text = False
 
 			transcript = [
 				dict(
-					dict(
-						audio_path = audio_path,
-						channel = channel,
-						speaker = self.speakers[channel] if self.speakers else None,
-						begin = 0,
-						end = signal.shape[1] / sample_rate
-					),
-					**t
+					audio_path = audio_path,
+					ref = t['ref'],
+					example_id = self.example_id(t)
+
+					channel = channel,
+					speaker = self.speakers[channel] if self.speakers else None,
+					begin = 0,
+					end = signal.shape[1] / sample_rate
 				)
 				for t in sorted(transcript, key = transcripts.sort_key)
-				for channel in ([t['channel']] if 'channel' in t else range(len(signal)))
+				for channel in ([t['channel']] if t['channel'] is not None else range(len(signal)))
 			]
+			speaker = [t.pop('speaker') for t in transcript]
 			features = [
 				self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0)
 				if self.frontend is not None else segment.unsqueeze(0)
 				for t in transcript
-				for segment in [signal[t['channel'], int(t['begin'] * sample_rate):1 + int(t['end'] * sample_rate)]]
+				for segment in [signal[t.pop('channel'), int(t.pop('begin') * sample_rate):1 + int(t.pop('end') * sample_rate)]]
 			]
 			targets = [[labels.encode(t.get('ref', ''), normalize = normalize_text)[1]
 						for t in transcript]
 						for labels in self.labels]
 
-		return [transcript, features] + list(targets)
+		return [transcript] + [features, speaker] + list(targets)
 
 	def __len__(self):
 		return len(self.examples)

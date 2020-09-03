@@ -95,11 +95,14 @@ def main(args):
 	for i, (meta, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
 
-		audio_path, speakers, begin, end = map(meta[0].get, ['audio_path', 'speakers', 'begin', 'end'])
-
 		if x.numel() == 0:
-			print(f'Skipping [{audio_path}].')
+			print(f'Skipping empty [{audio_path}].')
 			continue
+		
+		meta = [val_dataset.get_meta(m['example_id']) for m in meta]
+		audio_path = meta[0]['audio_path']
+		audio_name = transcripts.audio_name(audio_path)
+		transcript_path = os.path.join(args.output_path, audio_name + '.json')
 
 		try:
 			tic = time.time()
@@ -112,7 +115,7 @@ def main(args):
 
 			decoded = decoder.decode(log_probs, olen)
 
-			print('Input:', os.path.basename(audio_path))
+			print('Input:', audio_name)
 			print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
 			print(
 				'Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(
@@ -179,7 +182,7 @@ def main(args):
 						channel = channel[i],
 						speaker = speaker[i],
 						key = 'ref',
-						speakers = speakers
+						speakers = val_dataset.speakers
 					) for i in range(len(decoded))
 				]
 		except:
@@ -229,18 +232,18 @@ def main(args):
 		print('Filtered segments:', len(filtered_transcript), 'out of', len(transcript))
 
 		if args.output_json:
-			transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.json')
+			transcript_path = os.path.join(args.output_path, audio_name + '.json')
 			print(transcript_path)
 			with open(transcript_path, 'w') as f:
 				json.dump(filtered_transcript, f, ensure_ascii = False, sort_keys = True, indent = 2)
 
 		if args.output_html:
-			transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.html')
+			transcript_path = os.path.join(args.output_path, audio_name + '.html')
 			print(transcript_path)
 			vis.transcript(transcript_path, args.sample_rate, args.mono, transcript, filtered_transcript)
 
 		if args.output_txt:
-			transcript_path = os.path.join(args.output_path, os.path.basename(audio_path) + '.txt')
+			transcript_path = os.path.join(args.output_path, audio_name + '.txt')
 			print(transcript_path)
 			with open(transcript_path, 'w') as f:
 				f.write(hyp)
