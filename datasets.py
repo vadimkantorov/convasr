@@ -14,17 +14,16 @@ import utils
 import transcripts
 
 class TensorBackedStringArray:
-	def __init__(self, strings, encoding = 'utf-8'):
-		bytelens = []
-		bytes = bytearray()
-		for s in strings:
-			e = s.encode(encoding)
-			bytelens.append(len(e))
-			bytes.extend(e)
-
-		self.cumlen = torch.cat((torch.zeros(1, dtype = torch.int64), torch.as_tensor(lens, dtype = torch.int64))).cumsum(dim = 0)
+	def __init__(self, strings, encoding = 'utf_16_le'):
+		multiplier = dict(ascii = 1, utf_16_le = 2, utf_32_le = 4)[encoding]
+		strlens = list(map(len, strings))
+		bytes = ''.join(strings).encode(encoding)
+		
+		self.cumlen = torch.cat((torch.zeros(1, dtype = torch.int16), torch.as_tensor(strlens, dtype = torch.int16).mul_(multiplier))).cumsum(dim = 0, dtype = torch.int64)
 		self.data = torch.ByteTensor(torch.ByteStorage.from_buffer(bytes))
 		self.encoding = encoding
+		
+		assert int(self.cumlen[-1]) == len(self.data), f'[{encoding}] is not enough to hold characters, use a larger character class'
 
 	def __getitem__(self, i):
 		return bytes(self.data[self.cumlen[i] : self.cumlen[i + 1]]).decode(self.encoding)
