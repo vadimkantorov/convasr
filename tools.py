@@ -466,6 +466,16 @@ def split(
 		indent = 2
 	)
 
+#transcript = json.load(open('data/transcripts_valset_16082020.csv.json_GreedyDecoder.json'))
+#
+#cer = float(torch.FloatTensor([t['cer'] for t in transcript if t['num_words'] > 0]).mean())
+#wer = float(torch.FloatTensor([t['wer'] for t in transcript if t['num_words'] > 0]).mean())
+#print('base', cer, wer)
+#
+#for k in ['words_only_proper', 'words_only_number']:
+#	cer = float(torch.FloatTensor([t[k]['cer'] for t in transcript if t[k]['num_words'] > 0]).mean())
+#	wer = float(torch.FloatTensor([t[k]['wer'] for t in transcript if t[k]['num_words'] > 0]).mean())
+#	print(k, cer, wer)
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()

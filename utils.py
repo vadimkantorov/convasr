@@ -35,6 +35,8 @@ def compute_memory_stats(byte_scaler = 1024**3, measure_pss_ram = False):
 			child.memory_full_info().pss for child in children
 		)
 		res['pss_ram'] = total_pss_ram / byte_scaler
+	else:
+		res['pss_ram'] = 0.0
 	return res
 
 def reset_cpu_threads(num_threads):
