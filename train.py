@@ -418,6 +418,7 @@ def main(args):
 		waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob),
 		feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob)
 	)
+	tic = time.time()
 	train_dataset = datasets.AudioTextDataset(
 		args.train_data_path,
 		labels,
@@ -425,21 +426,21 @@ def main(args):
 		frontend = train_frontend if not args.frontend_in_model else None,
 		min_duration = args.min_duration,
 		max_duration = args.max_duration,
-		time_padding_multiple = args.batch_time_padding_multiple
-	)
-	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
-	tic = time.time()
-	sampler = datasets.BucketingBatchSampler(
-		train_dataset,
-		batch_size = args.train_batch_size,
-		mixing = args.train_data_mixing,
+		time_padding_multiple = args.batch_time_padding_multiple,
 		bucket = lambda example: int(
 			math.ceil(
 				((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
 			)
 		)
-	)  #+1 mean bug fix with bucket sizing
-	print('Time sampler created:', time.time() - tic, 'sec')
+	)
+	print('Time train dataset created:', time.time() - tic, 'sec')
+	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
+	tic = time.time()
+	sampler = datasets.BucketingBatchSampler(
+		train_dataset,
+		batch_size = args.train_batch_size,
+	)
+	print('Time train sampler created:', time.time() - tic, 'sec')
 
 	train_data_loader = torch.utils.data.DataLoader(
 		train_dataset,
@@ -526,6 +527,7 @@ def main(args):
 			if batch_idx == 0:
 				time_ms_launch_data_loader = (toc_data - tic) * 1000
 				print('Time data loader launch @ ', epoch, ':', time_ms_launch_data_loader / 1000, 'sec')
+			import IPython; IPython.embed()
 			lr = optimizer.param_groups[0]['lr']
 			lr_avg = metrics.exp_moving_average(lr_avg, lr, max = 1)
 
