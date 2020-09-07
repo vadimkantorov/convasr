@@ -1,5 +1,3 @@
-#TODO: support forced mono even if transcript is given
-
 import os
 import gzip
 import math
@@ -15,21 +13,18 @@ import transcripts
 
 class TensorBackedStringArray:
 	def __init__(self, strings, encoding = 'utf_16_le'):
-		multiplier = dict(ascii = 1, utf_16_le = 2, utf_32_le = 4)[encoding]
-		strlens = list(map(len, strings))
-		bytes = ''.join(strings).encode(encoding)
-		
-		self.cumlen = torch.cat((torch.zeros(1, dtype = torch.int16), torch.as_tensor(strlens, dtype = torch.int16).mul_(multiplier))).cumsum(dim = 0, dtype = torch.int64)
-		self.data = torch.ByteTensor(torch.ByteStorage.from_buffer(bytes))
+		strings = list(strings)
 		self.encoding = encoding
-		
-		assert int(self.cumlen[-1]) == len(self.data), f'[{encoding}] is not enough to hold characters, use a larger character class'
+		self.multiplier = dict(ascii = 1, utf_16_le = 2, utf_32_le = 4)[encoding]
+		self.data = torch.ByteTensor(torch.ByteStorage.from_buffer(''.join(strings).encode(encoding)))
+		self.cumlen = torch.LongTensor(list(map(len, strings))).cumsum(dim = 0)
+		assert int(self.cumlen[-1]) * self.multiplier == len(self.data), f'[{encoding}] is not enough to hold characters, use a larger character class'
 
 	def __getitem__(self, i):
-		return bytes(self.data[self.cumlen[i] : self.cumlen[i + 1]]).decode(self.encoding)
+		return bytes(self.data[(self.cumlen[i - 1] * self.multiplier if i >= 1 else 0) : self.cumlen[i] * self.multiplier]).decode(self.encoding)
 
 	def __len__(self):
-		return len(self.cumlen) - 1
+		return len(self.cumlen)
 
 	def __list__(self):
 		return [self[i] for i in range(len(self))]
@@ -39,19 +34,41 @@ def worker_init_fn(worker_id, num_threads = 1):
 	utils.reset_cpu_threads(num_threads)
 
 class AudioTextDataset(torch.utils.data.Dataset):
+	# Arguments
+	# ? speaker_names = ['', 'speaker1', 'speaker2']
+	# data_paths:
+	# {"audio_path" : "/path/to/audio.ext"}
+	# ? {"ref" : "ref text"}
+	# ? {"begin" : 1.0, "end" : 3.0}
+	# ? {"channel" : 0}
+	# ? {"speaker" : 1 | "speaker1"}
+	# Returned from __getitem__:
+	# {"audio_path" : "/path/to/audi.ext", "ref" : "ref text", "example_id" : "example_id"} 
+	# Returned from get_meta:
+	# {"audio_path" : "/path/to/audio.ext", "example_id" : "example_id", "begin" : 0.0 | time_missing, "end" : 0.0 | time_misisng, "channel" : 0 | 1 | channel_missing, "speaker" : 1 | 15 | speaker_missing, "meta" : original_example, "ref" : 'ref or empty before normalization'}
+	# Comments:
+	# If speaker_names are not set and speakers are not set, uses channel indices as speakers
+	
+	ref_missing = ''
+	speaker_name_missing = ''
+	speaker_missing = 0
+	channel_missing = -1
+	time_missing = -1
+
 	def __init__(
 		self,
 		data_paths,
 		labels,
 		sample_rate,
 		frontend = None,
-		speakers = None,
+		speaker_names = None,
 		waveform_transform_debug_dir = None,
 		min_duration = None,
 		max_duration = None,
 		duration_filter = True,
 		min_ref_len = None,
 		max_ref_len = None,
+		max_num_channels = 2,
 		ref_len_filter = True,
 		mono = True,
 		segmented = False,
@@ -70,7 +87,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.time_padding_multiple = time_padding_multiple
 		self.mono = mono
 		self.audio_backend = audio_backend
-		self.speakers = speakers
 
 		maybe_gzopen = lambda data_path: gzip.open(data_path, 'rt') if data_path.endswith('.gz') else open(data_path)
 		duration = lambda example: sum(map(transcripts.compute_duration, example))
@@ -84,50 +100,70 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				return json.load(open(data_path + '.json'))
 			return [dict(audio_path = data_path)]
 
-		self.examples = [
+		examples = [
 			list(g) for data_path in data_paths for k,
 			g in itertools
 			.groupby(sorted(read_transcript(data_path), key = transcripts.sort_key), key = transcripts.group_key)
 		]
-		self.examples = sorted(self.examples, key = duration)
-		self.examples = list(
+		examples = sorted(examples, key = duration)
+		examples = list(
 			filter(
 				lambda example: (min_duration is None or min_duration <= duration(example)) and
 				(max_duration is None or duration(example) <= max_duration),
-				self.examples
+				examples
 			)
-		) if duration_filter else self.examples
+		) if duration_filter else examples
 
 		exclude = set(exclude)
-		self.examples = [e for e in self.examples if transcripts.audio_name(e[0]) not in exclude]
+		examples = [e for e in examples if transcripts.audio_name(e[0]) not in exclude]
 
-		transcript = [t for e in self.examples for t in e]
+		transcript = [t for e in examples for t in e]
+		
+		if speaker_names:
+			self.speaker_names = speaker_names
+		else:
+			speaker_names = list(sorted(set(str(t['speaker']) for t in transcript if t.get('speaker')))) or [f'channel{1 + c}' for c in range(max_num_channels)]
+			self.speaker_names = [self.speaker_name_missing] + speaker_names
+		
+		self.speaker_names_index = {speaker_name : i for i, speaker_name in enumerate(self.speaker_names)}
+		assert self.speaker_names_index.get(self.speaker_name_missing) == self.speaker_missing
 
-		self.meta = { self.example_id(t) : t for t in transcript }
+		for t in transcript:
+			t['meta'] = t.copy()
+			t['ref'] = t.get('ref', self.ref_missing)
+			t['begin'] = t.get('begin', self.time_missing)
+			t['end'] = t.get('end', self.time_missing)
+			t['channel'] = t.get('channel', self.channel_missing)
+			t['speaker'] = t['speaker'] if isinstance(t.get('speaker'), int) else self.speaker_names_index.get(t['speaker'], self.speaker_missing) if isinstance(t.get('speaker'), str) else 1 + t['channel'] if 'channel' in t else self.speaker_missing
+			t['speaker_name'] = self.speaker_names[t['speaker']]
+			t['example_id'] = self.example_id(t)
 		
-		# t.copy()
-		#for t in self.meta.values():
-		#	assert t.get('audio_path') is not None
-		#	t['channel'] = t.get('channel', None)
-		#	t['begin'] = t.get('begin', 0.0)
-		#	if t.get('end') is None:
-		#		t['end'] = audio.compute_duration(t['audio_path'])
-		self.ref = TensorBackedStringArray(t.get('ref', '') for t in transcript)
-		self.begin = torch.FloatTensor([t.get('begin', -1) for t in transcript])
-		self.end = torch.FloatTensor([t.get('end', -1) for t in transcript])
-		self.channel = torch.CharTensor([t.get('channel', -1) for t in transcript])
-		self.speaker = torch.LongTensor([t.get('speaker', -1) for t in transcript])
-		self.audio_path = TensorBackedStringArray(e[0]['audio_path'] for e in self.examples)
+		self.meta = { t['example_id'] : t for t in transcript }
+		self.audio_path = TensorBackedStringArray([e[0]['audio_path'] for e in examples])
+		self.ref = TensorBackedStringArray([t['ref'] for t in transcript])
+		self.begin = torch.FloatTensor([t['begin'] for t in transcript])
+		self.end = torch.FloatTensor([t['end'] for t in transcript])
+		self.channel = torch.CharTensor([t['channel'] for t in transcript])
+		self.speaker = torch.LongTensor([t['speaker'] for t in transcript])
 		
-		self.cumlen = torch.cat((torch.zeros(1, dtype = torch.int64), torch.as_tensor(list(map(len, self.examples)), dtype = torch.int64))).cumsum(dim = 0)
-		self.speakers = (speakers or list(sorted(set(t['speaker'] for t in transcript if t.get('speaker') is not None)))) + [None]
+		self.cumlen = torch.cat((torch.zeros(1, dtype = torch.int16), torch.as_tensor(list(map(len, examples)), dtype = torch.int16))).cumsum(dim = 0, dtype = torch.int64)
 
 	def get_meta(self, example_id):
 		return self.meta[example_id]
 
 	@staticmethod
 	def example_id(t):
-		return '{{ "audio_path" : "{audio_path}", "begin" : {begin}, "end" : {end}, "channel" : {channel} }}'.format(audio_path = t['audio_path'], begin = t.get('begin', None), end = t.get('end', None), channel = t.get('channel', None))
+		return '{{ "audio_path" : "{audio_path}", "begin" : {begin}, "end" : {end}, "channel" : {channel} }}'.format(**t)
+
+	def load_example(self, index):
+		return [dict(
+				audio_path = self.audio_path[index], 
+				ref = self.ref[i],
+				begin = float(self.begin[i]),
+				end = float(self.end[i]),
+				channel = int(self.channel[i]),
+				speaker = int(self.speaker[i])
+			) for i in range(int(self.cumlen[index]), int(self.cumlen[index + 1]))]
 
 	def __getitem__(self, index):
 		waveform_transform_debug = (
@@ -141,25 +177,33 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		) if self.waveform_transform_debug_dir else None
 
 		audio_path = self.audio_path[index]
-		ge_zero_or = lambda x, default = None: x if x is not None and x >= 0 else default
-		transcript = [dict(audio_path = audio_path, ref = self.ref[i], begin = ge_zero_or(float(self.begin[i])), end = ge_zero_or(float(self.end[i])), channel = ge_zero_or(int(self.channel[i])), speaker = int(self.speaker[i])) for i in range(int(self.cumlen[index]), int(self.cumlen[index + 1]))]
+		
+		transcript = self.load_example(index)
+		
 		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration=self.max_duration) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
 
+		#TODO: support forced mono even if transcript is given
+		#TODO: merge both branches in one
+		#TODO: subsample speaker labels according to features
+		#TODO: move computing buckets here?
+
 		if not self.segmented:
-			transcript = dict(
-				audio_path = audio_path, 
-				ref = transcript[0]['ref'],
-				example_id = self.example_id(transcript[0]),
-				speaker = transcript[0]['speaker']
+			t = transcript[0]
+			t = dict(
+				audio_path = t['audio_path'], 
+				ref = t['ref'],
+				example_id = t['example_id'],
+
+				speaker = t['speaker']
 			)
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug
 										).squeeze(0) if self.frontend is not None else signal
-			targets = [labels.encode(transcript['ref']) for labels in self.labels]
+			targets = [labels.encode(t['ref']) for labels in self.labels]
 			ref_normalized, targets = zip(*targets)
-			speaker = torch.tensor(transcript['speaker'])
+			speaker = torch.tensor([t.pop('speaker')], dtype = torch.int64)
 		else:
-			some_segments_have_not_begin_end = any(t.get('begin') is None and t.get('end') is None for t in transcript)
-			some_segments_have_ref = any(bool(t.get('ref')) for t in transcript)
+			some_segments_have_not_begin_end = any(t['begin'] == self.time_missing and t['end'] == self.time_missing for t in transcript)
+			some_segments_have_ref = any(bool(t['ref']) for t in transcript)
 			replace_transcript = self.join_transcript or (not transcript) or (some_segments_have_not_begin_end and all_segments_have_ref)
 			normalize_text = True
 
@@ -167,8 +211,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				assert len(signal) == 1
 				ref_full = [self.labels[0].normalize_text(t['ref']) for t in transcript]
 				speaker = torch.cat([
-					torch.full((len(ref) + 1, ), speakers.index(t.get('speaker')),
-								dtype = torch.uint8).scatter_(0, torch.tensor(len(ref)), 0) for t,
+					torch.full((len(ref) + 1, ), t['speaker'],
+								dtype = torch.int64).scatter_(0, torch.tensor(len(ref)), self.speaker_missing) for t,
 					ref in zip(transcript, ref_full)
 				])[:-1]
 				transcript = [dict(ref = ' '.join(ref_full))]
@@ -176,14 +220,14 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 			transcript = [
 				dict(
-					audio_path = audio_path,
+					audio_path = t['audio_path'],
 					ref = t['ref'],
-					example_id = self.example_id(t),
+					example_id = t['example_id'],
 
 					channel = channel,
-					speaker = ge_zero_or(t['speaker'], channel),
-					begin = ge_zero_or(t['begin'], 0.0),
-					end = ge_zero_or(t['end'], signal.shape[1] / sample_rate)
+					speaker = t['speaker'],
+					begin_samples = (t['begin'] * sample_rate) if t['begin'] != self.time_missing else 0,
+					end_samples = (1 + t['end'] * sample_rate) if t['end'] != self.time_missing else signal.shape[1]
 				)
 				for t in sorted(transcript, key = transcripts.sort_key)
 				for channel in ([t['channel']] if t['channel'] is not None else range(len(signal)))
@@ -193,34 +237,37 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0)
 				if self.frontend is not None else segment.unsqueeze(0)
 				for t in transcript
-				for segment in [signal[t.pop('channel'), int(t.pop('begin') * sample_rate):1 + int(t.pop('end') * sample_rate)]]
+				for segment in [signal[t.pop('channel'), t.pop('begin_samples'):t.pop('end_samples')]]
 			]
-			targets = [[labels.encode(t.get('ref', ''), normalize = normalize_text)[1]
+			targets = [[labels.encode(t['ref'], normalize = normalize_text)[1]
 						for t in transcript]
 						for labels in self.labels]
 
-		return [transcript] + [speaker, features] + list(targets)
+		return [transcript, speaker, features] + list(targets)
 
 	def __len__(self):
-		return len(self.examples)
+		return len(self.cumlen)
 
 	def collate_fn(self, batch):
 		if self.segmented:
 			batch = list(zip(*batch))
 
-		meta, speaker, sample_x, *sample_y = batch[0]
-		xmax_len, *ymax_len = [int(math.ceil(max(b[k].shape[-1] for b in batch) / self.time_padding_multiple)) * self.time_padding_multiple for k in range(2, len(batch[0]))]
+		meta_s, sample_s, sample_x, *sample_y = batch[0]
+		time_padding_multiple = [1, 1, self.time_padding_multiple] + [self.time_padding_multiple] * len(sample_y)
+		smax_len, xmax_len, *ymax_len = [int(math.ceil(max(b[k].shape[-1] for b in batch) / time_padding_multiple[k])) * time_padding_multiple[k] for k in range(1, len(batch[0]))]
+		meta = [b[0] for b in batch]
 		x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = sample_x.dtype)
 		y = torch.zeros(len(batch), len(sample_y), max(ymax_len), dtype = torch.long)
+		s = torch.full((len(batch), smax_len), self.speaker_missing, dtype = torch.int64)
 		xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.long)
-		for k, (meta, speaker, sample_x, *sample_y) in enumerate(batch):
+		for k, (meta_s, sample_s, sample_x, *sample_y) in enumerate(batch):
 			xlen[k] = sample_x.shape[-1] / x.shape[-1] if x.shape[-1] > 0 else 1.0
 			x[k, ..., :sample_x.shape[-1]] = sample_x
+			s[k, :sample_s.shape[-1]] = sample_s
 			for j, t in enumerate(sample_y):
 				y[k, j, :t.shape[-1]] = t
 				ylen[k, j] = len(t)
-
-		return tuple(zip(*batch))[:1] + (x, xlen, y, ylen)
+		return (meta, s, x, xlen, y, ylen)
 
 
 class BucketingBatchSampler(torch.utils.data.Sampler):
@@ -230,7 +277,7 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 		self.dataset = dataset
 		self.batch_size = batch_size
 		#self.mixing = mixing or ([1 / len(self.dataset.examples)] * len(self.dataset.examples))
-		key = lambda example_idx: bucket(self.dataset.examples[example_idx])
+		key = lambda example_idx: bucket(self.dataset.load_example(example_idx))
 		self.buckets = {
 			k: list(g)
 			for k, g in itertools.groupby(sorted(range(len(self.dataset)), key = key), key = key)
@@ -264,7 +311,6 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 
 	def load_state_dict(self, state_dict):
 		self.batch_idx = state_dict['batch_idx']
-
 
 class Labels:
 	repeat = '2'

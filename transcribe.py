@@ -92,7 +92,7 @@ def main(args):
 	)
 	output_lines = []  # only used if args.output_tsv is True
 
-	for i, (meta, x, xlen, y, ylen) in enumerate(val_data_loader):
+	for i, (meta, s, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
 
 		if x.numel() == 0:

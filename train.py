@@ -23,7 +23,7 @@ import transcripts
 import multiprocessing
 
 def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
-	for meta, x, xlen, y, ylen in data_loader:
+	for meta, s, x, xlen, y, ylen in data_loader:
 		x, xlen, y, ylen = x.to(device, non_blocking = True), xlen.to(device, non_blocking = True), y.to(device, non_blocking = True), ylen.to(device, non_blocking = True)
 		with torch.no_grad():
 			try:
@@ -428,6 +428,7 @@ def main(args):
 		time_padding_multiple = args.batch_time_padding_multiple
 	)
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
+	tic = time.time()
 	sampler = datasets.BucketingBatchSampler(
 		train_dataset,
 		batch_size = args.train_batch_size,
@@ -438,6 +439,8 @@ def main(args):
 			)
 		)
 	)  #+1 mean bug fix with bucket sizing
+	print('Time sampler created:', time.time() - tic, 'sec')
+
 	train_data_loader = torch.utils.data.DataLoader(
 		train_dataset,
 		num_workers = args.num_workers,
@@ -518,8 +521,11 @@ def main(args):
 	for epoch in range(epoch, args.epochs):
 		sampler.shuffle(epoch + args.seed_sampler)
 		time_epoch_start = time.time()
-		for batch_idx, (meta, x, xlen, y, ylen) in enumerate(train_data_loader, start = sampler.batch_idx):
+		for batch_idx, (meta, s, x, xlen, y, ylen) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc_data = time.time()
+			if batch_idx == 0:
+				time_ms_launch_data_loader = (toc_data - tic) * 1000
+				print('Time data loader launch @ ', epoch, ':', time_ms_launch_data_loader / 1000, 'sec')
 			lr = optimizer.param_groups[0]['lr']
 			lr_avg = metrics.exp_moving_average(lr_avg, lr, max = 1)
 

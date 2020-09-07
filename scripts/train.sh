@@ -1,7 +1,7 @@
 python3 train.py $@ \
   --verbose --lang ru \
   --model JasperNetBig \
-  --train-batch-size 128 --val-batch-size 64 \
+  --train-batch-size 4 --val-batch-size 64 \
   --scheduler MultiStepLR --decay-milestones 25000 75000 \
   --lr 1e-2 \
   --optimizer NovoGrad \
