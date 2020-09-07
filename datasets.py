@@ -274,7 +274,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 
 class BucketingBatchSampler(torch.utils.data.Sampler):
-	def __init__(self, dataset, bucket, batch_size = 1, mixing = None):
+	def __init__(self, dataset, batch_size = 1, mixing = None):
 		super().__init__(dataset)
 
 		self.dataset = dataset
