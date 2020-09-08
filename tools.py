@@ -114,7 +114,7 @@ def cut(
 	for t in transcript:
 		transcript_by_path[t['audio_path']].append(t)
 
-	print("Unique audio_path count: ", len(transcript_by_path.keys()))
+	print('Unique audio_path count: ', len(transcript_by_path.keys()))
 	with multiprocessing.pool.Pool(processes = num_workers) as pool:
 		map_func = functools.partial(
 			cut_audio, output_path, sample_rate, mono, dilate, strip_prefix, audio_backend, add_sub_paths
@@ -162,8 +162,8 @@ def du(input_path):
 
 def csv2json(input_path, gz, group, reset_begin_end, csv_sep):
 	""" Convert cvs transcripts file to .csv.json transcripts file. Each line in `input_path` file must have format:
-		"audio_path,transcription,begin,end\n"
-		csv_sep could be "comma", representing ",", or "tab", representing "\t".
+		'audio_path,transcription,begin,end\n'
+		csv_sep could be 'comma', representing ',', or 'tab', representing '\t'.
 	"""
 	gzopen = lambda file_path, mode = 'r': gzip.open(file_path, mode + 't') if file_path.endswith('.gz') else open(file_path, mode)
 
@@ -174,17 +174,17 @@ def csv2json(input_path, gz, group, reset_begin_end, csv_sep):
 	csv_sep = dict(tab = '\t', comma = ',')[csv_sep]
 	res = []
 	for line in gzopen(input_path):
-		assert '"' not in line, f"{input_path!r} lines must not contain any quotation marks!"
+		assert '"' not in line, f'{input_path!r} lines must not contain any quotation marks!'
 		audio_path, ref, begin, end = line[:-1].split(csv_sep)[:4]
 		transcription = dict(audio_path = audio_path, ref = ref, begin = float(begin), end = float(end))
 		if reset_begin_end:
-			transcription["begin"] = 0.0
-			transcription["end"] = duration(os.path.basename(audio_path))
+			transcription['begin'] = 0.0
+			transcription['end'] = duration(os.path.basename(audio_path))
 
-		# add input_path folder name to the "group" key of each transcription
+		# add input_path folder name to the 'group' key of each transcription
 		# todo: rename --group parameter to something more sensible!
 		if group >= 0:
-			transcription["group"] = audio_path.split('/')[group]
+			transcription['group'] = audio_path.split('/')[group]
 		res.append(transcription)
 
 	output_path = input_path + '.json' + ('.gz' if gz else '')
