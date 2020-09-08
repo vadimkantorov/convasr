@@ -433,6 +433,8 @@ def main(args):
 			)
 		)
 	)
+	train_dataset.pop_meta()
+
 	print('Time train dataset created:', time.time() - tic, 'sec')
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
 	tic = time.time()
@@ -527,7 +529,7 @@ def main(args):
 			if batch_idx == 0:
 				time_ms_launch_data_loader = (toc_data - tic) * 1000
 				print('Time data loader launch @ ', epoch, ':', time_ms_launch_data_loader / 1000, 'sec')
-			import IPython; IPython.embed()
+			
 			lr = optimizer.param_groups[0]['lr']
 			lr_avg = metrics.exp_moving_average(lr_avg, lr, max = 1)
 
