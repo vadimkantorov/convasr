@@ -160,24 +160,35 @@ def du(input_path):
 	)
 
 
-def csv2json(input_path, gz, group, reset_duration):
+def csv2json(input_path, gz, group, reset_begin_end, csv_sep):
+	""" Convert cvs transcripts file to .csv.json transcripts file. Each line in `input_path` file must have format:
+		"audio_path,transcription,begin,end\n"
+		csv_sep could be "comma", representing ",", or "tab", representing "\t".
+	"""
 	gzopen = lambda file_path, mode = 'r': gzip.open(file_path, mode + 't') if file_path.endswith('.gz') else open(file_path, mode)
 
 	def duration(audio_name):
-		begin, end = map(float, os.path.splitext(audio_name)[0].split('_')[-2:])
-		return end - begin
+		begin, end = os.path.splitext(audio_name)[0].split('_')[-2:]
+		return float(end) - float(begin)
 
-	transcript = [
-		dict(
-			audio_path = s[0],
-			ref = s[1],
-			begin = 0.0,
-			end = float(s[2]) if not reset_duration else duration(os.path.basename(s[0])),
-			**(dict(group = s[0].split('/')[group]) if group >= 0 else {})
-		) for l in gzopen(input_path) if '"' not in l for s in [l.strip().split(',')]
-	]
+	csv_sep = dict(tab = '\t', comma = ',')[csv_sep]
+	res = []
+	for line in gzopen(input_path):
+		assert '"' not in line, f"{input_path!r} lines must not contain any quotation marks!"
+		audio_path, ref, begin, end = line[:-1].split(csv_sep)[:4]
+		transcription = dict(audio_path = audio_path, ref = ref, begin = float(begin), end = float(end))
+		if reset_begin_end:
+			transcription["begin"] = 0.0
+			transcription["end"] = duration(os.path.basename(audio_path))
+
+		# add input_path folder name to the "group" key of each transcription
+		# todo: rename --group parameter to something more sensible!
+		if group >= 0:
+			transcription["group"] = audio_path.split('/')[group]
+		res.append(transcription)
+
 	output_path = input_path + '.json' + ('.gz' if gz else '')
-	json.dump(transcript, gzopen(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	json.dump(res, gzopen(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
 
@@ -513,7 +524,8 @@ if __name__ == '__main__':
 	cmd.add_argument('input_path')
 	cmd.add_argument('--gzip', dest = 'gz', action = 'store_true')
 	cmd.add_argument('--group', type = int, default = 0)
-	cmd.add_argument('--reset-duration', action = 'store_true')
+	cmd.add_argument('--reset-begin-end', action = 'store_true')
+	cmd.add_argument('--csv-sep', default = 'tab', choices = ['tab', 'comma'])
 	cmd.set_defaults(func = csv2json)
 
 	cmd = subparsers.add_parser('diff')

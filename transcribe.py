@@ -57,7 +57,7 @@ def setup(args):
 def main(args):
 	utils.enable_jit_fusion()
 
-	assert args.output_json or args.output_html or args.output_txt or args.output_tsv, \
+	assert args.output_json or args.output_html or args.output_txt or args.output_csv, \
 		"at least one of the output formats must be provided"
 	os.makedirs(args.output_path, exist_ok = True)
 	data_paths = [
@@ -90,7 +90,8 @@ def main(args):
 	val_data_loader = torch.utils.data.DataLoader(
 		val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers
 	)
-	output_lines = []  # only used if args.output_tsv is True
+	csv_sep = dict(tab = '\t', comma = ',')[args.csv_sep]
+	output_lines = []  # only used if args.output_csv is True
 
 	for i, (meta, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
@@ -245,13 +246,13 @@ def main(args):
 			with open(transcript_path, 'w') as f:
 				f.write(hyp)
 
-		if args.output_tsv:
-			output_lines.append(f'{audio_path}\t{hyp}\t{begin}\t{end}\n')
+		if args.output_csv:
+			output_lines.append(csv_sep.join((audio_path, hyp, begin, end)) + '\n')
 
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
-	if args.output_tsv:
-		with open(os.path.join(args.output_path, "transcripts.tsv"), 'w') as f:
+	if args.output_csv:
+		with open(os.path.join(args.output_path, "transcripts.csv"), 'w') as f:
 			f.writelines(output_lines)
 
 
@@ -268,7 +269,8 @@ if __name__ == '__main__':
 	parser.add_argument('--output-json', action = 'store_true', help = 'write transcripts to separate json files')
 	parser.add_argument('--output-html', action = 'store_true', help = 'write transcripts to separate html files')
 	parser.add_argument('--output-txt', action = 'store_true', help = 'write transcripts to separate txt files')
-	parser.add_argument('--output-tsv', action = 'store_true', help = 'write transcripts to a transcripts.tsv file')
+	parser.add_argument('--output-csv', action = 'store_true', help = 'write transcripts to a transcripts.csv file')
+	parser.add_argument('--csv-sep', default = 'tab', choices = ['tab', 'comma'])
 	parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
 	parser.add_argument('--num-workers', type = int, default = 0)
