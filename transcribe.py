@@ -247,7 +247,7 @@ def main(args):
 				f.write(hyp)
 
 		if args.output_csv:
-			output_lines.append(csv_sep.join((audio_path, hyp, begin, end)) + '\n')
+			output_lines.append(csv_sep.join((audio_path, hyp, str(begin), str(end))) + '\n')
 
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
