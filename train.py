@@ -384,7 +384,8 @@ def main(args):
 				frontend = val_frontend if not args.frontend_in_model else None,
 				waveform_transform_debug_dir = args.val_waveform_transform_debug_dir,
 				min_duration = args.min_duration,
-				time_padding_multiple = args.batch_time_padding_multiple
+				time_padding_multiple = args.batch_time_padding_multiple,
+				pop_meta = True
 			)
 		]
 	}
@@ -431,9 +432,9 @@ def main(args):
 			math.ceil(
 				((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
 			)
-		)
+		),
+		pop_meta = True
 	)
-	train_dataset.pop_meta()
 
 	print('Time train dataset created:', time.time() - tic, 'sec')
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))

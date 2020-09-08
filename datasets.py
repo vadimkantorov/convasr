@@ -34,20 +34,22 @@ def worker_init_fn(worker_id, num_threads = 1):
 	utils.reset_cpu_threads(num_threads)
 
 class AudioTextDataset(torch.utils.data.Dataset):
-	# Arguments
-	# ? speaker_names = ['', 'speaker1', 'speaker2']
-	# data_paths:
-	# {"audio_path" : "/path/to/audio.ext"}
-	# ? {"ref" : "ref text"}
-	# ? {"begin" : 1.0, "end" : 3.0}
-	# ? {"channel" : 0}
-	# ? {"speaker" : 1 | "speaker1"}
-	# Returned from __getitem__:
-	# {"audio_path" : "/path/to/audi.ext", "ref" : "ref text", "example_id" : "example_id"} 
-	# Returned from get_meta:
-	# {"audio_path" : "/path/to/audio.ext", "example_id" : "example_id", "begin" : 0.0 | time_missing, "end" : 0.0 | time_misisng, "channel" : 0 | 1 | channel_missing, "speaker" : 1 | 15 | speaker_missing, "meta" : original_example, "ref" : 'ref or empty before normalization'}
-	# Comments:
-	# If speaker_names are not set and speakers are not set, uses channel indices as speakers
+	'''
+	Arguments
+	? speaker_names = ['', 'speaker1', 'speaker2']
+	data_paths:
+	{"audio_path" : "/path/to/audio.ext"}
+	? {"ref" : "ref text"}
+	? {"begin" : 1.0, "end" : 3.0}
+	? {"channel" : 0}
+	? {"speaker" : 1 | "speaker1"}
+	Returned from __getitem__:
+	{"audio_path" : "/path/to/audi.ext", "ref" : "ref text", "example_id" : "example_id"} 
+	Returned from get_meta:
+	{"audio_path" : "/path/to/audio.ext", "example_id" : "example_id", "begin" : 0.0 | time_missing, "end" : 0.0 | time_misisng, "channel" : 0 | 1 | channel_missing, "speaker" : 1 | 15 | speaker_missing, "meta" : original_example, "ref" : 'ref or empty before normalization'}
+	Comments:
+	If speaker_names are not set and speakers are not set, uses channel indices as speakers
+	'''
 	
 	ref_missing = ''
 	speaker_name_missing = ''
@@ -76,7 +78,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		audio_backend = None,
 		exclude = set(),
 		join_transcript = False,
-		bucket = None
+		bucket = None,
+		pop_meta = False
 	):
 		self.join_transcript = join_transcript
 		self.max_duration = max_duration
@@ -159,7 +162,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.channel = torch.CharTensor([t['channel'] for t in transcript])
 		self.speaker = torch.LongTensor([t['speaker'] for t in transcript])
 		self.cumlen = torch.ShortTensor(examples_lens).cumsum(dim = 0, dtype = torch.int64)
-		self.meta = { self.example_id(t) : t for t in transcript }
+		self.meta = { self.example_id(t) : t for t in transcript } if not pop_meta else {}
 		
 		print('Tensors', time.time() - tic); print()
 
