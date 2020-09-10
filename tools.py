@@ -17,6 +17,7 @@ import metrics
 import random
 import hashlib
 import multiprocessing
+import utils
 
 
 def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, unk, num_speakers):
@@ -167,7 +168,6 @@ def csv2json(input_path, gz, group, reset_begin_end, csv_sep, audio_name_pattern
 		audio_name_pattern - is a regex pattern, that is used, when reset_begin_end is True. It must contain at least
 			two named capturing groups: (?P<begin>...) and (?P<end>...). By default, Kontur calls patter will be used.
 	"""
-	gzopen = lambda file_path, mode = 'r': gzip.open(file_path, mode + 't') if file_path.endswith('.gz') else open(file_path, mode)
 	audio_name_regex = re.compile(audio_name_pattern) if audio_name_pattern else re.compile(
 		r'(?P<begin>\d+\.?\d*)-(?P<end>\d+\.?\d*)_\d+\.?\d*_[01]_1\d{9}\.?\d*\.wav'
 	)
@@ -182,7 +182,7 @@ def csv2json(input_path, gz, group, reset_begin_end, csv_sep, audio_name_pattern
 
 	csv_sep = dict(tab = '\t', comma = ',')[csv_sep]
 	res = []
-	for line in gzopen(input_path):
+	for line in utils.open_maybe_gz(input_path):
 		assert '"' not in line, f'{input_path!r} lines must not contain any quotation marks!'
 		audio_path, ref, begin, end = line[:-1].split(csv_sep)[:4]
 		transcription = dict(audio_path = audio_path, ref = ref, begin = float(begin), end = float(end))
@@ -197,7 +197,7 @@ def csv2json(input_path, gz, group, reset_begin_end, csv_sep, audio_name_pattern
 		res.append(transcription)
 
 	output_path = input_path + '.json' + ('.gz' if gz else '')
-	json.dump(res, gzopen(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	json.dump(res, utils.open_maybe_gz(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
 
