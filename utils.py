@@ -3,6 +3,10 @@ import sys
 import traceback
 import random
 import torch
+import gzip
+
+def open_maybe_gz(data_path):
+	return gzip.open(data_path, 'rt') if data_path.endswith('.gz') else open(data_path)
 
 def reset_cpu_threads(num_threads):
 	torch.set_num_threads(num_threads)
