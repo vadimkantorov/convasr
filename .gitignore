@@ -1,5 +1,15 @@
 # Data
 data/
+youtube/
+youtube_lowpass/
+echomsk6000/
+domain_set/
+kontur_calls_micro/
+ru_open_stt/
+unsup_dataset/
+
+# Experiments
+asr_experiments/
 convasr_scripts/
 scripts/experiments
 
