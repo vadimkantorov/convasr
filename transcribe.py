@@ -58,7 +58,7 @@ def main(args):
 	utils.enable_jit_fusion()
 
 	assert args.output_json or args.output_html or args.output_txt or args.output_csv, \
-		"at least one of the output formats must be provided"
+		'at least one of the output formats must be provided'
 	os.makedirs(args.output_path, exist_ok = True)
 	data_paths = [
 		p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f])
@@ -86,7 +86,7 @@ def main(args):
 		join_transcript = args.join_transcript
 	)
 	num_examples = len(val_dataset)
-	print("Examples count: ", num_examples)
+	print('Examples count: ', num_examples)
 	val_data_loader = torch.utils.data.DataLoader(
 		val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers
 	)
@@ -252,7 +252,7 @@ def main(args):
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
 	if args.output_csv:
-		with open(os.path.join(args.output_path, "transcripts.csv"), 'w') as f:
+		with open(os.path.join(args.output_path, 'transcripts.csv'), 'w') as f:
 			f.writelines(output_lines)
 
 
