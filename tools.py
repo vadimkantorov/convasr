@@ -160,16 +160,25 @@ def du(input_path):
 	)
 
 
-def csv2json(input_path, gz, group, reset_begin_end, csv_sep):
+def csv2json(input_path, gz, group, reset_begin_end, csv_sep, audio_name_pattern=None):
 	""" Convert cvs transcripts file to .csv.json transcripts file. Each line in `input_path` file must have format:
 		'audio_path,transcription,begin,end\n'
 		csv_sep could be 'comma', representing ',', or 'tab', representing '\t'.
+		audio_name_pattern - is a regex pattern, that is used, when reset_begin_end is True. It must contain at least
+			two named capturing groups: (?P<begin>...) and (?P<end>...). By default, Kontur calls patter will be used.
 	"""
 	gzopen = lambda file_path, mode = 'r': gzip.open(file_path, mode + 't') if file_path.endswith('.gz') else open(file_path, mode)
+	audio_name_regex = re.compile(audio_name_pattern) if audio_name_pattern else re.compile(
+		r'(?P<begin>\d+\.?\d*)-(?P<end>\d+\.?\d*)_\d+\.?\d*_[01]_1\d{9}\.?\d*\.wav'
+	)
+	# default is Kontur calls pattern, match example: '198.38-200.38_2.0_0_1582594487.376404.wav'
 
 	def duration(audio_name):
-		begin, end = os.path.splitext(audio_name)[0].split('_')[-2:]
-		return float(end) - float(begin)
+		match = audio_name_regex.fullmatch(audio_name)
+		assert match is not None, f'audio_name {audio_name!r} must match {audio_name_regex.pattern}'
+		begin, end = float(match['begin']), float(match['end'])
+		assert begin < end < 10_000, 'sanity check: begin and end must be below 10_000 seconds'
+		return end - begin
 
 	csv_sep = dict(tab = '\t', comma = ',')[csv_sep]
 	res = []
@@ -525,6 +534,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--gzip', dest = 'gz', action = 'store_true')
 	cmd.add_argument('--group', type = int, default = 0)
 	cmd.add_argument('--reset-begin-end', action = 'store_true')
+	cmd.add_argument('--audio-name-pattern', type = str, default = None)
 	cmd.add_argument('--csv-sep', default = 'tab', choices = ['tab', 'comma'])
 	cmd.set_defaults(func = csv2json)
 
