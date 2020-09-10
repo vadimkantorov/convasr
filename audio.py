@@ -10,18 +10,18 @@ f2s_numpy = lambda signal, max = np.float32(smax): np.multiply(signal, max).asty
 s2f_numpy = lambda signal, max = np.float32(smax): np.divide(signal, max, dtype = 'float32')
 
 def read_audio(
-	audio_path,
-	sample_rate,
-	offset = 0,
-	duration = None,
-	mono = True,
-	raw_dtype = 'int16',
-	dtype = 'float32',
-	byte_order = 'little',
-	backend = None,
-	raw_bytes = None,
-	raw_sample_rate = None,
-	raw_num_channels = None,
+        audio_path,
+        sample_rate,
+        offset=0,
+        duration=None,
+        mono=True,
+        raw_dtype='int16',
+        dtype='float32',
+        byte_order='little',
+        backend=None,
+        raw_bytes=None,
+        raw_sample_rate=None,
+        raw_num_channels=None,
 ):
 	assert dtype in ['int16', 'float32']
 
@@ -141,46 +141,45 @@ def resample(signal, sample_rate_, sample_rate):
 		signal = signal.unsqueeze(0)
 	return signal, sample_rate
 
-
-def compute_duration(audio_path, backend = 'ffmpeg'):
-	cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1'
-			] if backend == 'ffmpeg' else ['soxi', '-D'] if backend == 'sox' else None
-	return float(subprocess.check_output(cmd + [audio_path]))
+def compute_duration(audio_path, backend='ffmpeg'):
+    cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1'
+           ] if backend == 'ffmpeg' else ['soxi', '-D'] if backend == 'sox' else None
+    return float(subprocess.check_output(cmd + [audio_path]))
 
 
 if __name__ == '__main__':
-	import argparse
-	import time
-	import utils
+    import argparse
+    import time
+    import utils
 
-	parser = argparse.ArgumentParser()
-	subparsers = parser.add_subparsers()
-	cmd = subparsers.add_parser('timeit')
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers()
+    cmd = subparsers.add_parser('timeit')
 
-	cmd.add_argument('--audio-path', type = str, required = True)
-	cmd.add_argument('--sample-rate', type = int, default = 8000)
-	cmd.add_argument('--mono', action = 'store_true')
-	cmd.add_argument('--audio-backend', type = str, required = True)
-	cmd.add_argument('--number', type = int, default = 100)
-	cmd.add_argument('--number-warmup', type = int, default = 3)
-	cmd.add_argument('--scale', type = int, default = 1000)
-	cmd.add_argument('--raw-dtype', default = 'int16', choices = ['int16', 'float32'])
-	cmd.add_argument('--dtype', default = 'float32', choices = ['int16', 'float32'])
-	cmd.set_defaults(func = 'timeit')
+    cmd.add_argument('--audio-path', type=str, required=True)
+    cmd.add_argument('--sample-rate', type=int, default=8000)
+    cmd.add_argument('--mono', action='store_true')
+    cmd.add_argument('--audio-backend', type=str, required=True)
+    cmd.add_argument('--number', type=int, default=100)
+    cmd.add_argument('--number-warmup', type=int, default=3)
+    cmd.add_argument('--scale', type=int, default=1000)
+    cmd.add_argument('--raw-dtype', default='int16', choices=['int16', 'float32'])
+    cmd.add_argument('--dtype', default='float32', choices=['int16', 'float32'])
+    cmd.set_defaults(func='timeit')
 
-	args = parser.parse_args()
-	
-	if args.func == 'timeit':
-		utils.reset_cpu_threads(1)
-		for i in range(args.number_warmup):
-			read_audio(args.audio_path, sample_rate = args.sample_rate, mono = args.mono, backend = args.audio_backend, dtype = args.dtype, raw_dtype = args.raw_dtype)
-		
-		start_process_time = time.process_time_ns()
-		start_perf_counter = time.perf_counter_ns()
-		for i in range(args.number):
-			read_audio(args.audio_path, sample_rate = args.sample_rate, mono = args.mono, backend = args.audio_backend, dtype = args.dtype, raw_dtype = args.raw_dtype)
-		end_process_time = time.process_time_ns()
-		end_perf_counter = time.perf_counter_ns()
-		process_time = (end_process_time - start_process_time) / args.scale / args.number
-		perf_counter = (end_perf_counter - start_perf_counter) / args.scale / args.number
-		print(f'|{args.audio_path:>20}|{args.number:>5}|{args.audio_backend:>10}|{process_time:9.0f}|{perf_counter:9.0f}|')
+    args = parser.parse_args()
+
+    if args.func == 'timeit':
+        utils.reset_cpu_threads(1)
+        for i in range(args.number_warmup):
+            read_audio(args.audio_path, sample_rate=args.sample_rate, mono=args.mono, backend=args.audio_backend, dtype=args.dtype, raw_dtype=args.raw_dtype)
+
+        start_process_time = time.process_time_ns()
+        start_perf_counter = time.perf_counter_ns()
+        for i in range(args.number):
+            read_audio(args.audio_path, sample_rate=args.sample_rate, mono=args.mono, backend=args.audio_backend, dtype=args.dtype, raw_dtype=args.raw_dtype)
+        end_process_time = time.process_time_ns()
+        end_perf_counter = time.perf_counter_ns()
+        process_time = (end_process_time - start_process_time) / args.scale / args.number
+        perf_counter = (end_perf_counter - start_perf_counter) / args.scale / args.number
+        print(f'|{args.audio_path:>20}|{args.number:>5}|{args.audio_backend:>10}|{process_time:9.0f}|{perf_counter:9.0f}|')
