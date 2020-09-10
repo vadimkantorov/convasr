@@ -11,7 +11,7 @@ import onnxruntime
 import apex
 import datasets
 import decoders
-import exphtml
+#import exphtml
 import metrics
 import models
 import optimizers
@@ -23,7 +23,7 @@ import transcripts
 import multiprocessing
 
 def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
-	for meta, x, xlen, y, ylen in data_loader:
+	for meta, s, x, xlen, y, ylen in data_loader:
 		x, xlen, y, ylen = x.to(device, non_blocking = True), xlen.to(device, non_blocking = True), y.to(device, non_blocking = True), ylen.to(device, non_blocking = True)
 		with torch.no_grad():
 			try:
@@ -374,7 +374,7 @@ def main(args):
 			shuffle = False,
 			batch_size = args.val_batch_size,
 			worker_init_fn = datasets.worker_init_fn,
-			timeout = args.timeout
+			timeout = args.timeout if args.num_workers > 0 else 0
 		)
 		for val_data_path in args.val_data_path for val_dataset in [
 			datasets.AudioTextDataset(
@@ -384,7 +384,8 @@ def main(args):
 				frontend = val_frontend if not args.frontend_in_model else None,
 				waveform_transform_debug_dir = args.val_waveform_transform_debug_dir,
 				min_duration = args.min_duration,
-				time_padding_multiple = args.batch_time_padding_multiple
+				time_padding_multiple = args.batch_time_padding_multiple,
+				pop_meta = True
 			)
 		]
 	}
@@ -418,6 +419,7 @@ def main(args):
 		waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob),
 		feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob)
 	)
+	tic = time.time()
 	train_dataset = datasets.AudioTextDataset(
 		args.train_data_path,
 		labels,
@@ -425,19 +427,24 @@ def main(args):
 		frontend = train_frontend if not args.frontend_in_model else None,
 		min_duration = args.min_duration,
 		max_duration = args.max_duration,
-		time_padding_multiple = args.batch_time_padding_multiple
-	)
-	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
-	sampler = datasets.BucketingBatchSampler(
-		train_dataset,
-		batch_size = args.train_batch_size,
-		mixing = args.train_data_mixing,
+		time_padding_multiple = args.batch_time_padding_multiple,
 		bucket = lambda example: int(
 			math.ceil(
 				((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
 			)
-		)
-	)  #+1 mean bug fix with bucket sizing
+		),
+		pop_meta = True
+	)
+
+	print('Time train dataset created:', time.time() - tic, 'sec')
+	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
+	tic = time.time()
+	sampler = datasets.BucketingBatchSampler(
+		train_dataset,
+		batch_size = args.train_batch_size,
+	)
+	print('Time train sampler created:', time.time() - tic, 'sec')
+
 	train_data_loader = torch.utils.data.DataLoader(
 		train_dataset,
 		num_workers = args.num_workers,
@@ -445,7 +452,7 @@ def main(args):
 		pin_memory = True,
 		batch_sampler = sampler,
 		worker_init_fn = datasets.worker_init_fn,
-		timeout = args.timeout
+		timeout = args.timeout if args.num_workers > 0 else 0
 	)
 	optimizer = torch.optim.SGD(
 		model.parameters(),
@@ -518,8 +525,12 @@ def main(args):
 	for epoch in range(epoch, args.epochs):
 		sampler.shuffle(epoch + args.seed_sampler)
 		time_epoch_start = time.time()
-		for batch_idx, (meta, x, xlen, y, ylen) in enumerate(train_data_loader, start = sampler.batch_idx):
+		for batch_idx, (meta, s, x, xlen, y, ylen) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc_data = time.time()
+			if batch_idx == 0:
+				time_ms_launch_data_loader = (toc_data - tic) * 1000
+				print('Time data loader launch @ ', epoch, ':', time_ms_launch_data_loader / 1000, 'sec')
+			
 			lr = optimizer.param_groups[0]['lr']
 			lr_avg = metrics.exp_moving_average(lr_avg, lr, max = 1)
 
