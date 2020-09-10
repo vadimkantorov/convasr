@@ -208,19 +208,19 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		#TODO: move computing buckets here?
 
 		if not self.segmented:
-			t = transcript[0]
-			t = dict(
-				audio_path = t['audio_path'], 
-				ref = t['ref'],
-				example_id = self.example_id(t),
+			transcript = t = dict(
+				audio_path = transcript[0]['audio_path'], 
+				ref = transcript[0]['ref'],
+				example_id = self.example_id(transcript[0]),
 
-				speaker = t['speaker']
+				speaker = transcript[0]['speaker']
 			)
 			features = self.frontend(signal, waveform_transform_debug = waveform_transform_debug
 										).squeeze(0) if self.frontend is not None else signal
 			targets = [labels.encode(t['ref']) for labels in self.labels]
 			ref_normalized, targets = zip(*targets)
 			speaker = torch.tensor([t.pop('speaker')], dtype = torch.int64)
+
 		else:
 			some_segments_have_not_begin_end = any(t['begin'] == self.time_missing and t['end'] == self.time_missing for t in transcript)
 			some_segments_have_ref = any(bool(t['ref']) for t in transcript)
