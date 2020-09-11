@@ -26,13 +26,16 @@ import models
 import ctc
 import transcripts
 
-def speaker_barcode(transcript, begin, end, colors = ['white', 'red', 'blue']):
-	plt.figure(figsize = (6, 0.2))
+def speaker_barcode(transcript, begin, end, colors = ['gray', 'red', 'blue']):
+	plt.figure(figsize = (8, 0.2))
 	plt.xlim(begin, end)
+	plt.yticks([])
+	plt.axis('off')
 	for t in transcript:
 		plt.axvspan(t['begin'], t['end'], color = colors[t.get('speaker', 0)])
+	plt.subplots_adjust(left = 0, right = 1, bottom = 0, top = 1)
 	buf = io.BytesIO()
-	plt.savefig(buf, format = 'jpg', dpi = 600)
+	plt.savefig(buf, format = 'jpg', dpi = 150, facecolor = colors[0])
 	plt.close()
 	return buf.getvalue()
 
@@ -139,7 +142,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	)
 	uri_speaker_barcode = base64.b64encode(speaker_barcode(transcript, begin = 0.0, end = signal.shape[-1] / sample_rate)).decode()
 	html.writelines(
-		f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="ontimeupdate_(event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="{uri_audio}"></audio><img src="data:image/jpeg;base64,{uri_speaker_barcode}" style="width:100%"></img></figure>'
+		f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="ontimeupdate_(event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="{uri_audio}"></audio><img onclick="onclick_(event)" src="data:image/jpeg;base64,{uri_speaker_barcode}" style="width:100%"></img></figure>'
 		for c,
 		uri_audio in enumerate(
 			audio_data_uri(signal[channel], sample_rate) for channel in ([0, 1] if len(signal) == 2 else []) + [...]
@@ -164,7 +167,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 		begin_td = f'<td class="top">{fmt_link(0, **transcripts.summary(hyp, ij = True))}</td>'
 		end_td = f'<td class="top">{fmt_link(1, **transcripts.summary(hyp, ij = True))}</td>'
 		duration_td = f'<td class="top">{fmt_link(2, **transcripts.summary(hyp, ij = True))}</td>'
-		hyp_td = '<td class="top hyp" data-channel="{c}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}<template>{word_alignment(t.get("words", []), tag = "", hyp = True)}</template></td>' if has_hyp else '<td></td>'
+		hyp_td = '<td class="top hyp" data-channel="{c}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}<template>{word_alignment(t.get("words", []), tag = "", hyp = True)}</template></td>' if has_hyp else ''
 		ref_td = f'<td class="top reference ref" data-channel="{channel}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}<template>{word_alignment(t.get("words", []), tag = "", ref = True)}</template></td><td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td><td class="top">{t.get("cer", -1):.2%}</td>' if (has_ref and ref) else ('<td></td>' * 5 if has_ref else '')
 		return f'<tr class="channel{channel}">' + speaker_td + begin_td + end_td + duration_td + hyp_td + ref_td + '</tr>'
 
@@ -184,6 +187,16 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 			audio.dataset.endTime = end;
 			audio.play();
 			return false;
+		}
+		
+		function onclick_(evt)
+		{
+			const img = evt.target;
+			const dim = img.getBoundingClientRect();
+			const t = (evt.clientX - dim.left) / dim.width;
+			const audio = img.previousSibling;
+			audio.currentTime = t * audio.duration;
+			audio.play();
 		}
 		
 		function subtitle(segments, time, channel)
