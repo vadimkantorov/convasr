@@ -26,8 +26,15 @@ import models
 import ctc
 import transcripts
 
-def get_alignment(t):
-	return t.get('alignment') or t.get('words') or []
+def speaker_barcode(transcript, begin, end, colors = ['white', 'red', 'blue']):
+	plt.figure(figsize = (6, 0.2))
+	plt.xlim(begin, end)
+	for t in transcript:
+		plt.axvspan(t['begin'], t['end'], color = colors[t.get('speaker', 0)])
+	buf = io.BytesIO()
+	plt.savefig(buf, format = 'jpg', dpi = 600)
+	plt.close()
+	return buf.getvalue()
 
 def audio_data_uri(audio_path, sample_rate = None):
 	if isinstance(audio_path, str):
@@ -36,7 +43,6 @@ def audio_data_uri(audio_path, sample_rate = None):
 		wav_bytes = audio.write_audio(io.BytesIO(), audio_path, sample_rate).getvalue()
 
 	return 'data:audio/wav;base64,' + base64.b64encode(wav_bytes).decode()
-
 
 def label(output_path, transcript, info, page_size, prefix):
 	if isinstance(transcript, str):
@@ -112,13 +118,13 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	if isinstance(transcript, str):
 		transcript = json.load(open(transcript))
 
-	has_hyp = True
-	has_ref = any(t['alignment']['ref'] for t in transcript)
+	has_hyp = any(t.get('hyp') for t in transcript)
+	has_ref = any(t.get('ref') for t in transcript)
 
 	audio_path = transcript[0]['audio_path']
 	signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = mono)
 
-	fmt_link = lambda ref = '', hyp = '', channel = 0, begin = 0, end = 0, speaker = '', i = '', j = '': (f'<a onclick="return play({channel},{begin},{end})"' if ref not in [0, 1] else '<span') + f' title="#{channel}. {speaker}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + ((ref + hyp) if isinstance(ref, str) else f'{begin:.02f}' if ref == 0 else f'{end:.02f}' if ref == 1 else f'{end - begin:.02f}') + ('</a>' if ref not in [0, 1] else '</span>')
+	fmt_link = lambda ref = '', hyp = '', channel = 0, begin = 0, end = 0, speaker = '', i = '', j = '', audio_path = '', **kwargs: (f'<a onclick="return play({channel},{begin},{end})"' if ref not in [0, 1] else '<span') + f' title="#{channel}. {speaker}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + ((ref + hyp) if isinstance(ref, str) else f'{begin:.02f}' if ref == 0 else f'{end:.02f}' if ref == 1 else f'{end - begin:.02f}') + ('</a>' if ref not in [0, 1] else '</span>')
 	fmt_words = lambda rh: ' '.join(fmt_link(**w) for w in rh)
 	fmt_begin_end = 'data-begin="{begin}" data-end="{end}"'.format
 
@@ -131,33 +137,42 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	html.write(
 		f'<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>'
 	)
+	uri_speaker_barcode = base64.b64encode(speaker_barcode(transcript, begin = 0.0, end = signal.shape[-1] / sample_rate)).decode()
 	html.writelines(
-		f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="ontimeupdate_(event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="{uri}"></audio></figure>'
+		f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="ontimeupdate_(event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="{uri_audio}"></audio><img src="data:image/jpeg;base64,{uri_speaker_barcode}" style="width:100%"></img></figure>'
 		for c,
-		uri in enumerate(
+		uri_audio in enumerate(
 			audio_data_uri(signal[channel], sample_rate) for channel in ([0, 1] if len(signal) == 2 else []) + [...]
 		)
 	)
 	html.write(
 		f'<pre class="channel"><h3 class="channel0 channel">hyp #0:<span class="subtitle"></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span class="subtitle"></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span class="subtitle"></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span class="subtitle"></span></h3></pre><hr/><table style="width:100%">'
 	)
-	html.write(
-		'<tr>' + ('<th>begin</th><th>end</th><th>dur</th><th style="width:50%">hyp</th>' if has_hyp else '') +
-		('<th style="width:50%">ref</th><th>begin</th><th>end</th><th>dur</th><th>cer</th>' if has_ref else '') +
-		'<th>speaker</th></tr>'
-	)
-	html.writelines(
-		f'<tr class="channel{c}">' + (
-			f'<td class="top">{fmt_link(0, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(hyp, ij = True))}</td><td class="top hyp" data-channel="{c}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}<template>{word_alignment(get_alignment(t), tag = "", hyp = True)}</template></td>'
-			if has_hyp else ''
-		) + (
-			f'<td class="top reference ref" data-channel="{c}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}<template>{word_alignment(get_alignment(t), tag = "", ref = True)}</template></td><td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td><td class="top">{t["cer"]:.2%}</td>'
-			if ref else ('<td></td>' * 5 if has_ref else '')
-		) + f'''<td class="top {ok and 'ok'}">{speaker}</td></tr>''' for t in transcripts.sort(transcript)
-		for ok in [t in filtered_transcript] for c,
+	def format_th(has_hyp, has_ref):
+		speaker_th = '<th>speaker</th>'
+		begin_th = '<th>begin</th>'
+		end_th = '<th>end</th>'
+		duration_th = '<th>dur</th>'
+		hyp_th = '<th style="width:50%">hyp</th>' if has_hyp else ''
+		ref_th = '<th style="width:50%">ref</th>' + begin_th + end_th + duration_th + '<th>cer</th>' if has_ref else ''
+		return '<tr>' + speaker_th + begin_th + end_th + duration_th + hyp_th + ref_th
+
+	html.write(format_th(has_hyp, has_ref))
+
+	def format_tr(t, ok, has_hyp, has_ref, hyp, ref, channel, speaker):
+		speaker_td = f'''<td class="top {ok and 'ok'}">{speaker}</td>'''
+		begin_td = f'<td class="top">{fmt_link(0, **transcripts.summary(hyp, ij = True))}</td>'
+		end_td = f'<td class="top">{fmt_link(1, **transcripts.summary(hyp, ij = True))}</td>'
+		duration_td = f'<td class="top">{fmt_link(2, **transcripts.summary(hyp, ij = True))}</td>'
+		hyp_td = '<td class="top hyp" data-channel="{c}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}<template>{word_alignment(t.get("words", []), tag = "", hyp = True)}</template></td>' if has_hyp else '<td></td>'
+		ref_td = f'<td class="top reference ref" data-channel="{channel}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}<template>{word_alignment(t.get("words", []), tag = "", ref = True)}</template></td><td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td><td class="top">{t.get("cer", -1):.2%}</td>' if (has_ref and ref) else ('<td></td>' * 5 if has_ref else '')
+		return f'<tr class="channel{channel}">' + speaker_td + begin_td + end_td + duration_td + hyp_td + ref_td + '</tr>'
+
+	html.writelines(format_tr(t, ok, has_hyp, has_ref, hyp, ref, channel, speaker) for t in transcripts.sort(transcript)
+		for ok in [t in filtered_transcript] for channel,
 		speaker,
 		ref,
-		hyp in [(t['channel'], t.get('speaker', '') or 'N/A', t['alignment']['ref'], t['alignment']['hyp'])]
+		hyp in [(t.get('channel', 0), t.get('speaker', 0), t.get('words_ref', [t]), t.get('words_hyp', [t]))]
 	)
 	html.write(
 		'''</tbody></table><script>
@@ -406,7 +421,7 @@ def errors(
 			) +
 			f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{word_alignment(utt[0], ref = True, flat = True)}</td><td>{word_alignment(utt[0], ref = True, flat = True)}</td></tr>'
 			+ '\n'.join(
-				'<tr class="any"><td class="br">{audio_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td class="br">{mer:.02%}</td><td>{word_alignment}</td><td>{word_alignment_flat}</td></tr>'.format(audio_name = transcripts.audio_name(input_path[i]), cer_easy = a.get("words_easy_errors_easy", {}).get("cer_pseudo", -1), cer = a.get("cer", 1), wer_easy = a.get("words_easy_errors_easy", {}).get("wer_pseudo", -1), wer = a.get("wer", 1), mer = a.get("mer_wordwise", 1), word_alignment = word_alignment(get_alignment(a)), word_alignment_flat = word_alignment(a, hyp = True, flat = True))
+				'<tr class="any"><td class="br">{audio_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td class="br">{mer:.02%}</td><td>{word_alignment}</td><td>{word_alignment_flat}</td></tr>'.format(audio_name = transcripts.audio_name(input_path[i]), cer_easy = a.get("words_easy_errors_easy", {}).get("cer_pseudo", -1), cer = a.get("cer", 1), wer_easy = a.get("words_easy_errors_easy", {}).get("wer_pseudo", -1), wer = a.get("wer", 1), mer = a.get("mer_wordwise", 1), word_alignment = word_alignment(a.get('words', [])), word_alignment_flat = word_alignment(a, hyp = True, flat = True))
 				for i,
 				a in enumerate(utt)
 			)
