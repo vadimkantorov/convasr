@@ -10,7 +10,6 @@ import librosa
 import shaping
 from typing import List
 
-
 class InputOutputTypeCast(nn.Module):
 	def __init__(self, model, dtype):
 		super().__init__()
@@ -697,6 +696,11 @@ def silence_space_mask(log_probs, speech, blank_idx, space_idx, kernel_size = 10
 	return silence[:, None, :] * (
 		~F.one_hot(torch.tensor(space_idx), log_probs.shape[1]).to(device = silence.device, dtype = silence.dtype)
 	)[None, :, None]
+
+def rle1d(tensor):
+	starts = torch.cat(( torch.LongTensor([0], device = tensor.device), (tensor[1:] != tensor[:-1]).nonzero(as_tuple = False).add_(1).squeeze(1), torch.LongTensor([tensor.shape[-1]], device = tensor.device) ))
+	starts, lengths, values = starts[:-1], (starts[1:] - starts[:-1]), tensor[starts[:-1]]
+	return starts, lengths, values
 
 
 def sparse_topk(x, k, dim = -1, largest = True, indices_dtype = None, values_dtype = None, fill_value = 0.0):

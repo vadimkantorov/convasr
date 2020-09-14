@@ -22,9 +22,25 @@ import vis
 import utils
 import transcripts
 
+class LogFileSink:
+	def __init__(self, log_path):
+		self.log = open(log_path, 'w') if log_path else None
+
+	def perf(self, perf, iteration, train_dataset):
+		if self.log is None:
+			return
+
+		self.log.write(json.dumps(dict(train_dataset_name = train_dataset_name, loss_avg = perf['avg_loss'], lr_avg = perf['avg_lr'], iteration = iteration)))
+		self.log.write('\n')
+
 class TensorboardSink:
 	def __init__(self, summary_writer):
 		self.summary_writer = summary_writer
+
+	def perf(self, perf, iteration, train_dataset_name, lr_scaler = 1e4):
+		self.summary_writer.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = perf['avg_loss'], lr_avg_scaled = perf['avg_lr'] * lr_scaler), iteration)
+		#TODO: was add_scalar before, do not dump everything, or filter by prefix
+		self.summary_writer.add_scalars('perf', {k.replace('datasets_', 'datasets/') : v for k, v in perf.items()}, iteration)
 
 	def val_stats(self, iteration, val_dataset_name, labels_name, perf):
 		prefix = f'datasets/{val_dataset_name}_{labels_name}_'
@@ -57,11 +73,6 @@ class TensorboardSink:
 			if log_weight_distribution:
 				self.summary_writer.add_histogram(tag, param, iteration)
 				self.summary_writer.add_histogram(tag + '/grad', param.grad, iteration)
-
-	def perf(self, iteration, train_dataset_name, perf, lr_scaler = 1e4):
-		self.summary_writer.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = perf['avg_loss'], lr_avg_scaled = perf['avg_lr'] * lr_scaler), iteration)
-		#TODO: was add_scalar before, do not dump everything, or filter by prefix
-		self.summary_writer.add_scalars('perf', {k.replace('datasets_', 'datasets/') : v for k, v in perf.items()}, iteration)
 	
 
 def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
@@ -95,6 +106,7 @@ def evaluate_model(
 	sampler = None,
 	tensorboard = None,
 	tensorboard_sink = None,
+	logfile_sink = None,
 	epoch = None,
 	iteration = None
 ):
@@ -558,6 +570,7 @@ def main(args):
 			shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
 	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
 	tensorboard_sink = TensorboardSink(tensorboard)
+	logfile_sink = LogfileSink(args.log)
 
 	perf = metrics.PerformanceMeterDict(loss = dict(K = 50, max = 1000), memory_cuda_allocated = dict(K = 50), entropy = dict(K = 4), time_ms_iteration = dict(K = 50, max = 10_000), lr = dict(K = 50, max = 1))
 	
@@ -613,10 +626,11 @@ def main(args):
 					optimizer.step()
 
 					if iteration > 0 and iteration % args.log_iteration_interval == 0:
-						tensorboard_sink.perf(iteration, train_dataset_name, perf)
+						perf.update(utils.compute_memory_stats())
+						tensorboard_sink.perf(perf, iteration, train_dataset_name)
 						tensorboard_sink.weight_stats(iteration, model, args.log_weight_distribution)
+						logfile_sink.perf(perf, iteration, train_dataset_name)
 
-					perf.update(utils.compute_memory_stats())
 					optimizer.zero_grad()
 					scheduler.step(iteration)
 				perf.update(dict(entropy = entropy))
@@ -669,6 +683,7 @@ def main(args):
 				sampler,
 				tensorboard,
 				tensorboard_sink,
+				logfile_sink,
 				epoch + 1,
 				iteration
 			)
@@ -862,6 +877,7 @@ if __name__ == '__main__':
 	parser.add_argument('--val-crash-oom', action = 'store_true')
 	parser.add_argument('--val-config', default = 'configs/ru_val_config.json')
 	parser.add_argument('--analyze-num-workers', type = int, default = 0)
+	parser.add_argument('--log', default = None)
 	
 	#TODO: set up logging, RotatingFileHandler, StdoutHandler
 	#TODO: try-except
