@@ -86,7 +86,7 @@ def apply_model(data_loader, model, labels, decoder, device, oom_handler):
 				logits, log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'olen', 'loss'])
 				oom_handler.reset()
 			except:
-				if not oom_handler.try_recover(model.parameters(), _print = utils.get_root_logger_logging_print()):
+				if not oom_handler.try_recover(model.parameters(), _print = utils.get_root_logger_print()):
 					raise
 
 		entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, olen))
@@ -111,7 +111,7 @@ def evaluate_model(
 	epoch = None,
 	iteration = None
 ):
-	logging_print = utils.get_root_logger_logging_print()
+	logging_print = utils.get_root_logger_print()
 
 	training = epoch is not None and iteration is not None
 	columns = {}
@@ -315,8 +315,10 @@ def main(args):
 		experiments_dir = args.experiments_dir, experiment_id = args.experiment_id
 	)
 
+	os.makedirs(args.experiment_dir, exist_ok = True)
+	
 	utils.set_up_root_logger(os.path.join(args.experiment_dir, 'log.txt'), mode = 'w')
-	logging_print = utils.get_root_logger_logging_print()
+	logging_print = utils.get_root_logger_print()
 	
 	if checkpoint:
 		args.lang, args.model, args.num_input_features, args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['lang', 'model', 'num_input_features', 'sample_rate', 'window', 'window_size', 'window_stride'])
@@ -569,7 +571,6 @@ def main(args):
 
 	model.train()
 
-	os.makedirs(args.experiment_dir, exist_ok = True)
 	tensorboard_dir = os.path.join(args.experiment_dir, 'tensorboard')
 	if checkpoint and args.experiment_name:
 		tensorboard_dir_checkpoint = os.path.join(os.path.dirname(args.checkpoint[0]), 'tensorboard')

@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import apex
 import librosa
 import shaping
-from typing import List
+import typing
 
 class InputOutputTypeCast(nn.Module):
 	def __init__(self, model, dtype):
@@ -85,7 +85,7 @@ class ConvBn1d(nn.Module):
 		stride = 1,
 		dropout = 0,
 		groups = 1,
-		num_channels_residual: List = [],
+		num_channels_residual: typing.List = [],
 		repeat = 1,
 		dilation = 1,
 		separable = False,
@@ -124,7 +124,7 @@ class ConvBn1d(nn.Module):
 		self.activation = ResidualActivation(nonlinearity, dropout, invertible = inplace)
 		self.temporal_mask = temporal_mask
 
-	def forward(self, x, lengths_fraction = None, residual: List = []):
+	def forward(self, x, lengths_fraction = None, residual: typing.List = []):
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
 			if i == len(self.conv) - 1:
 				assert len(self.conv_residual) == len(self.bn_residual) == len(residual)
@@ -278,15 +278,14 @@ class JasperNet(nn.Module):
 		self.bpe_only = bpe_only
 
 	def forward(
-		self, x: shaping.BCT, xlen: shaping.B = None, y: shaping.BY = None, ylen: shaping.B = None
+		self, x: typing.Union[shaping.BCT, shaping.BT], xlen: typing.Optional[shaping.B] = None, y: typing.Optional[shaping.BY] = None, ylen: typing.Optional[shaping.B] = None
 	) -> shaping.BCt:
-		assert x.ndim == 3
 
-		#x = x.to(torch.float16)
-		x = x if x.ndim == 2 else x.squeeze(1)
 		if self.frontend is not None:
 			lengths = compute_output_lengths(x, xlen)
-			x = self.frontend(x, mask = temporal_mask(x, lengths))
+			x = self.frontend(x.squeeze(dim = 1), mask = temporal_mask(x, lengths))
+
+		assert x.ndim == 3
 
 		if self.normalize_features is not None:
 			lengths = compute_output_lengths(x, xlen)
@@ -349,7 +348,7 @@ class ResidualActivation(nn.Module):
 		self.dropout = dropout
 		self.invertible = invertible
 
-	def forward(self, y, residual: List = []):
+	def forward(self, y, residual: typing.List = []):
 		if self.invertible:
 			y = ResidualActivation.InvertibleResidualInplaceFunction.apply(self.nonlinearity, y, *residual)
 			y = F.dropout(y, p = self.dropout, training = self.training)
@@ -594,8 +593,11 @@ class LogFilterBankFrontend(nn.Module):
 		return True
 
 @torch.jit.script
-def compute_output_lengths(x: shaping.BT, lengths_fraction: shaping.B):
-	return (lengths_fraction * x.shape[-1]).ceil().long()
+def compute_output_lengths(x: shaping.BT, lengths_fraction: typing.Optional[shaping.B] = None):
+	if lengths_fraction is None:
+		return torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.long)
+	else:
+		return (lengths_fraction * x.shape[-1]).ceil().long()
 
 @torch.jit.script
 def temporal_mask(x: shaping.BT, lengths: shaping.B):

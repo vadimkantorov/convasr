@@ -10,7 +10,7 @@ import logging.handlers
 
 def get_root_logger_print():
 	logger = logging.getLogger()
-	return (lambda *args: logger.info(' '.join(map(str, args)))
+	return (lambda *args: logger.info(' '.join(map(str, args))))
 
 def set_up_root_logger(log_file_path = None, mode = 'a', max_bytes = 1_000_000, fmt = '%(asctime)s [%(levelname)s]: %(message)s'):
 	logger = logging.getLogger()
