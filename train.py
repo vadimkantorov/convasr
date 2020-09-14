@@ -27,8 +27,8 @@ import transcripts
 import perf
 
 class JsonlistSink:
-	def __init__(self, file_path):
-		self.json_file = open(file_path, 'w') if file_path else None
+	def __init__(self, file_path, mode = 'w'):
+		self.json_file = open(file_path, mode) if file_path else None
 
 	def perf(self, perf, iteration, train_dataset_name):
 		if self.json_file is None:
@@ -55,8 +55,9 @@ class TensorboardSink:
 			self.summary_writer.add_scalars(f'perf/{name}', aggregated_value, iteration)
 
 	def val_stats(self, iteration, val_dataset_name, labels_name, perf):
-		prefix = f'datasets/{val_dataset_name}_{labels_name}_'
+		prefix = f'datasets_{val_dataset_name}_{labels_name}_'
 		self.summary_writer.add_scalars(
+			prefix.replace('datasets_', 'datasets/'),
 			dict(
 				wer = perf[prefix + 'wer'] * 100.0,
 				cer = perf[prefix + 'cer'] * 100.0,
@@ -114,7 +115,6 @@ def evaluate_model(
 	error_analyzer,
 	optimizer = None,
 	sampler = None,
-	tensorboard = None,
 	tensorboard_sink = None,
 	logfile_sink = None,
 	epoch = None,
@@ -226,9 +226,9 @@ def evaluate_model(
 						wer = aggregated['wer'],
 						cer = aggregated['cer'],
 						loss = aggregated['loss']
-					), prefix = f'datasets_val_{val_dataset_name}_{labels.name}'
+					), prefix = f'datasets_val_{val_dataset_name}_{label.name}'
 				)
-				tensorboard_sink.val_stats(iteration, val_dataset_name, label.name, perf)
+				tensorboard_sink.val_stats(iteration, val_dataset_name, label.name, perf.default)
 
 		with open(transcripts_path, 'w') as f:
 			json.dump(transcript, f, ensure_ascii = False, indent = 2, sort_keys = True)
@@ -326,13 +326,19 @@ def main(args):
 	)
 
 	os.makedirs(args.experiment_dir, exist_ok = True)
-	
-	utils.set_up_root_logger(os.path.join(args.experiment_dir, 'log.txt'), mode = 'w')
-	logging_print = utils.get_root_logger_print()
-	
+
+	if args.log_json:
+		args.log_json = os.path.join(args.experiment_dir, 'log.json')
+
 	if checkpoint:
 		args.lang, args.model, args.num_input_features, args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['lang', 'model', 'num_input_features', 'sample_rate', 'window', 'window_size', 'window_stride'])
+		utils.set_up_root_logger(os.path.join(args.experiment_dir, 'log.txt'), mode = 'a')
+		logfile_sink = JsonlistSink(args.log_json, mode = 'a')
+	else:
+		utils.set_up_root_logger(os.path.join(args.experiment_dir, 'log.txt'), mode = 'w')
+		logfile_sink = JsonlistSink(args.log_json, mode = 'w')
 
+	logging_print = utils.get_root_logger_print()
 	logging_print('\n', 'Arguments:', args)
 	logging_print('\n', 'Experiment id:', args.experiment_id, '\n')
 	if args.dry:
@@ -588,10 +594,6 @@ def main(args):
 			shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
 	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
 	tensorboard_sink = TensorboardSink(tensorboard)
-	if args.log_json:
-		args.log_json = os.path.join(args.experiment_dir, 'log.json')
-	logfile_sink = JsonlistSink(args.log_json)
-
 
 	perf.default.__init__(loss = dict(K = 50, max = 1000), memory_cuda_allocated = dict(K = 50), entropy = dict(K = 4), time_ms_iteration = dict(K = 50, max = 10_000), lr = dict(K = 50, max = 1))
 	
@@ -678,8 +680,8 @@ def main(args):
 					error_analyzer,
 					optimizer,
 					sampler,
-					tensorboard,
 					tensorboard_sink,
+					logfile_sink,
 					epoch,
 					iteration
 				)
@@ -704,7 +706,6 @@ def main(args):
 				error_analyzer,
 				optimizer,
 				sampler,
-				tensorboard,
 				tensorboard_sink,
 				logfile_sink,
 				epoch + 1,
