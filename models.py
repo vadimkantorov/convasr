@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import apex
 import librosa
 import shaping
-from typing import List
+from typing import List, Optional
 
 
 class InputOutputTypeCast(nn.Module):
@@ -284,12 +284,12 @@ class JasperNet(nn.Module):
 		#x = x.to(torch.float16)
 		x = x if x.ndim == 2 else x.squeeze(1)
 		if self.frontend is not None:
-			lengths = compute_output_lengths(x, xlen)
-			x = self.frontend(x, mask = temporal_mask(x, lengths))
+			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
+			x = self.frontend(x, mask = mask)
 
 		if self.normalize_features is not None:
-			lengths = compute_output_lengths(x, xlen)
-			x = self.normalize_features(x, mask = temporal_mask(x, lengths))
+			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
+			x = self.normalize_features(x, mask = mask)
 
 		residual = []
 		for i, subblock in enumerate(self.backbone):
@@ -591,7 +591,9 @@ class LogFilterBankFrontend(nn.Module):
 		return True
 
 @torch.jit.script
-def compute_output_lengths(x: shaping.BT, lengths_fraction: shaping.B):
+def compute_output_lengths(x: shaping.BT, lengths_fraction: Optional[shaping.B] = None):
+	if lengths_fraction is None:
+		return torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.long)
 	return (lengths_fraction * x.shape[-1]).ceil().long()
 
 @torch.jit.script
@@ -603,7 +605,22 @@ def temporal_mask(x: shaping.BT, lengths: shaping.B):
 def apply_dither(x: shaping.BT, dither: float):
 	# dither extracted to ScriptFunction, because JIT does not trace randn_like correctly https://github.com/pytorch/pytorch/issues/43767
 	if dither > 0.0:
-		return x + dither * torch.randn_like(x)
+		# todo: vadimkantorov report those bugs to PyTorch:
+
+		# return x + dither * torch.randn_like(x)  # -->
+		# onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Type Error:
+		# Type parameter(T) bound to different types (tensor(float) and tensor(double) in node (Mul_26).
+
+		# return x + torch.FloatTensor([dither], device=x.device) * torch.randn_like(x)  # -->
+		# Unknown builtin op: aten::FloatTensor. Couldd not find any similar ops to aten::FloatTensor.
+		# This op may not exist or may not be currently supported in TorchScript.
+
+		# return x + torch.tensor(dither, dtype=x.dtype, device=x.device) * torch.randn_like(x)  # -->
+		# RuntimeError: Exporting the operator tensor to ONNX opset version 12 is not supported.
+		# Please open a bug to request ONNX export support for the missing operator.
+
+		# only this variant works when exporting to .onnx:
+		return x + torch.tensor(dither) * torch.randn_like(x)
 	else:
 		return x
 
@@ -637,7 +654,9 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 		if not self.temporal_mask or mask is None:
 			if self.legacy:
 				assert self.track_running_stats is False
-				std, mean = torch.std_mean(x, dim = -1, keepdim = True)
+				# std, mean = torch.std_mean(x, dim = -1, keepdim = True)
+				# replaced with new version for .onnx export fix!
+				std, mean = torch.std(x, dim=-1, keepdim=True), torch.mean(x, dim=-1, keepdim=True)
 				return (x - mean) / (std + self.eps)
 			else:
 				return super().forward(x)
