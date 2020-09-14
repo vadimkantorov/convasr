@@ -896,5 +896,5 @@ if __name__ == '__main__':
 	try:
 		main(parser.parse_args())
 	except Exception as e:
-		logging.getLogger().exception(e)
+		logging.getLogger().critical(e, exc_info=True)
 		raise

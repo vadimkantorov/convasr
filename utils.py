@@ -19,6 +19,7 @@ def set_up_root_logger(log_file_path = None, mode = 'a', max_bytes = 1_000_000, 
 	formatter = logging.Formatter(fmt)
 	handler = logging.StreamHandler()
 	handler.setFormatter(formatter)
+	handler.addFilter(lambda record: record.levelno != logging.CRITICAL) # hack to avoid duplicate messages in stdout
 	logger.addHandler(handler)
 	
 	if log_file_path:
