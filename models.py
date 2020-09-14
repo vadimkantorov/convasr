@@ -605,7 +605,22 @@ def temporal_mask(x: shaping.BT, lengths: shaping.B):
 def apply_dither(x: shaping.BT, dither: float):
 	# dither extracted to ScriptFunction, because JIT does not trace randn_like correctly https://github.com/pytorch/pytorch/issues/43767
 	if dither > 0.0:
-		return x + dither * torch.randn_like(x)
+		# todo: vadimkantorov report those bugs to PyTorch:
+
+		# return x + dither * torch.randn_like(x)  # -->
+		# onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Type Error:
+		# Type parameter(T) bound to different types (tensor(float) and tensor(double) in node (Mul_26).
+
+		# return x + torch.FloatTensor([dither], device=x.device) * torch.randn_like(x)  # -->
+		# Unknown builtin op: aten::FloatTensor. Couldd not find any similar ops to aten::FloatTensor.
+		# This op may not exist or may not be currently supported in TorchScript.
+
+		# return x + torch.tensor(dither, dtype=x.dtype, device=x.device) * torch.randn_like(x)  # -->
+		# RuntimeError: Exporting the operator tensor to ONNX opset version 12 is not supported.
+		# Please open a bug to request ONNX export support for the missing operator.
+
+		# only this variant works when exporting to .onnx:
+		return x + torch.tensor(dither) * torch.randn_like(x)
 	else:
 		return x
 
