@@ -106,6 +106,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		tic = time.time()
 		
 		transcripts_read = list(map(read_transcript, data_paths)) 
+		#print = logger.getLogger().info
+
 		print('Read', time.time() - tic); tic = time.time()
 
 		examples = [

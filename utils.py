@@ -5,6 +5,29 @@ import random
 import torch
 import gzip
 import psutil
+import logging
+import logging.handlers
+
+def get_root_logger_print():
+	logger = logging.getLogger()
+	return (lambda *args: logger.info(' '.join(map(str, args)))
+
+def set_up_root_logger(log_file_path = None, mode = 'a', max_bytes = 1_000_000, fmt = '%(asctime)s [%(levelname)s]: %(message)s'):
+	logger = logging.getLogger()
+	logger.setLevel(logging.INFO)
+	
+	formatter = logging.Formatter(fmt)
+	handler = logging.StreamHandler()
+	handler.setFormatter(formatter)
+	logger.addHandler(handler)
+	
+	if log_file_path:
+		handler = logging.handlers.RotatingFileHandler(log_file_path, maxBytes = max_bytes, backupCount = 0)
+		# workaround logging logic to enforce simple file append/create logic
+		handler.stream.close()
+		handler.stream = open(log_file_path, mode)
+		handler.setFormatter(formatter)
+		logger.addHandler(handler)
 
 def open_maybe_gz(data_path):
 	return gzip.open(data_path, 'rt') if data_path.endswith('.gz') else open(data_path)
@@ -49,20 +72,31 @@ def set_random_seed(seed):
 							] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
 		set_random_seed(seed)
 
-def handle_out_of_memory_exception(model_parameters = []):
-	# TODO: count OOM
-	exc_type, exc_value, exc_traceback = sys.exc_info()
-	if 'out of memory' in str(exc_value):
-		print('RECOVERING FROM OOM --- BEFORE FREE')
-		traceback.print_exception(exc_type, exc_value, exc_traceback)
-		for p in model_parameters:
-			p.grad = None
-		print_memory_stats('<BEFORE FREE>')
-		free_up_memory()
-		print_memory_stats('<AFTER FREE>')
-		print('RECOVERING FROM OOM --- AFTER FREE')
-		return True
-	return False
+class OomHandler:
+	def __init__(self, max_retries = 0):
+		self.retries = 0
+		self.max_retries = max_retries
+
+	def reset(self):
+		self.retries = 0
+
+	def try_recover(self, model_parameters = [], _print = print):
+		exc_type, exc_value, exc_traceback = sys.exc_info()
+		if 'out of memory' in str(exc_value):
+			self.retries += 1
+			if self.retries > self.max_retries:
+				return False
+			
+			_print('RECOVERING FROM OOM --- BEFORE FREE')
+			traceback.print_exception(exc_type, exc_value, exc_traceback)
+			for p in model_parameters:
+				p.grad = None
+			print_memory_stats('<BEFORE FREE>', _print = _print)
+			free_up_memory()
+			print_memory_stats('<AFTER FREE>', _print = _print)
+			_print('RECOVERING FROM OOM --- AFTER FREE', _print = _print)
+			return True
+		return False
 
 
 def free_up_memory(reset_counters = False):
@@ -74,10 +108,10 @@ def free_up_memory(reset_counters = False):
 	gc.collect()
 
 
-def print_memory_stats(prefix = '', scaler = dict(mb = 1e6)):
+def print_memory_stats(prefix = '', scaler = dict(mb = 1e6), _print = print):
 	k, v = next(iter(scaler.items()))
 	for device in range(torch.cuda.device_count()):
-		print(
+		_print(
 			'MEMORY',
 			prefix,
 			'reserved',
@@ -86,7 +120,7 @@ def print_memory_stats(prefix = '', scaler = dict(mb = 1e6)):
 			torch.cuda.memory_allocated(device) / v,
 			k
 		)
-		print(
+		_print(
 			'MEMORY MAX',
 			prefix,
 			'reserved',

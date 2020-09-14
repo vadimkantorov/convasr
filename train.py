@@ -1,3 +1,5 @@
+import logging
+import logging.handlers
 import argparse
 import json
 import math
@@ -21,8 +23,9 @@ import transforms
 import vis
 import utils
 import transcripts
+import perf
 
-class LogFileSink:
+class JsonlistSink:
 	def __init__(self, log_path):
 		self.log = open(log_path, 'w') if log_path else None
 
@@ -75,16 +78,15 @@ class TensorboardSink:
 				self.summary_writer.add_histogram(tag + '/grad', param.grad, iteration)
 	
 
-def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
+def apply_model(data_loader, model, labels, decoder, device, oom_handler):
 	for meta, s, x, xlen, y, ylen in data_loader:
 		x, xlen, y, ylen = x.to(device, non_blocking = True), xlen.to(device, non_blocking = True), y.to(device, non_blocking = True), ylen.to(device, non_blocking = True)
 		with torch.no_grad():
 			try:
 				logits, log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'olen', 'loss'])
+				oom_handler.reset()
 			except:
-				if (not crash_on_oom) and utils.handle_out_of_memory_exception(model.parameters()):
-					continue
-				else:
+				if not oom_handler.try_recover(model.parameters(), _print = utils.get_root_logger_logging_print()):
 					raise
 
 		entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, olen))
@@ -101,7 +103,6 @@ def evaluate_model(
 	labels,
 	decoder,
 	error_analyzer,
-	perf,
 	optimizer = None,
 	sampler = None,
 	tensorboard = None,
@@ -110,17 +111,19 @@ def evaluate_model(
 	epoch = None,
 	iteration = None
 ):
+	logging_print = utils.get_root_logger_logging_print()
+
 	training = epoch is not None and iteration is not None
 	columns = {}
 	for val_dataset_name, val_data_loader in val_data_loaders.items():
-		print(f'\n{val_dataset_name}@{iteration}')
+		logging_print(f'\n{val_dataset_name}@{iteration}')
 		transcript, logits_, y_ = [], [], []
 		analyze = args.analyze == [] or (args.analyze is not None and val_dataset_name in args.analyze)
 
 		model.eval()
 		if args.adapt_bn:
 			models.reset_bn_running_stats_(model)
-			for _ in apply_model(val_data_loader, model, labels, decoder, args.device, args.val_crash_oom):
+			for _ in apply_model(val_data_loader, model, labels, decoder, args.device, args.val_crash_oom, utils.OomHandler(retries = args.oom_retries)):
 				pass
 		model.eval()
 		cpu_list = lambda l: [[t.cpu() for t in t_] for t_ in l]
@@ -128,7 +131,7 @@ def evaluate_model(
 		tic = time.time()
 		ref_, hyp_, audio_path_, loss_, entropy_ = [], [], [], [], []
 		for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(
-				val_data_loader, model, labels, decoder, args.device, args.val_crash_oom)):
+				val_data_loader, model, labels, decoder, args.device, args.oom_retries)):
 			loss_.extend(loss.tolist())
 			entropy_.extend(entropy.tolist())
 			logits_.extend(zip(*cpu_list(logits)) if not training and args.logits else [])
@@ -139,7 +142,7 @@ def evaluate_model(
 		toc_apply_model = time.time()
 		time_sec_val_apply_model = toc_apply_model - tic
 		perf.update(dict(time_sec_val_apply_model = time_sec_val_apply_model), prefix = f'datasets_{val_dataset_name}')
-		print(f"Apply model {time_sec_val_apply_model:.1f} sec", end=", ")
+		logging_print(f"Apply model {time_sec_val_apply_model:.1f} sec", end=", ")
 
 		analyze_args_gen = (
 			(
@@ -169,16 +172,16 @@ def evaluate_model(
 		time_sec_analyze = toc_analyze - toc_apply_model
 		time_sec_total = toc_analyze - tic
 		perf.update(dict(time_sec_val_analyze = time_sec_val_analyze, time_sec_val_total = time_sec_val_total), prefix = f'datasets_{val_dataset_name}')
-		print(f"Analyze {time_sec_val_analyze:.1f} sec, Total {time_sec_val_total:.1f} sec")
+		logging_print(f"Analyze {time_sec_val_analyze:.1f} sec, Total {time_sec_val_total:.1f} sec")
 		
 		for i, t in enumerate(transcript if args.verbose else []):		
-			print(f'{val_dataset_name}@{iteration}: {i // len(labels)} / {len(audio_path_)} | {args.experiment_id}')
+			logging_print(f'{val_dataset_name}@{iteration}: {i // len(labels)} / {len(audio_path_)} | {args.experiment_id}')
 			# TODO: don't forget to fix aligned hyp & ref output!
 			# hyp = new_transcript['alignment']['hyp'] if analyze else new_transcript['hyp']
 			# ref = new_transcript['alignment']['ref'] if analyze else new_transcript['ref']
-			print('REF: {labels_name} "{ref}"'.format(**t))
-			print('HYP: {labels_name} "{hyp}"'.format(**t))
-			print('WER: {labels_name} {wer:.02%} | CER: {cer:.02%}\n'.format(**t))
+			logging_print('REF: {labels_name} "{ref}"'.format(**t))
+			logging_print('HYP: {labels_name} "{hyp}"'.format(**t))
+			logging_print('WER: {labels_name} {wer:.02%} | CER: {cer:.02%}\n'.format(**t))
 
 		transcripts_path = os.path.join(
 			args.experiment_dir,
@@ -194,12 +197,12 @@ def evaluate_model(
 				with open(f'{transcripts_path}.errors.csv', 'w') as f:
 					f.writelines('{hyp},{ref},{error_tag}\n'.format(**w) for w in aggregated['errors']['words'])
 
-			print('errors', aggregated['errors']['distribution'])
+			logging_print('errors', aggregated['errors']['distribution'])
 			cer = torch.FloatTensor([r['cer'] for r in transcript_by_label])
 			loss = torch.FloatTensor([r['loss'] for r in transcript_by_label])
-			print('cer', metrics.quantiles(cer))
-			print('loss', metrics.quantiles(loss))
-			print(
+			logging_print('cer', metrics.quantiles(cer))
+			logging_print('loss', metrics.quantiles(loss))
+			logging_print(
 				f'{args.experiment_id} {val_dataset_name} {label.name}',
 				f'| epoch {epoch} iter {iteration}' if training else '',
 				f'| {transcripts_path} |',
@@ -245,7 +248,7 @@ def evaluate_model(
 		# 		),
 		# 		logits_file_path
 		# 	)
-		# 	print('Logits saved:', logits_file_path)
+		# 	logging_print('Logits saved:', logits_file_path)
 
 	checkpoint_path = os.path.join(
 		args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)
@@ -311,11 +314,15 @@ def main(args):
 	args.experiment_dir = args.experiment_dir.format(
 		experiments_dir = args.experiments_dir, experiment_id = args.experiment_id
 	)
+
+	utils.set_up_root_logger(os.path.join(args.experiment_dir, 'log.txt'), mode = 'w')
+	logging_print = utils.get_root_logger_logging_print()
+	
 	if checkpoint:
 		args.lang, args.model, args.num_input_features, args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['lang', 'model', 'num_input_features', 'sample_rate', 'window', 'window_size', 'window_stride'])
 
-	print('\n', 'Arguments:', args)
-	print('\n', 'Experiment id:', args.experiment_id, '\n')
+	logging_print('\n', 'Arguments:', args)
+	logging_print('\n', 'Experiment id:', args.experiment_id, '\n')
 	if args.dry:
 		return
 	utils.set_random_seed(args.seed)
@@ -350,7 +357,7 @@ def main(args):
 		**(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx else {})
 	)
 
-	print(' Model capacity:', int(models.compute_capacity(model, scale = 1e6)), 'million parameters\n')
+	logging_print(' Model capacity:', int(models.compute_capacity(model, scale = 1e6)), 'million parameters\n')
 
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'], strict = False)
@@ -496,14 +503,14 @@ def main(args):
 		pop_meta = True
 	)
 
-	print('Time train dataset created:', time.time() - tic, 'sec')
+	logging_print('Time train dataset created:', time.time() - tic, 'sec')
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
 	tic = time.time()
 	sampler = datasets.BucketingBatchSampler(
 		train_dataset,
 		batch_size = args.train_batch_size,
 	)
-	print('Time train sampler created:', time.time() - tic, 'sec')
+	logging_print('Time train sampler created:', time.time() - tic, 'sec')
 
 	train_data_loader = torch.utils.data.DataLoader(
 		train_dataset,
@@ -570,9 +577,12 @@ def main(args):
 			shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
 	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
 	tensorboard_sink = TensorboardSink(tensorboard)
-	logfile_sink = LogfileSink(args.log)
+	if args.log_json:
+		args.log_json = os.path.join(args.experiment_dir, 'log.json')
+	logfile_sink = JsonlistSink(args.log_json)
 
-	perf = metrics.PerformanceMeterDict(loss = dict(K = 50, max = 1000), memory_cuda_allocated = dict(K = 50), entropy = dict(K = 4), time_ms_iteration = dict(K = 50, max = 10_000), lr = dict(K = 50, max = 1))
+
+	perf.default.__init__(loss = dict(K = 50, max = 1000), memory_cuda_allocated = dict(K = 50), entropy = dict(K = 4), time_ms_iteration = dict(K = 50, max = 10_000), lr = dict(K = 50, max = 1))
 	
 	with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
 		json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
@@ -583,6 +593,7 @@ def main(args):
 
 	tic, toc_fwd, toc_bwd = time.time(), time.time(), time.time()
 
+	oom_hanlder = utils.OomHandler(max_retries = args.oom_retries)
 	for epoch in range(epoch, args.epochs):
 		sampler.shuffle(epoch + args.seed_sampler)
 		time_epoch_start = time.time()
@@ -590,7 +601,7 @@ def main(args):
 			toc_data = time.time()
 			if batch_idx == 0:
 				time_ms_launch_data_loader = (toc_data - tic) * 1000
-				print('Time data loader launch @ ', epoch, ':', time_ms_launch_data_loader / 1000, 'sec')
+				logging_print('Time data loader launch @ ', epoch, ':', time_ms_launch_data_loader / 1000, 'sec')
 			
 			lr = optimizer.param_groups[0]['lr']
 			perf.update(dict(lr = lr))
@@ -599,8 +610,9 @@ def main(args):
 			try:
 				#TODO check nan values in tensors, they can break running_stats in bn
 				log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'olen', 'loss'])
+				oom_handler.reset()
 			except:
-				if (not args.train_crash_oom) and utils.handle_out_of_memory_exception(model.parameters()):
+				if oom_handler.try_recover(model.parameters(), _print = logging_print):
 					continue
 				else:
 					raise
@@ -627,9 +639,9 @@ def main(args):
 
 					if iteration > 0 and iteration % args.log_iteration_interval == 0:
 						perf.update(utils.compute_memory_stats())
-						tensorboard_sink.perf(perf, iteration, train_dataset_name)
+						tensorboard_sink.perf(perf.default, iteration, train_dataset_name)
 						tensorboard_sink.weight_stats(iteration, model, args.log_weight_distribution)
-						logfile_sink.perf(perf, iteration, train_dataset_name)
+						logfile_sink.perf(perf.default, iteration, train_dataset_name)
 
 					optimizer.zero_grad()
 					scheduler.step(iteration)
@@ -640,8 +652,8 @@ def main(args):
 			perf.update(dict(time_ms_data = time_ms_data, time_ms_fwd = time_ms_fwd, time_ms_bwd = time_ms_bwd, time_ms_iteration = time_ms_data + time_ms_model))
 
 			print_left = f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] {"x".join(map(str, x.shape))}'
-			print_right = 'ent: <{avg_entropy:.2f}> loss: {cur_loss:.2f} <{avg_loss:.2f}> time: {cur_time_ms_data:.2f}+{cur_time_ms_fwd:4.0f}+{cur_time_ms_bwd:4.0f} <{avg_time_ms_iteration:.0f}> | lr: {cur_lr:.5f}'.format(**perf)
-			print(print_left, print_right)
+			print_right = 'ent: <{avg_entropy:.2f}> loss: {cur_loss:.2f} <{avg_loss:.2f}> time: {cur_time_ms_data:.2f}+{cur_time_ms_fwd:4.0f}+{cur_time_ms_bwd:4.0f} <{avg_time_ms_iteration:.0f}> | lr: {cur_lr:.5f}'.format(**perf.default)
+			logging_print(print_left, print_right)
 			iteration += 1
 			sampler.batch_idx += 1
 
@@ -670,7 +682,7 @@ def main(args):
 			tic = time.time()
 
 		sampler.batch_idx = 0
-		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
+		logging_print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
 		if not args.skip_on_epoch_end_evaluation:
 			evaluate_model(
 				args,
@@ -873,12 +885,15 @@ if __name__ == '__main__':
 	parser.add_argument('--normalize-text-config', default = 'data/normalize_text_config.json')
 	parser.add_argument('--frontend-in-model', action = 'store_true')
 	parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
-	parser.add_argument('--train-crash-oom', action = 'store_true')
-	parser.add_argument('--val-crash-oom', action = 'store_true')
+	parser.add_argument('--oom-retries', type = int, default = 3)
 	parser.add_argument('--val-config', default = 'configs/ru_val_config.json')
 	parser.add_argument('--analyze-num-workers', type = int, default = 0)
-	parser.add_argument('--log', default = None)
+	parser.add_argument('--log-json', action = 'store_true')
 	
-	#TODO: set up logging, RotatingFileHandler, StdoutHandler
-	#TODO: try-except
-	main(parser.parse_args())
+	args = parser.parse_args()
+
+	try:
+		main(parser.parse_args())
+	except Exception as e:
+		logging.getLogger().exception(e)
+		raise

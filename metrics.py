@@ -170,25 +170,6 @@ class ErrorAnalyzer:
 
 		return res
 
-class PerformanceMeterDict(dict):
-	def __init__(self, *, K = 50, max = 1000, **config):
-		self.config = config
-		self.K = K
-		self.max = max
-
-	def update(self, kwargs, prefix = ''):
-		if prefix:
-			prefix += '_'
-
-		for name, value in kwargs.items():
-			avg_name, max_name, cur_name = prefix + 'avg_' + name, prefix + 'max_' + name, prefix + 'cur_' + name 
-			self[avg_name] = exp_moving_average(self.get(avg_name, 0), value, K = self.config.get(name, {}).get('K', self.K), max = self.config.get(name, {}).get('max', self.max))
-			self[max_name] = max(self.get(max_name, 0), value)
-			self[cur_name] = value
-	
-	def __missing__(self, key):
-		return 0.0
-
 def nanmean(dictlist, key):
 	prefix, suffix = ('', key) if '.' not in key else key.split('.')
 	tensor = torch.FloatTensor([r_[suffix] for r in dictlist for r_ in [r.get(prefix, r)] if suffix in r_])
@@ -199,9 +180,6 @@ def nanmean(dictlist, key):
 def quantiles(tensor):
 	tensor = tensor.sort().values
 	return {k: '{:.2f}'.format(float(tensor[int(len(tensor) * k / 100)])) for k in range(0, 100, 10)}
-
-def exp_moving_average(avg, val, max = 0, K = 50):
-	return (1. / K) * min(val, max) + (1 - 1. / K) * avg
 
 
 def align_words(*, hyp, ref, word_tagger = WordTagger(), error_tagger = ErrorTagger(), postproc = True, compute_cer = False):
