@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import apex
 import librosa
 import shaping
-from typing import List
+from typing import List, Optional
 
 
 class InputOutputTypeCast(nn.Module):
@@ -284,12 +284,12 @@ class JasperNet(nn.Module):
 		#x = x.to(torch.float16)
 		x = x if x.ndim == 2 else x.squeeze(1)
 		if self.frontend is not None:
-			lengths = compute_output_lengths(x, xlen)
-			x = self.frontend(x, mask = temporal_mask(x, lengths))
+			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
+			x = self.frontend(x, mask = mask)
 
 		if self.normalize_features is not None:
-			lengths = compute_output_lengths(x, xlen)
-			x = self.normalize_features(x, mask = temporal_mask(x, lengths))
+			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
+			x = self.normalize_features(x, mask = mask)
 
 		residual = []
 		for i, subblock in enumerate(self.backbone):
@@ -591,7 +591,9 @@ class LogFilterBankFrontend(nn.Module):
 		return True
 
 @torch.jit.script
-def compute_output_lengths(x: shaping.BT, lengths_fraction: shaping.B):
+def compute_output_lengths(x: shaping.BT, lengths_fraction: Optional[shaping.B] = None):
+	if lengths_fraction is None:
+		return torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.long)
 	return (lengths_fraction * x.shape[-1]).ceil().long()
 
 @torch.jit.script
