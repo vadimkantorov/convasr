@@ -654,7 +654,9 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 		if not self.temporal_mask or mask is None:
 			if self.legacy:
 				assert self.track_running_stats is False
-				std, mean = torch.std_mean(x, dim = -1, keepdim = True)
+				# std, mean = torch.std_mean(x, dim = -1, keepdim = True)
+				# replaced with new version for .onnx export fix!
+				std, mean = torch.std(x, dim=-1, keepdim=True), torch.mean(x, dim=-1, keepdim=True)
 				return (x - mean) / (std + self.eps)
 			else:
 				return super().forward(x)
