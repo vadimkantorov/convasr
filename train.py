@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import os
+import collections
 import random
 import shutil
 import time
@@ -26,15 +27,16 @@ import transcripts
 import perf
 
 class JsonlistSink:
-	def __init__(self, log_path):
-		self.log = open(log_path, 'w') if log_path else None
+	def __init__(self, file_path):
+		self.json_file = open(file_path, 'w') if file_path else None
 
-	def perf(self, perf, iteration, train_dataset):
-		if self.log is None:
+	def perf(self, perf, iteration, train_dataset_name):
+		if self.json_file is None:
 			return
 
-		self.log.write(json.dumps(dict(train_dataset_name = train_dataset_name, loss_avg = perf['avg_loss'], lr_avg = perf['avg_lr'], iteration = iteration)))
-		self.log.write('\n')
+		self.json_file.write(json.dumps(dict(train_dataset_name = train_dataset_name, loss_avg = perf['avg_loss'], lr_avg = perf['avg_lr'], iteration = iteration)))
+		self.json_file.write('\n')
+		self.json_file.flush()
 
 class TensorboardSink:
 	def __init__(self, summary_writer):
@@ -42,8 +44,15 @@ class TensorboardSink:
 
 	def perf(self, perf, iteration, train_dataset_name, lr_scaler = 1e4):
 		self.summary_writer.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = perf['avg_loss'], lr_avg_scaled = perf['avg_lr'] * lr_scaler), iteration)
-		#TODO: was add_scalar before, do not dump everything, or filter by prefix
-		self.summary_writer.add_scalars('perf', {k.replace('datasets_', 'datasets/') : v for k, v in perf.items()}, iteration)
+		#TODO: do not dump everything, or filter by prefix
+		aggregated_metrics = collections.defaultdict(dict)
+		for key, value in perf.items():
+			prefix = key.split('_')[0]
+			name = ''.join(key.split('_')[1:])
+			aggregated_metrics[name][prefix] = value
+
+		for name, aggregated_value in aggregated_metrics.items():
+			self.summary_writer.add_scalars(f'perf/{name}', aggregated_value, iteration)
 
 	def val_stats(self, iteration, val_dataset_name, labels_name, perf):
 		prefix = f'datasets/{val_dataset_name}_{labels_name}_'
@@ -51,7 +60,7 @@ class TensorboardSink:
 			dict(
 				wer = perf[prefix + 'wer'] * 100.0,
 				cer = perf[prefix + 'cer'] * 100.0,
-				loss = perf[perfix + 'loss']
+				loss = perf[prefix + 'loss']
 			),
 			iteration
 		)
@@ -115,6 +124,7 @@ def evaluate_model(
 
 	training = epoch is not None and iteration is not None
 	columns = {}
+	oom_handler = utils.OomHandler(max_retries=args.oom_retries)
 	for val_dataset_name, val_data_loader in val_data_loaders.items():
 		logging_print(f'\n{val_dataset_name}@{iteration}')
 		transcript, logits_, y_ = [], [], []
@@ -123,7 +133,7 @@ def evaluate_model(
 		model.eval()
 		if args.adapt_bn:
 			models.reset_bn_running_stats_(model)
-			for _ in apply_model(val_data_loader, model, labels, decoder, args.device, args.val_crash_oom, utils.OomHandler(retries = args.oom_retries)):
+			for _ in apply_model(val_data_loader, model, labels, decoder, args.device, oom_handler):
 				pass
 		model.eval()
 		cpu_list = lambda l: [[t.cpu() for t in t_] for t_ in l]
@@ -131,7 +141,7 @@ def evaluate_model(
 		tic = time.time()
 		ref_, hyp_, audio_path_, loss_, entropy_ = [], [], [], [], []
 		for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(
-				val_data_loader, model, labels, decoder, args.device, args.oom_retries)):
+				val_data_loader, model, labels, decoder, args.device, oom_handler)):
 			loss_.extend(loss.tolist())
 			entropy_.extend(entropy.tolist())
 			logits_.extend(zip(*cpu_list(logits)) if not training and args.logits else [])
@@ -142,7 +152,7 @@ def evaluate_model(
 		toc_apply_model = time.time()
 		time_sec_val_apply_model = toc_apply_model - tic
 		perf.update(dict(time_sec_val_apply_model = time_sec_val_apply_model), prefix = f'datasets_{val_dataset_name}')
-		logging_print(f"Apply model {time_sec_val_apply_model:.1f} sec", end=", ")
+		logging_print(f"Apply model {time_sec_val_apply_model:.1f} sec")
 
 		analyze_args_gen = (
 			(
@@ -169,8 +179,8 @@ def evaluate_model(
 				transcript = pool.starmap(error_analyzer.analyze, analyze_args_gen)
 
 		toc_analyze = time.time()
-		time_sec_analyze = toc_analyze - toc_apply_model
-		time_sec_total = toc_analyze - tic
+		time_sec_val_analyze = toc_analyze - toc_apply_model
+		time_sec_val_total = toc_analyze - tic
 		perf.update(dict(time_sec_val_analyze = time_sec_val_analyze, time_sec_val_total = time_sec_val_total), prefix = f'datasets_{val_dataset_name}')
 		logging_print(f"Analyze {time_sec_val_analyze:.1f} sec, Total {time_sec_val_total:.1f} sec")
 		
@@ -594,7 +604,7 @@ def main(args):
 
 	tic, toc_fwd, toc_bwd = time.time(), time.time(), time.time()
 
-	oom_hanlder = utils.OomHandler(max_retries = args.oom_retries)
+	oom_handler = utils.OomHandler(max_retries = args.oom_retries)
 	for epoch in range(epoch, args.epochs):
 		sampler.shuffle(epoch + args.seed_sampler)
 		time_epoch_start = time.time()
