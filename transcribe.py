@@ -186,6 +186,7 @@ def main(args):
 						speakers = val_dataset.speakers
 					) for i in range(len(decoded))
 				]
+			oom_handler.reset()
 		except:
 			if oom_handler.try_recover(model.parameters()):
 				print(f'Skipping {i} / {num_examples}')
