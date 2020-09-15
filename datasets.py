@@ -79,7 +79,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		exclude = set(),
 		join_transcript = False,
 		bucket = None,
-		pop_meta = False
+		pop_meta = False,
+		logging_print = print
 	):
 		self.join_transcript = join_transcript
 		self.max_duration = max_duration
@@ -106,9 +107,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		tic = time.time()
 		
 		transcripts_read = list(map(read_transcript, data_paths)) 
-		#print = logger.getLogger().info
 
-		print('Read', time.time() - tic); tic = time.time()
+		logging_print('Dataset reading time: ', time.time() - tic); tic = time.time()
 
 		examples = [
 			list(g) for transcript in transcripts_read for k,
@@ -154,7 +154,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			t['speaker'] = t['speaker'] if isinstance(t.get('speaker'), int) else self.speaker_names_index.get(t['speaker'], self.speaker_missing) if isinstance(t.get('speaker'), str) else 1 + t['channel'] if 'channel' in t else self.speaker_missing
 			t['speaker_name'] = self.speaker_names[t['speaker']]
 		
-		print('Constructor', time.time() - tic); tic = time.time()
+		logging_print('Dataset construction time: ', time.time() - tic); tic = time.time()
 		
 		self.bucket = torch.ShortTensor([e[0]['bucket'] for e in examples_filtered]) 
 		self.audio_path = TensorBackedStringArray([e[0]['audio_path'] for e in examples_filtered])
@@ -166,7 +166,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.cumlen = torch.ShortTensor(examples_lens).cumsum(dim = 0, dtype = torch.int64)
 		self.meta = { self.example_id(t) : t for t in transcript } if not pop_meta else {}
 		
-		print('Tensors', time.time() - tic); print()
+		logging_print('Dataset tensors creation time: ', time.time() - tic)
 
 	def pop_meta(self):
 		meta = self.meta

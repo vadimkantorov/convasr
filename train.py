@@ -470,7 +470,8 @@ def main(args):
 				waveform_transform_debug_dir = args.val_waveform_transform_debug_dir,
 				min_duration = args.min_duration,
 				time_padding_multiple = args.batch_time_padding_multiple,
-				pop_meta = True
+				pop_meta = True,
+				logging_print = logging_print
 			)
 		]
 	}
@@ -518,7 +519,8 @@ def main(args):
 				((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
 			)
 		),
-		pop_meta = True
+		pop_meta = True,
+		logging_print = logging_print
 	)
 
 	logging_print('Time train dataset created:', time.time() - tic, 'sec')
