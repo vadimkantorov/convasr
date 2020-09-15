@@ -466,7 +466,8 @@ def main(args):
 												waveform_transform_debug_dir = args.val_waveform_transform_debug_dir,
 												min_duration = args.min_duration,
 												time_padding_multiple = args.batch_time_padding_multiple,
-												pop_meta = True)
+												pop_meta = True,
+												logging_print = logging_print)
 		if args.world_size > 1:
 			sampler = torch.utils.data.DistributedSampler(val_dataset, num_replicas = args.world_size, rank = args.rank, shuffle = False)
 		else:
@@ -535,7 +536,8 @@ def main(args):
 				((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
 			)
 		),
-		pop_meta = True
+		pop_meta = True,
+		logging_print = logging_print
 	)
 
 	logging_print('Time train dataset created:', time.time() - tic, 'sec')
@@ -971,7 +973,7 @@ if __name__ == '__main__':
 	parser.add_argument('--backend', default = 'nccl', help = 'processes communication backend')
 	parser.add_argument('--master-ip', default = '0.0.0.0', help = 'DDP MASTER_ADDR')
 	parser.add_argument('--master-port', default = '12345', help = 'DDP MASTER_PORT')
-	
+
 	args = parser.parse_args()
 
 	try:

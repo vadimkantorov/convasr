@@ -94,7 +94,12 @@ class ErrorAnalyzer:
 		stats['errors'] = dict(distribution = dict(collections.OrderedDict(sorted(error_chars.items()))), words = error_words)
 		return stats
 
-	def analyze(self, hyp, ref, full = False, extra = {}, postprocess_transcript = (lambda s, *args, **kwargs: s), split_candidates = (lambda s: [s])):
+	def analyze(self, hyp, ref, full = False, extra = {}, postprocess_transcript = None, split_candidates = None):
+		if postprocess_transcript is None:
+			postpprocess_transcript = lambda s, *args, **kwargs: s
+		if split_candidates is None:
+			split_candidates = lambda s: [s]
+		
 		# TODO: add error_ok_tags
 		# TODO: respect full flag
 
@@ -520,14 +525,13 @@ class Needleman:
 
 if __name__ == '__main__':
 	import argparse
-	import datasets
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
 
 	cmd = subparsers.add_parser('analyze')
 	cmd.add_argument('--hyp', required = True)
 	cmd.add_argument('--ref', required = True)
-	cmd.add_argument('--lang', default = 'ru')
+	cmd.add_argument('--lang')
 	cmd.add_argument('--vocab', default = 'data/vocab_word_list.txt')
 	cmd.add_argument('--val-config', default = 'configs/ru_val_config.json')
 	cmd.set_defaults(
@@ -535,7 +539,7 @@ if __name__ == '__main__':
 		ref, val_config, vocab,
 		lang: print(
 			json.dumps(
-				ErrorAnalyzer(**(dict(configs = json.load(open(val_config))['error_analyzer'], word_tagger = WordTagger(word_tags = json.load(open(val_config))['word_tags'], vocab = set(map(str.strip, open(vocab))) if os.path.exists(vocab) else set())) if os.path.exists(val_config) else {})).analyze(hyp = hyp, ref = ref, labels = datasets.Labels(datasets.Language(lang)), full = True),
+				ErrorAnalyzer(**(dict(configs = json.load(open(val_config))['error_analyzer'], word_tagger = WordTagger(word_tags = json.load(open(val_config))['word_tags'], vocab = set(map(str.strip, open(vocab))) if os.path.exists(vocab) else set())) if os.path.exists(val_config) else {})).analyze(hyp = hyp, ref = ref, postprocess_transcript = __import__('datasets').Labels(__import__('datasets').Language(lang)).postprocess_transcript if args.lang is not None else None, full = True),
 				ensure_ascii = False,
 				indent = 2,
 				sort_keys = True
