@@ -25,6 +25,7 @@ import vis
 import utils
 import transcripts
 import perf
+import torch.distributed as dist
 
 class JsonlistSink:
 	def __init__(self, file_path, mode = 'w'):
@@ -327,23 +328,31 @@ def main(args):
 
 	os.makedirs(args.experiment_dir, exist_ok = True)
 
+	if checkpoint:
+		args.lang, args.model, args.num_input_features, args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['lang', 'model', 'num_input_features', 'sample_rate', 'window', 'window_size', 'window_stride'])
+		log_mode = 'a'
+	else:
+		log_mode = 'w'
+
 	if args.log_json:
 		args.log_json = os.path.join(args.experiment_dir, 'log.json')
 
-	if checkpoint:
-		args.lang, args.model, args.num_input_features, args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['lang', 'model', 'num_input_features', 'sample_rate', 'window', 'window_size', 'window_stride'])
-		utils.set_up_root_logger(os.path.join(args.experiment_dir, 'log.txt'), mode = 'a')
-		logfile_sink = JsonlistSink(args.log_json, mode = 'a')
+	if args.rank == 0:
+		log_path = os.path.join(args.experiment_dir, 'log.txt')
+		log_level = logging.INFO
 	else:
-		utils.set_up_root_logger(os.path.join(args.experiment_dir, 'log.txt'), mode = 'w')
-		logfile_sink = JsonlistSink(args.log_json, mode = 'w')
+		log_path = None
+		log_level = logging.ERROR
+		args.log_json = None
+
+	utils.set_up_root_logger(log_path, mode = log_mode, level = log_level)
+	logfile_sink = JsonlistSink(args.log_json, mode = log_mode)
 
 	logging_print = utils.get_root_logger_print()
 	logging_print('\n', 'Arguments:', args)
 	logging_print('\n', 'Experiment id:', args.experiment_id, '\n')
 	if args.dry:
 		return
-	utils.set_random_seed(args.seed)
 	if args.cudnn == 'benchmark':
 		torch.backends.cudnn.benchmark = True
 
@@ -446,12 +455,24 @@ def main(args):
 			args.val_waveform_transform_debug_dir,
 			str(val_frontend.waveform_transform)
 			if isinstance(val_frontend.waveform_transform, transforms.RandomCompose) else
-			val.waveform_transform.__class__.__name__
+			val_frontend.waveform_transform.__class__.__name__
 		)
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
 
-	val_data_loaders = {
-		os.path.basename(val_data_path): torch.utils.data.DataLoader(
+	val_data_loaders = {}
+	for val_data_path in args.val_data_path:
+		val_dataset = datasets.AudioTextDataset(val_data_path, labels, args.sample_rate,
+												frontend = val_frontend if not args.frontend_in_model else None,
+												waveform_transform_debug_dir = args.val_waveform_transform_debug_dir,
+												min_duration = args.min_duration,
+												time_padding_multiple = args.batch_time_padding_multiple,
+												pop_meta = True)
+		if args.world_size > 1:
+			sampler = torch.utils.data.DistributedSampler(val_dataset, num_replicas = args.world_size, rank = args.rank, shuffle = False)
+		else:
+			sampler = None
+
+		val_data_loader = torch.utils.data.DataLoader(
 			val_dataset,
 			num_workers = args.num_workers,
 			collate_fn = val_dataset.collate_fn,
@@ -459,21 +480,12 @@ def main(args):
 			shuffle = False,
 			batch_size = args.val_batch_size,
 			worker_init_fn = datasets.worker_init_fn,
+			sampler = sampler,
 			timeout = args.timeout if args.num_workers > 0 else 0
 		)
-		for val_data_path in args.val_data_path for val_dataset in [
-			datasets.AudioTextDataset(
-				val_data_path,
-				labels,
-				args.sample_rate,
-				frontend = val_frontend if not args.frontend_in_model else None,
-				waveform_transform_debug_dir = args.val_waveform_transform_debug_dir,
-				min_duration = args.min_duration,
-				time_padding_multiple = args.batch_time_padding_multiple,
-				pop_meta = True
-			)
-		]
-	}
+
+		val_data_loaders[os.path.basename(val_data_path)] = val_data_loader
+
 	decoder = [
 		decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(
 			labels[0],
@@ -492,8 +504,13 @@ def main(args):
 		model.eval()
 		if not args.adapt_bn:
 			model.fuse_conv_bn_eval()
-		if args.device != 'cpu':
-			model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+		if args.fp16:
+			model, _ = apex.amp.initialize(model, None, opt_level=args.fp16, keep_batchnorm_fp32=args.fp16_keep_batchnorm_fp32)
+		if args.world_size > 1:
+			model = torch.nn.parallel.DistributedDataParallel(model,
+															  device_ids=[args.local_rank],
+															  output_device=args.local_rank,
+															  find_unused_parameters=True)
 		evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer)
 		return
 
@@ -528,6 +545,8 @@ def main(args):
 		train_dataset,
 		batch_size = args.train_batch_size,
 	)
+	if args.world_size > 1:
+		sampler = datasets.DistributedSamplerWrapper(sampler, num_replicas=args.world_size, rank=args.rank)
 	logging_print('Time train sampler created:', time.time() - tic, 'sec')
 
 	train_data_loader = torch.utils.data.DataLoader(
@@ -539,32 +558,43 @@ def main(args):
 		worker_init_fn = datasets.worker_init_fn,
 		timeout = args.timeout if args.num_workers > 0 else 0
 	)
-	optimizer = torch.optim.SGD(
-		model.parameters(),
-		lr = args.lr,
-		momentum = args.momentum,
-		weight_decay = args.weight_decay,
-		nesterov = args.nesterov
-	) if args.optimizer == 'SGD' else torch.optim.AdamW(
-		model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay
-	) if args.optimizer == 'AdamW' else optimizers.NovoGrad(
-		model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay
-	) if args.optimizer == 'NovoGrad' else apex.optimizers.FusedNovoGrad(
-		model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay
-	) if args.optimizer == 'FusedNovoGrad' else None
+
+	if args.optimizer == 'SGD':
+		optimizer = torch.optim.SGD(model.parameters(),
+									lr = args.lr,
+									momentum = args.momentum,
+									weight_decay = args.weight_decay,
+									nesterov = args.nesterov)
+	elif args.optimizer == 'AdamW':
+		optimizer = torch.optim.AdamW(model.parameters(),
+									   lr = args.lr,
+									   betas = args.betas,
+									   weight_decay = args.weight_decay)
+	elif args.optimizer == 'NovoGrad':
+		optimizer = optimizers.NovoGrad(model.parameters(),
+										lr = args.lr,
+										betas = args.betas,
+										weight_decay = args.weight_decay)
+	elif args.optimizer == 'FusedNovoGrad':
+		optimizer = apex.optimizers.FusedNovoGrad(model.parameters(),
+												  lr = args.lr,
+												  betas = args.betas,
+												  weight_decay = args.weight_decay)
+	else:
+		optimizer = None
 
 	if checkpoint and checkpoint['optimizer_state_dict'] is not None:
 		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 		if not args.skip_optimizer_reset:
 			optimizers.reset_options(optimizer)
 
-	scheduler = optimizers.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones
-										) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(
-											optimizer,
-											power = args.decay_power,
-											decay_steps = len(train_data_loader) * args.decay_epochs,
-											end_lr = args.decay_lr
-										) if args.scheduler == 'PolynomialDecayLR' else optimizers.NoopLR(optimizer)
+	if args.scheduler == 'MultiStepLR':
+		scheduler = optimizers.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones)
+	elif args.scheduler == 'PolynomialDecayLR':
+		scheduler = optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr)
+	else:
+		scheduler = optimizers.NoopLR(optimizer)
+
 	epoch, iteration = 0, 0
 	if checkpoint:
 		epoch, iteration = checkpoint['epoch'], checkpoint['iteration']
@@ -580,29 +610,39 @@ def main(args):
 		assert epoch_skip_fraction < args.max_epoch_skip_fraction, \
 			f'args.iterations_per_epoch must not skip more than {args.max_epoch_skip_fraction:.1%} of each epoch'
 
-	if args.device != 'cpu':
-		model, optimizer = models.data_parallel_and_autocast(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+	if args.fp16:
+		model, optimizer = apex.amp.initialize(model, optimizer, opt_level= args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+	if args.world_size > 1:
+		model = torch.nn.parallel.DistributedDataParallel(model,
+														  device_ids=[args.local_rank],
+														  output_device=args.local_rank,
+														  find_unused_parameters=True)
 	if checkpoint and args.fp16 and checkpoint['amp_state_dict'] is not None:
 		apex.amp.load_state_dict(checkpoint['amp_state_dict'])
 
 	model.train()
 
 	tensorboard_dir = os.path.join(args.experiment_dir, 'tensorboard')
-	if checkpoint and args.experiment_name:
+	if checkpoint and args.experiment_name and args.rank == 0:
 		tensorboard_dir_checkpoint = os.path.join(os.path.dirname(args.checkpoint[0]), 'tensorboard')
 		if os.path.exists(tensorboard_dir_checkpoint) and not os.path.exists(tensorboard_dir):
 			shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
+	if args.world_size > 1:
+		if not os.path.exists(tensorboard_dir):
+			os.makedirs(tensorboard_dir, exist_ok = True)
+		dist.barrier()
 	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
 	tensorboard_sink = TensorboardSink(tensorboard)
 
 	perf.default.__init__(loss = dict(K = 50, max = 1000), memory_cuda_allocated = dict(K = 50), entropy = dict(K = 4), time_ms_iteration = dict(K = 50, max = 10_000), lr = dict(K = 50, max = 1))
-	
-	with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
-		json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
 
-	with open(os.path.join(args.experiment_dir, args.dump_model_config), 'w') as f:
-		model_config = dict(init_params = models.master_module(model).init_params, model = repr(models.master_module(model)))
-		json.dump(model_config, f, sort_keys = True, ensure_ascii = False, indent = 2)
+	if args.rank == 0:
+		with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
+			json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
+
+		with open(os.path.join(args.experiment_dir, args.dump_model_config), 'w') as f:
+			model_config = dict(init_params = models.master_module(model).init_params, model = repr(models.master_module(model)))
+			json.dump(model_config, f, sort_keys = True, ensure_ascii = False, indent = 2)
 
 	tic, toc_fwd, toc_bwd = time.time(), time.time(), time.time()
 
@@ -629,12 +669,7 @@ def main(args):
 					continue
 				else:
 					raise
-			example_weights = ylen[:, 0]
-			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, float(loss.mean())
 
-			perf.update(dict(loss = loss_cur))
-
-			entropy = float(models.entropy(log_probs[0], olen[0], dim = 1).mean())
 			toc_fwd = time.time()
 			#TODO: inf/nan still corrupts BN stats
 			if not (torch.isinf(loss) or torch.isnan(loss)):
@@ -658,7 +693,24 @@ def main(args):
 
 					optimizer.zero_grad()
 					scheduler.step(iteration)
-				perf.update(dict(entropy = entropy))
+
+				example_weights = ylen[:, 0]
+				loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, loss.mean()
+				entropy = models.entropy(log_probs[0], olen[0], dim=1).mean()
+
+				if args.world_size > 1:
+					dist.reduce(loss, dst=0, op=dist.ReduceOp.SUM)
+					dist.reduce(loss_cur, dst=0, op=dist.ReduceOp.SUM)
+					dist.reduce(entropy, dst=0, op=dist.ReduceOp.SUM)
+					loss = loss / args.world_size
+					loss_cur = loss_cur / args.world_size
+					entropy = entropy / args.world_size
+
+				if args.rank == 0:
+					perf.update(dict(loss = float(loss_cur)))
+					perf.update(dict(entropy = float(entropy)))
+			else:
+				logging.getLogger().error(f'Loss value is corrupted! {args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] | Rank: {args.rank} | Loss: {loss.item()}')
 			toc_bwd = time.time()
 
 			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = map(lambda sec: sec * 1000, [toc_data - tic, toc_fwd - toc_data, toc_bwd - toc_fwd, toc_bwd - toc_data])
@@ -668,7 +720,7 @@ def main(args):
 			print_right = 'ent: <{avg_entropy:.2f}> loss: {cur_loss:.2f} <{avg_loss:.2f}> time: {cur_time_ms_data:.2f}+{cur_time_ms_fwd:4.0f}+{cur_time_ms_bwd:4.0f} <{avg_time_ms_iteration:.0f}> | lr: {cur_lr:.5f}'.format(**perf.default)
 			logging_print(print_left, print_right)
 			iteration += 1
-			sampler.batch_idx += 1
+			sampler.batch_idx += args.world_size
 
 			if iteration > 0 and (iteration % args.val_iteration_interval == 0 or iteration == args.iterations):
 				evaluate_model(
@@ -713,6 +765,17 @@ def main(args):
 			)
 
 
+def init_process(args):
+	""" Initialize the distributed environment. """
+	utils.set_random_seed(args.seed)
+	torch.backends.cudnn.deterministic = True
+	torch.cuda.set_device(args.local_rank)
+
+	print(f"Initialize worker with rank {args.rank} in world size {args.world_size} at {args.master_ip}:{args.master_port}")
+	dist.init_process_group(args.backend, init_method=f"tcp://{args.master_ip}:{args.master_port}", rank=args.rank, world_size=args.world_size)
+	main(args)
+
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--optimizer', choices = ['SGD', 'AdamW', 'NovoGrad', 'FusedNovoGrad'], default = 'SGD')
@@ -746,9 +809,9 @@ if __name__ == '__main__':
 	parser.add_argument('--train-data-path', nargs = '*', default = [])
 	parser.add_argument('--train-data-mixing', type = float, nargs = '*')
 	parser.add_argument('--val-data-path', nargs = '*', default = [])
-	parser.add_argument('--num-workers', type = int, default = 64)
-	parser.add_argument('--train-batch-size', type = int, default = 256)
-	parser.add_argument('--val-batch-size', type = int, default = 256)
+	parser.add_argument('--num-workers', type = int, default = 16, help = 'num workers per DDP process')
+	parser.add_argument('--train-batch-size', type = int, default = 256, help = 'batch size per DDP process')
+	parser.add_argument('--val-batch-size', type = int, default = 256, help = 'batch size per DDP process')
 	parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 	parser.add_argument(
 		'--checkpoint',
@@ -901,11 +964,32 @@ if __name__ == '__main__':
 	parser.add_argument('--val-config', default = 'configs/ru_val_config.json')
 	parser.add_argument('--analyze-num-workers', type = int, default = 0)
 	parser.add_argument('--log-json', action = 'store_true')
+	# DDP settings
+	parser.add_argument('--start-rank', type = int, default = 0, help = 'processes ranks equal: start_rank+local_rank')
+	parser.add_argument('--local-ranks', type = int, nargs = '+', default = [0], help ='processes local ranks, equals to cuda device id')
+	parser.add_argument('--world-size', type = int, default = 1, help = 'amount of processes')
+	parser.add_argument('--backend', default = 'nccl', help = 'processes communication backend')
+	parser.add_argument('--master-ip', default = '0.0.0.0', help = 'DDP MASTER_ADDR')
+	parser.add_argument('--master-port', default = '12345', help = 'DDP MASTER_PORT')
 	
 	args = parser.parse_args()
 
 	try:
-		main(parser.parse_args())
+		if args.world_size > 1:
+			processes = []
+			for rank in args.local_ranks:
+				args.local_rank = rank
+				args.rank = args.start_rank + rank
+				p = torch.multiprocessing.Process(target=init_process, args=(args,))
+				p.start()
+				processes.append(p)
+
+			for p in processes:
+				p.join()
+		else:
+			args.local_rank = 0
+			args.rank = 0
+			main(args)
 	except Exception as e:
 		logging.getLogger().critical(e, exc_info=True)
 		raise

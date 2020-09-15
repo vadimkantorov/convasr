@@ -5,6 +5,7 @@ import random
 import torch
 import gzip
 import psutil
+import numpy
 import logging
 import logging.handlers
 
@@ -12,9 +13,9 @@ def get_root_logger_print():
 	logger = logging.getLogger()
 	return (lambda *args: logger.info(' '.join(map(str, args))))
 
-def set_up_root_logger(log_file_path = None, mode = 'a', max_bytes = 1_000_000, fmt = '%(asctime)s [%(levelname)s]: %(message)s'):
+def set_up_root_logger(log_file_path = None, mode = 'a', max_bytes = 1_000_000, fmt = '%(asctime)s [%(levelname)s]: %(message)s', level=logging.INFO):
 	logger = logging.getLogger()
-	logger.setLevel(logging.INFO)
+	logger.setLevel(level)
 	
 	formatter = logging.Formatter(fmt)
 	handler = logging.StreamHandler()
@@ -70,7 +71,7 @@ def reset_cpu_threads(num_threads):
 	#os.environ['MKL_NUM_THREADS'] = str(num_threads)
 
 def set_random_seed(seed):
-	for set_random_seed in [random.seed, torch.manual_seed
+	for set_random_seed in [random.seed, torch.manual_seed, numpy.random.seed
 							] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
 		set_random_seed(seed)
 

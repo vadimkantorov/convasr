@@ -3,6 +3,7 @@ import math
 import collections
 import functools
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import apex
@@ -730,7 +731,7 @@ def sparse_topk_todense(saved, device = None):
 
 
 def master_module(model):
-	return model.module if isinstance(model, nn.DataParallel) else model
+	return model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model
 
 
 ########CONFIGS########

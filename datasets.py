@@ -10,6 +10,8 @@ import sentencepiece
 import audio
 import utils
 import transcripts
+import operator
+import typing
 
 class TensorBackedStringArray:
 	def __init__(self, strings, encoding = 'utf_16_le'):
@@ -324,6 +326,95 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 
 	def load_state_dict(self, state_dict):
 		self.batch_idx = state_dict['batch_idx']
+
+
+# https://github.com/catalyst-team/catalyst/blob/master/catalyst/data/sampler.py
+class DatasetFromSampler(torch.utils.data.Dataset):
+	"""Dataset of indexes from `Sampler`."""
+
+	def __init__(self, sampler: torch.utils.data.Sampler):
+		self.sampler = sampler
+		self.sampler_list = None
+
+	def __getitem__(self, index: int):
+		"""Gets element of the dataset.
+		Args:
+			index (int): index of the element in the dataset
+		Returns:
+			Single element by index
+		"""
+		if self.sampler_list is None:
+			self.sampler_list = list(self.sampler)
+		return self.sampler_list[index]
+
+	def __len__(self) -> int:
+		"""
+		Returns:
+			int: length of the dataset
+		"""
+		return len(self.sampler)
+
+
+class DistributedSamplerWrapper(torch.utils.data.DistributedSampler):
+	"""
+	Wrapper over `Sampler` for distributed training.
+	Allows you to use any sampler in distributed mode.
+	It is especially useful in conjunction with
+	`torch.nn.parallel.DistributedDataParallel`. In such case, each
+	process can pass a DistributedSamplerWrapper instance as a DataLoader
+	sampler, and load a subset of subsampled data of the original dataset
+	that is exclusive to it.
+	.. note::
+		Sampler is assumed to be of constant size.
+	"""
+
+	def __init__(
+		self,
+		sampler,
+		num_replicas: typing.Optional[int] = None,
+		rank: typing.Optional[int] = None,
+		shuffle: bool = False,
+	):
+		"""
+		Args:
+			sampler: Sampler used for subsampling
+			num_replicas (int, optional): Number of processes participating in
+			  distributed training
+			rank (int, optional): Rank of the current process
+			  within ``num_replicas``
+			shuffle (bool, optional): If true sampler will shuffle the indices
+		"""
+		super(DistributedSamplerWrapper, self).__init__(
+			DatasetFromSampler(sampler),
+			num_replicas=num_replicas,
+			rank=rank,
+			shuffle=shuffle,
+		)
+		self.sampler = sampler
+
+	def __iter__(self):
+		self.dataset = DatasetFromSampler(self.sampler)
+		indexes_of_indexes = super().__iter__()
+		subsampler_indexes = self.dataset
+		return iter(operator.itemgetter(*indexes_of_indexes)(subsampler_indexes))
+
+	def state_dict(self):
+		return self.sampler.state_dict()
+
+	def load_state_dict(self, state_dict):
+		self.sampler.load_state_dict(state_dict)
+
+	def shuffle(self, epoch):
+		self.sampler.shuffle(epoch)
+
+	@property
+	def batch_idx(self):
+		return self.sampler.batch_idx
+
+	@batch_idx.setter
+	def batch_idx(self, value):
+		self.sampler.batch_idx = value
+
 
 class Labels:
 	repeat = '2'
