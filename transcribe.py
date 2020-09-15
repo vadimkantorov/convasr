@@ -80,7 +80,6 @@ def main(args):
 		mono = args.mono,
 		time_padding_multiple = args.batch_time_padding_multiple,
 		audio_backend = args.audio_backend,
-		speakers = args.speakers,
 		exclude = exclude,
 		max_duration = args.transcribe_first_n_sec,
 		join_transcript = args.join_transcript
@@ -96,14 +95,16 @@ def main(args):
 	for i, (meta, s, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
 
+		meta = [val_dataset.meta.get(m['example_id']) for m in meta]
+		audio_path = meta[0]['audio_path']
+
 		if x.numel() == 0:
 			print(f'Skipping empty [{audio_path}].')
 			continue
-		
-		meta = [val_dataset.get_meta(m['example_id']) for m in meta]
-		audio_path = meta[0]['audio_path']
+
+		begin = meta[0]['begin']
+		end = meta[0]['end']
 		audio_name = transcripts.audio_name(audio_path)
-		transcript_path = os.path.join(args.output_path, audio_name + '.json')
 
 		try:
 			tic = time.time()

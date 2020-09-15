@@ -229,6 +229,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			replace_transcript = self.join_transcript or (not transcript) or (some_segments_have_not_begin_end and some_segments_have_ref)
 			normalize_text = True
 
+			assert not replace_transcript, "todo: vadimkantorov pls fix this code!"
 			if replace_transcript:
 				assert len(signal) == 1
 				ref_full = [self.labels[0].normalize_text(t['ref']) for t in transcript]
@@ -254,7 +255,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				for t in sorted(transcript, key = transcripts.sort_key)
 				for channel in ([t['channel']] if t['channel'] is not None else range(len(signal)))
 			]
-			speaker = [t.pop('speaker') for t in transcript]
+			speaker = torch.LongTensor([t.pop('speaker') for t in transcript]).unsqueeze(-1)
 			features = [
 				self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0)
 				if self.frontend is not None else segment.unsqueeze(0)
@@ -276,7 +277,10 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 		meta_s, sample_s, sample_x, *sample_y = batch[0]
 		time_padding_multiple = [1, 1, self.time_padding_multiple] + [self.time_padding_multiple] * len(sample_y)
-		smax_len, xmax_len, *ymax_len = [int(math.ceil(max(b[k].shape[-1] for b in batch) / time_padding_multiple[k])) * time_padding_multiple[k] for k in range(1, len(batch[0]))]
+		smax_len, xmax_len, *ymax_len = [
+			int(math.ceil(max(b[k].shape[-1] for b in batch) / time_padding_multiple[k])) * time_padding_multiple[k]
+			for k in range(1, len(batch[0]))
+		]
 		meta = [b[0] for b in batch]
 		x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = sample_x.dtype)
 		y = torch.zeros(len(batch), len(sample_y), max(ymax_len), dtype = torch.long)
