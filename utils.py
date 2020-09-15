@@ -19,6 +19,8 @@ def set_up_root_logger(log_file_path = None, mode = 'a', max_bytes = 1_000_000, 
 	formatter = logging.Formatter(fmt)
 	handler = logging.StreamHandler()
 	handler.setFormatter(formatter)
+	# hack to avoid duplicate messages in stdout
+	handler.addFilter(lambda record: record.levelno != logging.CRITICAL)
 	logger.addHandler(handler)
 	
 	if log_file_path:
@@ -88,7 +90,7 @@ class OomHandler:
 				return False
 			
 			_print('RECOVERING FROM OOM --- BEFORE FREE')
-			traceback.print_exception(exc_type, exc_value, exc_traceback)
+			_print(''.join(traceback.format_exception(exc_type, exc_value, exc_traceback)))
 			for p in model_parameters:
 				p.grad = None
 			print_memory_stats('<BEFORE FREE>', _print = _print)
