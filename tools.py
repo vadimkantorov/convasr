@@ -467,7 +467,7 @@ def split(
 				sort_keys = True,
 				indent = 2
 			)
-	return
+
 	json.dump(
 		transcripts_train,
 		open(os.path.join(output_path, os.path.basename(output_path) + '_train.json'), 'w'),

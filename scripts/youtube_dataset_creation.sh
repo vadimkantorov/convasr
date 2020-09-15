@@ -37,10 +37,10 @@ TRAIN_TEST_SPLIT='--microval-duration-in-hours 0 --val-duration-in-hours 0 --tes
 
 #python3 tools.py subset -i $DATASET_TRANSCRIBE -o $DATASET_SUBSET.json $SUBSET
 
-#python3 tools.py cut -i $DATASET_SUBSET.json -o $DATASET_CUT $CUT
+python3 tools.py cut -i $DATASET_SUBSET.json -o $DATASET_CUT $CUT
 
 python3 tools.py split -i $DATASET_CUT_JSON -o $DATASET_CUT $TRAIN_TEST_SPLIT
 
 #python3 vis.py audiosample -i $DATASET_CUT/$(basename $DATASET_CUT).json -o $DATASET_CUT.json.html
 
-python3 tools.py split -i unsup_dataset/unsup_dataset.json -o unsup_dataset --microval-duration-in-hours 400 --val-duration-in-hours 400 --test-duration-in-hours 400 --seed 42
+python3 tools.py split -i unsup_dataset/unsup_dataset.json -o unsup_dataset --microval-duration-in-hours 1300 --val-duration-in-hours 1300 --test-duration-in-hours 1300 --seed 42
