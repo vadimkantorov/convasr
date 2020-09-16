@@ -1,4 +1,6 @@
 def exp_moving_average(avg, val, max = 0, K = 50):
+	if avg is None:
+		return val
 	return (1. / K) * min(val, max) + (1 - 1. / K) * avg
 
 
@@ -23,13 +25,13 @@ class PerformanceMeterDict(dict):
 	def update_default(cls, kwargs, prefix = ''):
 		cls.default().update(kwargs, prefix)
 
-	def update(self, kwargs, prefix =' '):
+	def update(self, kwargs, prefix = ''):
 		if prefix:
 			prefix += '_'
 
 		for name, value in kwargs.items():
 			avg_name, max_name, cur_name = prefix + 'avg_' + name, prefix + 'max_' + name, prefix + 'cur_' + name
-			self[avg_name] = exp_moving_average(self.get(avg_name, 0), value, K=self.config.get(name, {}).get('K', self.K), max=self.config.get(name, {}).get('max', self.max))
+			self[avg_name] = exp_moving_average(self.get(avg_name, None), value, K=self.config.get(name, {}).get('K', self.K), max=self.config.get(name, {}).get('max', self.max))
 			self[max_name] = max(self.get(max_name, 0), value)
 			self[cur_name] = value
 
