@@ -302,7 +302,7 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 		self.batch_size = batch_size
 		self.buckets = {k : (self.dataset.bucket == k).nonzero(as_tuple = True)[0] for k in self.dataset.bucket.unique()}
 		self.batch_idx = 0
-		self.shuffle(epoch = 0)
+		self.set_epoch(epoch = 0)
 
 	def __iter__(self):
 		return iter(self.shuffled[self.batch_idx:])
@@ -310,7 +310,7 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 	def __len__(self):
 		return len(self.shuffled)
 
-	def shuffle(self, epoch):
+	def set_epoch(self, epoch):
 		rng = torch.Generator()
 		rng.manual_seed(epoch)
 
@@ -384,7 +384,7 @@ class DistributedSamplerWrapper(torch.utils.data.DistributedSampler):
 			  within ``num_replicas``
 			shuffle (bool, optional): If true sampler will shuffle the indices
 		"""
-		super(DistributedSamplerWrapper, self).__init__(
+		super().__init__(
 			DatasetFromSampler(sampler),
 			num_replicas=num_replicas,
 			rank=rank,
@@ -404,8 +404,9 @@ class DistributedSamplerWrapper(torch.utils.data.DistributedSampler):
 	def load_state_dict(self, state_dict):
 		self.sampler.load_state_dict(state_dict)
 
-	def shuffle(self, epoch):
-		self.sampler.shuffle(epoch)
+	def set_epoch(self, epoch):
+		super().set_epoch(epoch)
+		self.sampler.set_epoch(epoch)
 
 	@property
 	def batch_idx(self):

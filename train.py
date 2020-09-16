@@ -467,7 +467,7 @@ def main(args):
 												min_duration = args.min_duration,
 												time_padding_multiple = args.batch_time_padding_multiple,
 												pop_meta = True,
-												logging_print = logging_print)
+												_print = _print)
 		if args.world_size > 1:
 			sampler = torch.utils.data.DistributedSampler(val_dataset, num_replicas = args.world_size, rank = args.rank, shuffle = False)
 		else:
@@ -650,7 +650,7 @@ def main(args):
 
 	oom_handler = utils.OomHandler(max_retries = args.oom_retries)
 	for epoch in range(epoch, args.epochs):
-		sampler.shuffle(epoch + args.seed_sampler)
+		sampler.set_epoch(epoch + args.seed_sampler)
 		time_epoch_start = time.time()
 		for batch_idx, (meta, s, x, xlen, y, ylen) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc_data = time.time()
@@ -672,6 +672,9 @@ def main(args):
 				else:
 					raise
 
+			example_weights = ylen[:, 0]
+			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, loss.mean()
+			entropy = models.entropy(log_probs[0], olen[0], dim=1).mean()
 			toc_fwd = time.time()
 			#TODO: inf/nan still corrupts BN stats
 			if not (torch.isinf(loss) or torch.isnan(loss)):
@@ -696,21 +699,16 @@ def main(args):
 					optimizer.zero_grad()
 					scheduler.step(iteration)
 
-				example_weights = ylen[:, 0]
-				loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, loss.mean()
-				entropy = models.entropy(log_probs[0], olen[0], dim=1).mean()
-
 				if args.world_size > 1:
-					dist.reduce(loss, dst=0, op=dist.ReduceOp.SUM)
-					dist.reduce(loss_cur, dst=0, op=dist.ReduceOp.SUM)
-					dist.reduce(entropy, dst=0, op=dist.ReduceOp.SUM)
+					dist.all_reduce(loss, op=dist.ReduceOp.SUM)
+					dist.all_reduce(loss_cur, op=dist.ReduceOp.SUM)
+					dist.all_reduce(entropy, op=dist.ReduceOp.SUM)
 					loss = loss / args.world_size
 					loss_cur = loss_cur / args.world_size
 					entropy = entropy / args.world_size
 
-				if args.rank == 0:
-					perf.update(dict(loss = float(loss_cur)))
-					perf.update(dict(entropy = float(entropy)))
+				perf.update(dict(loss = float(loss_cur)))
+				perf.update(dict(entropy = float(entropy)))
 			else:
 				logging.getLogger().error(f'Loss value is corrupted! {args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] | Rank: {args.rank} | Loss: {loss.item()}')
 			toc_bwd = time.time()
