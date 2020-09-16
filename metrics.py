@@ -96,7 +96,7 @@ class ErrorAnalyzer:
 
 	def analyze(self, hyp, ref, full = False, extra = {}, postprocess_transcript = None, split_candidates = None):
 		if postprocess_transcript is None:
-			postpprocess_transcript = lambda s, *args, **kwargs: s
+			postprocess_transcript = lambda s, *args, **kwargs: s
 		if split_candidates is None:
 			split_candidates = lambda s: [s]
 		
@@ -106,15 +106,14 @@ class ErrorAnalyzer:
 		hyp, ref = min((cer(hyp = h, ref = r), (h, r)) for r in split_candidates(ref) for h in split_candidates(hyp))[1] 
 		hyp_postproc, ref_postproc = map(postprocess_transcript, [hyp, ref])
 		res = dict(
-			ref = ref,
-			hyp = hyp,
+			ref = hyp_postproc,
+			hyp = ref_postproc,
 			**extra
 		)
 		_hyp_, _ref_, word_alignment = align_words(hyp = hyp, ref = ref, word_tagger = self.word_tagger, error_tagger = self.error_tagger, compute_cer = True) # **config['align_words']) 
 
 		res['alignment'] = word_alignment
-		res['char_stats'] = char_stats = dict(
-			ok = 0, replace = 0, delete = 0, insert = 0, delete_spaces = 0, insert_spaces = 0, total_spaces = 0)
+		res['char_stats'] = char_stats = dict(ok = 0, replace = 0, delete = 0, insert = 0, delete_spaces = 0, insert_spaces = 0, total_spaces = 0)
 		for ch, cr in zip(_hyp_, _ref_):
 			char_stats['ok'] += (cr == ch)
 			char_stats['replace'] += (cr != placeholder and cr != ch and ch != placeholder)

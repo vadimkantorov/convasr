@@ -372,9 +372,7 @@ def errors(
 		else:
 			filter_transcripts = lambda cat: cat
 
-	cat = filter_transcripts([[a] + list(filter(None, [t.get(a['audio_name'], None)
-														for t in theirs]))
-								for a in ours])[slice(topk)]
+	cat = filter_transcripts([[a] + list(filter(None, [t.get(a['audio_name'], None) for t in theirs])) for a in ours])[slice(topk)]
 	cat_by_labels = collections.defaultdict(list)
 	for c in cat:
 		transcripts_by_labels = collections.defaultdict(list)
