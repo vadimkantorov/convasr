@@ -1,3 +1,11 @@
+#TODO: add optimization time logging
+#TODO: add RSS logging
+#TODO: add CPU/GPU load logging
+#TODO: add PyTorch GPU caching allocator memory utilisation (utils.compute_memory_fragmentation) logging
+#TODO: add data loader process amount logging
+#TODO: add intra-op parallelism logging (including DataLoader)
+#TODO: add validaation logging to json
+
 import logging
 import logging.handlers
 import argparse
@@ -34,7 +42,15 @@ class JsonlistSink:
 		if self.json_file is None:
 			return
 
-		self.json_file.write(json.dumps(dict(train_dataset_name = train_dataset_name, loss_avg = perf['avg_loss'], lr_avg = perf['avg_lr'], iteration = iteration)))
+		self.json_file.write(json.dumps(dict(train_dataset_name = train_dataset_name,
+											 loss_BT_normalized_avg = perf['avg_loss_BT_normalized'],
+											 lr_avg = perf['avg_lr'],
+											 time_ms_data_avg = perf['avg_time_ms_data'],
+											 time_ms_forward_avg = perf['avg_time_ms_fwd'],
+											 time_ms_backward_avg = perf['avg_time_ms_bwd'],
+											 input_B_cur = perf['cur_input_B'],
+											 input_T_cur = perf['cur_input_T'],
+											 iteration = iteration)))
 		self.json_file.write('\n')
 		self.json_file.flush()
 
@@ -43,7 +59,7 @@ class TensorboardSink:
 		self.summary_writer = summary_writer
 
 	def perf(self, perf, iteration, train_dataset_name, lr_scaler = 1e4):
-		self.summary_writer.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = perf['avg_loss'], lr_avg_scaled = perf['avg_lr'] * lr_scaler), iteration)
+		self.summary_writer.add_scalars(f'datasets/{train_dataset_name}', dict(loss_BT_normalized_avg = perf['avg_loss_BT_normalized'], lr_avg_scaled = perf['avg_lr'] * lr_scaler), iteration)
 		#TODO: do not dump everything, or filter by prefix
 		aggregated_metrics = collections.defaultdict(dict)
 		for key, value in perf.items():
@@ -55,7 +71,7 @@ class TensorboardSink:
 			self.summary_writer.add_scalars(f'perf/{name}', aggregated_value, iteration)
 
 	def val_stats(self, iteration, val_dataset_name, labels_name, perf):
-		prefix = f'datasets_{val_dataset_name}_{labels_name}_'
+		prefix = f'datasets_val_{val_dataset_name}_{labels_name}_cur_'
 		self.summary_writer.add_scalars(
 			prefix.replace('datasets_', 'datasets/'),
 			dict(
@@ -340,7 +356,9 @@ def main(args):
 
 	_print = utils.get_root_logger_print()
 	_print('\n', 'Arguments:', args)
-	_print('\n', 'Experiment id:', args.experiment_id, '\n')
+	_print(f'"CUDA_VISIBLE_DEVICES={os.environ.get("CUDA_VISIBLE_DEVICES", default = "")}"')
+	_print(f'"CUDA_LAUNCH_BLOCKING={os.environ.get("CUDA_LAUNCH_BLOCKING", default="")}"')
+	_print('Experiment id:', args.experiment_id, '\n')
 	if args.dry:
 		return
 	utils.set_random_seed(args.seed)
@@ -634,7 +652,7 @@ def main(args):
 			example_weights = ylen[:, 0]
 			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, float(loss.mean())
 
-			perf.update(dict(loss = loss_cur))
+			perf.update(dict(loss_BT_normalized = loss_cur))
 
 			entropy = float(models.entropy(log_probs[0], olen[0], dim = 1).mean())
 			toc_fwd = time.time()
@@ -665,9 +683,9 @@ def main(args):
 
 			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = map(lambda sec: sec * 1000, [toc_data - tic, toc_fwd - toc_data, toc_bwd - toc_fwd, toc_bwd - toc_data])
 			perf.update(dict(time_ms_data = time_ms_data, time_ms_fwd = time_ms_fwd, time_ms_bwd = time_ms_bwd, time_ms_iteration = time_ms_data + time_ms_model))
-
+			perf.update(dict(input_B = x.shape[0], input_T = x.shape[-1]))
 			print_left = f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] {"x".join(map(str, x.shape))}'
-			print_right = 'ent: <{avg_entropy:.2f}> loss: {cur_loss:.2f} <{avg_loss:.2f}> time: {cur_time_ms_data:.2f}+{cur_time_ms_fwd:4.0f}+{cur_time_ms_bwd:4.0f} <{avg_time_ms_iteration:.0f}> | lr: {cur_lr:.5f}'.format(**perf.default())
+			print_right = 'ent: <{avg_entropy:.2f}> loss: {cur_loss_BT_normalized:.2f} <{avg_loss_BT_normalized:.2f}> time: {cur_time_ms_data:.2f}+{cur_time_ms_fwd:4.0f}+{cur_time_ms_bwd:4.0f} <{avg_time_ms_iteration:.0f}> | lr: {cur_lr:.5f}'.format(**perf.default())
 			_print(print_left, print_right)
 			iteration += 1
 			sampler.batch_idx += 1

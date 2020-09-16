@@ -309,12 +309,9 @@ class JasperNet(nn.Module):
 		aux = {}
 
 		if y is not None and ylen is not None:
-			loss = [
-				F.
-				ctc_loss(l.permute(2, 0, 1), y[:, i], olen[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') /
-				ylen[:, 0] for i,
-				l in enumerate(log_probs)
-			]
+			loss = []
+			for i, l in enumerate(log_probs):
+				loss.append(F.ctc_loss(l.permute(2, 0, 1), y[:, i], olen[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') / ylen[:, 0])
 			aux = dict(loss = sum(loss) if not self.bpe_only else sum(loss[1:]))
 
 		return self.dict(logits = logits, log_probs = log_probs, olen = olen, **aux)
@@ -667,11 +664,6 @@ def reset_bn_running_stats_(model):
 		bn.momentum = None
 		bn.train()
 	return model
-
-
-def compute_memory_fragmentation():
-	snapshot = torch.cuda.memory_snapshot()
-	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
 
 
 def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, opt_level = None, **kwargs):

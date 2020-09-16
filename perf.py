@@ -1,30 +1,29 @@
-def exp_moving_average(avg, val, max=0, K=50):
+def exp_moving_average(avg, val, max = 0, K = 50):
 	return (1. / K) * min(val, max) + (1 - 1. / K) * avg
 
 
 class PerformanceMeterDict(dict):
 	__instance = None
 
-	def __init__(self, *, K=50, max=1000, **config):
+	def __init__(self, *, K = 50, max = 1000, **config):
 		self.config = config
 		self.K = K
 		self.max = max
 
 	@classmethod
-	def init_default(cls, *, K=50, max=1000, **config):
-		cls.__instance = cls(K=K, max=max, **config)
+	def init_default(cls, *, K = 50, max = 1000, **config):
+		cls.__instance = cls(K = K, max = max, **config)
 
 	@classmethod
 	def default(cls):
-		if cls.__instance is None:
-			raise RuntimeError('Default performance meter is not initialized, call "perf.init_default" to fix this.')
+		assert cls.__instance is not None, 'Default performance meter is not initialized, call "perf.init_default" to fix this.'
 		return cls.__instance
 
 	@classmethod
-	def update_default(cls, kwargs, prefix=''):
+	def update_default(cls, kwargs, prefix = ''):
 		cls.default().update(kwargs, prefix)
 
-	def update(self, kwargs, prefix=''):
+	def update(self, kwargs, prefix =' '):
 		if prefix:
 			prefix += '_'
 

@@ -64,6 +64,12 @@ def compute_memory_stats(byte_scaler = 1024**3, measure_pss_ram = False):
 		res['pss_ram'] = 0.0
 	return res
 
+
+def compute_memory_fragmentation():
+	snapshot = torch.cuda.memory_snapshot()
+	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
+
+
 def reset_cpu_threads(num_threads):
 	torch.set_num_threads(num_threads)
 	#os.environ['OMP_NUM_THREADS'] = str(num_threads)
