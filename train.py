@@ -448,6 +448,8 @@ def main(args):
 		# add metadata to model
 		return
 
+	perf.init_default(loss=dict(K=50, max=1000), memory_cuda_allocated=dict(K=50), entropy=dict(K=4), time_ms_iteration=dict(K=50, max=10_000), lr=dict(K=50, max=1))
+
 	val_config = json.load(open(args.val_config)) if os.path.exists(args.val_config) else {}
 	word_tags = json.load(open(args.word_tags)) if os.path.exists(args.word_tags) else {}
 	for word_tag, words in val_config.get('word_tags', {}).items():
@@ -618,8 +620,6 @@ def main(args):
 	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
 	tensorboard_sink = TensorboardSink(tensorboard)
 
-	perf.init_default(loss = dict(K = 50, max = 1000), memory_cuda_allocated = dict(K = 50), entropy = dict(K = 4), time_ms_iteration = dict(K = 50, max = 10_000), lr = dict(K = 50, max = 1))
-	
 	with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
 		json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
 
