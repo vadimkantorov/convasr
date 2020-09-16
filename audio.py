@@ -141,10 +141,10 @@ def resample(signal, sample_rate_, sample_rate):
 		signal = signal.unsqueeze(0)
 	return signal, sample_rate
 
-def compute_duration(audio_path, backend='ffmpeg'):
-    cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1'
-           ] if backend == 'ffmpeg' else ['soxi', '-D'] if backend == 'sox' else None
-    return float(subprocess.check_output(cmd + [audio_path]))
+def compute_duration(audio_path, backend = 'ffmpeg'):
+	cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1'
+			] if backend == 'ffmpeg' else ['soxi', '-D'] if backend == 'sox' else None
+	return float(subprocess.check_output(cmd + [audio_path]))
 
 
 if __name__ == '__main__':

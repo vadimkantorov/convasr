@@ -93,6 +93,7 @@ def main(args):
 	csv_sep = dict(tab = '\t', comma = ',')[args.csv_sep]
 	output_lines = []  # only used if args.output_csv is True
 
+	oom_handler = utils.OomHandler(max_retries = args.oom_retries)
 	for i, (meta, s, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
 
@@ -186,8 +187,9 @@ def main(args):
 						speakers = val_dataset.speakers
 					) for i in range(len(decoded))
 				]
+			oom_handler.reset()
 		except:
-			if (not args.oom_crash) and utils.handle_out_of_memory_exception(model.parameters()):
+			if oom_handler.try_recover(model.parameters()):
 				print(f'Skipping {i} / {num_examples}')
 				continue
 			else:
@@ -301,7 +303,7 @@ if __name__ == '__main__':
 	parser.add_argument('--transcribe-first-n-sec', type = int)
 	parser.add_argument('--join-transcript', action = 'store_true')
 	parser.add_argument('--pack-backpointers', action = 'store_true')
-	parser.add_argument('--oom-crash', action = 'store_true')
+	parser.add_argument('--oom-retries', type = int, default = 3)
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)

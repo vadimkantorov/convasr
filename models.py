@@ -8,8 +8,7 @@ import torch.nn.functional as F
 import apex
 import librosa
 import shaping
-from typing import List, Optional
-
+import typing
 
 class InputOutputTypeCast(nn.Module):
 	def __init__(self, model, dtype):
@@ -86,7 +85,7 @@ class ConvBn1d(nn.Module):
 		stride = 1,
 		dropout = 0,
 		groups = 1,
-		num_channels_residual: List = [],
+		num_channels_residual: typing.List = [],
 		repeat = 1,
 		dilation = 1,
 		separable = False,
@@ -125,7 +124,7 @@ class ConvBn1d(nn.Module):
 		self.activation = ResidualActivation(nonlinearity, dropout, invertible = inplace)
 		self.temporal_mask = temporal_mask
 
-	def forward(self, x, lengths_fraction = None, residual: List = []):
+	def forward(self, x, lengths_fraction = None, residual: typing.List = []):
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
 			if i == len(self.conv) - 1:
 				assert len(self.conv_residual) == len(self.bn_residual) == len(residual)
@@ -279,13 +278,14 @@ class JasperNet(nn.Module):
 		self.bpe_only = bpe_only
 
 	def forward(
-		self, x: shaping.BCT, xlen: shaping.B = None, y: shaping.BY = None, ylen: shaping.B = None
+		self, x: typing.Union[shaping.BCT, shaping.BT], xlen: typing.Optional[shaping.B] = None, y: typing.Optional[shaping.BY] = None, ylen: typing.Optional[shaping.B] = None
 	) -> shaping.BCt:
-		#x = x.to(torch.float16)
-		x = x if x.ndim == 2 else x.squeeze(1)
+
 		if self.frontend is not None:
-			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
-			x = self.frontend(x, mask = mask)
+			lengths = compute_output_lengths(x, xlen)
+			x = self.frontend(x.squeeze(dim = 1), mask = temporal_mask(x, lengths))
+
+		assert x.ndim == 3
 
 		if self.normalize_features is not None:
 			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
@@ -309,12 +309,9 @@ class JasperNet(nn.Module):
 		aux = {}
 
 		if y is not None and ylen is not None:
-			loss = [
-				F.
-				ctc_loss(l.permute(2, 0, 1), y[:, i], olen[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') /
-				ylen[:, 0] for i,
-				l in enumerate(log_probs)
-			]
+			loss = []
+			for i, l in enumerate(log_probs):
+				loss.append(F.ctc_loss(l.permute(2, 0, 1), y[:, i], olen[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') / ylen[:, 0])
 			aux = dict(loss = sum(loss) if not self.bpe_only else sum(loss[1:]))
 
 		return self.dict(logits = logits, log_probs = log_probs, olen = olen, **aux)
@@ -348,7 +345,7 @@ class ResidualActivation(nn.Module):
 		self.dropout = dropout
 		self.invertible = invertible
 
-	def forward(self, y, residual: List = []):
+	def forward(self, y, residual: typing.List = []):
 		if self.invertible:
 			y = ResidualActivation.InvertibleResidualInplaceFunction.apply(self.nonlinearity, y, *residual)
 			y = F.dropout(y, p = self.dropout, training = self.training)
@@ -565,6 +562,8 @@ class LogFilterBankFrontend(nn.Module):
 			self.stft = None
 
 	def forward(self, signal: shaping.BT, mask: shaping.BT = None) -> shaping.BCT:
+		assert signal.ndim == 2
+
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
 		signal = normalize_signal(signal) if self.normalize_signal else signal
 		signal = apply_dither(signal, self.dither0)
@@ -591,10 +590,11 @@ class LogFilterBankFrontend(nn.Module):
 		return True
 
 @torch.jit.script
-def compute_output_lengths(x: shaping.BT, lengths_fraction: Optional[shaping.B] = None):
+def compute_output_lengths(x: shaping.BT, lengths_fraction: typing.Optional[shaping.B] = None):
 	if lengths_fraction is None:
 		return torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.long)
-	return (lengths_fraction * x.shape[-1]).ceil().long()
+	else:
+		return (lengths_fraction * x.shape[-1]).ceil().long()
 
 @torch.jit.script
 def temporal_mask(x: shaping.BT, lengths: shaping.B):
@@ -654,6 +654,7 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 		if not self.temporal_mask or mask is None:
 			if self.legacy:
 				assert self.track_running_stats is False
+				# BUG: https://github.com/pytorch/pytorch/issues/44636
 				# std, mean = torch.std_mean(x, dim = -1, keepdim = True)
 				# replaced with new version for .onnx export fix!
 				std, mean = torch.std(x, dim=-1, keepdim=True), torch.mean(x, dim=-1, keepdim=True)
@@ -683,11 +684,6 @@ def reset_bn_running_stats_(model):
 	return model
 
 
-def compute_memory_fragmentation():
-	snapshot = torch.cuda.memory_snapshot()
-	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
-
-
 def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, opt_level = None, **kwargs):
 	data_parallel = data_parallel and torch.cuda.device_count() > 1
 
@@ -712,6 +708,12 @@ def silence_space_mask(log_probs, speech, blank_idx, space_idx, kernel_size = 10
 	return silence[:, None, :] * (
 		~F.one_hot(torch.tensor(space_idx), log_probs.shape[1]).to(device = silence.device, dtype = silence.dtype)
 	)[None, :, None]
+
+
+def rle1d(tensor):
+	starts = torch.cat(( torch.LongTensor([0], device = tensor.device), (tensor[1:] != tensor[:-1]).nonzero(as_tuple = False).add_(1).squeeze(1), torch.LongTensor([tensor.shape[-1]], device = tensor.device) ))
+	starts, lengths, values = starts[:-1], (starts[1:] - starts[:-1]), tensor[starts[:-1]]
+	return starts, lengths, values
 
 
 def sparse_topk(x, k, dim = -1, largest = True, indices_dtype = None, values_dtype = None, fill_value = 0.0):
