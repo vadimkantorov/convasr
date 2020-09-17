@@ -1,7 +1,14 @@
 # Data
 data/
-convasr_scripts/
+asr_experiments/
 scripts/experiments
+youtube/
+youtube_lowpass/
+echomsk6000/
+domain_set/
+kontur_calls_micro/
+ru_open_stt/
+unsup_dataset/
 
 # Archives
 *.pyc

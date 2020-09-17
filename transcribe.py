@@ -57,8 +57,8 @@ def setup(args):
 def main(args):
 	utils.enable_jit_fusion()
 
-	assert args.output_json or args.output_html or args.output_txt or args.output_tsv, \
-		"at least one of the output formats must be provided"
+	assert args.output_json or args.output_html or args.output_txt or args.output_csv, \
+		'at least one of the output formats must be provided'
 	os.makedirs(args.output_path, exist_ok = True)
 	data_paths = [
 		p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f])
@@ -86,12 +86,14 @@ def main(args):
 		join_transcript = args.join_transcript
 	)
 	num_examples = len(val_dataset)
-	print("Examples count: ", num_examples)
+	print('Examples count: ', num_examples)
 	val_data_loader = torch.utils.data.DataLoader(
 		val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers
 	)
-	output_lines = []  # only used if args.output_tsv is True
+	csv_sep = dict(tab = '\t', comma = ',')[args.csv_sep]
+	output_lines = []  # only used if args.output_csv is True
 
+	oom_handler = utils.OomHandler(max_retries = args.oom_retries)
 	for i, (meta, s, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
 
@@ -185,8 +187,9 @@ def main(args):
 						speakers = val_dataset.speakers
 					) for i in range(len(decoded))
 				]
+			oom_handler.reset()
 		except:
-			if (not args.oom_crash) and utils.handle_out_of_memory_exception(model.parameters()):
+			if oom_handler.try_recover(model.parameters()):
 				print(f'Skipping {i} / {num_examples}')
 				continue
 			else:
@@ -248,13 +251,13 @@ def main(args):
 			with open(transcript_path, 'w') as f:
 				f.write(hyp)
 
-		if args.output_tsv:
-			output_lines.append(f'{audio_path}\t{hyp}\t{begin}\t{end}\n')
+		if args.output_csv:
+			output_lines.append(csv_sep.join((audio_path, hyp, str(begin), str(end))) + '\n')
 
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
-	if args.output_tsv:
-		with open(os.path.join(args.output_path, "transcripts.tsv"), 'w') as f:
+	if args.output_csv:
+		with open(os.path.join(args.output_path, 'transcripts.csv'), 'w') as f:
 			f.writelines(output_lines)
 
 
@@ -271,7 +274,8 @@ if __name__ == '__main__':
 	parser.add_argument('--output-json', action = 'store_true', help = 'write transcripts to separate json files')
 	parser.add_argument('--output-html', action = 'store_true', help = 'write transcripts to separate html files')
 	parser.add_argument('--output-txt', action = 'store_true', help = 'write transcripts to separate txt files')
-	parser.add_argument('--output-tsv', action = 'store_true', help = 'write transcripts to a transcripts.tsv file')
+	parser.add_argument('--output-csv', action = 'store_true', help = 'write transcripts to a transcripts.csv file')
+	parser.add_argument('--csv-sep', default = 'tab', choices = ['tab', 'comma'])
 	parser.add_argument('--device', default = 'cuda', choices = ['cpu', 'cuda'])
 	parser.add_argument('--fp16', choices = ['O0', 'O1', 'O2', 'O3'], default = None)
 	parser.add_argument('--num-workers', type = int, default = 0)
@@ -299,7 +303,7 @@ if __name__ == '__main__':
 	parser.add_argument('--transcribe-first-n-sec', type = int)
 	parser.add_argument('--join-transcript', action = 'store_true')
 	parser.add_argument('--pack-backpointers', action = 'store_true')
-	parser.add_argument('--oom-crash', action = 'store_true')
+	parser.add_argument('--oom-retries', type = int, default = 3)
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)

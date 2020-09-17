@@ -79,7 +79,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		exclude = set(),
 		join_transcript = False,
 		bucket = None,
-		pop_meta = False
+		pop_meta = False,
+		_print = print
 	):
 		self.join_transcript = join_transcript
 		self.max_duration = max_duration
@@ -106,7 +107,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		tic = time.time()
 		
 		transcripts_read = list(map(read_transcript, data_paths)) 
-		print('Read', time.time() - tic); tic = time.time()
+
+		_print('Dataset reading time: ', time.time() - tic); tic = time.time()
 
 		examples = [
 			list(g) for transcript in transcripts_read for k,
@@ -152,7 +154,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			t['speaker'] = t['speaker'] if isinstance(t.get('speaker'), int) else self.speaker_names_index.get(t['speaker'], self.speaker_missing) if isinstance(t.get('speaker'), str) else 1 + t['channel'] if 'channel' in t else self.speaker_missing
 			t['speaker_name'] = self.speaker_names[t['speaker']]
 		
-		print('Constructor', time.time() - tic); tic = time.time()
+		_print('Dataset construction time: ', time.time() - tic); tic = time.time()
 		
 		self.bucket = torch.ShortTensor([e[0]['bucket'] for e in examples_filtered]) 
 		self.audio_path = TensorBackedStringArray([e[0]['audio_path'] for e in examples_filtered])
@@ -164,7 +166,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.cumlen = torch.ShortTensor(examples_lens).cumsum(dim = 0, dtype = torch.int64)
 		self.meta = { self.example_id(t) : t for t in transcript } if not pop_meta else {}
 		
-		print('Tensors', time.time() - tic); print()
+		_print('Dataset tensors creation time: ', time.time() - tic)
 
 	def pop_meta(self):
 		meta = self.meta
@@ -224,7 +226,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		else:
 			some_segments_have_not_begin_end = any(t['begin'] == self.time_missing and t['end'] == self.time_missing for t in transcript)
 			some_segments_have_ref = any(bool(t['ref']) for t in transcript)
-			replace_transcript = self.join_transcript or (not transcript) or (some_segments_have_not_begin_end and all_segments_have_ref)
+			replace_transcript = self.join_transcript or (not transcript) or (some_segments_have_not_begin_end and some_segments_have_ref)
 			normalize_text = True
 
 			if replace_transcript:
