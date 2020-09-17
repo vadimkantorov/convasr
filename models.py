@@ -289,8 +289,8 @@ class JasperNet(nn.Module):
 		assert x.ndim == 3
 
 		if self.normalize_features is not None:
-			lengths = compute_output_lengths(x, xlen)
-			x = self.normalize_features(x, mask = temporal_mask(x, lengths))
+			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
+			x = self.normalize_features(x, mask = mask)
 
 		residual = []
 		for i, subblock in enumerate(self.backbone):
@@ -310,12 +310,9 @@ class JasperNet(nn.Module):
 		aux = {}
 
 		if y is not None and ylen is not None:
-			loss = [
-				F.
-				ctc_loss(l.permute(2, 0, 1), y[:, i], olen[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') /
-				ylen[:, 0] for i,
-				l in enumerate(log_probs)
-			]
+			loss = []
+			for i, l in enumerate(log_probs):
+				loss.append(F.ctc_loss(l.permute(2, 0, 1), y[:, i], olen[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') / ylen[:, 0])
 			aux = dict(loss = sum(loss) if not self.bpe_only else sum(loss[1:]))
 
 		return self.dict(logits = logits, log_probs = log_probs, olen = olen, **aux)
@@ -609,7 +606,22 @@ def temporal_mask(x: shaping.BT, lengths: shaping.B):
 def apply_dither(x: shaping.BT, dither: float):
 	# dither extracted to ScriptFunction, because JIT does not trace randn_like correctly https://github.com/pytorch/pytorch/issues/43767
 	if dither > 0.0:
-		return x + dither * torch.randn_like(x)
+		# todo: vadimkantorov report those bugs to PyTorch:
+
+		# return x + dither * torch.randn_like(x)  # -->
+		# onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Type Error:
+		# Type parameter(T) bound to different types (tensor(float) and tensor(double) in node (Mul_26).
+
+		# return x + torch.FloatTensor([dither], device=x.device) * torch.randn_like(x)  # -->
+		# Unknown builtin op: aten::FloatTensor. Couldd not find any similar ops to aten::FloatTensor.
+		# This op may not exist or may not be currently supported in TorchScript.
+
+		# return x + torch.tensor(dither, dtype=x.dtype, device=x.device) * torch.randn_like(x)  # -->
+		# RuntimeError: Exporting the operator tensor to ONNX opset version 12 is not supported.
+		# Please open a bug to request ONNX export support for the missing operator.
+
+		# only this variant works when exporting to .onnx:
+		return x + torch.tensor(dither) * torch.randn_like(x)
 	else:
 		return x
 
@@ -643,7 +655,10 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 		if not self.temporal_mask or mask is None:
 			if self.legacy:
 				assert self.track_running_stats is False
-				std, mean = torch.std_mean(x, dim = -1, keepdim = True)
+				# BUG: https://github.com/pytorch/pytorch/issues/44636
+				# std, mean = torch.std_mean(x, dim = -1, keepdim = True)
+				# replaced with new version for .onnx export fix!
+				std, mean = torch.std(x, dim=-1, keepdim=True), torch.mean(x, dim=-1, keepdim=True)
 				return (x - mean) / (std + self.eps)
 			else:
 				return super().forward(x)
@@ -670,11 +685,6 @@ def reset_bn_running_stats_(model):
 	return model
 
 
-def compute_memory_fragmentation():
-	snapshot = torch.cuda.memory_snapshot()
-	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
-
-
 def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, opt_level = None, **kwargs):
 	data_parallel = data_parallel and torch.cuda.device_count() > 1
 
@@ -699,6 +709,7 @@ def silence_space_mask(log_probs, speech, blank_idx, space_idx, kernel_size = 10
 	return silence[:, None, :] * (
 		~F.one_hot(torch.tensor(space_idx), log_probs.shape[1]).to(device = silence.device, dtype = silence.dtype)
 	)[None, :, None]
+
 
 def rle1d(tensor):
 	starts = torch.cat(( torch.LongTensor([0], device = tensor.device), (tensor[1:] != tensor[:-1]).nonzero(as_tuple = False).add_(1).squeeze(1), torch.LongTensor([tensor.shape[-1]], device = tensor.device) ))

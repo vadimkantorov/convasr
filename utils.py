@@ -32,8 +32,9 @@ def set_up_root_logger(log_file_path = None, mode = 'a', max_bytes = 1_000_000, 
 		handler.setFormatter(formatter)
 		logger.addHandler(handler)
 
-def open_maybe_gz(data_path):
-	return gzip.open(data_path, 'rt') if data_path.endswith('.gz') else open(data_path)
+
+def open_maybe_gz(data_path, mode = 'r'):
+	return gzip.open(data_path, mode + 't') if data_path.endswith('.gz') else open(data_path, mode)
 
 def compute_memory_stats(byte_scaler = 1024**3, measure_pss_ram = False):
 	device_count = torch.cuda.device_count()
@@ -64,6 +65,12 @@ def compute_memory_stats(byte_scaler = 1024**3, measure_pss_ram = False):
 	else:
 		res['pss_ram'] = 0.0
 	return res
+
+
+def compute_memory_fragmentation():
+	snapshot = torch.cuda.memory_snapshot()
+	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
+
 
 def reset_cpu_threads(num_threads):
 	torch.set_num_threads(num_threads)

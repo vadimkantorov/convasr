@@ -228,7 +228,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		else:
 			some_segments_have_not_begin_end = any(t['begin'] == self.time_missing and t['end'] == self.time_missing for t in transcript)
 			some_segments_have_ref = any(bool(t['ref']) for t in transcript)
-			replace_transcript = self.join_transcript or (not transcript) or (some_segments_have_not_begin_end and all_segments_have_ref)
+			replace_transcript = self.join_transcript or (not transcript) or (some_segments_have_not_begin_end and some_segments_have_ref)
 			normalize_text = True
 
 			if replace_transcript:

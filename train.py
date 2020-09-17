@@ -1,3 +1,11 @@
+#TODO: add optimization time logging
+#TODO: add RSS logging
+#TODO: add CPU/GPU load logging
+#TODO: add PyTorch GPU caching allocator memory utilisation (utils.compute_memory_fragmentation) logging
+#TODO: add data loader process amount logging
+#TODO: add intra-op parallelism logging (including DataLoader)
+#TODO: add validaation logging to json
+
 import logging
 import logging.handlers
 import argparse
@@ -35,7 +43,15 @@ class JsonlistSink:
 		if self.json_file is None:
 			return
 
-		self.json_file.write(json.dumps(dict(train_dataset_name = train_dataset_name, loss_avg = perf['avg_loss'], lr_avg = perf['avg_lr'], iteration = iteration)))
+		self.json_file.write(json.dumps(dict(train_dataset_name = train_dataset_name,
+											 loss_BT_normalized_avg = perf['avg_loss_BT_normalized'],
+											 lr_avg = perf['avg_lr'],
+											 time_ms_data_avg = perf['performance_avg_time_ms_data'],
+											 time_ms_forward_avg = perf['performance_avg_time_ms_fwd'],
+											 time_ms_backward_avg = perf['performance_avg_time_ms_bwd'],
+											 input_B_cur = perf['performance_cur_input_B'],
+											 input_T_cur = perf['performance_cur_input_T'],
+											 iteration = iteration)))
 		self.json_file.write('\n')
 		self.json_file.flush()
 
@@ -44,19 +60,23 @@ class TensorboardSink:
 		self.summary_writer = summary_writer
 
 	def perf(self, perf, iteration, train_dataset_name, lr_scaler = 1e4):
-		self.summary_writer.add_scalars(f'datasets/{train_dataset_name}', dict(loss_avg = perf['avg_loss'], lr_avg_scaled = perf['avg_lr'] * lr_scaler), iteration)
-		#TODO: do not dump everything, or filter by prefix
+		self.summary_writer.add_scalars(f'datasets/{train_dataset_name}', dict(loss_BT_normalized_avg = perf['avg_loss_BT_normalized'], lr_avg_scaled = perf['avg_lr'] * lr_scaler), iteration)
+		filter_key = 'performance_'
 		aggregated_metrics = collections.defaultdict(dict)
 		for key, value in perf.items():
-			prefix = key.split('_')[0]
+			if filter_key == key[:len(filter_key)]:
+				key = key[len(filter_key):]
+			else:
+				continue
+			agg_type = key.split('_')[0]
 			name = ''.join(key.split('_')[1:])
-			aggregated_metrics[name][prefix] = value
+			aggregated_metrics[name][agg_type] = value
 
-		for name, aggregated_value in aggregated_metrics.items():
-			self.summary_writer.add_scalars(f'perf/{name}', aggregated_value, iteration)
+		for agg_type, value in aggregated_metrics.items():
+			self.summary_writer.add_scalars(f'perf/{agg_type}', value, iteration)
 
 	def val_stats(self, iteration, val_dataset_name, labels_name, perf):
-		prefix = f'datasets_{val_dataset_name}_{labels_name}_'
+		prefix = f'datasets_val_{val_dataset_name}_{labels_name}_cur_'
 		self.summary_writer.add_scalars(
 			prefix.replace('datasets_', 'datasets/'),
 			dict(
@@ -350,7 +370,9 @@ def main(args):
 
 	_print = utils.get_root_logger_print()
 	_print('\n', 'Arguments:', args)
-	_print('\n', 'Experiment id:', args.experiment_id, '\n')
+	_print(f'"CUDA_VISIBLE_DEVICES={os.environ.get("CUDA_VISIBLE_DEVICES", default = "")}"')
+	_print(f'"CUDA_LAUNCH_BLOCKING={os.environ.get("CUDA_LAUNCH_BLOCKING", default="")}"')
+	_print('Experiment id:', args.experiment_id, '\n')
 	if args.dry:
 		return
 	if args.cudnn == 'benchmark':
@@ -358,8 +380,7 @@ def main(args):
 
 	lang = datasets.Language(args.lang)
 	#TODO: , candidate_sep = datasets.Labels.candidate_sep
-	normalize_text_config = json.load(open(args.normalize_text_config)) if os.path.exists(args.normalize_text_config
-																							) else {}
+	normalize_text_config = json.load(open(args.normalize_text_config)) if os.path.exists(args.normalize_text_config) else {}
 	labels = [datasets.Labels(lang, name = 'char', normalize_text_config = normalize_text_config)] + [
 		datasets.Labels(lang, bpe = bpe, name = f'bpe{i}', normalize_text_config = normalize_text_config) for i,
 		bpe in enumerate(args.bpe)
@@ -435,6 +456,8 @@ def main(args):
 		#os.system('dot -O -Gdpi=300 -Tpng pipeline_transpose2x.dot')
 		# add metadata to model
 		return
+
+	perf.init_default(loss=dict(K=50, max=1000), memory_cuda_allocated=dict(K=50), entropy=dict(K=4), time_ms_iteration=dict(K=50, max=10_000), lr=dict(K=50, max=1))
 
 	val_config = json.load(open(args.val_config)) if os.path.exists(args.val_config) else {}
 	word_tags = json.load(open(args.word_tags)) if os.path.exists(args.word_tags) else {}
@@ -636,8 +659,6 @@ def main(args):
 	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
 	tensorboard_sink = TensorboardSink(tensorboard)
 
-	perf.init_default(loss = dict(K = 50, max = 1000), memory_cuda_allocated = dict(K = 50), entropy = dict(K = 4), time_ms_iteration = dict(K = 50, max = 10_000), lr = dict(K = 50, max = 1))
-
 	if args.rank == 0:
 		with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
 			json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
@@ -675,6 +696,9 @@ def main(args):
 			example_weights = ylen[:, 0]
 			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, loss.mean()
 			entropy = models.entropy(log_probs[0], olen[0], dim=1).mean()
+
+			perf.update(dict(loss_BT_normalized = loss_cur.item()))
+
 			toc_fwd = time.time()
 			#TODO: inf/nan still corrupts BN stats
 			if not (torch.isinf(loss) or torch.isnan(loss)):
@@ -691,7 +715,7 @@ def main(args):
 					optimizer.step()
 
 					if iteration > 0 and iteration % args.log_iteration_interval == 0:
-						perf.update(utils.compute_memory_stats())
+						perf.update(utils.compute_memory_stats(), prefix = 'performance')
 						tensorboard_sink.perf(perf.default(), iteration, train_dataset_name)
 						tensorboard_sink.weight_stats(iteration, model, args.log_weight_distribution)
 						logfile_sink.perf(perf.default(), iteration, train_dataset_name)
@@ -714,10 +738,10 @@ def main(args):
 			toc_bwd = time.time()
 
 			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = map(lambda sec: sec * 1000, [toc_data - tic, toc_fwd - toc_data, toc_bwd - toc_fwd, toc_bwd - toc_data])
-			perf.update(dict(time_ms_data = time_ms_data, time_ms_fwd = time_ms_fwd, time_ms_bwd = time_ms_bwd, time_ms_iteration = time_ms_data + time_ms_model))
-
+			perf.update(dict(time_ms_data = time_ms_data, time_ms_fwd = time_ms_fwd, time_ms_bwd = time_ms_bwd, time_ms_iteration = time_ms_data + time_ms_model), prefix = 'performance')
+			perf.update(dict(input_B = x.shape[0], input_T = x.shape[-1]), prefix = 'performance')
 			print_left = f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] {"x".join(map(str, x.shape))}'
-			print_right = 'ent: <{avg_entropy:.2f}> loss: {cur_loss:.2f} <{avg_loss:.2f}> time: {cur_time_ms_data:.2f}+{cur_time_ms_fwd:4.0f}+{cur_time_ms_bwd:4.0f} <{avg_time_ms_iteration:.0f}> | lr: {cur_lr:.5f}'.format(**perf.default())
+			print_right = 'ent: <{avg_entropy:.2f}> loss: {cur_loss_BT_normalized:.2f} <{avg_loss_BT_normalized:.2f}> time: {performance_cur_time_ms_data:.2f}+{performance_cur_time_ms_fwd:4.0f}+{performance_cur_time_ms_bwd:4.0f} <{performance_avg_time_ms_iteration:.0f}> | lr: {cur_lr:.5f}'.format(**perf.default())
 			_print(print_left, print_right)
 			iteration += 1
 			sampler.batch_idx += args.world_size

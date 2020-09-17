@@ -17,6 +17,7 @@ import metrics
 import random
 import hashlib
 import multiprocessing
+import utils
 
 
 def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, unk, num_speakers):
@@ -114,7 +115,7 @@ def cut(
 	for t in transcript:
 		transcript_by_path[t['audio_path']].append(t)
 
-	print("Unique audio_path count: ", len(transcript_by_path.keys()))
+	print('Unique audio_path count: ', len(transcript_by_path.keys()))
 	with multiprocessing.pool.Pool(processes = num_workers) as pool:
 		map_func = functools.partial(
 			cut_audio, output_path, sample_rate, mono, dilate, strip_prefix, audio_backend, add_sub_paths
@@ -160,24 +161,43 @@ def du(input_path):
 	)
 
 
-def csv2json(input_path, gz, group, reset_duration):
-	gzopen = lambda file_path, mode = 'r': gzip.open(file_path, mode + 't') if file_path.endswith('.gz') else open(file_path, mode)
+def csv2json(input_path, gz, group, reset_begin_end, csv_sep, audio_name_pattern=None):
+	""" Convert cvs transcripts file to .csv.json transcripts file. Each line in `input_path` file must have format:
+		'audio_path,transcription,begin,end\n'
+		csv_sep could be 'comma', representing ',', or 'tab', representing '\t'.
+		audio_name_pattern - is a regex pattern, that is used, when reset_begin_end is True. It must contain at least
+			two named capturing groups: (?P<begin>...) and (?P<end>...). By default, Kontur calls patter will be used.
+	"""
+	audio_name_regex = re.compile(audio_name_pattern) if audio_name_pattern else re.compile(
+		r'(?P<begin>\d+\.?\d*)-(?P<end>\d+\.?\d*)_\d+\.?\d*_[01]_1\d{9}\.?\d*\.wav'
+	)
+	# default is Kontur calls pattern, match example: '198.38-200.38_2.0_0_1582594487.376404.wav'
 
 	def duration(audio_name):
-		begin, end = map(float, os.path.splitext(audio_name)[0].split('_')[-2:])
+		match = audio_name_regex.fullmatch(audio_name)
+		assert match is not None, f'audio_name {audio_name!r} must match {audio_name_regex.pattern}'
+		begin, end = float(match['begin']), float(match['end'])
+		assert begin < end < 10_000, 'sanity check: begin and end must be below 10_000 seconds'
 		return end - begin
 
-	transcript = [
-		dict(
-			audio_path = s[0],
-			ref = s[1],
-			begin = 0.0,
-			end = float(s[2]) if not reset_duration else duration(os.path.basename(s[0])),
-			**(dict(group = s[0].split('/')[group]) if group >= 0 else {})
-		) for l in gzopen(input_path) if '"' not in l for s in [l.strip().split(',')]
-	]
+	csv_sep = dict(tab = '\t', comma = ',')[csv_sep]
+	res = []
+	for line in utils.open_maybe_gz(input_path):
+		assert '"' not in line, f'{input_path!r} lines must not contain any quotation marks!'
+		audio_path, ref, begin, end = line[:-1].split(csv_sep)[:4]
+		transcription = dict(audio_path = audio_path, ref = ref, begin = float(begin), end = float(end))
+		if reset_begin_end:
+			transcription['begin'] = 0.0
+			transcription['end'] = duration(os.path.basename(audio_path))
+
+		# add input_path folder name to the 'group' key of each transcription
+		# todo: rename --group parameter to something more sensible!
+		if group >= 0:
+			transcription['group'] = audio_path.split('/')[group]
+		res.append(transcription)
+
 	output_path = input_path + '.json' + ('.gz' if gz else '')
-	json.dump(transcript, gzopen(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	json.dump(res, utils.open_maybe_gz(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_path)
 
 
@@ -523,7 +543,9 @@ if __name__ == '__main__':
 	cmd.add_argument('input_path')
 	cmd.add_argument('--gzip', dest = 'gz', action = 'store_true')
 	cmd.add_argument('--group', type = int, default = 0)
-	cmd.add_argument('--reset-duration', action = 'store_true')
+	cmd.add_argument('--reset-begin-end', action = 'store_true')
+	cmd.add_argument('--audio-name-pattern', type = str, default = None)
+	cmd.add_argument('--csv-sep', default = 'tab', choices = ['tab', 'comma'])
 	cmd.set_defaults(func = csv2json)
 
 	cmd = subparsers.add_parser('diff')
