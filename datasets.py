@@ -109,7 +109,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		print(f'Read {time.time() - tic:.2} sec', end=', ')
 		tic = time.time()
 
-		examples = [
+		segments_by_audio_path = [
 			list(g) for transcript in transcripts_read for k,
 			g in itertools
 			.groupby(sorted(transcript, key = transcripts.sort_key), key = transcripts.group_key)
@@ -120,11 +120,12 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		transcript = []
 		
 		duration = lambda example: sum(map(transcripts.compute_duration, example))
-		examples.sort(key = duration)
-		for example in examples:
+		segments_by_audio_path.sort(key = duration)
+		# TODO: not segmented mode may fail if several examples have same audio_path
+		for example in segments_by_audio_path:
+			exclude_ok = ((not exclude) or (transcripts.audio_name(e[0]) not in exclude))
 			duration_ok = ((not duration_filter) or (min_duration is None or min_duration <= duration(example)) and
 				(max_duration is None or duration(example) <= max_duration))
-			exclude_ok = ((not exclude) or (transcripts.audio_name(e[0]) not in exclude))
 
 			if duration_ok and exclude_ok:
 				b = bucket(example) if bucket is not None else 0
@@ -240,17 +241,17 @@ class AudioTextDataset(torch.utils.data.Dataset):
 					example_id = self.example_id(t),
 
 					channel = channel,
-					begin_samples = (t['begin'] * sample_rate) if t['begin'] != self.time_missing else 0,
-					end_samples = (1 + t['end'] * sample_rate) if t['end'] != self.time_missing else signal.shape[1],
+					begin_samples = int(t['begin'] * sample_rate) if t['begin'] != self.time_missing else 0,
+					end_samples = 1 + int(t['end'] * sample_rate) if t['end'] != self.time_missing else signal.shape[1],
 					
 					speaker = t['speaker']
 				)
 				for t in sorted(transcript, key = transcripts.sort_key)
-				for channel in ([t['channel']] if t['channel'] is not None else range(len(signal)))
+				for channel in ([t['channel']] if t['channel'] != self.channel_missing else range(len(signal)))
 			]
 			speaker = torch.LongTensor([t.pop('speaker') for t in transcript]).unsqueeze(-1)
 			normalize_text = True
-		
+	
 		features = [
 			self.frontend(segment.unsqueeze(0), waveform_transform_debug = waveform_transform_debug).squeeze(0)
 			if self.frontend is not None else segment
@@ -260,8 +261,13 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		targets = [[labels.encode(t['ref'], normalize = normalize_text)[1]
 					for t in transcript]
 					for labels in self.labels]
+		
+		# not batch mode
+		if not self.segmented:
+			transcript, speaker, features = transcript[0], speaker[0], features[0]
+			targets = [target[0] for target in targets]
 
-		return [transcript, speaker, features] + list(targets)
+		return [transcript, speaker, features] + targets
 
 	def __len__(self):
 		return len(self.cumlen)
@@ -269,7 +275,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	def collate_fn(self, batch):
 		if self.segmented:
 			batch = list(zip(*batch))
-
 		meta_s, sample_s, sample_x, *sample_y = batch[0]
 		time_padding_multiple = [1, 1, self.time_padding_multiple] + [self.time_padding_multiple] * len(sample_y)
 		smax_len, xmax_len, *ymax_len = [
