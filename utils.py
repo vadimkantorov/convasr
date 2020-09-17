@@ -70,6 +70,8 @@ def compute_memory_fragmentation():
 	snapshot = torch.cuda.memory_snapshot()
 	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
 
+def open_maybe_gz(data_path, mode = 'r'):
+	return gzip.open(data_path, mode + 't') if data_path.endswith('.gz') else open(data_path, mode)
 
 def reset_cpu_threads(num_threads):
 	torch.set_num_threads(num_threads)
