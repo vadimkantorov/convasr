@@ -57,9 +57,9 @@ def segment(transcript, max_segment_seconds):
 
 def summary(transcript, ij = False):
 	res = dict(
-		channel = list(set(t['channel'] for t in transcript))[0],
-		begin = min(w['begin'] for w in transcript),
-		end = max(w['end'] for w in transcript),
+		channel = list(set(t.get('channel', 0) for t in transcript))[0],
+		begin = min(w.get('begin', 0.0) for w in transcript),
+		end = max(w.get('end', 0.0) for w in transcript),
 		i = min([w['i'] for w in transcript if 'i' in w] or [0]),
 		j = max([w['j'] for w in transcript if 'j' in w] or [0])
 	) if len(transcript) > 0 else dict(begin = 0, end = 0, i = 0, j = 0, channel = 0)
@@ -70,7 +70,7 @@ def summary(transcript, ij = False):
 
 
 def sort(transcript):
-	return sorted(transcript, key = lambda t: sort_key(summary(t['alignment']['ref'] + t['alignment']['hyp'])))
+	return sorted(transcript, key = lambda t: sort_key(summary(t.get('words_ref', []) + t.get('words_hyp', []))))
 
 
 def sort_key(t):

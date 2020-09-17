@@ -80,10 +80,10 @@ def main(args):
 		mono = args.mono,
 		time_padding_multiple = args.batch_time_padding_multiple,
 		audio_backend = args.audio_backend,
-		speakers = args.speakers,
 		exclude = exclude,
 		max_duration = args.transcribe_first_n_sec,
-		join_transcript = args.join_transcript
+		join_transcript = args.join_transcript,
+		string_array_encoding = args.dataset_string_array_encoding
 	)
 	num_examples = len(val_dataset)
 	print('Examples count: ', num_examples)
@@ -93,17 +93,20 @@ def main(args):
 	csv_sep = dict(tab = '\t', comma = ',')[args.csv_sep]
 	output_lines = []  # only used if args.output_csv is True
 
+	oom_handler = utils.OomHandler(max_retries = args.oom_retries)
 	for i, (meta, s, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
+
+		meta = [val_dataset.meta.get(m['example_id']) for m in meta]
+		audio_path = meta[0]['audio_path']
 
 		if x.numel() == 0:
 			print(f'Skipping empty [{audio_path}].')
 			continue
-		
-		meta = [val_dataset.get_meta(m['example_id']) for m in meta]
-		audio_path = meta[0]['audio_path']
+
+		begin = meta[0]['begin']
+		end = meta[0]['end']
 		audio_name = transcripts.audio_name(audio_path)
-		transcript_path = os.path.join(args.output_path, audio_name + '.json')
 
 		try:
 			tic = time.time()
@@ -186,8 +189,9 @@ def main(args):
 						speakers = val_dataset.speakers
 					) for i in range(len(decoded))
 				]
+			oom_handler.reset()
 		except:
-			if (not args.oom_crash) and utils.handle_out_of_memory_exception(model.parameters()):
+			if oom_handler.try_recover(model.parameters()):
 				print(f'Skipping {i} / {num_examples}')
 				continue
 			else:
@@ -301,7 +305,8 @@ if __name__ == '__main__':
 	parser.add_argument('--transcribe-first-n-sec', type = int)
 	parser.add_argument('--join-transcript', action = 'store_true')
 	parser.add_argument('--pack-backpointers', action = 'store_true')
-	parser.add_argument('--oom-crash', action = 'store_true')
+	parser.add_argument('--oom-retries', type = int, default = 3)
+	parser.add_argument('--dataset-string-array-encoding', default = 'utf_32_le', choices = ['utf_16_le', 'utf_32_le'])
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)

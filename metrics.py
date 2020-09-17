@@ -5,7 +5,6 @@ import json
 import functools
 import torch
 import Levenshtein
-import psutil
 
 placeholder = '|'
 space = ' '
@@ -95,7 +94,12 @@ class ErrorAnalyzer:
 		stats['errors'] = dict(distribution = dict(collections.OrderedDict(sorted(error_chars.items()))), words = error_words)
 		return stats
 
-	def analyze(self, hyp, ref, full = False, extra = {}, postprocess_transcript = (lambda s, *args, **kwargs: s), split_candidates = (lambda s: [s])):
+	def analyze(self, hyp, ref, full = False, extra = {}, postprocess_transcript = None, split_candidates = None):
+		if postprocess_transcript is None:
+			postpprocess_transcript = lambda s, *args, **kwargs: s
+		if split_candidates is None:
+			split_candidates = lambda s: [s]
+		
 		# TODO: add error_ok_tags
 		# TODO: respect full flag
 
@@ -171,48 +175,6 @@ class ErrorAnalyzer:
 
 		return res
 
-
-class PerformanceMeter(dict):
-	def update(self, kwargs, subtag = None):
-		for name, value in kwargs.items():
-			avg_name = f'performance/{name}_avg' + (f'/{subtag}' if subtag else '')
-			max_name = f'performance/{name}_max' + (f'/{subtag}' if subtag else '')
-			self[avg_name] = exp_moving_average(self.get(avg_name, 0), value)
-			self[max_name] = max(self.get(max_name, 0), value)
-
-	def update_memory_metrics(self, byte_scaler = 1024**3, measure_pss_ram = False):
-		device_count = torch.cuda.device_count()
-		total_allocated = 0
-		total_reserved = 0
-		for i in range(device_count):
-			device_stats = torch.cuda.memory_stats(i)
-			allocated = device_stats['allocated_bytes.all.peak'] / byte_scaler
-			total_allocated += allocated
-
-			reserved = device_stats[f'reserved_bytes.all.peak'] / byte_scaler
-			total_reserved += reserved
-			self.update(dict(allocated = allocated, reserved = reserved), f'cuda:{i}')
-
-		self.update(dict(allocated = total_allocated, reserved = total_reserved), 'total')
-
-		if measure_pss_ram:
-			process = psutil.Process()
-			children = process.children(recursive=True)
-			total_pss_ram = process.memory_full_info().pss + sum(
-				child.memory_full_info().pss for child in children
-			)
-			self.update(dict(pss_ram = total_pss_ram / byte_scaler))
-
-	def update_time_metrics(self, time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model):
-		self.update(
-			dict(
-				time_data = time_ms_data,
-				time_forward = time_ms_fwd,
-				time_backward = time_ms_bwd,
-				time_iteration = time_ms_data + time_ms_model
-			)
-		)
-
 def nanmean(dictlist, key):
 	prefix, suffix = ('', key) if '.' not in key else key.split('.')
 	tensor = torch.FloatTensor([r_[suffix] for r in dictlist for r_ in [r.get(prefix, r)] if suffix in r_])
@@ -223,9 +185,6 @@ def nanmean(dictlist, key):
 def quantiles(tensor):
 	tensor = tensor.sort().values
 	return {k: '{:.2f}'.format(float(tensor[int(len(tensor) * k / 100)])) for k in range(0, 100, 10)}
-
-def exp_moving_average(avg, val, max = 0, K = 50):
-	return (1. / K) * min(val, max) + (1 - 1. / K) * avg
 
 
 def align_words(*, hyp, ref, word_tagger = WordTagger(), error_tagger = ErrorTagger(), postproc = True, compute_cer = False):
@@ -566,14 +525,13 @@ class Needleman:
 
 if __name__ == '__main__':
 	import argparse
-	import datasets
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
 
 	cmd = subparsers.add_parser('analyze')
 	cmd.add_argument('--hyp', required = True)
 	cmd.add_argument('--ref', required = True)
-	cmd.add_argument('--lang', default = 'ru')
+	cmd.add_argument('--lang')
 	cmd.add_argument('--vocab', default = 'data/vocab_word_list.txt')
 	cmd.add_argument('--val-config', default = 'configs/ru_val_config.json')
 	cmd.set_defaults(
@@ -581,7 +539,7 @@ if __name__ == '__main__':
 		ref, val_config, vocab,
 		lang: print(
 			json.dumps(
-				ErrorAnalyzer(**(dict(configs = json.load(open(val_config))['error_analyzer'], word_tagger = WordTagger(word_tags = json.load(open(val_config))['word_tags'], vocab = set(map(str.strip, open(vocab))) if os.path.exists(vocab) else set())) if os.path.exists(val_config) else {})).analyze(hyp = hyp, ref = ref, labels = datasets.Labels(datasets.Language(lang)), full = True),
+				ErrorAnalyzer(**(dict(configs = json.load(open(val_config))['error_analyzer'], word_tagger = WordTagger(word_tags = json.load(open(val_config))['word_tags'], vocab = set(map(str.strip, open(vocab))) if os.path.exists(vocab) else set())) if os.path.exists(val_config) else {})).analyze(hyp = hyp, ref = ref, postprocess_transcript = __import__('datasets').Labels(__import__('datasets').Language(lang)).postprocess_transcript if args.lang is not None else None, full = True),
 				ensure_ascii = False,
 				indent = 2,
 				sort_keys = True
