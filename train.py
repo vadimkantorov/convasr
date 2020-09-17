@@ -39,7 +39,7 @@ class JsonlistSink:
 	def __init__(self, file_path, mode = 'w'):
 		self.json_file = open(file_path, mode) if file_path else None
 
-	def perf(self, perf, iteration, train_dataset_name):
+	def log(self, perf, iteration, train_dataset_name):
 		if self.json_file is None:
 			return
 
@@ -59,8 +59,7 @@ class TensorboardSink:
 	def __init__(self, summary_writer):
 		self.summary_writer = summary_writer
 
-	def perf(self, perf, iteration, train_dataset_name, lr_scaler = 1e4):
-		self.summary_writer.add_scalars(f'datasets/{train_dataset_name}', dict(loss_BT_normalized_avg = perf['avg_loss_BT_normalized'], lr_avg_scaled = perf['avg_lr'] * lr_scaler), iteration)
+	def perf(self, perf, iteration, rank = None):
 		filter_key = 'performance_'
 		aggregated_metrics = collections.defaultdict(dict)
 		for key, value in perf.items():
@@ -72,10 +71,18 @@ class TensorboardSink:
 			name = ''.join(key.split('_')[1:])
 			aggregated_metrics[name][agg_type] = value
 
-		for agg_type, value in aggregated_metrics.items():
-			self.summary_writer.add_scalars(f'perf/{agg_type}', value, iteration)
+		for name, value in aggregated_metrics.items():
+			if rank is not None:
+				tag = f'perf/{name}_node<{rank}>'
+			else:
+				tag = f'perf/{name}'
+			self.summary_writer.add_scalars(tag, value, iteration)
+
+	def train_stats(self, perf, iteration, train_dataset_name, lr_scaler = 1e4):
+		self.summary_writer.add_scalars(f'datasets/{train_dataset_name}', dict(loss_BT_normalized_avg=perf['avg_loss_BT_normalized'], lr_avg_scaled=perf['avg_lr'] * lr_scaler), iteration)
 
 	def val_stats(self, iteration, val_dataset_name, labels_name, perf):
+		prefix = f'datasets_val_{val_dataset_name}_{labels_name}_cur_'
 		prefix = f'datasets_val_{val_dataset_name}_{labels_name}_cur_'
 		self.summary_writer.add_scalars(
 			prefix.replace('datasets_', 'datasets/'),
@@ -355,15 +362,17 @@ def main(args):
 		log_mode = 'w'
 
 	if args.log_json:
-		args.log_json = os.path.join(args.experiment_dir, 'log.json')
+		if args.world_size > 1:
+			json_file = f'log.node{args.rank}.json'
+		else:
+			json_file = 'log.json'
+		args.log_json = os.path.join(args.experiment_dir, json_file)
 
+	log_path = os.path.join(args.experiment_dir, 'log.txt')
 	if args.rank == 0:
-		log_path = os.path.join(args.experiment_dir, 'log.txt')
 		log_level = logging.INFO
 	else:
-		log_path = None
 		log_level = logging.ERROR
-		args.log_json = None
 
 	utils.set_up_root_logger(log_path, mode = log_mode, level = log_level)
 	logfile_sink = JsonlistSink(args.log_json, mode = log_mode)
@@ -648,13 +657,14 @@ def main(args):
 	model.train()
 
 	tensorboard_dir = os.path.join(args.experiment_dir, 'tensorboard')
-	if checkpoint and args.experiment_name and args.rank == 0:
+	if checkpoint and args.experiment_name and args.local_rank == 0:
 		tensorboard_dir_checkpoint = os.path.join(os.path.dirname(args.checkpoint[0]), 'tensorboard')
 		if os.path.exists(tensorboard_dir_checkpoint) and not os.path.exists(tensorboard_dir):
-			shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
+				shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
+
 	if args.world_size > 1:
-		if not os.path.exists(tensorboard_dir):
-			os.makedirs(tensorboard_dir, exist_ok = True)
+		if args.local_rank == 0:
+			os.makedirs(tensorboard_dir, exist_ok=True)
 		dist.barrier()
 	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
 	tensorboard_sink = TensorboardSink(tensorboard)
@@ -697,11 +707,18 @@ def main(args):
 			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, loss.mean()
 			entropy = models.entropy(log_probs[0], olen[0], dim=1).mean()
 
+			if args.world_size > 1:
+				dist.all_reduce(loss_cur, op=dist.ReduceOp.SUM)
+				dist.all_reduce(entropy, op=dist.ReduceOp.SUM)
+				loss_cur = loss_cur / args.world_size
+				entropy = entropy / args.world_size
+
+			perf.update(dict(entropy = entropy.item()))
 			perf.update(dict(loss_BT_normalized = loss_cur.item()))
 
 			toc_fwd = time.time()
 			#TODO: inf/nan still corrupts BN stats
-			if not (torch.isinf(loss) or torch.isnan(loss)):
+			if not (torch.isinf(loss_cur) or torch.isnan(loss_cur)):
 				if args.fp16:
 					with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
 						scaled_loss.backward()
@@ -713,28 +730,24 @@ def main(args):
 						apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm
 					)
 					optimizer.step()
-
-					if iteration > 0 and iteration % args.log_iteration_interval == 0:
-						perf.update(utils.compute_memory_stats(), prefix = 'performance')
-						tensorboard_sink.perf(perf.default(), iteration, train_dataset_name)
-						tensorboard_sink.weight_stats(iteration, model, args.log_weight_distribution)
-						logfile_sink.perf(perf.default(), iteration, train_dataset_name)
-
 					optimizer.zero_grad()
 					scheduler.step(iteration)
 
-				if args.world_size > 1:
-					dist.all_reduce(loss, op=dist.ReduceOp.SUM)
-					dist.all_reduce(loss_cur, op=dist.ReduceOp.SUM)
-					dist.all_reduce(entropy, op=dist.ReduceOp.SUM)
-					loss = loss / args.world_size
-					loss_cur = loss_cur / args.world_size
-					entropy = entropy / args.world_size
-
-				perf.update(dict(loss = float(loss_cur)))
-				perf.update(dict(entropy = float(entropy)))
+				if iteration > 0 and iteration % args.log_iteration_interval == 0:
+					if args.world_size > 1:
+						perf.update(utils.compute_cuda_memory_stats(devices = [args.local_rank]), prefix = 'performance')
+						tensorboard_sink.perf(perf.default(), iteration, rank = args.rank)
+					else:
+						perf.update(utils.compute_cuda_memory_stats(), prefix = 'performance')
+						tensorboard_sink.perf(perf.default(), iteration, train_dataset_name)
+					if args.rank == 0:
+						tensorboard_sink.train_stats(perf.default(), iteration, train_dataset_name)
+						tensorboard_sink.weight_stats(iteration, model, args.log_weight_distribution)
+					logfile_sink.log(perf.default(), iteration, train_dataset_name)
 			else:
-				logging.getLogger().error(f'Loss value is corrupted! {args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] | Rank: {args.rank} | Loss: {loss.item()}')
+				_print('Loss corruption detected, skip step.')
+				if (torch.isinf(loss) or torch.isnan(loss)):
+					logging.getLogger().error(f'Loss value is corrupted! {args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] | Rank: {args.rank} | Loss: {loss.item()}')
 			toc_bwd = time.time()
 
 			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = map(lambda sec: sec * 1000, [toc_data - tic, toc_fwd - toc_data, toc_bwd - toc_fwd, toc_bwd - toc_data])
