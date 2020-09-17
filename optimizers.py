@@ -80,14 +80,14 @@ class NovoGrad(torch.optim.Optimizer):
 
 				grad = p.grad / (state['_grads_ema'] + group['eps']).sqrt()
 				if group['weight_decay'] > 0:
-					grad.add_(group['weight_decay'], p)
+					grad.add_(p, alpha = group['weight_decay'])
 				if group['dampening']:
 					grad *= 1 - group['betas'][0]
 
 				state['momentum_buffer'] = state['momentum_buffer'].mul_(
 					group['betas'][0]
 				).add_(grad) if 'momentum_buffer' in state else grad
-				p.add_(-group['lr'], state['momentum_buffer'])
+				p.add_(state['momentum_buffer'], alpha = -group['lr'])
 
 
 @torch.no_grad()

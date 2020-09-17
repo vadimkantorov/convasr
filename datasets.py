@@ -79,7 +79,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		exclude = set(),
 		join_transcript = False,
 		bucket = None,
-		pop_meta = False
+		pop_meta = False,
+		_print = print
 	):
 		self.join_transcript = join_transcript
 		self.max_duration = max_duration
@@ -106,8 +107,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		tic = time.time()
 		
 		transcripts_read = list(map(read_transcript, data_paths)) 
-		print(f'Read {time.time() - tic:.2} sec', end=', ')
-		tic = time.time()
+		_print('Dataset reading time: ', time.time() - tic); tic = time.time()
 
 		segments_by_audio_path = [
 			list(g) for transcript in transcripts_read for k,
@@ -153,9 +153,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		for t in transcript:
 			t['speaker'] = t['speaker'] if isinstance(t.get('speaker'), int) else self.speaker_names_index.get(t['speaker'], self.speaker_missing) if isinstance(t.get('speaker'), str) else 1 + t['channel'] if 'channel' in t else self.speaker_missing
 			t['speaker_name'] = self.speaker_names[t['speaker']]
-
-		print(f'Constructor {time.time() - tic:.2} sec', end=', ')
-		tic = time.time()
+		
+		_print('Dataset construction time: ', time.time() - tic); tic = time.time()
 		
 		self.bucket = torch.ShortTensor([e[0]['bucket'] for e in examples_filtered]) 
 		self.audio_path = TensorBackedStringArray([e[0]['audio_path'] for e in examples_filtered])
@@ -166,8 +165,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.speaker = torch.LongTensor([t['speaker'] for t in transcript])
 		self.cumlen = torch.ShortTensor(examples_lens).cumsum(dim = 0, dtype = torch.int64)
 		self.meta = { self.example_id(t) : t for t in transcript } if not pop_meta else {}
-
-		print(f'Tensors {time.time() - tic:.2} sec')
+		_print('Dataset tensors creation time: ', time.time() - tic)
 
 	def pop_meta(self):
 		meta = self.meta
