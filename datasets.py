@@ -207,11 +207,10 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		#TODO: support forced mono even if transcript is given
 		#TODO: merge both branches in one
 		#TODO: subsample speaker labels according to features
-		#TODO: move computing buckets here?
 
 		if not self.segmented:
 			transcript = t = dict(
-				audio_path = transcript[0]['audio_path'], 
+				audio_path = audio_path, 
 				ref = transcript[0]['ref'],
 				example_id = self.example_id(transcript[0]),
 
@@ -227,38 +226,50 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			some_segments_have_not_begin_end = any(t['begin'] == self.time_missing and t['end'] == self.time_missing for t in transcript)
 			some_segments_have_ref = any(bool(t['ref']) for t in transcript)
 			replace_transcript = self.join_transcript or (not transcript) or (some_segments_have_not_begin_end and some_segments_have_ref)
-			normalize_text = True
 
-			assert not replace_transcript, "todo: vadimkantorov pls fix this code!"
 			if replace_transcript:
-				assert len(signal) == 1
+				assert len(signal) == 1, 'only mono supported for now'
+				# replacing ref by normalizing only with default labels
 				ref_full = [self.labels[0].normalize_text(t['ref']) for t in transcript]
 				speaker = torch.cat([
 					torch.full((len(ref) + 1, ), t['speaker'],
 								dtype = torch.int64).scatter_(0, torch.tensor(len(ref)), self.speaker_missing) for t,
 					ref in zip(transcript, ref_full)
 				])[:-1]
-				transcript = [dict(ref = ' '.join(ref_full))]
+				transcript = [
+					dict(
+						audio_path = audio_path,
+						ref = ' '.join(ref_full),
+						example_id = self.example_id(dict(audio_path = audio_path)),
+
+						channel = 0,
+						begin_samples = 0,
+						end_samples = None
+					)
+				]
 				normalize_text = False
+			else:
+				transcript = [
+					dict(
+						audio_path = audio_path,
+						ref = t['ref'],
+						example_id = self.example_id(t),
 
-			transcript = [
-				dict(
-					audio_path = t['audio_path'],
-					ref = t['ref'],
-					example_id = self.example_id(t),
-
-					channel = channel,
-					speaker = t['speaker'],
-					begin_samples = (t['begin'] * sample_rate) if t['begin'] != self.time_missing else 0,
-					end_samples = (1 + t['end'] * sample_rate) if t['end'] != self.time_missing else signal.shape[1]
-				)
-				for t in sorted(transcript, key = transcripts.sort_key)
-				for channel in ([t['channel']] if t['channel'] is not None else range(len(signal)))
-			]
-			speaker = torch.LongTensor([t.pop('speaker') for t in transcript]).unsqueeze(-1)
+						channel = channel,
+						begin_samples = (t['begin'] * sample_rate) if t['begin'] != self.time_missing else 0,
+						end_samples = (1 + t['end'] * sample_rate) if t['end'] != self.time_missing else signal.shape[1],
+						
+						speaker = t['speaker']
+					)
+					for t in sorted(transcript, key = transcripts.sort_key)
+					for channel in ([t['channel']] if t['channel'] is not None else range(len(signal)))
+				]
+				speaker = torch.LongTensor([t.pop('speaker') for t in transcript]).unsqueeze(-1)
+				normalize_text = True
+			
 			features = [
-				self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0)
-				if self.frontend is not None else segment.unsqueeze(0)
+				self.frontend(segment.unsqueeze(0), waveform_transform_debug = waveform_transform_debug).squeeze(0)
+				if self.frontend is not None else segment
 				for t in transcript
 				for segment in [signal[t.pop('channel'), t.pop('begin_samples'):t.pop('end_samples')]]
 			]
