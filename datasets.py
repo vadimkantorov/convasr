@@ -10,6 +10,7 @@ import sentencepiece
 import audio
 import utils
 import transcripts
+import shaping
 
 class TensorBackedStringArray:
 	def __init__(self, strings, encoding = 'utf_16_le'):
@@ -18,7 +19,7 @@ class TensorBackedStringArray:
 		self.multiplier = dict(ascii = 1, utf_16_le = 2, utf_32_le = 4)[encoding]
 		self.data = torch.ByteTensor(torch.ByteStorage.from_buffer(''.join(strings).encode(encoding)))
 		self.cumlen = torch.LongTensor(list(map(len, strings))).cumsum(dim = 0)
-		assert int(self.cumlen[-1]) * self.multiplier == len(self.data), f'[{encoding}] is not enough to hold characters, use a larger character class'
+		assert len(self) == 0 or int(self.cumlen[-1]) * self.multiplier == len(self.data), f'[{encoding}] is not enough to hold characters, use a larger character class'
 
 	def __getitem__(self, i):
 		return bytes(self.data[(self.cumlen[i - 1] * self.multiplier if i >= 1 else 0) : self.cumlen[i] * self.multiplier]).decode(self.encoding)
@@ -80,6 +81,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		join_transcript = False,
 		bucket = None,
 		pop_meta = False,
+		string_array_encoding = 'utf_16_le',
 		_print = print
 	):
 		self.join_transcript = join_transcript
@@ -157,8 +159,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		_print('Dataset construction time: ', time.time() - tic); tic = time.time()
 		
 		self.bucket = torch.ShortTensor([e[0]['bucket'] for e in examples_filtered]) 
-		self.audio_path = TensorBackedStringArray([e[0]['audio_path'] for e in examples_filtered])
-		self.ref = TensorBackedStringArray([t['ref'] for t in transcript])
+		self.audio_path = TensorBackedStringArray([e[0]['audio_path'] for e in examples_filtered], encoding = string_array_encoding)
+		self.ref = TensorBackedStringArray([t['ref'] for t in transcript], encoding = string_array_encoding)
 		self.begin = torch.FloatTensor([t['begin'] for t in transcript])
 		self.end = torch.FloatTensor([t['end'] for t in transcript])
 		self.channel = torch.CharTensor([t['channel'] for t in transcript])
@@ -251,8 +253,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			normalize_text = True
 	
 		features = [
-			self.frontend(segment.unsqueeze(0), waveform_transform_debug = waveform_transform_debug).squeeze(0)
-			if self.frontend is not None else segment
+			self.frontend(segment.unsqueeze(0), waveform_transform_debug = waveform_transform_debug)
+			if self.frontend is not None else segment.unsqueeze(0)
 			for t in transcript
 			for segment in [signal[t.pop('channel'), t.pop('begin_samples'):t.pop('end_samples')]]
 		]
@@ -262,9 +264,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		
 		# not batch mode
 		if not self.segmented:
-			transcript, speaker, features = transcript[0], speaker[0], features[0]
+			transcript, speaker, features = transcript[0], speaker[0], features[0][0]
 			targets = [target[0] for target in targets]
-
 		return [transcript, speaker, features] + targets
 
 	def __len__(self):
@@ -280,10 +281,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			for k in range(1, len(batch[0]))
 		]
 		meta = [b[0] for b in batch]
-		x = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = sample_x.dtype)
-		y = torch.zeros(len(batch), len(sample_y), max(ymax_len), dtype = torch.long)
-		s = torch.full((len(batch), smax_len), self.speaker_missing, dtype = torch.int64)
-		xlen, ylen = torch.zeros(len(batch), dtype = torch.float32), torch.zeros(len(batch), len(sample_y), dtype = torch.long)
+		x : shaping.BCT = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = sample_x.dtype)
+		y : shaping.BLY = torch.zeros(len(batch), len(sample_y), max(ymax_len), dtype = torch.long)
+		s : shaping.BS = torch.full((len(batch), smax_len), self.speaker_missing, dtype = torch.int64)
+		xlen : shaping.B = torch.zeros(len(batch), dtype = torch.float32)
+		ylen : shaping.B = torch.zeros(len(batch), len(sample_y), dtype = torch.long)
 		for k, (meta_s, sample_s, sample_x, *sample_y) in enumerate(batch):
 			xlen[k] = sample_x.shape[-1] / x.shape[-1] if x.shape[-1] > 0 else 1.0
 			x[k, ..., :sample_x.shape[-1]] = sample_x

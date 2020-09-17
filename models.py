@@ -278,12 +278,12 @@ class JasperNet(nn.Module):
 		self.bpe_only = bpe_only
 
 	def forward(
-		self, x: typing.Union[shaping.BCT, shaping.BT], xlen: typing.Optional[shaping.B] = None, y: typing.Optional[shaping.BY] = None, ylen: typing.Optional[shaping.B] = None
+		self, x: typing.Union[shaping.BCT, shaping.BT], xlen: typing.Optional[shaping.B] = None, y: typing.Optional[shaping.BLY] = None, ylen: typing.Optional[shaping.B] = None
 	) -> shaping.BCt:
 
 		if self.frontend is not None:
 			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
-			x = self.frontend(x, mask = mask)
+			x = self.frontend(x.squeeze(1), mask = mask)
 
 		assert x.ndim == 3
 
@@ -590,7 +590,7 @@ class LogFilterBankFrontend(nn.Module):
 		return True
 
 @torch.jit.script
-def compute_output_lengths(x: shaping.BT, lengths_fraction: Optional[shaping.B] = None):
+def compute_output_lengths(x: shaping.BT, lengths_fraction: typing.Optional[shaping.B] = None):
 	if lengths_fraction is None:
 		return torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.long)
 	return (lengths_fraction * x.shape[-1]).ceil().long()

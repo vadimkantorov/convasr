@@ -82,7 +82,8 @@ def main(args):
 		audio_backend = args.audio_backend,
 		exclude = exclude,
 		max_duration = args.transcribe_first_n_sec,
-		join_transcript = args.join_transcript
+		join_transcript = args.join_transcript,
+		string_array_encoding = args.dataset_string_array_encoding
 	)
 	num_examples = len(val_dataset)
 	print('Examples count: ', num_examples)
@@ -305,6 +306,7 @@ if __name__ == '__main__':
 	parser.add_argument('--join-transcript', action = 'store_true')
 	parser.add_argument('--pack-backpointers', action = 'store_true')
 	parser.add_argument('--oom-retries', type = int, default = 3)
+	parser.add_argument('--dataset-string-array-encoding', default = 'utf_32_le', choices = ['utf_16_le', 'utf_32_le'])
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
