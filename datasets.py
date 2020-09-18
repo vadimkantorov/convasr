@@ -249,19 +249,32 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 					channel = channel,
 					speaker = t['speaker'],
-					begin_samples = (t['begin'] * sample_rate) if t['begin'] != self.time_missing else 0,
-					end_samples = (1 + t['end'] * sample_rate) if t['end'] != self.time_missing else signal.shape[1]
+					begin_samples = int(t['begin'] * sample_rate) if t['begin'] != self.time_missing else 0,
+					end_samples = int(1 + t['end'] * sample_rate) if t['end'] != self.time_missing else signal.shape[1]
 				)
 				for t in sorted(transcript, key = transcripts.sort_key)
 				for channel in ([t['channel']] if t['channel'] is not None else range(len(signal)))
 			]
 			speaker = torch.LongTensor([t.pop('speaker') for t in transcript]).unsqueeze(-1)
-			features = [
-				self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0)
-				if self.frontend is not None else segment.unsqueeze(0)
-				for t in transcript
-				for segment in [signal[t.pop('channel'), t.pop('begin_samples'):t.pop('end_samples')]]
-			]
+
+			features_from_whole_normalized_signal = True
+			if features_from_whole_normalized_signal:
+				signal_feature = self.frontend(signal)
+				hop_lenght = self.frontend.hop_length
+
+				features = [
+					segment.squeeze(0)
+					for t in transcript
+					for segment in [signal_feature[t.pop('channel'), :, t.pop('begin_samples') // hop_lenght:t.pop('end_samples') // hop_lenght]]
+				]
+
+			else:
+				features = [
+					self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0)
+					if self.frontend is not None else segment.unsqueeze(0)
+					for t in transcript
+					for segment in [signal[t.pop('channel'), t.pop('begin_samples'):t.pop('end_samples')]]
+				]
 			targets = [[labels.encode(t['ref'], normalize = normalize_text)[1]
 						for t in transcript]
 						for labels in self.labels]

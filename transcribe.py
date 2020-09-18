@@ -30,7 +30,7 @@ def setup(args):
 	labels = datasets.Labels(datasets.Language(checkpoint['args']['lang']), name = 'char')
 	model = getattr(models, args.model or checkpoint['args']['model'])(
 		args.num_input_features, [len(labels)],
-		frontend = frontend,
+		frontend = None,
 		dict = lambda logits,
 		log_probs,
 		olen,
@@ -75,7 +75,7 @@ def main(args):
 	val_dataset = datasets.AudioTextDataset(
 		data_paths, [labels],
 		args.sample_rate,
-		frontend = None,
+		frontend = frontend,
 		segmented = True,
 		mono = args.mono,
 		time_padding_multiple = args.batch_time_padding_multiple,
@@ -251,7 +251,8 @@ def main(args):
 				f.write(hyp)
 
 		if args.output_csv:
-			output_lines.append(csv_sep.join((audio_path, hyp, str(begin), str(end))) + '\n')
+			[output_lines.append(csv_sep.join((audio_path, h, str(meta[i]['begin']), str(meta[i]['end']))) + '\n')
+				for i, h in enumerate(hyp.split('\n'))]
 
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
