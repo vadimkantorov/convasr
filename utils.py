@@ -105,7 +105,7 @@ class OomHandler:
 			print_memory_stats('<BEFORE FREE>', _print = _print)
 			free_up_memory()
 			print_memory_stats('<AFTER FREE>', _print = _print)
-			_print('RECOVERING FROM OOM --- AFTER FREE', _print = _print)
+			_print('RECOVERING FROM OOM --- AFTER FREE')
 			return True
 		return False
 
