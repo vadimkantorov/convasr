@@ -96,7 +96,7 @@ class ErrorAnalyzer:
 
 	def analyze(self, hyp, ref, full = False, extra = {}, postprocess_transcript = None, split_candidates = None):
 		if postprocess_transcript is None:
-			postpprocess_transcript = lambda s, *args, **kwargs: s
+			postprocess_transcript = lambda s, *args, **kwargs: s
 		if split_candidates is None:
 			split_candidates = lambda s: [s]
 		

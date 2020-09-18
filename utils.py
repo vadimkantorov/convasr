@@ -7,7 +7,9 @@ import gzip
 import psutil
 import numpy
 import logging
+import typing
 import logging.handlers
+import torch.distributed
 
 def get_root_logger_print():
 	logger = logging.getLogger()
@@ -107,7 +109,7 @@ class OomHandler:
 			print_memory_stats('<BEFORE FREE>', _print = _print)
 			free_up_memory()
 			print_memory_stats('<AFTER FREE>', _print = _print)
-			_print('RECOVERING FROM OOM --- AFTER FREE', _print = _print)
+			_print('RECOVERING FROM OOM --- AFTER FREE')
 			return True
 		return False
 
@@ -149,3 +151,61 @@ def enable_jit_fusion():
 	torch._C._jit_set_profiling_mode(False)
 	torch._C._jit_override_can_fuse_on_gpu(True)
 	torch._C._jit_set_texpr_fuser_enabled(False)
+
+
+def gather_tensor_shapes(tensor: torch.Tensor, world_size: int) -> typing.List[torch.Tensor]:
+	shape_tensor = torch.tensor(tensor.shape, dtype = torch.long, device = tensor.device)
+	shapes = [torch.zeros(len(tensor.shape), dtype = torch.long, device = tensor.device) for _ in range(world_size)]
+	torch.distributed.all_gather(shapes, shape_tensor)
+	return shapes
+
+
+def gather_tensors(tensor: torch.Tensor, world_size: int) -> typing.List[torch.Tensor]:
+	shapes = gather_tensor_shapes(tensor, world_size)
+	max_shape = torch.cat([shape.unsqueeze(0) for shape in shapes], dim=0).max(dim=0).values
+	padding = []
+	for i, dim in enumerate(max_shape):
+		padding += [0, dim.item() - tensor.size(i)]
+	padded_tensor = torch.nn.functional.pad(tensor, padding)
+	tensors = [torch.zeros_like(padded_tensor) for _ in range(world_size)]
+	torch.distributed.all_gather(tensors, padded_tensor)
+	for i, shape in enumerate(shapes):
+		tensors[i] = tensors[i][list(map(lambda x: slice(x.item()), shape))]
+	return tensors
+
+
+class TensorBackedStringArray:
+	def __init__(self, strings, encoding = 'utf_16_le', device = 'cpu'):
+		strings = list(strings)
+		self.encoding = encoding
+		self.multiplier = dict(ascii = 1, utf_16_le = 2, utf_32_le = 4)[encoding]
+		self.data = torch.ByteTensor(torch.ByteStorage.from_buffer(''.join(strings).encode(encoding))).to(device)
+		self.cumlen = torch.LongTensor(list(map(len, strings))).cumsum(dim = 0).to(device)
+		assert int(self.cumlen[-1]) * self.multiplier == len(self.data), f'[{encoding}] is not enough to hold characters, use a larger character class'
+
+	def __getitem__(self, i):
+		return bytes(self.data[(self.cumlen[i - 1] * self.multiplier if i >= 1 else 0) : self.cumlen[i] * self.multiplier]).decode(self.encoding)
+
+	def __len__(self):
+		return len(self.cumlen)
+
+	def __list__(self):
+		return [self[i] for i in range(len(self))]
+
+	def to(self, device):
+		self.data = self.data.to(device)
+		self.cumlen = self.cumlen.to(device)
+		return self
+
+	def synchronize(self, world_size):
+		cumlen = gather_tensors(self.cumlen, world_size)
+		data = gather_tensors(self.data, world_size)
+
+		# cat synchronized data
+		for i in range(1, world_size):
+			cumlen[i] += cumlen[i-1][-1]
+
+		self.data = torch.cat(data, dim=0)
+		self.cumlen = torch.cat(cumlen, dim=0)
+
+

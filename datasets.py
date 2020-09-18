@@ -13,24 +13,6 @@ import transcripts
 import operator
 import typing
 
-class TensorBackedStringArray:
-	def __init__(self, strings, encoding = 'utf_16_le'):
-		strings = list(strings)
-		self.encoding = encoding
-		self.multiplier = dict(ascii = 1, utf_16_le = 2, utf_32_le = 4)[encoding]
-		self.data = torch.ByteTensor(torch.ByteStorage.from_buffer(''.join(strings).encode(encoding)))
-		self.cumlen = torch.LongTensor(list(map(len, strings))).cumsum(dim = 0)
-		assert int(self.cumlen[-1]) * self.multiplier == len(self.data), f'[{encoding}] is not enough to hold characters, use a larger character class'
-
-	def __getitem__(self, i):
-		return bytes(self.data[(self.cumlen[i - 1] * self.multiplier if i >= 1 else 0) : self.cumlen[i] * self.multiplier]).decode(self.encoding)
-
-	def __len__(self):
-		return len(self.cumlen)
-
-	def __list__(self):
-		return [self[i] for i in range(len(self))]
-
 def worker_init_fn(worker_id, num_threads = 1):
 	utils.set_random_seed(worker_id)
 	utils.reset_cpu_threads(num_threads)
@@ -159,8 +141,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		_print('Dataset construction time: ', time.time() - tic); tic = time.time()
 		
 		self.bucket = torch.ShortTensor([e[0]['bucket'] for e in examples_filtered]) 
-		self.audio_path = TensorBackedStringArray([e[0]['audio_path'] for e in examples_filtered])
-		self.ref = TensorBackedStringArray([t['ref'] for t in transcript])
+		self.audio_path = utils.TensorBackedStringArray([e[0]['audio_path'] for e in examples_filtered])
+		self.ref = utils.TensorBackedStringArray([t['ref'] for t in transcript])
 		self.begin = torch.FloatTensor([t['begin'] for t in transcript])
 		self.end = torch.FloatTensor([t['end'] for t in transcript])
 		self.channel = torch.CharTensor([t['channel'] for t in transcript])

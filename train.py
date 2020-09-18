@@ -33,6 +33,7 @@ import vis
 import utils
 import transcripts
 import perf
+import itertools
 import torch.distributed as dist
 
 class JsonlistSink:
@@ -154,8 +155,10 @@ def evaluate_model(
 	columns = {}
 	oom_handler = utils.OomHandler(max_retries=args.oom_retries)
 	for val_dataset_name, val_data_loader in val_data_loaders.items():
+		if args.world_size > 1:
+			# synchronize process, because rank 0 process do result analisys and io
+			dist.barrier()
 		_print(f'\n{val_dataset_name}@{iteration}')
-		transcript, logits_, y_ = [], [], []
 		analyze = args.analyze == [] or (args.analyze is not None and val_dataset_name in args.analyze)
 
 		model.eval()
@@ -164,7 +167,6 @@ def evaluate_model(
 			for _ in apply_model(val_data_loader, model, labels, decoder, args.device, oom_handler):
 				pass
 		model.eval()
-		cpu_list = lambda l: [[t.cpu() for t in t_] for t_ in l]
 
 		tic = time.time()
 		ref_, hyp_, audio_path_, loss_, entropy_ = [], [], [], [], []
@@ -172,8 +174,6 @@ def evaluate_model(
 				val_data_loader, model, labels, decoder, args.device, oom_handler)):
 			loss_.extend(loss.tolist())
 			entropy_.extend(entropy.tolist())
-			logits_.extend(zip(*cpu_list(logits)) if not training and args.logits else [])
-			y_.extend(cpu_list(y))
 			audio_path_.extend(m['audio_path'] for m in meta)
 			ref_.extend(labels[0].normalize_text(m['ref']) for m in meta)
 			hyp_.extend(zip(*hyp))
@@ -181,6 +181,36 @@ def evaluate_model(
 		time_sec_val_apply_model = toc_apply_model - tic
 		perf.update(dict(time_sec_val_apply_model = time_sec_val_apply_model), prefix = f'datasets_{val_dataset_name}')
 		_print(f"Apply model {time_sec_val_apply_model:.1f} sec")
+
+		if args.world_size > 1:
+			def sync_float_list(float_list):
+				sync = utils.gather_tensors(torch.tensor(float_list, dtype=torch.float32, device=args.device), world_size=args.world_size)
+				return list(itertools.chain.from_iterable([x.cpu().tolist() for x in sync]))
+
+			def sync_string_list(str_list):
+				string_storage = utils.TensorBackedStringArray(str_list, device = args.device)
+				string_storage.synchronize(args.world_size)
+				return list(string_storage.to('cpu'))
+			_print(f"Synchronize validation results started")
+			sync_tic = time.time()
+			loss_ = sync_float_list(loss_)
+			_print(f'loss sync time {time.time() - sync_tic:.1f} sec');sync_tic = time.time()
+			entropy_ = sync_float_list(entropy_)
+			_print(f'entropy sync time {time.time() - sync_tic:.1f} sec');sync_tic = time.time()
+			audio_path_ = sync_string_list(audio_path_)
+			_print(f'audio_path sync time {time.time()  - sync_tic:.1f} sec');sync_tic = time.time()
+			ref_ = sync_string_list(ref_)
+			_print(f'ref sync time {time.time() - sync_tic:.1f} sec');sync_tic = time.time()
+			hyps_by_labels = list(map(list, zip(*hyp_)))
+			for i in range(len(hyps_by_labels)):
+				hyps_by_labels[i] = sync_string_list(hyps_by_labels[i])
+			hyp_ = list(map(list, zip(*hyps_by_labels)))
+			_print(f'hyp sync time {time.time()- sync_tic:.1f} sec')
+			time_sec_val_sync_results = time.time() - toc_apply_model
+			perf.update(dict(time_sec_val_sync_results=time_sec_val_sync_results), prefix=f'datasets_{val_dataset_name}')
+			_print(f"Synchronize validation results {time_sec_val_sync_results:.1f} sec")
+			if args.rank != 0:
+				continue
 
 		analyze_args_gen = (
 			(
@@ -263,38 +293,9 @@ def evaluate_model(
 		if analyze:
 			vis.errors([transcripts_path], audio = args.vis_errors_audio)
 
-		# TODO: transcript got flattened make this code work:
-		# if args.logits:
-		# 	logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
-		# 	torch.save(
-		# 		list(
-		# 			sorted([
-		# 				dict(
-		# 					**r_,
-		# 					logits = l_ if not args.logits_topk else models.sparse_topk(l_, args.logits_topk, dim = 0),
-		# 					y = y_,
-		# 					ydecoded = labels_.decode(y_.tolist())
-		# 				) for r,
-		# 				l,
-		# 				y in zip(transcript, logits_, y_) for labels_,
-		# 				r_,
-		# 				l_,
-		# 				y_ in zip(labels, r, l, y)
-		# 			],
-		# 					key = lambda r: r['cer'],
-		# 					reverse = True)
-		# 		),
-		# 		logits_file_path
-		# 	)
-		# 	_print('Logits saved:', logits_file_path)
-
 	checkpoint_path = os.path.join(
 		args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)
 	) if training and not args.checkpoint_skip else None
-	#if args.exphtml:
-	#	columns['checkpoint_path'] = checkpoint_path
-	#	exphtml.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, tag = 'train' if training else 'test', git_http = args.githttp)
-	#	exphtml.exphtml(args.exphtml)
 
 	if training and not args.checkpoint_skip:
 		torch.save(
@@ -805,8 +806,9 @@ def main(args):
 def init_process(args):
 	""" Initialize the distributed environment. """
 	utils.set_random_seed(args.seed)
-	torch.backends.cudnn.deterministic = True
-	torch.cuda.set_device(args.local_rank)
+	if args.device == 'cuda':
+		torch.backends.cudnn.deterministic = True
+		torch.cuda.set_device(args.local_rank)
 
 	print(f"Initialize worker with rank {args.rank} in world size {args.world_size} at {args.master_ip}:{args.master_port}")
 	dist.init_process_group(args.backend, init_method=f"tcp://{args.master_ip}:{args.master_port}", rank=args.rank, world_size=args.world_size)
