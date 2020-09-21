@@ -5,16 +5,19 @@ import random
 import torch
 import gzip
 import psutil
+import numpy
 import logging
+import typing
 import logging.handlers
+import torch.distributed
 
 def get_root_logger_print():
 	logger = logging.getLogger()
 	return (lambda *args: logger.info(' '.join(map(str, args))))
 
-def set_up_root_logger(log_file_path = None, mode = 'a', max_bytes = 1_000_000, fmt = '%(asctime)s [%(levelname)s]: %(message)s'):
+def set_up_root_logger(log_file_path = None, mode = 'a', max_bytes = 1_000_000, fmt = '%(asctime)s [%(levelname)s]: %(message)s', level=logging.INFO):
 	logger = logging.getLogger()
-	logger.setLevel(logging.INFO)
+	logger.setLevel(level)
 	
 	formatter = logging.Formatter(fmt)
 	handler = logging.StreamHandler()
@@ -35,35 +38,38 @@ def set_up_root_logger(log_file_path = None, mode = 'a', max_bytes = 1_000_000, 
 def open_maybe_gz(data_path, mode = 'r'):
 	return gzip.open(data_path, mode + 't') if data_path.endswith('.gz') else open(data_path, mode)
 
-def compute_memory_stats(byte_scaler = 1024**3, measure_pss_ram = False):
-	device_count = torch.cuda.device_count()
+
+def compute_cuda_memory_stats(byte_scaler = 1024**3, devices = None):
+	if devices is None:
+		devices = range(torch.cuda.device_count())
 	total_allocated = 0
 	total_reserved = 0
 
-	res = {}
-	for i in range(device_count):
+	stats = {}
+	for i in devices:
 		device_stats = torch.cuda.memory_stats(i)
 		allocated = device_stats['allocated_bytes.all.peak'] / byte_scaler
 		total_allocated += allocated
 
 		reserved = device_stats[f'reserved_bytes.all.peak'] / byte_scaler
 		total_reserved += reserved
-		res[f'allocated_cuda{i}'] = allocated
-		res[f'reserved_cuda{i}'] = reserved
+		stats[f'allocated_cuda{i}'] = allocated
+		stats[f'reserved_cuda{i}'] = reserved
 
-	res['allocated'] = total_allocated
-	res['reserved'] = total_reserved 
+	stats['allocated'] = total_allocated
+	stats['reserved'] = total_reserved
+	return stats
 
-	if measure_pss_ram:
-		process = psutil.Process()
-		children = process.children(recursive=True)
-		total_pss_ram = process.memory_full_info().pss + sum(
-			child.memory_full_info().pss for child in children
-		)
-		res['pss_ram'] = total_pss_ram / byte_scaler
-	else:
-		res['pss_ram'] = 0.0
-	return res
+
+def compute_pss_memory_stats(byte_scaler = 1024**3):
+	stats = {}
+	process = psutil.Process()
+	children = process.children(recursive=True)
+	total_pss_ram = process.memory_full_info().pss + sum(
+		child.memory_full_info().pss for child in children
+	)
+	stats['pss_ram'] = total_pss_ram / byte_scaler
+	return stats
 
 
 def compute_memory_fragmentation():
@@ -79,7 +85,7 @@ def reset_cpu_threads(num_threads):
 	#os.environ['MKL_NUM_THREADS'] = str(num_threads)
 
 def set_random_seed(seed):
-	for set_random_seed in [random.seed, torch.manual_seed
+	for set_random_seed in [random.seed, torch.manual_seed, numpy.random.seed
 							] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
 		set_random_seed(seed)
 
@@ -147,3 +153,61 @@ def enable_jit_fusion():
 	torch._C._jit_set_profiling_mode(False)
 	torch._C._jit_override_can_fuse_on_gpu(True)
 	torch._C._jit_set_texpr_fuser_enabled(False)
+
+
+def gather_tensor_shapes(tensor: torch.Tensor, world_size: int) -> typing.List[torch.Tensor]:
+	shape_tensor = torch.tensor(tensor.shape, dtype = torch.long, device = tensor.device)
+	shapes = [torch.zeros(len(tensor.shape), dtype = torch.long, device = tensor.device) for _ in range(world_size)]
+	torch.distributed.all_gather(shapes, shape_tensor)
+	return shapes
+
+
+def gather_tensors(tensor: torch.Tensor, world_size: int) -> typing.List[torch.Tensor]:
+	shapes = gather_tensor_shapes(tensor, world_size)
+	max_shape = torch.cat([shape.unsqueeze(0) for shape in shapes], dim=0).max(dim=0).values
+	padding = []
+	for i, dim in enumerate(max_shape):
+		padding += [0, dim.item() - tensor.size(i)]
+	padded_tensor = torch.nn.functional.pad(tensor, padding)
+	tensors = [torch.zeros_like(padded_tensor) for _ in range(world_size)]
+	torch.distributed.all_gather(tensors, padded_tensor)
+	for i, shape in enumerate(shapes):
+		tensors[i] = tensors[i][list(map(lambda x: slice(x.item()), shape))]
+	return tensors
+
+
+class TensorBackedStringArray:
+	def __init__(self, strings, encoding = 'utf_16_le', device = 'cpu'):
+		strings = list(strings)
+		self.encoding = encoding
+		self.multiplier = dict(ascii = 1, utf_16_le = 2, utf_32_le = 4)[encoding]
+		self.data = torch.ByteTensor(torch.ByteStorage.from_buffer(''.join(strings).encode(encoding))).to(device)
+		self.cumlen = torch.LongTensor(list(map(len, strings))).cumsum(dim = 0).to(device)
+		assert int(self.cumlen[-1]) * self.multiplier == len(self.data), f'[{encoding}] is not enough to hold characters, use a larger character class'
+
+	def __getitem__(self, i):
+		return bytes(self.data[(self.cumlen[i - 1] * self.multiplier if i >= 1 else 0) : self.cumlen[i] * self.multiplier]).decode(self.encoding)
+
+	def __len__(self):
+		return len(self.cumlen)
+
+	def __list__(self):
+		return [self[i] for i in range(len(self))]
+
+	def to(self, device):
+		self.data = self.data.to(device)
+		self.cumlen = self.cumlen.to(device)
+		return self
+
+	def synchronize(self, world_size):
+		cumlen = gather_tensors(self.cumlen, world_size)
+		data = gather_tensors(self.data, world_size)
+
+		# cat synchronized data
+		for i in range(1, world_size):
+			cumlen[i] += cumlen[i-1][-1]
+
+		self.data = torch.cat(data, dim=0)
+		self.cumlen = torch.cat(cumlen, dim=0)
+
+
