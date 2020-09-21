@@ -538,13 +538,10 @@ def main(args):
 		model.eval()
 		if not args.adapt_bn:
 			model.fuse_conv_bn_eval()
-		if args.fp16:
-			model, _ = apex.amp.initialize(model, None, opt_level=args.fp16, keep_batchnorm_fp32=args.fp16_keep_batchnorm_fp32)
 		if args.world_size > 1:
-			model = torch.nn.parallel.DistributedDataParallel(model,
-															  device_ids=[args.local_rank],
-															  output_device=args.local_rank,
-															  find_unused_parameters=True)
+			model, *_ = models.distributed_data_parallel_and_autocast(model, args.local_rank, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+		elif args.device != 'cpu':
+			model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 		evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer)
 		return
 
@@ -645,13 +642,10 @@ def main(args):
 		assert epoch_skip_fraction < args.max_epoch_skip_fraction, \
 			f'args.iterations_per_epoch must not skip more than {args.max_epoch_skip_fraction:.1%} of each epoch'
 
-	if args.fp16:
-		model, optimizer = apex.amp.initialize(model, optimizer, opt_level= args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 	if args.world_size > 1:
-		model = torch.nn.parallel.DistributedDataParallel(model,
-														  device_ids=[args.local_rank],
-														  output_device=args.local_rank,
-														  find_unused_parameters=True)
+		model, optimizer = models.distributed_data_parallel_and_autocast(model, args.local_rank, optimizer, opt_level=args.fp16, keep_batchnorm_fp32=args.fp16_keep_batchnorm_fp32)
+	elif args.device != 'cpu':
+		model, optimizer = models.data_parallel_and_autocast(model, optimizer, opt_level=args.fp16, keep_batchnorm_fp32=args.fp16_keep_batchnorm_fp32)
 	if checkpoint and args.fp16 and checkpoint['amp_state_dict'] is not None:
 		apex.amp.load_state_dict(checkpoint['amp_state_dict'])
 

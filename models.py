@@ -702,6 +702,12 @@ def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, op
 	return model, optimizer
 
 
+def distributed_data_parallel_and_autocast(model, local_rank, optimizer = None, opt_level = None, **kwargs):
+	model, optimizer = apex.amp.initialize(model, optimizer, opt_level=opt_level, **kwargs)
+	model = torch.nn.parallel.DistributedDataParallel(model, device_ids = [local_rank], output_device = local_rank, find_unused_parameters = True)
+	return model, optimizer
+
+
 def silence_space_mask(log_probs, speech, blank_idx, space_idx, kernel_size = 101):
 	# major dilation
 	greedy_decoded = log_probs.max(dim = 1).indices
@@ -742,7 +748,7 @@ def sparse_topk_todense(saved, device = None):
 
 
 def master_module(model):
-	return model.module if isinstance(model, torch.nn.parallel.DistributedDataParallel) else model
+	return model.module if isinstance(model, (torch.nn.parallel.DistributedDataParallel, torch.nn.DataParallel,)) else model
 
 
 ########CONFIGS########
