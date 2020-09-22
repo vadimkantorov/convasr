@@ -230,8 +230,8 @@ def evaluate_model(
 			_print('errors', aggregated['errors']['distribution'])
 			cer = torch.FloatTensor([r['cer'] for r in transcript_by_label])
 			loss = torch.FloatTensor([r['loss'] for r in transcript_by_label])
-			_print('cer', metrics.quantiles(cer))
-			_print('loss', metrics.quantiles(loss))
+			_print('cer', metrics.quantiles(cer.tolist()))
+			_print('loss', metrics.quantiles(loss.tolist()))
 			_print(
 				f'{args.experiment_id} {val_dataset_name} {label.name}',
 				f'| epoch {epoch} iter {iteration}' if training else '',

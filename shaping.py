@@ -3,6 +3,9 @@ import torch
 class B(torch.Tensor):
 	pass
 
+class T(torch.Tensor):
+	pass
+
 class BCT(torch.Tensor):
 	pass
 
