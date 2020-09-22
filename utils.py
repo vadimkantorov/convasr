@@ -1,3 +1,5 @@
+import os
+import shutil
 import gc
 import sys
 import traceback
@@ -61,7 +63,7 @@ def compute_cuda_memory_stats(byte_scaler = 1024**3, devices = None):
 	return stats
 
 
-def compute_pss_memory_stats(byte_scaler = 1024**3):
+def compute_ram_memory_stats(byte_scaler =1024 ** 3):
 	stats = {}
 	process = psutil.Process()
 	children = process.children(recursive=True)
@@ -76,18 +78,29 @@ def compute_memory_fragmentation():
 	snapshot = torch.cuda.memory_snapshot()
 	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
 
+
 def open_maybe_gz(data_path, mode = 'r'):
 	return gzip.open(data_path, mode + 't') if data_path.endswith('.gz') else open(data_path, mode)
+
 
 def reset_cpu_threads(num_threads):
 	torch.set_num_threads(num_threads)
 	#os.environ['OMP_NUM_THREADS'] = str(num_threads)
 	#os.environ['MKL_NUM_THREADS'] = str(num_threads)
 
+
 def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed, numpy.random.seed
 							] + ([torch.cuda.manual_seed_all] if torch.cuda.is_available() else []):
 		set_random_seed(seed)
+
+
+def copy_tensorboard_dir_from_previous_checkpoint_if_exists(args, tensorboard_dir):
+	if len(args.checkpoint) > 0 and args.experiment_name and args.local_rank == 0:
+		tensorboard_dir_checkpoint = os.path.join(os.path.dirname(args.checkpoint[0]), 'tensorboard')
+		if os.path.exists(tensorboard_dir_checkpoint) and not os.path.exists(tensorboard_dir):
+			shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
+
 
 class OomHandler:
 	def __init__(self, max_retries = 0):
@@ -157,19 +170,19 @@ def enable_jit_fusion():
 
 def gather_tensor_shapes(tensor: torch.Tensor, world_size: int) -> typing.List[torch.Tensor]:
 	shape_tensor = torch.tensor(tensor.shape, dtype = torch.long, device = tensor.device)
-	shapes = [torch.zeros(len(tensor.shape), dtype = torch.long, device = tensor.device) for _ in range(world_size)]
+	shapes = torch.zeros([world_size, len(tensor.shape)], dtype = torch.long, device = tensor.device).unbind(0)
 	torch.distributed.all_gather(shapes, shape_tensor)
 	return shapes
 
 
 def gather_tensors(tensor: torch.Tensor, world_size: int) -> typing.List[torch.Tensor]:
 	shapes = gather_tensor_shapes(tensor, world_size)
-	max_shape = torch.cat([shape.unsqueeze(0) for shape in shapes], dim=0).max(dim=0).values
+	max_shape = torch.stack([shape for shape in shapes], dim=0).max(dim=0).values
 	padding = []
 	for i, dim in enumerate(max_shape):
 		padding += [0, dim.item() - tensor.size(i)]
 	padded_tensor = torch.nn.functional.pad(tensor, padding)
-	tensors = [torch.zeros_like(padded_tensor) for _ in range(world_size)]
+	tensors = torch.zeros([world_size, *padded_tensor.shape], dtype=padded_tensor.dtype, device=padded_tensor.device).unbind(0)
 	torch.distributed.all_gather(tensors, padded_tensor)
 	for i, shape in enumerate(shapes):
 		tensors[i] = tensors[i][list(map(lambda x: slice(x.item()), shape))]

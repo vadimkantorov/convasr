@@ -701,7 +701,9 @@ def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, op
 	return model, optimizer
 
 
-def distributed_data_parallel_and_autocast(model, local_rank, optimizer = None, opt_level = None, **kwargs):
+def distributed_data_parallel_and_autocast(model, local_rank, optimizer = None, opt_level = None, synchronize_bn = False, **kwargs):
+	if synchronize_bn:
+		model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 	model, optimizer = apex.amp.initialize(model, optimizer, opt_level=opt_level, **kwargs)
 	model = torch.nn.parallel.DistributedDataParallel(model, device_ids = [local_rank], output_device = local_rank, find_unused_parameters = True)
 	return model, optimizer

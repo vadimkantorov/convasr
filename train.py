@@ -538,7 +538,7 @@ def main(args):
 		if not args.adapt_bn:
 			model.fuse_conv_bn_eval()
 		if args.world_size > 1:
-			model, *_ = models.distributed_data_parallel_and_autocast(model, args.local_rank, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+			model, *_ = models.distributed_data_parallel_and_autocast(model, args.local_rank, opt_level = args.fp16, synchronize_bn = args.synchronize_bn, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 		elif args.device != 'cpu':
 			model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 		evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer)
@@ -651,10 +651,7 @@ def main(args):
 	model.train()
 
 	tensorboard_dir = os.path.join(args.experiment_dir, 'tensorboard')
-	if checkpoint and args.experiment_name and args.local_rank == 0:
-		tensorboard_dir_checkpoint = os.path.join(os.path.dirname(args.checkpoint[0]), 'tensorboard')
-		if os.path.exists(tensorboard_dir_checkpoint) and not os.path.exists(tensorboard_dir):
-				shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
+	utils.copy_tensorboard_dir_from_previous_checkpoint_if_exists(args, tensorboard_dir)
 
 	if args.world_size > 1:
 		if args.local_rank == 0:
@@ -1002,6 +999,7 @@ if __name__ == '__main__':
 	parser.add_argument('--backend', default = 'nccl', help = 'processes communication backend')
 	parser.add_argument('--master-ip', default = '0.0.0.0', help = 'DDP MASTER_ADDR')
 	parser.add_argument('--master-port', default = '12345', help = 'DDP MASTER_PORT')
+	parser.add_argument('--synchronize-bn', action = 'store_true', help = 'replace all instance of torch.nn.modules.batchnorm._BatchNorm to SyncBatchNorm')
 
 	args = parser.parse_args()
 
