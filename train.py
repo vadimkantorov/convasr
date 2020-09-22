@@ -362,11 +362,7 @@ def main(args):
 		log_mode = 'w'
 
 	if args.log_json:
-		if args.world_size > 1:
-			json_file = f'log.node{args.rank}.json'
-		else:
-			json_file = 'log.json'
-		args.log_json = os.path.join(args.experiment_dir, json_file)
+		args.log_json = os.path.join(args.experiment_dir, f'log.node{args.rank}.json')
 
 	log_path = os.path.join(args.experiment_dir, 'log.txt')
 	if args.rank == 0:

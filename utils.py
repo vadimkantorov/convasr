@@ -170,7 +170,7 @@ def enable_jit_fusion():
 
 def gather_tensor_shapes(tensor: torch.Tensor, world_size: int) -> typing.List[torch.Tensor]:
 	shape_tensor = torch.tensor(tensor.shape, dtype = torch.long, device = tensor.device)
-	shapes = torch.zeros([world_size, len(tensor.shape)], dtype = torch.long, device = tensor.device).unbind(0)
+	shapes = list(torch.zeros([world_size, len(tensor.shape)], dtype = torch.long, device = tensor.device).unbind(0))
 	torch.distributed.all_gather(shapes, shape_tensor)
 	return shapes
 
@@ -182,7 +182,7 @@ def gather_tensors(tensor: torch.Tensor, world_size: int) -> typing.List[torch.T
 	for i, dim in enumerate(max_shape):
 		padding += [0, dim.item() - tensor.size(i)]
 	padded_tensor = torch.nn.functional.pad(tensor, padding)
-	tensors = torch.zeros([world_size, *padded_tensor.shape], dtype=padded_tensor.dtype, device=padded_tensor.device).unbind(0)
+	tensors = list(torch.zeros([world_size, *padded_tensor.shape], dtype=padded_tensor.dtype, device=padded_tensor.device).unbind(0))
 	torch.distributed.all_gather(tensors, padded_tensor)
 	for i, shape in enumerate(shapes):
 		tensors[i] = tensors[i][list(map(lambda x: slice(x.item()), shape))]
