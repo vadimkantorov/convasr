@@ -10,6 +10,35 @@ import librosa
 import shaping
 import typing
 
+def select_speaker(signal : shaping.BT, kernel_size_smooth_signal : int, kernel_size_smooth_speaker : int, silence_absolute_threshold : float = 0.2, silence_relative_threshold : float = 0.5, eps : float = 1e-9) -> shaping.T:
+	padding = kernel_size_smooth_signal // 2
+	stride = 1
+	smoothed = F.max_pool1d(signal.abs().unsqueeze(1), kernel_size_smooth_signal, stride = stride, padding = padding).squeeze(1)
+	
+	silence_absolute = smoothed < silence_absolute_threshold
+	silence_relative = smoothed / (eps + smoothed.max(dim = -1, keepdim = True).values) < silence_relative_threshold
+	silence = silence_absolute | silence_relative
+	
+	diff = smoothed[0] - smoothed[1]
+	speaker_id = diff.sign()
+	
+
+	padding = kernel_size_smooth_speaker // 2
+	stride = 1
+	speaker_id = F.avg_pool1d(speaker_id.view(1, 1, -1), kernel_size = kernel_size_smooth_speaker, stride = stride, padding = padding).view(-1)
+
+	speaker_id = speaker_id.sign()
+
+	maxt = min(speaker_id.shape[-1], silence.shape[-1])
+	smoothed, diff, speaker_id, silence_absolute = smoothed[..., :maxt], diff[..., :maxt], speaker_id[..., :maxt], silence_absolute[..., :maxt]
+
+	#speaker_id = torch.where(silence.any(dim = 0), torch.tensor(0, device = signal.device, dtype = speaker_id.dtype), speaker_id)
+	
+	#speaker_id = torch.nn.functional.unfold(speaker_id[None, None, None, :].float(), kernel_size = (1, kernel_size), padding = (0, padding), stride = (1, stride)).mode(1).values.int()
+	#speaker_id_ = torch.nn.functional.unfold(, kernel_size = (1, kernel_size), padding = (0, padding), stride = (1, stride)).mode(1).values
+	
+	return speaker_id, silence, torch.cat([torch.stack((speaker_id * 0.5, diff, silence_absolute.any(dim = 0).float() * 0.5)), smoothed])
+
 class InputOutputTypeCast(nn.Module):
 	def __init__(self, model, dtype):
 		super().__init__()
@@ -710,6 +739,7 @@ def silence_space_mask(log_probs, speech, blank_idx, space_idx, kernel_size = 10
 
 
 def rle1d(tensor):
+	assert tensor.ndim == 1
 	starts = torch.cat(( torch.LongTensor([0], device = tensor.device), (tensor[1:] != tensor[:-1]).nonzero(as_tuple = False).add_(1).squeeze(1), torch.LongTensor([tensor.shape[-1]], device = tensor.device) ))
 	starts, lengths, values = starts[:-1], (starts[1:] - starts[:-1]), tensor[starts[:-1]]
 	return starts, lengths, values
