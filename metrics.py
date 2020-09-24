@@ -5,8 +5,6 @@ import json
 import functools
 import typing
 import Levenshtein
-import datasets
-import ru
 
 placeholder = '|'
 space = ' '
@@ -14,9 +12,6 @@ silence = placeholder + space
 
 replace_placeholder = lambda s, rep = '': s.replace(placeholder, rep)
 
-labels = {
-	'ru': datasets.Labels(ru)
-}
 
 class ErrorTagger:
 	typo_easy = 'typo_easy'
@@ -608,8 +603,15 @@ class Needleman:
 
 
 def cmd_analyze(hyp, ref, val_config, vocab, lang, detailed):
+	import datasets
+	import ru
+
+	labels = {
+		'ru': lambda: datasets.Labels(ru)
+	}
+
 	vocab = set(map(str.strip, open(vocab))) if os.path.exists(vocab) else set()
-	postprocess_transcript = labels[lang].postprocess_transcript if lang is not None else None
+	postprocess_transcript = labels[lang]().postprocess_transcript if lang is not None else None
 	if os.path.exists(val_config):
 		val_config = json.load(open(val_config))
 		analyzer_configs = val_config['error_analyzer']
