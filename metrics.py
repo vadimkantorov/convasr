@@ -603,15 +603,17 @@ class Needleman:
 
 
 def cmd_analyze(hyp, ref, val_config, vocab, lang, detailed):
-	import datasets
-	import ru
-
-	labels = {
-		'ru': lambda: datasets.Labels(ru)
-	}
-
 	vocab = set(map(str.strip, open(vocab))) if os.path.exists(vocab) else set()
-	postprocess_transcript = labels[lang]().postprocess_transcript if lang is not None else None
+	if lang is not None:
+		import datasets
+		import ru
+
+		labels = {
+			'ru': lambda: datasets.Labels(ru)
+		}
+		postprocess_transcript = labels[lang]().postprocess_transcript
+	else:
+		postprocess_transcript = False
 	if os.path.exists(val_config):
 		val_config = json.load(open(val_config))
 		analyzer_configs = val_config['error_analyzer']
