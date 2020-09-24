@@ -566,6 +566,11 @@ class LogFilterBankFrontend(nn.Module):
 
 	def forward(self, signal: shaping.BT, mask: shaping.BT = None) -> shaping.BCT:
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
+
+		#signal_max = signal.abs().max(dim=-1, keepdim=True).values.item()
+		#signal_mean = signal.abs().mean(dim=-1, keepdim=True).values.item()
+		#signal_min = signal.abs().min(dim=-1, keepdim=True).values.item()
+
 		signal = normalize_signal(signal) if self.normalize_signal else signal
 		signal = apply_dither(signal, self.dither0)
 		signal = torch.cat([signal[..., :1], signal[..., 1:] -
@@ -640,8 +645,32 @@ def compute_capacity(model, scale = 1):
 	return sum(map(torch.numel, model.parameters())) / scale
 
 
+def percentile(t: torch.tensor, q: float):
+	"""
+	Return the ``q``-th percentile of the flattened input tensor's data.
+
+	CAUTION:
+	 * Needs PyTorch >= 1.1.0, as ``torch.kthvalue()`` is used.
+	 * Values are not interpolated, which corresponds to
+	   ``numpy.percentile(..., interpolation="nearest")``.
+
+	:param t: Input tensor.
+	:param q: Percentile to compute, which must be between 0 and 100 inclusive.
+	:return: Resulting value (scalar).
+	"""
+	# Note that ``kthvalue()`` works one-based, i.e. the first sorted value
+	# indeed corresponds to k=1, not k=0! Use float(q) instead of q directly,
+	# so that ``round()`` returns an integer, even if q is a np.float32.
+	k = 1 + round(.01 * float(q) * (t.numel() - 1))
+	result = t.view(-1).kthvalue(k).values.item()
+	return result
+
+
 def normalize_signal(signal, dim = -1, eps = 1e-5):
-	return signal / (signal.abs().max(dim = dim, keepdim = True).values + eps) if signal.numel() > 0 else signal
+	signal_max = signal.abs().max(dim = dim, keepdim = True).values + eps
+	signal_90percentile = percentile(signal.abs(), 90) + eps
+	multiplier = 1.0
+	return signal / (signal_max * multiplier) if signal.numel() > 0 else signal
 
 
 class MaskedInstanceNorm1d(nn.InstanceNorm1d):
