@@ -834,8 +834,8 @@ if __name__ == '__main__':
 	parser.add_argument('--train-data-mixing', type = float, nargs = '*')
 	parser.add_argument('--val-data-path', nargs = '*', default = [])
 	parser.add_argument('--num-workers', type = int, default = 16, help = 'num workers per DDP process')
-	parser.add_argument('--train-batch-size', type = int, default = 256, help = 'batch size per DDP process')
-	parser.add_argument('--val-batch-size', type = int, default = 256, help = 'batch size per DDP process')
+	parser.add_argument('--train-batch-size', type = int, default = 256)
+	parser.add_argument('--val-batch-size', type = int, default = 256)
 	parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
 	parser.add_argument(
 		'--checkpoint',
@@ -1002,6 +1002,8 @@ if __name__ == '__main__':
 	try:
 		if args.world_size > 1:
 			processes = []
+			args.train_batch_size = int(args.train_batch_size / args.world_size)
+			args.val_batch_size = int(args.val_batch_size / args.world_size)
 			for rank in args.local_ranks:
 				args.local_rank = rank
 				args.rank = args.start_rank + rank
