@@ -1,5 +1,8 @@
 import torch
 
+class T(torch.Tensor):
+	pass
+
 class B(torch.Tensor):
 	pass
 

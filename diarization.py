@@ -16,9 +16,11 @@ args = parser.parse_args()
 
 os.makedirs(args.output_path, exist_ok = True)
 
-pipeline = torch.hub.load('pyannote/pyannote-audio', 'dia', device = args.device)#, batch_size = 8)
+#pipeline = torch.hub.load('pyannote/pyannote-audio', 'dia', device = args.device)#, batch_size = 8)
 
 audio_source = ([(args.input_path, audio_name) for audio_name in os.listdir(args.input_path)] if os.path.isdir(args.input_path) else [(os.path.dirname(args.input_path), os.path.basename(args.input_path))])
+
+max_duration = 60
 
 for i, (input_path, audio_name) in enumerate(audio_source):
 	if i > 0:
@@ -30,12 +32,13 @@ for i, (input_path, audio_name) in enumerate(audio_source):
 	transcript_path = os.path.join(args.output_path, audio_name + '.json')
 	html_path = os.path.join(args.output_path, audio_name + '.html')
 
-	signal, sample_rate = audio.read_audio(audio_path.replace('mono', 'stereo').replace('.mp3.wav', '.mp3'), sample_rate = args.sample_rate, mono = False, dtype = 'float32')
-	speaker_ref, silence_ref, smoothed_ref = models.select_speaker(signal.to(args.device), silence_absolute_threshold = 0.05, silence_relative_threshold = 0.0, kernel_size_smooth_signal = 128, kernel_size_smooth_speaker = 4096)
-	audio.write_audio(transcript_path + '.wav', torch.cat([signal[:, :speaker_ref.shape[-1]], smoothed_ref[:, :signal.shape[-1]].to(signal)]), sample_rate, mono = False)
+	signal, sample_rate = audio.read_audio(audio_path.replace('mono', 'stereo').replace('.mp3.wav', '.mp3'), sample_rate = args.sample_rate, mono = False, dtype = 'float32', duration = max_duration)
+	speaker_id_ref, speaker_id_ref_ = models.select_speaker(signal.to(args.device), silence_absolute_threshold = 0.2, silence_relative_threshold = 0.0, kernel_size_smooth_signal = 128, kernel_size_smooth_speaker = 4096, kernel_size_smooth_silence = 4096)
+
+	audio.write_audio(transcript_path + '.wav', torch.cat([signal[..., :speaker_id_ref.shape[-1]], models.convert_speaker_id(speaker_id_ref[..., :signal.shape[-1]], to_bipole = True).unsqueeze(0).cpu() * 0.5, speaker_id_ref_[..., :signal.shape[-1]].cpu() * 0.5]), sample_rate, mono = False)
 	print(transcript_path + '.wav')
 
-	transcript_ref = [dict(audio_path = audio_path, begin = float(begin), end = float(begin) + float(duration), speaker_name = str(int(speaker)), speaker = int(speaker)) for begin, duration, speaker in zip(*models.rle1d(speaker_ref.cpu()))]
+	transcript_ref = [dict(audio_path = audio_path, begin = float(begin) / sample_rate, end = (float(begin) + float(duration)) / sample_rate, speaker_name = str(int(speaker)), speaker = int(speaker)) for begin, duration, speaker in zip(*models.rle1d(speaker_id_ref.cpu()))]
 	json.dump(transcript_ref, open(transcript_path, 'w'), indent = 2, sort_keys = True)
 	
 	#diarization = pipeline(dict(audio = audio_path))
@@ -44,4 +47,4 @@ for i, (input_path, audio_name) in enumerate(audio_source):
 	#for t in transcript:
 	#	t['speaker'] = speaker_names.index(t['speaker_name'])
 	#json.dump(transcript, open(transcript_path, 'w'), indent = 2, sort_keys = True)
-	vis.transcript(html_path, sample_rate = args.sample_rate, mono = True, transcript = transcript_path)
+	vis.transcript(html_path, sample_rate = args.sample_rate, mono = True, transcript = transcript_path, duration = max_duration)
