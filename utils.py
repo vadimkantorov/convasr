@@ -112,6 +112,7 @@ class OomHandler:
 
 	def try_recover(self, model_parameters = [], _print = print):
 		exc_type, exc_value, exc_traceback = sys.exc_info()
+		# TODO OOM restore doestn work in DDP setup, reason: https://github.com/pytorch/pytorch/issues/18853#issuecomment-698386652
 		if 'out of memory' in str(exc_value):
 			self.retries += 1
 			if self.retries > self.max_retries:
