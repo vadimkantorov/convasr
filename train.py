@@ -335,7 +335,7 @@ def main(args):
 	args.experiment_id = args.experiment_id.format(
 		model = args.model,
 		frontend = args.frontend,
-		train_batch_size = args.train_batch_size,
+		train_batch_size = args.train_batch_size * args.world_size,
 		optimizer = args.optimizer,
 		lr = args.lr,
 		weight_decay = args.weight_decay,
