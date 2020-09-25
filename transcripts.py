@@ -37,7 +37,7 @@ def take_between(transcript, ind_last_taken, t, first, last, sort_by_time = True
 	return ind_last_taken[-1], list(transcript)
 
 
-def segment(transcript, max_segment_seconds):
+def segment(transcript, max_segment_seconds, break_on_speaker_change = True, break_on_channel_change = True):
 	ind_last_taken = -1
 	if isinstance(max_segment_seconds, list):
 		for j in range(len(max_segment_seconds)):
@@ -48,8 +48,8 @@ def segment(transcript, max_segment_seconds):
 		for j, t in enumerate(transcript):
 			first, last = ind_last_taken == -1, j == len(transcript) - 1
 			if last or (t['end'] - transcript[ind_last_taken + 1]['begin'] > max_segment_seconds) \
-                                or (j >= 1 and t['speaker'] != transcript[j - 1]['speaker']) \
-                                or (j >= 1 and t['channel'] != transcript[j - 1]['channel']):
+                                or (break_on_speaker_change and j >= 1 and t['speaker'] != transcript[j - 1]['speaker']) \
+                                or (break_on_channel_change and j >= 1 and t['channel'] != transcript[j - 1]['channel']):
 				ind_last_taken, transcript_segment = take_between(transcript, ind_last_taken, t, first, last, sort_by_time=False)
 				if transcript_segment:
 					yield transcript_segment

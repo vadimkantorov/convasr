@@ -10,52 +10,6 @@ import librosa
 import shaping
 import typing
 
-def convert_speaker_id(speaker_id, to_bipole = False, from_bipole = False):
-	k, b = (1 - 3/2, 3 / 2) if from_bipole else (-2, 3) if to_bipole else (None, None)
-	return (speaker_id != 0) * (speaker_id * k + b)
-
-def resize_to_min_size_(*tensors, dim = -1):
-	tensor_dim_slice = lambda tensor, dim, dim_slice: tensor[(dim if dim >= 0 else dim + tensor.dim()) * (slice(None), ) + (dim_slice, )]
-	size = min(t.shape[dim] for t in tensors)
-	for t in tensors:
-		if t.shape[dim] > size:
-			reshaped = tensor_dim_slice(t, dim, slice(size))
-			t.set_(t.storage(), 0, reshaped.size(), reshaped.stride())
-
-def select_speaker(signal : shaping.BT, kernel_size_smooth_silence : int, kernel_size_smooth_signal : int, kernel_size_smooth_speaker : int, silence_absolute_threshold : float = 0.2, silence_relative_threshold : float = 0.5, eps : float = 1e-9) -> shaping.T:
-	assert len(signal) == 2
-
-	padding = kernel_size_smooth_signal // 2
-	stride = 1
-	smoothed = F.max_pool1d(signal.abs().unsqueeze(1), kernel_size_smooth_signal, stride = stride, padding = padding).squeeze(1)
-
-	padding = kernel_size_smooth_silence // 2
-	stride = 1
-	smoothed_for_silence = F.max_pool1d(signal.abs().unsqueeze(1), kernel_size_smooth_silence, stride = stride, padding = padding).squeeze(1)
-	smoothed_for_silence = -F.max_pool1d(-smoothed_for_silence.unsqueeze(1), kernel_size_smooth_silence, stride = stride, padding = padding).squeeze(1)
-	
-	silence_absolute = smoothed_for_silence < silence_absolute_threshold
-	#silence_relative = smoothed / (eps + smoothed.max(dim = -1, keepdim = True).values) < silence_relative_threshold
-	#silence = silence_absolute | silence_relative
-	silence = silence_absolute
-	
-	diff = smoothed[0] - smoothed[1]
-	speaker_id = diff.sign()
-	
-	padding = kernel_size_smooth_speaker // 2
-	stride = 1
-	speaker_id = F.avg_pool1d(speaker_id.view(1, 1, -1), kernel_size = kernel_size_smooth_speaker, stride = stride, padding = padding).view(-1).sign()
-
-	resize_to_min_size_(silence, speaker_id, dim = -1)
-	
-	silence_flat = silence.all(dim = 0)
-	speaker_id_flat = convert_speaker_id(speaker_id, from_bipole = True) * (~silence_flat)
-
-	speaker_id = (~silence) * (speaker_id.unsqueeze(0) == torch.tensor([1, -1], dtype = speaker_id.dtype, device = speaker_id.device).unsqueeze(1))
-	return speaker_id_flat, torch.cat([silence_flat.unsqueeze(0), speaker_id])
-
-	#speaker_id = torch.where(silence.any(dim = 0), torch.tensor(0, device = signal.device, dtype = speaker_id.dtype), speaker_id)
-	#return speaker_id, silence_flat, torch.stack((speaker_id * 0.5, diff, smoothed_for_silence[0], smoothed_for_silence[1] , silence_flat.float() * 0.5))
 
 class InputOutputTypeCast(nn.Module):
 	def __init__(self, model, dtype):

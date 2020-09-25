@@ -43,20 +43,31 @@ def speaker_barcode_img(transcript, begin, end, colors = channel_colors):
 	uri_speaker_barcode = base64.b64encode(buf.getvalue()).decode()
 	return f'<img onclick="onclick_img(event)" src="data:image/jpeg;base64,{uri_speaker_barcode}" style="width:100%"></img>'
 
-def speaker_barcode_svg(transcript, begin, end, colors = channel_colors):
-	assert begin == 0
-	header = '<div style="width: 100%; height: 50px"><svg viewbox="0 0 1 1" style="width:100%; height:100%" preserveAspectRatio="none">'
-	body = '\n'.join('<rect x="{x}" width="{width}" height="1" style="fill:{color}" onclick="onclick_svg(event)"><title>speaker{speaker}: {begin:.2f} - {end:.2f}</title></rect>'.format(x = t['begin'] / end, width = (t['end'] - t['begin']) / end, color = channel_colors[t['speaker']], **t) for t in transcript) 
-	footer = '</svg></div>'
-	return header + body + footer
+def speaker_barcode_svg(transcript, begin, end, colors = channel_colors, max_segment_seconds = 60):
+	html = ''
+	segments = transcripts.segment(transcript, max_segment_seconds = max_segment_seconds, break_on_speaker_change = False, break_on_channel_change = False)
+	for segment in segments:
+		summary = transcripts.summary(segment)
+		duration = transcripts.compute_duration(summary)
+		if duration <= max_segment_seconds:
+			duration = max_segment_seconds
+		header = '<div style="width: 100%; height: 15px; border: 1px black solid"><svg viewbox="0 0 1 1" style="width:100%; height:100%" preserveAspectRatio="none">'
+		body = '\n'.join('<rect data-begin="{begin}" data-end="{end}" x="{x}" width="{width}" height="1" style="fill:{color}" onclick="onclick_svg(event)"><title>speaker{speaker} | {begin:.2f} - {end:.2f} [{duration:.2f}]</title></rect>'.format(x = (t['begin'] - summary['begin']) / duration, width = (t['end'] - t['begin']) / duration, color = channel_colors[t['speaker']], duration = transcripts.compute_duration(t), **t) for t in transcript) 
+		footer = '</svg></div>'
+		html += header + body + footer
+	return html
 
-def audio_data_uri(audio_path, sample_rate = None):
+def audio_data_uri(audio_path, sample_rate = None, audio_backend = 'scipy', audio_format = 'wav'):
+	data_uri = lambda audio_format, audio_bytes: f'data:audio/{audio_format};base64,' + base64.b64encode(audio_bytes).decode()
+	
 	if isinstance(audio_path, str):
-		wav_bytes = open(audio_path, 'rb').read()
+		assert audio_path.endswith('.wav')
+		audio_bytes, audio_format = open(audio_path, 'rb').read(), 'wav'
 	else:
-		wav_bytes = audio.write_audio(io.BytesIO(), audio_path, sample_rate).getvalue()
+		audio_bytes = audio.write_audio(io.BytesIO(), audio_path, sample_rate, backend = audio_backend, format = audio_format).getvalue()
+		
+	return data_uri(audio_format = audio_format, audio_bytes = audio_bytes)
 
-	return 'data:audio/wav;base64,' + base64.b64encode(wav_bytes).decode()
 
 def label(output_path, transcript, info, page_size, prefix):
 	if isinstance(transcript, str):
@@ -213,9 +224,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 		function onclick_svg(evt)
 		{
 			const rect = evt.target;
-			const svg = rect.parentElement;
-			const x = rect.x.baseVal.value, width = rect.width.baseVal.value; 
-			play(0, x, x + width, true);
+			play(0, parseFloat(rect.dataset.begin), parseFloat(rect.dataset.end));
 		}
 		
 		function subtitle(segments, time, channel)

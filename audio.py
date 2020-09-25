@@ -24,6 +24,7 @@ def read_audio(
         raw_num_channels=None,
 ):
 	assert dtype in ['int16', 'float32']
+	assert backend in [None, 'scipy', 'soundfile', 'ffmpeg', 'sox']
 
 	try:
 		if audio_path is None or audio_path.endswith('.raw'):
@@ -123,11 +124,23 @@ def read_audio(
 	return signal, sample_rate_
 
 
-def write_audio(audio_path, signal, sample_rate, mono = False):
-	assert signal.dtype is torch.float32
-	signal = signal if not mono else signal.mean(dim = 0, keepdim = True)
-	scipy.io.wavfile.write(audio_path, sample_rate, f2s_numpy(signal.t().numpy()))
-	return audio_path
+def write_audio(audio_path, signal, sample_rate, mono = False, backend = None, format = 'wav'):
+	assert backend in [None, 'scipy', 'soundfile']
+	assert signal.dtype == torch.float32 or len(signal) == 1 or (not mono)
+
+	signal = signal if (not mono or len(signal) == 1) else signal.mean(dim = 0, keepdim = True)
+	
+	if backend == 'scipy' or (backend is None and (not audio_path or audio_path.endswith('.wav'))):
+		assert signal.dtype == torch.float32
+		scipy.io.wavfile.write(audio_path, sample_rate, f2s_numpy(signal.t().numpy()))
+		return audio_path
+	
+	elif backend == 'soundfile':
+		assert not isinstance(audio_path, str) or audio_path.endswith('.' + format)
+		assert signal.dtype == torch.float32 or signal.dtype == torch.int16
+		subtype = 'FLOAT' if signal.dtype == torch.float32 else 'PCM_16'
+		soundfile.write(audio_path, signal.numpy(), endian = 'LITTLE', samplerate = sample_rate, subtype = subtype, format = format.upper()) 
+		return audio_path
 
 
 def resample(signal, sample_rate_, sample_rate):
