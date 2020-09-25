@@ -1,5 +1,6 @@
 import torch
 import shaping
+import typing
 
 class GreedyDecoder:
 	def decode(self, log_probs : shaping.BCt, output_lengths : typing.Optional[shaping.B] = None, K = 1):

@@ -12,6 +12,7 @@ silence = placeholder + space
 
 replace_placeholder = lambda s, rep = '': s.replace(placeholder, rep)
 
+
 class ErrorTagger:
 	typo_easy = 'typo_easy'
 	typo_hard = 'typo_hard'
@@ -87,7 +88,13 @@ class ErrorAnalyzer:
 			keys.extend([c + sep + k for k in keys_with_number_vals(analyzed[0][c])])
 
 		stats = {k: nanmean(analyzed, k, sep = sep) for k in keys}
-		
+		default_config_prefix = 'default' + sep
+		default_stats = {}
+		for name, value in stats.items():
+			if name[:len(default_config_prefix)] == default_config_prefix:
+				default_stats[name[len(default_config_prefix):]] = value
+		stats.update(default_stats)
+
 		error_chars, error_words = collections.defaultdict(int), []
 		for a in analyzed:
 			for w in a.get('alignment', []):
@@ -99,8 +106,8 @@ class ErrorAnalyzer:
 		stats['errors'] = dict(distribution = dict(collections.OrderedDict(sorted(error_chars.items()))), words = error_words)
 		return stats
 
-	@staticmethod
 	def filter_words(
+		self,
 		word_alignment,
 		word_include_tags = [],
 		word_exclude_tags = [],
@@ -122,8 +129,7 @@ class ErrorAnalyzer:
 			res.append(w)
 		return res
 
-	@staticmethod
-	def compute_wordwise_metrics(filtered_alignment : typing.List[dict]) -> dict:
+	def compute_wordwise_metrics(self, filtered_alignment : typing.List[dict]) -> dict:
 		num_words = len(filtered_alignment)
 		num_words_ok = sum(ErrorTagger.ok in w['error_tags'] for w in filtered_alignment)
 		num_words_missing = sum(ErrorTagger.missing in w['error_tags'] for w in filtered_alignment)
@@ -134,17 +140,16 @@ class ErrorAnalyzer:
 			num_words_missing = num_words_missing, 
 
 			mer_wordwise = num_words_missing / num_words if num_words != 0 else 0,
-			wer_wordwise = num_words_ok / num_words if num_words != 0 else 0,
+			wer_wordwise = 1.0 - num_words_ok / num_words if num_words != 0 else 0,
 			cer_wordwise = sum(w['cer'] for w in filtered_alignment) / num_words if num_words != 0 else 0
 		)
 
-	@staticmethod
-	def compute_pseudo_metrics(word_alignment : typing.List[dict], filtered_alignment : typing.List[dict], collapse_repeat : bool = False, phonetic_replace_groups: typing.List[str] = [], **kwargs) -> dict:
+	def compute_pseudo_metrics(self, word_alignment : typing.List[dict], filtered_alignment : typing.List[dict], postprocess_transcript : typing.Optional[typing.Callable[..., str]] = None, **kwargs) -> dict:
 		'''Corrects FILTERED words, i.e. computes what would metrics be if the FILTERED words are replaced by ground truth'''
-		postprocess_transcript_reified = functools.partial(postprocess_transcript, collapse_repeat = collapse_repeat, phonetic_replace_groups = phonetic_replace_groups)
+
 		# TODO: use sets?
 		hyp_pseudo, ref_pseudo = space.join(w['ref'] if w in filtered_alignment else w['hyp'] for w in word_alignment), space.join(w['ref'] for w in word_alignment)
-		hyp_pseudo, ref_pseudo = map(postprocess_transcript_reified, [hyp_pseudo, ref_pseudo])
+		hyp_pseudo, ref_pseudo = map(postprocess_transcript, [hyp_pseudo, ref_pseudo])
 		cer_pseudo, wer_pseudo = cer(hyp = hyp_pseudo, ref = ref_pseudo), wer(hyp = hyp_pseudo, ref = ref_pseudo)
 		
 		return dict(
@@ -152,21 +157,19 @@ class ErrorAnalyzer:
 			wer_pseudo = wer_pseudo
 		)
 
-	@staticmethod
-	def compute_filtered_metrics(word_alignment : typing.List[dict], filtered_alignment : typing.List[dict], collapse_repeat : bool = False, phonetic_replace_groups: typing.List[str] = [], **kwargs) -> dict:
+	def compute_filtered_metrics(self, word_alignment : typing.List[dict], filtered_alignment : typing.List[dict], postprocess_transcript : typing.Optional[typing.Callable[..., str]], **kwargs) -> dict:
 		'''Corrects NOT FILTERED words, i.e. computes what would metrics be if the NOT FILTERED words are replaced by ground truth'''
 		# TODO: use sets?
-		postprocess_transcript_reified = functools.partial(postprocess_transcript, collapse_repeat = collapse_repeat, phonetic_replace_groups = phonetic_replace_groups)
+
 		hyp_filtered, ref_filtered = space.join(w['hyp'] if w in filtered_alignment else w['ref'] for w in word_alignment), space.join(w['ref'] for w in word_alignment)
-		hyp_filtered, ref_filtered = map(postprocess_transcript_reified, [hyp_filtered, ref_filtered])
+		hyp_filtered, ref_filtered = map(postprocess_transcript, [hyp_filtered, ref_filtered])
 		
 		return dict(
 			cer_filtered = cer(hyp = hyp_filtered, ref = ref_filtered), 
 			wer_filtered = wer(hyp = hyp_filtered, ref = ref_filtered)
 		)
 
-	@staticmethod
-	def compute_vocabness_metrics(word_alignment : typing.List[dict], filtered_alignment : typing.List[dict], **kwargs) -> dict:
+	def compute_vocabness_metrics(self, word_alignment : typing.List[dict], filtered_alignment : typing.List[dict], postprocess_transcript : typing.Optional[typing.Callable[..., str]], **kwargs) -> dict:
 		num_words = len(filtered_alignment)
 		hyp_vocabness, ref_vocabness = [sum(self.word_tagger.vocab_hit in w[k] for w in filtered_alignment) / num_words if num_words != 0 else 0 for k in ['hyp_tags', 'ref_tags']]
 		return dict(
@@ -216,11 +219,14 @@ class ErrorAnalyzer:
 			res['char_stats'] = char_stats
 			
 			for config_name, config in self.configs.items():
+				postprocess_transcript_reified = functools.partial(postprocess_transcript,
+																   collapse_repeat = config.get('collapse_repeat', False),
+																   phonetic_replace_groups = config.get('phonetic_replace_groups', []))
 				filtered_alignment = self.filter_words(word_alignment, **config)
 				res[config_name] = self.compute_wordwise_metrics(filtered_alignment = filtered_alignment)
 				
 				for m in [self.compute_filtered_metrics, self.compute_pseudo_metrics, self.compute_vocabness_metrics]:
-					res[config_name].update(m(word_alignment, filtered_alignment, **config))
+					res[config_name].update(m(word_alignment, filtered_alignment, postprocess_transcript_reified, **config))
 		
 		return res
 
@@ -229,8 +235,8 @@ def nanmean(list_of_dicts : typing.List[dict], key : str, sep : str = '.'):
 	assert seps < 2
 
 	if seps == 1:
-		prefix, key = key.split('.')
-		vals = [d[key] for dd in list_of_dicts for d in [dd[prefix]] if k in d if math.isfinite(d[key])]
+		prefix, key = key.split(sep)
+		vals = [d[key] for dd in list_of_dicts for d in [dd[prefix]] if key in d if math.isfinite(d[key])]
 	else:
 		vals = [d[key] for d in list_of_dicts if key in d and math.isfinite(d[key])]
 	
@@ -291,14 +297,14 @@ def align_words(_hyp_ : str, _ref_: str, word_tagger : WordTagger = WordTagger()
 					ref[i] = placeholder
 
 				if k != j:
-					words.append((hyp[k:j], ref[k:j]))
+					words.append((''.join(hyp[k:j]), ''.join(ref[k:j])))
 				
 				k = l
 
 		return words
 
 	def prefer_replacement(*, hyp, ref):
-		hyp, ref = hyp[:], ref[:]
+		hyp, ref = list(hyp), list(ref)
 		for k in range(len(ref) - 1):
 			if ref[k] == placeholder and hyp[k] != placeholder and ref[k + 1] != placeholder and hyp[k + 1] == placeholder:
 				ref[k] = ref[k + 1]
@@ -307,7 +313,7 @@ def align_words(_hyp_ : str, _ref_: str, word_tagger : WordTagger = WordTagger()
 				hyp[k] = hyp[k + 1]
 				hyp[k + 1] = placeholder
 		hyp, ref = zip(*[(ch, cr) for ch, cr in zip(hyp, ref) if not (cr == ch == placeholder)])
-		return hyp, ref
+		return ''.join(hyp), ''.join(ref)
 
 	hyp_ref_word_pairs = split_by_space_into_word_pairs(_hyp_ = _hyp_, _ref_ = _ref_, copy_space = False)
 	
@@ -596,6 +602,39 @@ class Needleman:
 		return self.backtrack()
 
 
+def cmd_analyze(hyp, ref, val_config, vocab, lang, detailed):
+	vocab = set(map(str.strip, open(vocab))) if os.path.exists(vocab) else set()
+	if lang is not None:
+		import datasets
+		import ru
+
+		labels = {
+			'ru': lambda: datasets.Labels(ru)
+		}
+		postprocess_transcript = labels[lang]().postprocess_transcript
+	else:
+		postprocess_transcript = False
+	if os.path.exists(val_config):
+		val_config = json.load(open(val_config))
+		analyzer_configs = val_config['error_analyzer']
+		word_tags = val_config['word_tags']
+	else:
+		analyzer_configs = {}
+		word_tags = {}
+
+	word_tagger = WordTagger(word_tags = word_tags, vocab = vocab)
+	error_tagger = ErrorTagger()
+	analyzer = ErrorAnalyzer(word_tagger = word_tagger, error_tagger = error_tagger, configs = analyzer_configs)
+	report = analyzer.analyze(hyp = hyp, ref = ref, postprocess_transcript = postprocess_transcript, detailed=detailed)
+	print(json.dumps(report, ensure_ascii = False, indent = 2, sort_keys = True))
+
+
+def cmd_align(hyp, ref):
+	alignment = align_strings(hyp=hyp, ref=ref)
+	print('\n'.join(f'{k}: {v}' for k, v in zip(['hyp', 'ref'], alignment)))
+	print('\n'.join(map(str, align_words(alignment))))
+
+
 if __name__ == '__main__':
 	import argparse
 	parser = argparse.ArgumentParser()
@@ -605,31 +644,15 @@ if __name__ == '__main__':
 	cmd.add_argument('--hyp', required = True)
 	cmd.add_argument('--ref', required = True)
 	cmd.add_argument('--lang')
+	cmd.add_argument('--detailed', action='store_true')
 	cmd.add_argument('--vocab', default = 'data/vocab_word_list.txt')
 	cmd.add_argument('--val-config', default = 'configs/ru_val_config.json')
-	cmd.set_defaults(
-		func = lambda hyp,
-		ref, val_config, vocab,
-		lang: print(
-			json.dumps(
-				ErrorAnalyzer(**(dict(configs = json.load(open(val_config))['error_analyzer'], word_tagger = WordTagger(word_tags = json.load(open(val_config))['word_tags'], vocab = set(map(str.strip, open(vocab))) if os.path.exists(vocab) else set())) if os.path.exists(val_config) else {})).analyze(hyp = hyp, ref = ref, postprocess_transcript = __import__('datasets').Labels(__import__('datasets').Language(lang)).postprocess_transcript if args.lang is not None else None, detailed = True),
-				ensure_ascii = False,
-				indent = 2,
-				sort_keys = True
-			)
-		)
-	)
+	cmd.set_defaults(func=cmd_analyze)
 
 	cmd = subparsers.add_parser('align')
 	cmd.add_argument('--hyp', required = True)
 	cmd.add_argument('--ref', required = True)
-	cmd.set_defaults(
-		func = lambda hyp,
-		ref, break_ref: (
-			print('\n'.join(f'{k}: {v}' for k, v in zip(['hyp', 'ref'], align_strings(hyp = hyp, ref = ref)))),
-			print('\n'.join(map(str, align_words(*align_strings(hyp = hyp, ref = ref)))))
-		)
-	)
+	cmd.set_defaults(func=cmd_align)
 
 	args = parser.parse_args()
 	args = vars(parser.parse_args())
