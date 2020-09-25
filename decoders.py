@@ -1,8 +1,10 @@
 import torch
-
+import shaping
+import typing
 
 class GreedyDecoder:
-	def decode(self, log_probs, output_lengths = None, K = 1):
+	def decode(self, log_probs : shaping.BCt, output_lengths : typing.Optional[shaping.B] = None, K = 1):
+		# returns list of lists B x l    # TODO: (B x H x l) 
 		return [
 			l[... if K > 1 else 0, :o].tolist() for o,
 			l in zip(

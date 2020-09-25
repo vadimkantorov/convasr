@@ -124,7 +124,7 @@ def read_audio(
 
 
 def write_audio(audio_path, signal, sample_rate, mono = False):
-	assert signal.dtype is torch.float32
+	assert signal.dtype == torch.float32
 	signal = signal if not mono else signal.mean(dim = 0, keepdim = True)
 	scipy.io.wavfile.write(audio_path, sample_rate, f2s_numpy(signal.t().numpy()))
 	return audio_path
