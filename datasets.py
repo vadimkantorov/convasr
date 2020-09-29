@@ -83,7 +83,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		exclude = set(exclude)
 
 		def read_transcript(data_path):
-			assert os.path.exists(data_path)
+			assert os.path.exists(data_path), f'transript not found {data_path}'
 			if data_path.endswith('.json') or data_path.endswith('.json.gz'):
 				return json.load(utils.open_maybe_gz(data_path))
 			if os.path.exists(data_path + '.json'):

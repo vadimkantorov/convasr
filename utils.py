@@ -13,11 +13,11 @@ import typing
 import logging.handlers
 import torch.distributed
 
-def get_root_logger_print():
+def get_root_logger_print(level = logging.INFO):
 	logger = logging.getLogger()
-	return (lambda *args: logger.info(' '.join(map(str, args))))
+	return (lambda *args: logger.log(level, ' '.join(map(str, args))))
 
-def set_up_root_logger(log_file_path = None, mode = 'a', max_bytes = 1_000_000, fmt = '%(asctime)s [%(levelname)s]: %(message)s', level=logging.INFO):
+def set_up_root_logger(log_file_path = None, mode = 'a', max_bytes = 1_000_000, fmt = '%(asctime)s [%(levelname)s]: %(message)s', level = logging.INFO):
 	logger = logging.getLogger()
 	logger.setLevel(level)
 	

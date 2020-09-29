@@ -15,6 +15,7 @@ import os
 import collections
 import random
 import shutil
+import datetime
 import time
 import multiprocessing
 import torch.utils.data
@@ -124,7 +125,8 @@ def apply_model(data_loader, model, labels, decoder, device, oom_handler):
 				logits, log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'olen', 'loss'])
 				oom_handler.reset()
 			except:
-				if not oom_handler.try_recover(model.parameters(), _print = utils.get_root_logger_print()):
+				## TODO remove args.world_size > 1 after OOM recover fix for DDP
+				if args.world_size > 1 or not oom_handler.try_recover(model.parameters(), _print = utils.get_root_logger_print(level = logging.ERROR)):
 					raise
 
 		entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, olen))
@@ -685,9 +687,8 @@ def main(args):
 				log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'olen', 'loss'])
 				oom_handler.reset()
 			except:
-				if oom_handler.try_recover(model.parameters(), _print = _print):
-					continue
-				else:
+				## TODO remove args.world_size > 1 after OOM recover fix for DDP
+				if args.world_size > 1 or not oom_handler.try_recover(model.parameters(), _print=utils.get_root_logger_print(level=logging.ERROR)):
 					raise
 			example_weights = ylen[:, 0]
 			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, loss.mean()
@@ -791,12 +792,25 @@ def main(args):
 def init_process(args):
 	""" Initialize the distributed environment. """
 	utils.set_random_seed(args.seed)
+	if args.backend is None:
+		args.backend = 'nccl' if args.device == 'cuda' else 'gloo'
+
 	if args.device == 'cuda':
 		torch.backends.cudnn.deterministic = True
 		torch.cuda.set_device(args.local_rank)
+		assert args.backend == 'nccl', 'CUDA supports only nccl backend'
+		# synchronization timeout do not work without this env variable
+		if args.synchronization_timeout:
+			os.environ['NCCL_BLOCKING_WAIT'] = '1'
+	else:
+		assert args.backend != 'nccl', f'nccl backend do not support this device {args.device}'
 
 	print(f"Initialize worker with rank {args.rank} in world size {args.world_size} at {args.master_ip}:{args.master_port}")
-	dist.init_process_group(args.backend, init_method=f"tcp://{args.master_ip}:{args.master_port}", rank=args.rank, world_size=args.world_size)
+	dist.init_process_group(args.backend,
+							init_method = f"tcp://{args.master_ip}:{args.master_port}",
+							rank = args.rank,
+							world_size = args.world_size,
+							timeout = datetime.timedelta(seconds = args.synchronization_timeout) if args.synchronization_timeout else datetime.timedelta(minutes = 30))
 	main(args)
 
 
@@ -833,7 +847,7 @@ if __name__ == '__main__':
 	parser.add_argument('--train-data-path', nargs = '*', default = [])
 	parser.add_argument('--train-data-mixing', type = float, nargs = '*')
 	parser.add_argument('--val-data-path', nargs = '*', default = [])
-	parser.add_argument('--num-workers', type = int, default = 16, help = 'num workers per DDP process')
+	parser.add_argument('--num-workers', type = int, default = 64)
 	parser.add_argument('--train-batch-size', type = int, default = 256)
 	parser.add_argument('--val-batch-size', type = int, default = 256)
 	parser.add_argument('--device', default = 'cuda', choices = ['cuda', 'cpu'])
@@ -992,16 +1006,21 @@ if __name__ == '__main__':
 	parser.add_argument('--start-rank', type = int, default = 0, help = 'processes ranks equal: start_rank+local_rank')
 	parser.add_argument('--local-ranks', type = int, nargs = '+', default = [0], help ='processes local ranks, equals to cuda device id')
 	parser.add_argument('--world-size', type = int, default = 1, help = 'amount of processes')
-	parser.add_argument('--backend', default = 'nccl', help = 'processes communication backend')
+	parser.add_argument('--backend', choices = ['nccl', 'gloo'], help = 'processes communication backend')
 	parser.add_argument('--master-ip', default = '0.0.0.0', help = 'DDP MASTER_ADDR')
 	parser.add_argument('--master-port', default = '12345', help = 'DDP MASTER_PORT')
 	parser.add_argument('--synchronize-bn', action = 'store_true', help = 'replace all instance of torch.nn.modules.batchnorm._BatchNorm to SyncBatchNorm')
+	parser.add_argument('--synchronization-timeout', type = int, help = 'DDP synchronization method timeout in seconds')
 
 	args = parser.parse_args()
 
 	try:
 		if args.world_size > 1:
 			processes = []
+			assert args.num_workers % args.world_size == 0, f'''--num-workers should be must be a multiple of --world-size,
+																but now: --num-workers {args.num_workers} --world-size {args.world_size}, 
+																num-workers % world-size should be 0, but get {args.num_workers % args.world_size}'''
+			args.num_workers = int(args.num_workers / args.world_size)
 			args.train_batch_size = int(args.train_batch_size / args.world_size)
 			args.val_batch_size = int(args.val_batch_size / args.world_size)
 			for rank in args.local_ranks:
