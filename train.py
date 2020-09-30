@@ -221,7 +221,7 @@ def evaluate_model(
 		)
 		for i, label in enumerate(labels):
 			transcript_by_label = transcript[i:: len(labels)]
-			aggregated = error_analyzer.aggregate(transcript_by_label, sep = '__')
+			aggregated = error_analyzer.aggregate(transcript_by_label, sep = '__', defaults = dict(words_easy_errors_easy__cer_pseudo = -1, mer_wordwise = -1, hyp_vocabness = -1, ref_vocabness = -1))
 			if analyze:
 				with open(f'{transcripts_path}.errors.csv', 'w') as f:
 					f.writelines('{hyp},{ref},{error_tag}\n'.format(**w) for w in aggregated['errors']['words'])

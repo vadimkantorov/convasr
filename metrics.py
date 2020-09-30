@@ -80,14 +80,16 @@ class ErrorAnalyzer:
 		self.error_tagger = error_tagger
 		self.configs = configs or dict(default = {})
 
-	def aggregate(self, analyzed, sep = '__'):
+	def aggregate(self, analyzed, sep = '__', defaults = {}):
 		keys_with_number_vals = lambda d: [k for k, v in d.items() if isinstance(v, float) or isinstance(v, int)]
 
 		keys = keys_with_number_vals(analyzed[0])
 		for c in self.configs:
-			keys.extend([c + sep + k for k in keys_with_number_vals(analyzed[0][c])])
+			keys.extend([c + sep + k for k in keys_with_number_vals(analyzed[0].get(c, {}))])
 
-		stats = {k: nanmean(analyzed, k, sep = sep) for k in keys}
+		stats = {}
+		stats.update(defaults)
+		stats.update({k: nanmean(analyzed, k, sep = sep) for k in keys})
 		default_config_prefix = 'default' + sep
 		default_stats = {}
 		for name, value in stats.items():
