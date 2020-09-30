@@ -91,10 +91,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			return [dict(audio_path = data_path)]
 
 		tic = time.time()
-		
+		#TODO compare read speed youtube/cut/cut_train.json for full json objects and minimal objects with keys: audio_path, end, ref
 		transcripts_read = list(map(read_transcript, data_paths)) 
 		_print('Dataset reading time: ', time.time() - tic); tic = time.time()
 
+		#TODO group only segmented = True
 		segments_by_audio_path = [
 			list(g) for transcript in transcripts_read for k,
 			g in itertools
@@ -109,7 +110,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		segments_by_audio_path.sort(key = duration)
 		# TODO: not segmented mode may fail if several examples have same audio_path
 		for example in segments_by_audio_path:
-			exclude_ok = ((not exclude) or (transcripts.audio_name(e[0]) not in exclude))
+			exclude_ok = ((not exclude) or (transcripts.audio_name(example[0]) not in exclude))
 			duration_ok = ((not duration_filter) or (min_duration is None or min_duration <= duration(example)) and
 				(max_duration is None or duration(example) <= max_duration))
 
