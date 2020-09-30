@@ -208,9 +208,9 @@ def evaluate_model(
 			# TODO: don't forget to fix aligned hyp & ref output!
 			# hyp = new_transcript['alignment']['hyp'] if analyze else new_transcript['hyp']
 			# ref = new_transcript['alignment']['ref'] if analyze else new_transcript['ref']
-			_print('REF: {labels_name} "{ref}"'.format(**t))
-			_print('HYP: {labels_name} "{hyp}"'.format(**t))
-			_print('WER: {labels_name} {wer:.02%} | CER: {cer:.02%}\n'.format(**t))
+			_print('{labels_name} REF: "{ref}"'.format(**t))
+			_print('{labels_name} HYP: "{hyp}"'.format(**t))
+			_print('{labels_name} WER: {wer:.02%} | CER: {cer:.02%}\n'.format(**t))
 
 		transcripts_path = os.path.join(
 			args.experiment_dir,
