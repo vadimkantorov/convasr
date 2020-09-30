@@ -16,6 +16,8 @@ def strip(transcript, keys = []):
 def join(ref = [], hyp = []):
 	return ' '.join(t['ref'] for t in ref).strip() + ' '.join(t['hyp'] for t in hyp).strip()
 
+def speaker_names(transcript):
+	return [None] + list(set(t['speaker_name'] for t in transcript))
 
 def speaker(ref = None, hyp = None):
 	return ', '.join(sorted(filter(bool, set(t.get('speaker') for t in ref + hyp)))) or None

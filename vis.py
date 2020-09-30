@@ -149,7 +149,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	audio_path = transcript[0]['audio_path']
 	signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = mono, duration = duration)
 
-	fmt_link = lambda ref = '', hyp = '', channel = 0, begin = 0, end = 0, speaker = '', i = '', j = '', audio_path = '', **kwargs: (f'<a onclick="return play({channel},{begin},{end})"' if ref not in [0, 1] else '<span') + f' title="#{channel}. {speaker}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + ((ref + hyp) if isinstance(ref, str) else f'{begin:.02f}' if ref == 0 else f'{end:.02f}' if ref == 1 else f'{end - begin:.02f}') + ('</a>' if ref not in [0, 1] else '</span>')
+	fmt_link = lambda ref = '', hyp = '', channel = 0, begin = 0, end = 0, speaker = '', i = '', j = '', audio_path = '', **kwargs: (f'<a onclick="return play(event, {channel},{begin},{end})"' if ref not in [0, 1] else '<span') + f' title="#{channel}. {speaker}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + ((ref + hyp) if isinstance(ref, str) else f'{begin:.02f}' if ref == 0 else f'{end:.02f}' if ref == 1 else f'{end - begin:.02f}') + ('</a>' if ref not in [0, 1] else '</span>')
 	fmt_words = lambda rh: ' '.join(fmt_link(**w) for w in rh)
 	fmt_begin_end = 'data-begin="{begin}" data-end="{end}"'.format
 
@@ -200,7 +200,9 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	)
 	html.write(
 		'''</tbody></table><script>
-		function play(channel, begin, end, relative)
+		var playTimeStampMillis = 0.0;
+
+		function play(evt, channel, begin, end, relative)
 		{
 			Array.from(document.querySelectorAll('audio')).map(audio => audio.pause());
 			const audio = document.querySelector(`#audio${channel}`);
@@ -208,6 +210,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 				[begin, end] = [begin * audio.duration, end * audio.duration];
 			audio.currentTime = begin;
 			audio.dataset.endTime = end;
+			playTimeStampMillis = evt.timeStamp;
 			audio.play();
 			return false;
 		}
@@ -217,14 +220,13 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 			const img = evt.target;
 			const dim = img.getBoundingClientRect();
 			const t = (evt.clientX - dim.left) / dim.width;
-			play(0, t, 0 * audio.duration, true);
-			audio.play();
+			play(evt, 0, t, 0, true);
 		}
 		
 		function onclick_svg(evt)
 		{
 			const rect = evt.target;
-			play(0, parseFloat(rect.dataset.begin), parseFloat(rect.dataset.end));
+			play(evt, 0, parseFloat(rect.dataset.begin), parseFloat(rect.dataset.end));
 		}
 		
 		function subtitle(segments, time, channel)
@@ -234,7 +236,8 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 
 		function onpause_(evt)
 		{
-			evt.target.dataset.endTime = null;
+			if(evt.timeStamp - playTimeStampMillis > 10)
+				evt.target.dataset.endTime = null;
 		}
 
 		function ontimeupdate_(evt)
