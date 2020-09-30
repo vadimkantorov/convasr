@@ -96,11 +96,13 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		_print('Dataset reading time: ', time.time() - tic); tic = time.time()
 
 		#TODO group only segmented = True
-		segments_by_audio_path = [
-			list(g) for transcript in transcripts_read for k,
-			g in itertools
-			.groupby(sorted(transcript, key = transcripts.sort_key), key = transcripts.group_key)
-		]
+		segments_by_audio_path = []
+		for transcript in transcripts_read:
+			transcript = sorted(transcript, key = transcripts.sort_key)
+			transcript = itertools.groupby(transcript, key = transcripts.group_key)
+			for _, example in transcript:
+				segments_by_audio_path.append(list(example))
+
 		speaker_names_filtered = set()
 		examples_filtered = []
 		examples_lens = []
@@ -111,13 +113,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		# TODO: not segmented mode may fail if several examples have same audio_path
 		for example in segments_by_audio_path:
 			exclude_ok = ((not exclude) or (transcripts.audio_name(example[0]) not in exclude))
-			duration_ok = ((not duration_filter) or (min_duration is None or min_duration <= duration(example)) and
-				(max_duration is None or duration(example) <= max_duration))
+			duration_ok = ((not duration_filter) or (min_duration is None or min_duration <= duration(example)) and (max_duration is None or duration(example) <= max_duration))
 
 			if duration_ok and exclude_ok:
 				b = bucket(example) if bucket is not None else 0
 				for t in example:
-					#t['meta'] = t.copy()
 					t['bucket'] = b
 					t['ref'] = t.get('ref', self.ref_missing)
 					t['begin'] = t.get('begin', self.time_missing)
