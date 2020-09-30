@@ -550,22 +550,53 @@ def main(args):
 		feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob)
 	)
 	tic = time.time()
-	train_dataset = datasets.AudioTextDataset(
-		args.train_data_path,
-		labels,
-		args.sample_rate,
-		frontend = train_frontend if not args.frontend_in_model else None,
-		min_duration = args.min_duration,
-		max_duration = args.max_duration,
-		time_padding_multiple = args.batch_time_padding_multiple,
-		bucket = lambda example: int(
-			math.ceil(
-				((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
-			)
-		),
-		pop_meta = True,
-		_print = _print
-	)
+	if args.local_rank == 0:
+		train_dataset = datasets.AudioTextDataset(
+			args.train_data_path,
+			labels,
+			args.sample_rate,
+			frontend = train_frontend if not args.frontend_in_model else None,
+			min_duration = args.min_duration,
+			max_duration = args.max_duration,
+			time_padding_multiple = args.batch_time_padding_multiple,
+			bucket = lambda example: int(
+				math.ceil(
+					((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
+				)
+			),
+			pop_meta = True,
+			_print = _print
+		)
+		if args.world_size > 0:
+			os.makedirs('data/dataset_cache', exist_ok = True)
+			torch.save(train_dataset.state_dict(), 'data/dataset_cache/cache.pt')
+
+	if args.world_size > 0:
+		# waiting for dataset cache serialization
+		dist.barrier()
+
+	if args.local_rank != 0:
+		train_dataset = datasets.AudioTextDataset(
+			[],
+			labels,
+			args.sample_rate,
+			frontend=train_frontend if not args.frontend_in_model else None,
+			min_duration=args.min_duration,
+			max_duration=args.max_duration,
+			time_padding_multiple=args.batch_time_padding_multiple,
+			bucket=lambda example: int(
+				math.ceil(
+					((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
+				)
+			),
+			pop_meta=True,
+			_print=_print
+		)
+		train_dataset.load_state_dict(torch.load('data/dataset_cache/cache.pt'))
+
+	if args.world_size > 0:
+		# waiting for dataset cache loading
+		dist.barrier()
 
 	_print('Time train dataset created:', time.time() - tic, 'sec')
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))

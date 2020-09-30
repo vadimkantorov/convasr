@@ -154,6 +154,30 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.meta = { self.example_id(t) : t for t in transcript } if not pop_meta else {}
 		_print('Dataset tensors creation time: ', time.time() - tic)
 
+	def state_dict(self) -> dict:
+		return {
+			'bucket': self.bucket,
+			'audio_path': self.audio_path,
+			'ref': self.ref,
+			'begin': self.begin,
+			'end': self.end,
+			'channel': self.channel,
+			'speaker': self.speaker,
+			'cumlen': self.cumlen,
+			'meta': self.meta
+		}
+
+	def load_state_dict(self, state_dict: dict):
+		self.bucket = state_dict['bucket']
+		self.audio_path = state_dict['audio_path']
+		self.ref = state_dict['ref']
+		self.begin = state_dict['begin']
+		self.end = state_dict['end']
+		self.channel = state_dict['channel']
+		self.speaker = state_dict['speaker']
+		self.cumlen = state_dict['cumlen']
+		self.meta = state_dict['meta']
+
 	def pop_meta(self):
 		meta = self.meta
 		self.meta = {}
