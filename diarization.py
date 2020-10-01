@@ -68,14 +68,14 @@ def select_speaker(signal : shaping.BT, kernel_size_smooth_silence : int, kernel
 	#speaker_id = torch.where(silence.any(dim = 0), torch.tensor(0, device = signal.device, dtype = speaker_id.dtype), speaker_id)
 	#return speaker_id, silence_flat, torch.stack((speaker_id * 0.5, diff, smoothed_for_silence[0], smoothed_for_silence[1] , silence_flat.float() * 0.5))
 
-def ref(input_path, output_path, sample_rate, window_size, device, max_duration, debug_audio, html):
+def ref(input_path, output_path, sample_rate, window_size, device, max_duration, debug_audio, html, ext):
 	os.makedirs(output_path, exist_ok = True)
 	audio_source = ([(input_path, audio_name) for audio_name in os.listdir(input_path)] if os.path.isdir(input_path) else [(os.path.dirname(input_path), os.path.basename(input_path))])
 	for i, (input_path, audio_name) in enumerate(audio_source):
 		print(i, '/', len(audio_source), audio_name)
 		audio_path = os.path.join(input_path, audio_name)
-		transcript_path = os.path.join(output_path, audio_name + '.ref.json')
-		rttm_path = os.path.join(output_path, audio_name + '.ref.rttm')
+		transcript_path = os.path.join(output_path, audio_name + '.json')
+		rttm_path = os.path.join(output_path, audio_name[:-len(ext)] + '.rttm')
 
 		signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = False, dtype = 'float32', duration = max_duration)
 
@@ -97,7 +97,7 @@ def ref(input_path, output_path, sample_rate, window_size, device, max_duration,
 			html_path = os.path.join(output_path, audio_name + '.html')
 			vis.transcript(html_path, sample_rate = sample_rate, mono = True, transcript = transcript, duration = max_duration)
 
-def hyp(input_path, output_path, device, batch_size, html):
+def hyp(input_path, output_path, device, batch_size, html, ext):
 	pipeline = torch.hub.load('pyannote/pyannote-audio', 'dia', device = device, batch_size = batch_size)
 	
 	os.makedirs(output_path, exist_ok = True)
@@ -105,8 +105,8 @@ def hyp(input_path, output_path, device, batch_size, html):
 	for i, (input_path, audio_name) in enumerate(audio_source):
 		print(i, '/', len(audio_source), audio_name)
 		audio_path = os.path.join(input_path, audio_name)
-		transcript_path = os.path.join(output_path, audio_name + '.hyp.json')
-		rttm_path = os.path.join(output_path, audio_name + '.hyp.rttm')
+		transcript_path = os.path.join(output_path, audio_name + '.json')
+		rttm_path = os.path.join(output_path, audio_name[:-len(ext)]+ '.rttm')
 	
 		res = pipeline(dict(audio = audio_path))
 		transcript = [dict(audio_path = audio_path, begin = turn.start, end = turn.end, speaker_name = speaker) for turn, _, speaker in res.itertracks(yield_label = True)]
@@ -125,11 +125,25 @@ def hyp(input_path, output_path, device, batch_size, html):
 			vis.transcript(html_path, sample_rate = sample_rate, mono = True, transcript = transcript, duration = max_duration)
 		
 def der(ref, hyp):
-	metric = pyannote.metrics.diarization.DiarizationErrorRate()
-	ref, hyp = map(pyannote.database.util.load_rttm, [ref, hyp])
-	ref, hyp = [next(iter(anno.values())) for anno in [ref, hyp]]
-	der = metric(ref, hyp)
-	print(der)
+	def der_(ref_rttm_path, hyp_rttm_path, metric = pyannote.metrics.diarization.DiarizationErrorRate()):
+		ref, hyp = map(pyannote.database.util.load_rttm, [ref_rttm_path, hyp_rttm_path])
+		ref, hyp = [next(iter(anno.values())) for anno in [ref, hyp]]
+		return metric(ref, hyp)
+
+	if os.path.isfile(ref) and os.path.isfile(hyp):
+		print(der_(ref_rttm_path = ref, hyp_rttm_path = hyp))
+
+	elif os.path.isdir(ref) and os.path.isdir(hyp):
+		ders = []
+		for rttm in os.listdir(ref):
+			if not rttm.endswith('.rttm'):
+				continue
+			d = der_(ref_rttm_path = os.path.join(ref, rttm), hyp_rttm_path = os.path.join(hyp, rttm))
+			print(f'{rttm}: {d:.2f}')
+			ders.append(d)
+		print('===')
+		print(sum(ders) / len(ders))
+
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -144,6 +158,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--max-duration', type = float)
 	cmd.add_argument('--audio', dest = 'debug_audio', action = 'store_true')
 	cmd.add_argument('--html', action = 'store_true')
+	cmd.add_argument('--ext', default = '.mp3')
 	cmd.set_defaults(func = ref)
 	
 	cmd = subparsers.add_parser('hyp')
@@ -152,6 +167,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--output-path', '-o')
 	cmd.add_argument('--batch-size', type = int, default = 8)
 	cmd.add_argument('--html', action = 'store_true')
+	cmd.add_argument('--ext', default = '.mp3.wav')
 	cmd.set_defaults(func = hyp)
 	
 	cmd = subparsers.add_parser('der')
