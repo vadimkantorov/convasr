@@ -25,7 +25,14 @@ def setup(args):
 	checkpoint = torch.load(args.checkpoint, map_location = 'cpu')
 	args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
 	frontend = models.LogFilterBankFrontend(
-		args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, eps = 1e-6
+		args.num_input_features,
+			args.sample_rate,
+			args.window_size,
+			args.window_stride,
+			args.window,
+			eps = 1e-6,
+			normalize_signal=args.normalize_signal,
+			normalize_signal_multiplier=args.normalize_signal_multiplier
 	)
 	labels = datasets.Labels(datasets.Language(checkpoint['args']['lang']), name = 'char')
 	model = getattr(models, args.model or checkpoint['args']['model'])(
@@ -304,6 +311,8 @@ if __name__ == '__main__':
 	parser.add_argument('--join-transcript', action = 'store_true')
 	parser.add_argument('--pack-backpointers', action = 'store_true')
 	parser.add_argument('--oom-crash', action = 'store_true')
+	parser.add_argument('--normalize-signal', action = 'store_true')
+	parser.add_argument('--normalize-signal-multiplier', action = 'store_true')
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)

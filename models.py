@@ -520,12 +520,14 @@ class LogFilterBankFrontend(nn.Module):
 		preemphasis = 0.97,
 		eps = torch.finfo(torch.float16).tiny,
 		normalize_signal = True,
+		normalize_signal_multiplier = 1.0,
 		stft_mode = None,
 		window_periodic = True,
 		normalize_features = False,
 		**kwargs
 	):
 		super().__init__()
+		self.normalize_signal_multiplier = normalize_signal_multiplier
 		self.stft_mode = stft_mode
 		self.dither = dither
 		self.dither0 = dither0
@@ -571,7 +573,7 @@ class LogFilterBankFrontend(nn.Module):
 		#signal_mean = signal.abs().mean(dim=-1, keepdim=True).values.item()
 		#signal_min = signal.abs().min(dim=-1, keepdim=True).values.item()
 
-		signal = normalize_signal(signal) if self.normalize_signal else signal
+		signal = normalize_signal(signal, self.normalize_signal_multiplier) if self.normalize_signal else signal
 		signal = apply_dither(signal, self.dither0)
 		signal = torch.cat([signal[..., :1], signal[..., 1:] -
 							self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
@@ -666,11 +668,10 @@ def percentile(t: torch.tensor, q: float):
 	return result
 
 
-def normalize_signal(signal, dim = -1, eps = 1e-5):
+def normalize_signal(signal, dim = -1, eps = 1e-5, normalize_signal_multiplier  = 1.0):
 	signal_max = signal.abs().max(dim = dim, keepdim = True).values + eps
 	signal_90percentile = percentile(signal.abs(), 90) + eps
-	multiplier = 1.0
-	return signal / (signal_max * multiplier) if signal.numel() > 0 else signal
+	return signal / (signal_max * normalize_signal_multiplier) if signal.numel() > 0 else signal
 
 
 class MaskedInstanceNorm1d(nn.InstanceNorm1d):
