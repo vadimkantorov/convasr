@@ -206,8 +206,7 @@ def evaluate_model(
 		for i, t in enumerate(transcript if args.verbose else []):		
 			_print(f'{val_dataset_name}@{iteration}: {i // len(labels)} / {len(audio_path_)} | {args.experiment_id}')
 			# TODO: don't forget to fix aligned hyp & ref output!
-			# hyp = new_transcript['alignment']['hyp'] if analyze else new_transcript['hyp']
-			# ref = new_transcript['alignment']['ref'] if analyze else new_transcript['ref']
+			_print('{labels_name} AUDIO_NAME: {audio_name}'.format(**t))
 			_print('{labels_name} REF: "{ref}"'.format(**t))
 			_print('{labels_name} HYP: "{hyp}"'.format(**t))
 			_print('{labels_name} WER: {wer:.02%} | CER: {cer:.02%}\n'.format(**t))
@@ -344,8 +343,9 @@ def main(args):
 
 	if checkpoint:
 		args.lang, args.model, args.num_input_features, args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['lang', 'model', 'num_input_features', 'sample_rate', 'window', 'window_size', 'window_stride'])
-		utils.set_up_root_logger(os.path.join(args.experiment_dir, 'log.txt'), mode = 'a')
-		logfile_sink = JsonlistSink(args.log_json, mode = 'a')
+		log_mode = 'a' if len(args.train_data_path) > 0 else 'w'
+		utils.set_up_root_logger(os.path.join(args.experiment_dir, 'log.txt'), mode = log_mode)
+		logfile_sink = JsonlistSink(args.log_json, mode = log_mode)
 	else:
 		utils.set_up_root_logger(os.path.join(args.experiment_dir, 'log.txt'), mode = 'w')
 		logfile_sink = JsonlistSink(args.log_json, mode = 'w')

@@ -475,6 +475,8 @@ class Labels:
 			text = ''.join(c if i == 0 or c != self.repeat else text[i - 1] for i, c in enumerate(text))
 		if collapse_repeat:
 			text = ''.join(c if i == 0 or c != text[i - 1] else '' for i, c in enumerate(text))
+		if phonetic_replace_groups:
+			text = text.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g})
 		return text
 
 	def __getitem__(self, idx):
