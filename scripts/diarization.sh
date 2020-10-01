@@ -1,6 +1,6 @@
-#python3 diarization.py ref $@ -i diarization/stereo -o data/diarization/ref
+#python3 diarization.py ref $@ -i diarization/stereo -o data/diarization/ref --html
 
-#python3 diarization.py hyp $@ -i diarization/mono -o data/diarization/hyp
+python3 diarization.py hyp $@ -i diarization/mono -o data/diarization/hyp --html
 
 python3 diarization.py der --ref data/diarization/ref --hyp data/diarization/hyp
 

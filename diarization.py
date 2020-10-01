@@ -38,32 +38,37 @@ def select_speaker(signal : shaping.BT, kernel_size_smooth_silence : int, kernel
 
 	padding = kernel_size_smooth_silence // 2
 	stride = 1
+	
+	# dilation
 	smoothed_for_silence = F.max_pool1d(signal.abs().unsqueeze(1), kernel_size_smooth_silence, stride = stride, padding = padding).squeeze(1)
+	
+	# erosion
 	smoothed_for_silence = -F.max_pool1d(-smoothed_for_silence.unsqueeze(1), kernel_size_smooth_silence, stride = stride, padding = padding).squeeze(1)
 	
+	# primitive VAD
 	signal_max = smoothed_for_diff.kthvalue(int(normalization_percentile * smoothed_for_diff.shape[-1]), dim = -1, keepdim = True).values
 	silence_absolute = smoothed_for_silence < silence_absolute_threshold
 	silence_relative = smoothed_for_silence / (eps + signal_max) < silence_relative_threshold
 	silence = silence_absolute | silence_relative
 	
 	diff_flat = smoothed_for_diff[0] - smoothed_for_diff[1]
-	speaker_id = diff_flat.sign()
+	speaker_id_bipole = diff_flat.sign()
 	
 	padding = kernel_size_smooth_speaker // 2
 	stride = 1
-	#TODO: remove 1 sample silence
-	speaker_id = F.avg_pool1d(speaker_id.view(1, 1, -1), kernel_size = kernel_size_smooth_speaker, stride = stride, padding = padding).view(-1).sign()
+	speaker_id_bipole = F.avg_pool1d(speaker_id_bipole.view(1, 1, -1), kernel_size = kernel_size_smooth_speaker, stride = stride, padding = padding).view(-1).sign()
 
-	replace = (speaker_id == 0) & (F.avg_pool1d(speaker_id.abs().view(1, 1, -1), kernel_size = 3, stride = 1, padding = 1).view(-1) == 2/3) & (F.avg_pool1d(speaker_id.view(1, 1, -1), kernel_size = 3, stride = 1, padding = 1).view(-1) == 0)
-	speaker_id = torch.where(replace, torch.ones_like(speaker_id), speaker_id)
+	# removing 1 sample silence at 1111-1-1-1-1 boundaries, replace by F.conv1d (patterns -101, 10-1)
+	speaker_id_bipole = torch.where((speaker_id_bipole == 0) & (F.avg_pool1d(speaker_id_bipole.abs().view(1, 1, -1), kernel_size = 3, stride = 1, padding = 1).view(-1) == 2/3) & (F.avg_pool1d(speaker_id_bipole.view(1, 1, -1), kernel_size = 3, stride = 1, padding = 1).view(-1) == 0), torch.ones_like(speaker_id_bipole), speaker_id_bipole)
 	
-	resize_to_min_size_(silence, speaker_id, dim = -1)
+	resize_to_min_size_(silence, speaker_id_bipole, dim = -1)
 	
 	silence_flat = silence.all(dim = 0)
-	speaker_id_flat = convert_speaker_id(speaker_id, from_bipole = True) * (~silence_flat)
+	speaker_id_categorical = convert_speaker_id(speaker_id, from_bipole = True) * (~silence_flat)
 
-	speaker_id = (~silence) * (speaker_id.unsqueeze(0) == torch.tensor([1, -1], dtype = speaker_id.dtype, device = speaker_id.device).unsqueeze(1))
-	return speaker_id_flat, torch.cat([silence_flat.unsqueeze(0), speaker_id])
+	bipole = torch.tensor([1, -1], dtype = speaker_id_bipole.dtype, device = speaker_id_bipole.device)
+	speaker_id_mask = (~silence) * (speaker_id_bipole.unsqueeze(0) == bipole.unsqueeze(1))
+	return speaker_id_categorical, torch.cat([silence_flat.unsqueeze(0), speaker_id_mask])
 
 	#speaker_id = torch.where(silence.any(dim = 0), torch.tensor(0, device = signal.device, dtype = speaker_id.dtype), speaker_id)
 	#return speaker_id, silence_flat, torch.stack((speaker_id * 0.5, diff, smoothed_for_silence[0], smoothed_for_silence[1] , silence_flat.float() * 0.5))
@@ -97,7 +102,7 @@ def ref(input_path, output_path, sample_rate, window_size, device, max_duration,
 			html_path = os.path.join(output_path, audio_name + '.html')
 			vis.transcript(html_path, sample_rate = sample_rate, mono = True, transcript = transcript, duration = max_duration)
 
-def hyp(input_path, output_path, device, batch_size, html, ext):
+def hyp(input_path, output_path, device, batch_size, html, ext, sample_rate, max_duration):
 	pipeline = torch.hub.load('pyannote/pyannote-audio', 'dia', device = device, batch_size = batch_size)
 	
 	os.makedirs(output_path, exist_ok = True)
@@ -166,8 +171,10 @@ if __name__ == '__main__':
 	cmd.add_argument('--input-path', '-i')
 	cmd.add_argument('--output-path', '-o')
 	cmd.add_argument('--batch-size', type = int, default = 8)
+	cmd.add_argument('--sample-rate', type = int, default = 8_000)
 	cmd.add_argument('--html', action = 'store_true')
 	cmd.add_argument('--ext', default = '.mp3.wav')
+	cmd.add_argument('--max-duration', type = float)
 	cmd.set_defaults(func = hyp)
 	
 	cmd = subparsers.add_parser('der')
