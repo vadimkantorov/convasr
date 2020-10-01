@@ -251,13 +251,20 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			]
 			speaker = torch.LongTensor([t.pop('speaker') for t in transcript]).unsqueeze(-1)
 			normalize_text = True
-	
-		features = [
-			self.frontend(segment.unsqueeze(0), waveform_transform_debug = waveform_transform_debug)
-			if self.frontend is not None else segment.unsqueeze(0)
-			for t in transcript
-			for segment in [signal[t.pop('channel'), t.pop('begin_samples'):t.pop('end_samples')]]
-		]
+
+		features = []
+		for t in transcript:
+			channel = t.pop('channel')
+			time_slice = slice(t.pop('begin_samples'), t.pop('end_samples')) # pop is required independent of segmented
+			if self.segmented:
+				segment = signal[None, channel, time_slice]
+			else:
+				segment = signal[None, channel, :] # begin, end meta could be corrupted, thats why we dont use it here
+			if self.frontend is not None:
+				features.append(self.frontend(segment, waveform_transform_debug = waveform_transform_debug))
+			else:
+				features.append(segment)
+
 		targets = [[labels.encode(t['ref'], normalize = normalize_text)[1]
 					for t in transcript]
 					for labels in self.labels]
