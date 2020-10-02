@@ -29,6 +29,11 @@ def write_rttm(file_path, transcript):
 	with open(file_path, 'w') as f:
 		f.writelines('SPEAKER {audio_name} 1 {begin:.3f} {duration:.3f} <NA> <NA> {speaker} <NA> <NA>\n'.format(audio_name = audio_name, begin = t['begin'], duration = transcripts.compute_duration(t), speaker = t['speaker']) for t in transcript)
 
+def load_rttm(file_path):
+	transcript = [dict(audio_name = splitted[1], begin = float(splitted[3]), end = float(splitted[3]) + float(splitted[4]), speaker_name = splitted[7]) for splitted in map(str.split, open(file_path))]
+	transcripts.set_speaker(transcript)
+	return transcript
+
 def select_speaker(signal : shaping.BT, kernel_size_smooth_silence : int, kernel_size_smooth_signal : int, kernel_size_smooth_speaker : int, silence_absolute_threshold : float = 0.2, silence_relative_threshold : float = 0.5, eps : float = 1e-9, normalization_percentile = 0.9) -> shaping.T:
 	assert len(signal) == 2
 
@@ -64,7 +69,7 @@ def select_speaker(signal : shaping.BT, kernel_size_smooth_silence : int, kernel
 	resize_to_min_size_(silence, speaker_id_bipole, dim = -1)
 	
 	silence_flat = silence.all(dim = 0)
-	speaker_id_categorical = convert_speaker_id(speaker_id, from_bipole = True) * (~silence_flat)
+	speaker_id_categorical = convert_speaker_id(speaker_id_bipole, from_bipole = True) * (~silence_flat)
 
 	bipole = torch.tensor([1, -1], dtype = speaker_id_bipole.dtype, device = speaker_id_bipole.device)
 	speaker_id_mask = (~silence) * (speaker_id_bipole.unsqueeze(0) == bipole.unsqueeze(1))
@@ -79,8 +84,9 @@ def ref(input_path, output_path, sample_rate, window_size, device, max_duration,
 	for i, (input_path, audio_name) in enumerate(audio_source):
 		print(i, '/', len(audio_source), audio_name)
 		audio_path = os.path.join(input_path, audio_name)
-		transcript_path = os.path.join(output_path, audio_name + '.json')
-		rttm_path = os.path.join(output_path, audio_name[:-len(ext)] + '.rttm')
+		noextname = audio_name[:-len(ext)]
+		transcript_path = os.path.join(output_path, noextname + '.json')
+		rttm_path = os.path.join(output_path, noextname + '.rttm')
 
 		signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = False, dtype = 'float32', duration = max_duration)
 
@@ -110,14 +116,13 @@ def hyp(input_path, output_path, device, batch_size, html, ext, sample_rate, max
 	for i, (input_path, audio_name) in enumerate(audio_source):
 		print(i, '/', len(audio_source), audio_name)
 		audio_path = os.path.join(input_path, audio_name)
-		transcript_path = os.path.join(output_path, audio_name + '.json')
-		rttm_path = os.path.join(output_path, audio_name[:-len(ext)]+ '.rttm')
+		noextname = audio_name[:-len(ext)]
+		transcript_path = os.path.join(output_path, noextname + '.json')
+		rttm_path = os.path.join(output_path, noextname + '.rttm')
 	
 		res = pipeline(dict(audio = audio_path))
 		transcript = [dict(audio_path = audio_path, begin = turn.start, end = turn.end, speaker_name = speaker) for turn, _, speaker in res.itertracks(yield_label = True)]
-		speaker_names = transcripts.speaker_names(transcript)
-		for t in transcript:
-			t['speaker'] = speaker_names.index(t['speaker_name'])
+		transcripts.set_speaker(transcript)
 		
 		json.dump(transcript, open(transcript_path, 'w'), indent = 2, sort_keys = True)
 		print(transcript_path)
@@ -128,26 +133,44 @@ def hyp(input_path, output_path, device, batch_size, html, ext, sample_rate, max
 		if html:
 			html_path = os.path.join(output_path, audio_name + '.html')
 			vis.transcript(html_path, sample_rate = sample_rate, mono = True, transcript = transcript, duration = max_duration)
-		
-def der(ref, hyp):
-	def der_(ref_rttm_path, hyp_rttm_path, metric = pyannote.metrics.diarization.DiarizationErrorRate()):
-		ref, hyp = map(pyannote.database.util.load_rttm, [ref_rttm_path, hyp_rttm_path])
-		ref, hyp = [next(iter(anno.values())) for anno in [ref, hyp]]
-		return metric(ref, hyp)
 
+def der(ref_rttm_path, hyp_rttm_path, metric = pyannote.metrics.diarization.DiarizationErrorRate()):
+	ref, hyp = map(pyannote.database.util.load_rttm, [ref_rttm_path, hyp_rttm_path])
+	ref, hyp = [next(iter(anno.values())) for anno in [ref, hyp]]
+	return metric(ref, hyp)
+
+def speaker_error(ref_rttm_path, hyp_rttm_path):
+	ref, hyp = map(load_rttm, [ref_rttm_path, hyp_rttm_path])
+		
+def eval(ref, hyp, html, debug_audio):
 	if os.path.isfile(ref) and os.path.isfile(hyp):
-		print(der_(ref_rttm_path = ref, hyp_rttm_path = hyp))
+		print(der(ref_rttm_path = ref, hyp_rttm_path = hyp))
 
 	elif os.path.isdir(ref) and os.path.isdir(hyp):
 		ders = []
+		diarization_transcript = []
 		for rttm in os.listdir(ref):
 			if not rttm.endswith('.rttm'):
 				continue
-			d = der_(ref_rttm_path = os.path.join(ref, rttm), hyp_rttm_path = os.path.join(hyp, rttm))
+			ref_rttm_path = os.path.join(ref, rttm)
+			hyp_rttm_path = os.path.join(hyp, rttm)
+			d = der(ref_rttm_path = ref_rttm_path, hyp_rttm_path = hyp_rttm_path)
+			hyp_transcript = json.load(open(hyp_rttm_path.replace('.rttm', '.json')))
+			ref_transcript = json.load(open(ref_rttm_path.replace('.rttm', '.json')))
+			diarization_transcript.append(dict(
+				metric = d, 
+				audio_path = hyp_transcript[0]['audio_path'],
+				audio_name = transcripts.audio_name(hyp_transcript[0]),
+				ref = ref_transcript, 
+				hyp = hyp_transcript
+			))
 			print(f'{rttm}: {d:.2f}')
 			ders.append(d)
 		print('===')
 		print(sum(ders) / len(ders))
+		
+		if html:
+			print(vis.diarization(diarization_transcript, html, debug_audio))
 
 
 if __name__ == '__main__':
@@ -177,10 +200,12 @@ if __name__ == '__main__':
 	cmd.add_argument('--max-duration', type = float)
 	cmd.set_defaults(func = hyp)
 	
-	cmd = subparsers.add_parser('der')
+	cmd = subparsers.add_parser('eval')
 	cmd.add_argument('--ref', required = True)
 	cmd.add_argument('--hyp', required = True)
-	cmd.set_defaults(func = der)
+	cmd.add_argument('--html', default = 'data/diarization.html')
+	cmd.add_argument('--audio', dest = 'debug_audio', action = 'store_true')
+	cmd.set_defaults(func = eval)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')

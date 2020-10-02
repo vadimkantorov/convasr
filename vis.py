@@ -26,10 +26,86 @@ import models
 import ctc
 import transcripts
 
+onclick_img_script = '''
+function onclick_img(evt)
+{
+	const img = evt.target;
+	const dim = img.getBoundingClientRect();
+	const t = (evt.clientX - dim.left) / dim.width;
+	const channel = img.dataset.channel || 0;
+	play(evt, channel, t, 0, true);
+}
+'''
+
+onclick_svg_script = '''
+function onclick_svg(evt)
+{
+	const rect = evt.target;
+	const channel = rect.dataset.channel || 0;
+	play(evt, channel, parseFloat(rect.dataset.begin), parseFloat(rect.dataset.end));
+}
+'''
+
+play_script = '''
+var playTimeStampMillis = 0.0;
+function play(evt, channel, begin, end, relative)
+{
+	Array.from(document.querySelectorAll('audio')).map(audio => audio.pause());
+	const audio = document.querySelector(`#audio${channel}`);
+	if(relative)
+		[begin, end] = [begin * audio.duration, end * audio.duration];
+	audio.currentTime = begin;
+	audio.dataset.endTime = end;
+	playTimeStampMillis = evt.timeStamp;
+	audio.play();
+	return false;
+}
+
+function onpause_(evt)
+{
+	if(evt.timeStamp - playTimeStampMillis > 10)
+		evt.target.dataset.endTime = null;
+}
+
+function ontimeupdate_(evt)
+{
+	const time = evt.target.currentTime, endtime = evt.target.dataset.endTime;
+	if(endtime && endtime > 0 && time > endtime)
+	{
+		evt.target.pause();
+		return false;
+	}
+	return true;
+}
+'''
+
 channel_colors = ['gray', 'red', 'blue']
 
-def speaker_barcode_img(transcript, begin, end, colors = channel_colors):
-	assert begin == 0
+def diarization(diarization_transcript, html_path, debug_audio):
+	with open(html_path, 'w') as html:
+		html.write('<html><head><meta charset="UTF-8"><style>.nowrap{white-space:nowrap} table {border-collapse:collapse} .border-hyp {border-bottom: 2px black solid}</style></head><body>\n')
+		html.write(f'<script>{play_script}</script>\n')
+		html.write(f'<script>{onclick_img_script}</script>')
+		html.write('<table>\n')
+		html.write('<tr><th>audio_name</th><th>duration</th><th>refhyp</th><th>metric</th><th>audio</th><th>barcode</th></tr>\n')
+		html.write('<tr class="border-hyp"><td>{num_files}</td><td>{total_duration:.02f}</td><td>avg</td><td>{avg_metric:.02f}</td><td></td><td></td></tr>\n'.format(num_files = len(diarization_transcript), total_duration = sum(map(transcripts.compute_duration, diarization_transcript)), avg_metric = sum(t['metric'] for t in diarization_transcript) / len(diarization_transcript)))
+		for i, dt in enumerate(diarization_transcript):
+			audio_html = '<audio id="audio{channel}" controls src="{data_uri}"></audio>'.format(channel = i, data_uri = audio_data_uri(dt['audio_path'])) if debug_audio else ''
+			begin, end = 0.0, transcripts.compute_duration(dt)
+			for refhyp in ['ref', 'hyp']:
+				html.write('<tr class="border-{refhyp}"><td class="nowrap">{audio_name}</td><td>{end:.02f}</td><td>{refhyp}</td><td>{metric:.02f}</td><td rospan="{rowspan}">{audio_html}</td><td>{barcode}</td></tr>\n'.format(audio_name = dt['audio_name'], audio_html = audio_html if refhyp == 'ref' else '', rowspan = 2 if refhyp == 'ref' else 1, refhyp = refhyp, end = end, metric = dt['metric'], barcode = speaker_barcode_img(dt[refhyp], begin = begin, end = end, onclick = None if debug_audio else '', dataset = dict(channel = i))))
+
+		html.write('</table></body></html>')
+	return html_path
+
+def speaker_barcode_img(transcript, begin = None, end = None, colors = channel_colors, onclick = None, dataset = {}):
+	if begin is None:
+		begin = 0
+	if end is None:
+		end = max(t['end'] for t in transcript)
+	if onclick is None:
+		onclick = 'onclick_img(event)'
+
 	plt.figure(figsize = (8, 0.2))
 	plt.xlim(begin, end)
 	plt.yticks([])
@@ -41,9 +117,13 @@ def speaker_barcode_img(transcript, begin, end, colors = channel_colors):
 	plt.savefig(buf, format = 'jpg', dpi = 150, facecolor = colors[0])
 	plt.close()
 	uri_speaker_barcode = base64.b64encode(buf.getvalue()).decode()
-	return f'<img onclick="onclick_img(event)" src="data:image/jpeg;base64,{uri_speaker_barcode}" style="width:100%"></img>'
+	dataset = ' '.join(f'data-{k}="{v}"' for k, v in dataset.items())
+	return f'<img onclick="{onclick}" src="data:image/jpeg;base64,{uri_speaker_barcode}" style="width:100% {dataset}"></img>'
 
-def speaker_barcode_svg(transcript, begin, end, colors = channel_colors, max_segment_seconds = 60):
+
+def speaker_barcode_svg(transcript, begin, end, colors = channel_colors, max_segment_seconds = 60, onclick = None):
+	if onclick is None:
+		onclick = 'onclick_svg(event)'
 	html = ''
 	segments = transcripts.segment(transcript, max_segment_seconds = max_segment_seconds, break_on_speaker_change = False, break_on_channel_change = False)
 	for segment in segments:
@@ -52,7 +132,7 @@ def speaker_barcode_svg(transcript, begin, end, colors = channel_colors, max_seg
 		if duration <= max_segment_seconds:
 			duration = max_segment_seconds
 		header = '<div style="width: 100%; height: 15px; border: 1px black solid"><svg viewbox="0 0 1 1" style="width:100%; height:100%" preserveAspectRatio="none">'
-		body = '\n'.join('<rect data-begin="{begin}" data-end="{end}" x="{x}" width="{width}" height="1" style="fill:{color}" onclick="onclick_svg(event)"><title>speaker{speaker} | {begin:.2f} - {end:.2f} [{duration:.2f}]</title></rect>'.format(x = (t['begin'] - summary['begin']) / duration, width = (t['end'] - t['begin']) / duration, color = channel_colors[t['speaker']], duration = transcripts.compute_duration(t), **t) for t in transcript) 
+		body = '\n'.join('<rect data-begin="{begin}" data-end="{end}" x="{x}" width="{width}" height="1" style="fill:{color}" onclick="{onclick}"><title>speaker{speaker} | {begin:.2f} - {end:.2f} [{duration:.2f}]</title></rect>'.format(onclick = onclick, x = (t['begin'] - summary['begin']) / duration, width = (t['end'] - t['begin']) / duration, color = channel_colors[t['speaker']], duration = transcripts.compute_duration(t), **t) for t in transcript) 
 		footer = '</svg></div>'
 		html += header + body + footer
 	return html
@@ -163,7 +243,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	html_speaker_barcode = speaker_barcode_svg(transcript, begin = 0.0, end = signal.shape[-1] / sample_rate)
 
 	html.writelines(
-		f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="ontimeupdate_(event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="{uri_audio}"></audio>{html_speaker_barcode}</figure>'
+		f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="update_span(ontimeupdate_(event), event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="{uri_audio}"></audio>{html_speaker_barcode}</figure>'
 		for c,
 		uri_audio in enumerate(
 			audio_data_uri(signal[channel], sample_rate) for channel in ([0, 1] if len(signal) == 2 else []) + [...]
@@ -198,54 +278,23 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 		ref,
 		hyp in [(t.get('channel', 0), t.get('speaker', 0), t.get('words_ref', [t]), t.get('words_hyp', [t]))]
 	)
-	html.write(
-		'''</tbody></table><script>
-		var playTimeStampMillis = 0.0;
-
-		function play(evt, channel, begin, end, relative)
-		{
-			Array.from(document.querySelectorAll('audio')).map(audio => audio.pause());
-			const audio = document.querySelector(`#audio${channel}`);
-			if(relative)
-				[begin, end] = [begin * audio.duration, end * audio.duration];
-			audio.currentTime = begin;
-			audio.dataset.endTime = end;
-			playTimeStampMillis = evt.timeStamp;
-			audio.play();
-			return false;
-		}
-		
-		function onclick_img(evt)
-		{
-			const img = evt.target;
-			const dim = img.getBoundingClientRect();
-			const t = (evt.clientX - dim.left) / dim.width;
-			play(evt, 0, t, 0, true);
-		}
-		
-		function onclick_svg(evt)
-		{
-			const rect = evt.target;
-			play(evt, 0, parseFloat(rect.dataset.begin), parseFloat(rect.dataset.end));
-		}
+	html.write('</tbody></table>')
+	html.write(f'<script>{play_script}</script>')
+	html.write(f'<script>{onclick_svg_script}</script>')
+	html.write('''
+		<script>
 		
 		function subtitle(segments, time, channel)
 		{
 			return (segments.find(([rh, c, b, e]) => c == channel && b <= time && time <= e ) || ['', channel, null, null])[0];
 		}
 
-		function onpause_(evt)
+		function update_span(do, evt)
 		{
-			if(evt.timeStamp - playTimeStampMillis > 10)
-				evt.target.dataset.endTime = null;
-		}
+			if(!do)
+				return false;
 
-		function ontimeupdate_(evt)
-		{
-			const time = evt.target.currentTime, endtime = evt.target.dataset.endTime;
-			if(endtime && endtime > 0 && time > endtime)
-				return evt.target.pause();
-
+			const time = evt.target.currentTime;
 			document.querySelector('h5').innerText = time.toString();
 			const [spanhyp0, spanref0, spanhyp1, spanref1] = document.querySelectorAll('span.subtitle');
 			[spanhyp0.innerHTML, spanref0.innerHTML, spanhyp1.innerHTML, spanref1.innerHTML] = [subtitle(hyp_segments, time, 0), subtitle(ref_segments, time, 0), subtitle(hyp_segments, time, 1), subtitle(ref_segments, time, 1)];

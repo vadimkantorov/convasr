@@ -16,6 +16,25 @@ def strip(transcript, keys = []):
 def join(ref = [], hyp = []):
 	return ' '.join(t['ref'] for t in ref).strip() + ' '.join(t['hyp'] for t in hyp).strip()
 
+def set_speaker(transcript):
+	if not transcript:
+		return
+
+	has_speaker = all(t.get('speaker') is not None for t in transcript)
+	has_speaker_names = all(bool(t.get('speaker_name')) for t in transcript)
+	
+	if has_speaker:
+		return
+
+	if has_speaker_names:
+		if all(t['speaker_name'].isdigit() for t in transcript):
+			for t in transcript:
+				t['speaker'] = int(t['speaker_name'])
+		else:
+			speaker_names = speaker_names(transcript)
+			for t in transcript:
+				t['speaker'] = speaker_names.index(t['speaker_name'])
+
 def speaker_names(transcript):
 	return [None] + sorted(set(t['speaker_name'] for t in transcript))
 
@@ -118,7 +137,11 @@ def prune(
 
 
 def compute_duration(t, hours = False):
-	seconds = t.get('end', 0) - t.get('begin', 0)
+	if 'begin' in t or 'end' in t:
+		seconds = t.get('end', 0) - t.get('begin', 0)
+	elif 'hyp' in t or 'ref' in t:
+		seconds = max(t_['end'] for k in ['hyp', 'ref'] for t_ in t.get(k, []))
+
 	return seconds / (60 * 60) if hours else seconds
 
 
