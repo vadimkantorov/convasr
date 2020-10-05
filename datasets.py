@@ -11,24 +11,8 @@ import audio
 import utils
 import transcripts
 import shaping
-
-class TensorBackedStringArray:
-	def __init__(self, strings, encoding = 'utf_16_le'):
-		strings = list(strings)
-		self.encoding = encoding
-		self.multiplier = dict(ascii = 1, utf_16_le = 2, utf_32_le = 4)[encoding]
-		self.data = torch.ByteTensor(torch.ByteStorage.from_buffer(''.join(strings).encode(encoding)))
-		self.cumlen = torch.LongTensor(list(map(len, strings))).cumsum(dim = 0)
-		assert len(self) == 0 or int(self.cumlen[-1]) * self.multiplier == len(self.data), f'[{encoding}] is not enough to hold characters, use a larger character class'
-
-	def __getitem__(self, i):
-		return bytes(self.data[(self.cumlen[i - 1] * self.multiplier if i >= 1 else 0) : self.cumlen[i] * self.multiplier]).decode(self.encoding)
-
-	def __len__(self):
-		return len(self.cumlen)
-
-	def __list__(self):
-		return [self[i] for i in range(len(self))]
+import operator
+import typing
 
 def worker_init_fn(worker_id, num_threads = 1):
 	utils.set_random_seed(worker_id)
@@ -99,7 +83,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		exclude = set(exclude)
 
 		def read_transcript(data_path):
-			assert os.path.exists(data_path)
+			assert os.path.exists(data_path), f'transript not found {data_path}'
 			if data_path.endswith('.json') or data_path.endswith('.json.gz'):
 				return json.load(utils.open_maybe_gz(data_path))
 			if os.path.exists(data_path + '.json'):
@@ -107,15 +91,18 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			return [dict(audio_path = data_path)]
 
 		tic = time.time()
-		
+		#TODO compare read speed youtube/cut/cut_train.json for full json objects and minimal objects with keys: audio_path, end, ref
 		transcripts_read = list(map(read_transcript, data_paths)) 
 		_print('Dataset reading time: ', time.time() - tic); tic = time.time()
 
-		segments_by_audio_path = [
-			list(g) for transcript in transcripts_read for k,
-			g in itertools
-			.groupby(sorted(transcript, key = transcripts.sort_key), key = transcripts.group_key)
-		]
+		#TODO group only segmented = True
+		segments_by_audio_path = []
+		for transcript in transcripts_read:
+			transcript = sorted(transcript, key = transcripts.sort_key)
+			transcript = itertools.groupby(transcript, key = transcripts.group_key)
+			for _, example in transcript:
+				segments_by_audio_path.append(list(example))
+
 		speaker_names_filtered = set()
 		examples_filtered = []
 		examples_lens = []
@@ -125,14 +112,12 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		segments_by_audio_path.sort(key = duration)
 		# TODO: not segmented mode may fail if several examples have same audio_path
 		for example in segments_by_audio_path:
-			exclude_ok = ((not exclude) or (transcripts.audio_name(e[0]) not in exclude))
-			duration_ok = ((not duration_filter) or (min_duration is None or min_duration <= duration(example)) and
-				(max_duration is None or duration(example) <= max_duration))
+			exclude_ok = ((not exclude) or (transcripts.audio_name(example[0]) not in exclude))
+			duration_ok = ((not duration_filter) or (min_duration is None or min_duration <= duration(example)) and (max_duration is None or duration(example) <= max_duration))
 
 			if duration_ok and exclude_ok:
 				b = bucket(example) if bucket is not None else 0
 				for t in example:
-					#t['meta'] = t.copy()
 					t['bucket'] = b
 					t['ref'] = t.get('ref', self.ref_missing)
 					t['begin'] = t.get('begin', self.time_missing)
@@ -159,8 +144,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		_print('Dataset construction time: ', time.time() - tic); tic = time.time()
 		
 		self.bucket = torch.ShortTensor([e[0]['bucket'] for e in examples_filtered]) 
-		self.audio_path = TensorBackedStringArray([e[0]['audio_path'] for e in examples_filtered], encoding = string_array_encoding)
-		self.ref = TensorBackedStringArray([t['ref'] for t in transcript], encoding = string_array_encoding)
+		self.audio_path = utils.TensorBackedStringArray([e[0]['audio_path'] for e in examples_filtered], encoding = string_array_encoding)
+		self.ref = utils.TensorBackedStringArray([t['ref'] for t in transcript], encoding = string_array_encoding)
 		self.begin = torch.DoubleTensor([t['begin'] for t in transcript])
 		self.end = torch.DoubleTensor([t['end'] for t in transcript])
 		self.channel = torch.CharTensor([t['channel'] for t in transcript])
@@ -168,6 +153,30 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.cumlen = torch.ShortTensor(examples_lens).cumsum(dim = 0, dtype = torch.int64)
 		self.meta = { self.example_id(t) : t for t in transcript } if not pop_meta else {}
 		_print('Dataset tensors creation time: ', time.time() - tic)
+
+	def state_dict(self) -> dict:
+		return {
+			'bucket': self.bucket,
+			'audio_path': self.audio_path,
+			'ref': self.ref,
+			'begin': self.begin,
+			'end': self.end,
+			'channel': self.channel,
+			'speaker': self.speaker,
+			'cumlen': self.cumlen,
+			'meta': self.meta
+		}
+
+	def load_state_dict(self, state_dict: dict):
+		self.bucket = state_dict['bucket']
+		self.audio_path = state_dict['audio_path']
+		self.ref = state_dict['ref']
+		self.begin = state_dict['begin']
+		self.end = state_dict['end']
+		self.channel = state_dict['channel']
+		self.speaker = state_dict['speaker']
+		self.cumlen = state_dict['cumlen']
+		self.meta = state_dict['meta']
 
 	def pop_meta(self):
 		meta = self.meta
@@ -311,7 +320,7 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 		self.batch_size = batch_size
 		self.buckets = {k : (self.dataset.bucket == k).nonzero(as_tuple = True)[0] for k in self.dataset.bucket.unique()}
 		self.batch_idx = 0
-		self.shuffle(epoch = 0)
+		self.set_epoch(epoch = 0)
 
 	def __iter__(self):
 		return iter(self.shuffled[self.batch_idx:])
@@ -319,7 +328,7 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 	def __len__(self):
 		return len(self.shuffled)
 
-	def shuffle(self, epoch):
+	def set_epoch(self, epoch):
 		rng = torch.Generator()
 		rng.manual_seed(epoch)
 
@@ -335,6 +344,96 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 
 	def load_state_dict(self, state_dict):
 		self.batch_idx = state_dict['batch_idx']
+
+
+# https://github.com/catalyst-team/catalyst/blob/master/catalyst/data/sampler.py
+class DatasetFromSampler(torch.utils.data.Dataset):
+	"""Dataset of indexes from `Sampler`."""
+
+	def __init__(self, sampler: torch.utils.data.Sampler):
+		self.sampler = sampler
+		self.sampler_list = None
+
+	def __getitem__(self, index: int):
+		"""Gets element of the dataset.
+		Args:
+			index (int): index of the element in the dataset
+		Returns:
+			Single element by index
+		"""
+		if self.sampler_list is None:
+			self.sampler_list = list(self.sampler)
+		return self.sampler_list[index]
+
+	def __len__(self) -> int:
+		"""
+		Returns:
+			int: length of the dataset
+		"""
+		return len(self.sampler)
+
+
+class DistributedSamplerWrapper(torch.utils.data.DistributedSampler):
+	"""
+	Wrapper over `Sampler` for distributed training.
+	Allows you to use any sampler in distributed mode.
+	It is especially useful in conjunction with
+	`torch.nn.parallel.DistributedDataParallel`. In such case, each
+	process can pass a DistributedSamplerWrapper instance as a DataLoader
+	sampler, and load a subset of subsampled data of the original dataset
+	that is exclusive to it.
+	.. note::
+		Sampler is assumed to be of constant size.
+	"""
+
+	def __init__(
+		self,
+		sampler,
+		num_replicas: typing.Optional[int] = None,
+		rank: typing.Optional[int] = None,
+		shuffle: bool = False,
+	):
+		"""
+		Args:
+			sampler: Sampler used for subsampling
+			num_replicas (int, optional): Number of processes participating in
+			  distributed training
+			rank (int, optional): Rank of the current process
+			  within ``num_replicas``
+			shuffle (bool, optional): If true sampler will shuffle the indices
+		"""
+		super().__init__(
+			DatasetFromSampler(sampler),
+			num_replicas=num_replicas,
+			rank=rank,
+			shuffle=shuffle,
+		)
+		self.sampler = sampler
+
+	def __iter__(self):
+		self.dataset = DatasetFromSampler(self.sampler)
+		indexes_of_indexes = super().__iter__()
+		subsampler_indexes = self.dataset
+		return iter(operator.itemgetter(*indexes_of_indexes)(subsampler_indexes))
+
+	def state_dict(self):
+		return self.sampler.state_dict()
+
+	def load_state_dict(self, state_dict):
+		self.sampler.load_state_dict(state_dict)
+
+	def set_epoch(self, epoch):
+		super().set_epoch(epoch)
+		self.sampler.set_epoch(epoch)
+
+	@property
+	def batch_idx(self):
+		return self.sampler.batch_idx
+
+	@batch_idx.setter
+	def batch_idx(self, value):
+		self.sampler.batch_idx = value
+
 
 class Labels:
 	repeat = '2'
