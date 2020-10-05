@@ -564,8 +564,10 @@ def main(args):
 			_print = _print
 		)
 		if args.world_size > 1:
-			os.makedirs('data/dataset_cache', exist_ok = True)
-			torch.save(train_dataset.state_dict(), 'data/dataset_cache/cache.pt')
+			cache_path = f'{args.experiment_dir}/dataset_cache.pt'
+			if os.path.exists(cache_path):
+				os.remove(cache_path)
+			torch.save(train_dataset.state_dict(), cache_path)
 
 	if args.world_size > 1:
 		# waiting for dataset cache serialization
@@ -588,7 +590,7 @@ def main(args):
 			pop_meta=True,
 			_print=_print
 		)
-		train_dataset.load_state_dict(torch.load('data/dataset_cache/cache.pt'))
+		train_dataset.load_state_dict(torch.load(f'{args.experiment_dir}/dataset_cache.pt'))
 
 	if args.world_size > 1:
 		# waiting for dataset cache loading

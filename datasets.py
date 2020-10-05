@@ -83,7 +83,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		exclude = set(exclude)
 
 		def read_transcript(data_path):
-			assert os.path.exists(data_path), f'transript not found {data_path}'
+			assert os.path.exists(data_path), f'transcript not found {data_path}'
 			if data_path.endswith('.json') or data_path.endswith('.json.gz'):
 				return json.load(utils.open_maybe_gz(data_path))
 			if os.path.exists(data_path + '.json'):
@@ -411,10 +411,12 @@ class DistributedSamplerWrapper(torch.utils.data.DistributedSampler):
 		self.sampler = sampler
 
 	def __iter__(self):
-		self.dataset = DatasetFromSampler(self.sampler)
-		indexes_of_indexes = super().__iter__()
-		subsampler_indexes = self.dataset
-		return iter(operator.itemgetter(*indexes_of_indexes)(subsampler_indexes))
+		# comments are specific for BucketingBatchSampler as self.sampler, variable names are kept from Catalyst
+		self.dataset = DatasetFromSampler(self.sampler) # hack for DistributedSampler compatibility
+		indexes_of_indexes = super().__iter__() # type: List[int] # batch indices of BucketingBatchSampler
+		subsampler_indexes = self.dataset # type: List[List[int]] # original example indices
+		ddp_sampling_operator = operator.itemgetter(*indexes_of_indexes) # operator to extract rank specific batches from original sampled
+		return iter(ddp_sampling_operator(subsampler_indexes)) # type: Iterable[List[int]]
 
 	def state_dict(self):
 		return self.sampler.state_dict()
