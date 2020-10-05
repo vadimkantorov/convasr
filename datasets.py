@@ -79,8 +79,10 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		exclude = set(),
 		join_transcript = False,
 		bucket = None,
-		pop_meta = False
+		pop_meta = False,
+		debug_short_long_records_features_from_whole_normalized_signal=False
 	):
+		self.debug_short_long_records_features_from_whole_normalized_signal = debug_short_long_records_features_from_whole_normalized_signal
 		self.join_transcript = join_transcript
 		self.max_duration = max_duration
 		self.labels = labels
@@ -257,8 +259,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			]
 			speaker = torch.LongTensor([t.pop('speaker') for t in transcript]).unsqueeze(-1)
 
-			features_from_whole_normalized_signal = True
-			if features_from_whole_normalized_signal:
+			if self.debug_short_long_records_features_from_whole_normalized_signal:
 				signal_feature = self.frontend(signal)
 				hop_lenght = self.frontend.hop_length
 

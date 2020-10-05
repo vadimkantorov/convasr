@@ -32,7 +32,7 @@ def setup(args):
 			args.window,
 			eps = 1e-6,
 			normalize_signal=args.normalize_signal,
-			normalize_signal_multiplier=args.normalize_signal_multiplier
+			debug_short_long_records_normalize_signal_multiplier=args.debug_short_long_records_normalize_signal_multiplier
 	)
 	labels = datasets.Labels(datasets.Language(checkpoint['args']['lang']), name = 'char')
 	model = getattr(models, args.model or checkpoint['args']['model'])(
@@ -89,7 +89,8 @@ def main(args):
 		audio_backend = args.audio_backend,
 		exclude = exclude,
 		max_duration = args.transcribe_first_n_sec,
-		join_transcript = args.join_transcript
+		join_transcript = args.join_transcript,
+		debug_short_long_records_features_from_whole_normalized_signal = args.debug_short_long_records_features_from_whole_normalized_signal
 	)
 	num_examples = len(val_dataset)
 	print('Examples count: ', num_examples)
@@ -312,7 +313,8 @@ if __name__ == '__main__':
 	parser.add_argument('--pack-backpointers', action = 'store_true')
 	parser.add_argument('--oom-crash', action = 'store_true')
 	parser.add_argument('--normalize-signal', action = 'store_true')
-	parser.add_argument('--normalize-signal-multiplier', action = 'store_true')
+	parser.add_argument('--debug-short-long-records-normalize-signal-multiplier', action = 'store_true')
+	parser.add_argument('--debug-short-long-records-features-from-whole-normalized-signal', action = 'store_true')
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
