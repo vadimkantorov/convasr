@@ -1,20 +1,39 @@
 import os
+import json
 import torch
 import torch.nn.functional as F
+
+import utils
+
+ref_missing = ''
+speaker_name_missing = ''
+speaker_missing = 0
+channel_missing = -1
+time_missing = -1
+		
+def load(data_path):
+	assert os.path.exists(data_path)
+	if data_path.endswith('.json') or data_path.endswith('.json.gz'):
+		return json.load(utils.open_maybe_gz(data_path))
+	if os.path.exists(data_path + '.json'):
+		return json.load(open(data_path + '.json'))
+	return [dict(audio_path = data_path)]
 
 
 def strip(transcript, keys = []):
 	return [{k: v for k, v in t.items() if k not in keys} for t in transcript]
 
 
-#def segment(speech, sample_rate = 1):
-#	_notspeech_ = ~F.pad(speech, [1, 1])
-#	channel_i_channel_j = torch.cat([(speech & _notspeech_[..., :-2]).nonzero(), (speech & _notspeech_[..., 2:]).nonzero()], dim = -1)
-#	return [dict(begin = i / sample_rate, end = j / sample_rate, channel = channel) for channel, i, _, j in channel_i_channel_j.tolist()]
-
 
 def join(ref = [], hyp = []):
 	return ' '.join(t['ref'] for t in ref).strip() + ' '.join(t['hyp'] for t in hyp).strip()
+
+def remap_speaker(transcript, speaker_perm):
+	speaker_names_ = speaker_names(transcript, num_speakers = len(speaker_perm) - 1)
+	for t in transcript:
+		speaker_ = speaker_perm[t['speaker']]
+		t['speaker'], t['speaker_name'] = speaker_, speaker_names_[speaker_]
+
 
 def set_speaker(transcript):
 	if not transcript:
@@ -31,12 +50,24 @@ def set_speaker(transcript):
 			for t in transcript:
 				t['speaker'] = int(t['speaker_name'])
 		else:
-			speaker_names = speaker_names(transcript)
+			speaker_names_ = speaker_names(transcript)
 			for t in transcript:
-				t['speaker'] = speaker_names.index(t['speaker_name'])
+				t['speaker'] = speaker_names_.index(t['speaker_name'])
 
-def speaker_names(transcript):
-	return [None] + sorted(set(t['speaker_name'] for t in transcript))
+def speaker_names(transcript, num_speakers = None):
+	has_speaker = all(t.get('speaker') is not None for t in transcript)
+	
+	if has_speaker:
+		num_speakers = num_speakers if num_speakers is not None else len(set(t['speaker'] for t in transcript if t['speaker'] != speaker_missing))
+		speaker_names_ = [None if speaker == speaker_missing else str(speaker) for speaker in range(1 + num_speakers)]
+		for t in transcript:
+			speaker_name = t.get('speaker_name')
+			if speaker_name is not None:
+				speaker_names_[t['speaker']] = speaker_name
+	else:
+		speaker_names_ = [None] + sorted(set(t['speaker_name'] for t in transcript))	
+	
+	return speaker_names_
 
 def speaker(ref = None, hyp = None):
 	return ', '.join(sorted(filter(bool, set(t.get('speaker') for t in ref + hyp)))) or None

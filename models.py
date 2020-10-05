@@ -711,6 +711,10 @@ def silence_space_mask(log_probs, speech, blank_idx, space_idx, kernel_size = 10
 
 
 def rle1d(tensor):
+	#_notspeech_ = ~F.pad(speech, [1, 1])
+	#channel_i_channel_j = torch.cat([(speech & _notspeech_[..., :-2]).nonzero(), (speech & _notspeech_[..., 2:]).nonzero()], dim = -1)
+	#return [dict(begin = i / sample_rate, end = j / sample_rate, channel = channel) for channel, i, _, j in channel_i_channel_j.tolist()]
+	
 	assert tensor.ndim == 1
 	starts = torch.cat(( torch.LongTensor([0], device = tensor.device), (tensor[1:] != tensor[:-1]).nonzero(as_tuple = False).add_(1).squeeze(1), torch.LongTensor([tensor.shape[-1]], device = tensor.device) ))
 	starts, lengths, values = starts[:-1], (starts[1:] - starts[:-1]), tensor[starts[:-1]]

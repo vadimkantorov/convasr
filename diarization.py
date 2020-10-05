@@ -139,38 +139,70 @@ def der(ref_rttm_path, hyp_rttm_path, metric = pyannote.metrics.diarization.Diar
 	ref, hyp = [next(iter(anno.values())) for anno in [ref, hyp]]
 	return metric(ref, hyp)
 
-def speaker_error(ref_rttm_path, hyp_rttm_path):
-	ref, hyp = map(load_rttm, [ref_rttm_path, hyp_rttm_path])
+def speaker_mask(transcript, num_speakers, duration, sample_rate):
+	mask = torch.zeros(1 + num_speakers, int(duration * sample_rate), dtype = torch.bool)
+	for t in transcript:
+		mask[t['speaker'], int(t['begin'] * sample_rate) : int(t['end'] * sample_rate)] = 1
+	mask[0] = mask[1] & mask[2]
+	return mask
+
+def speaker_error(ref, hyp, num_speakers, sample_rate = 8000, hyp_speaker_mapping = None, ignore_silence_and_overlapped_speech = True):
+	assert num_speakers == 2
+	duration = transcripts.compute_duration(dict(ref = ref, hyp = hyp))
+	ref_mask = speaker_mask(ref,  num_speakers, duration, sample_rate)
+	hyp_mask_ = speaker_mask(hyp, num_speakers, duration, sample_rate)
+
+	vals = []
+	for hyp_perm in ([[0, 1, 2], [0, 2, 1]] if hyp_speaker_mapping is None else hyp_speaker_mapping):
+		hyp_mask = hyp_mask_[hyp_perm]
+		speaker_mismatch = (ref_mask[1] != hyp_mask[1]) | (ref_mask[2] != hyp_mask[2])
+		if ignore_silence_and_overlapped_speech:
+			silence_or_overlap_mask = ref_mask[1] == ref_mask[2]
+			speaker_mismatch = speaker_mismatch[~silence_or_overlap_mask]
+
+		err = float(speaker_mismatch.float().mean())
+		vals.append((err, hyp_perm))
+
+	return min(vals)
 		
-def eval(ref, hyp, html, debug_audio):
+def eval(ref, hyp, html, debug_audio, sample_rate = 100):
 	if os.path.isfile(ref) and os.path.isfile(hyp):
 		print(der(ref_rttm_path = ref, hyp_rttm_path = hyp))
 
 	elif os.path.isdir(ref) and os.path.isdir(hyp):
-		ders = []
+		errs = []
 		diarization_transcript = []
 		for rttm in os.listdir(ref):
 			if not rttm.endswith('.rttm'):
 				continue
-			ref_rttm_path = os.path.join(ref, rttm)
-			hyp_rttm_path = os.path.join(hyp, rttm)
-			d = der(ref_rttm_path = ref_rttm_path, hyp_rttm_path = hyp_rttm_path)
-			hyp_transcript = json.load(open(hyp_rttm_path.replace('.rttm', '.json')))
-			ref_transcript = json.load(open(ref_rttm_path.replace('.rttm', '.json')))
+			audio_path = transcripts.load(os.path.join(hyp, rttm).replace('.rttm', '.json'))[0]['audio_path']
+
+			ref_rttm_path, hyp_rttm_path = os.path.join(ref, rttm), os.path.join(hyp, rttm)
+			ref_transcript, hyp_transcript = map(load_rttm, [ref_rttm_path, hyp_rttm_path])
+			ser_err, hyp_perm = speaker_error(ref = ref_transcript, hyp = hyp_transcript, num_speakers = 2, sample_rate = sample_rate, ignore_silence_and_overlapped_speech = True)
+			der_err, *_ = speaker_error(ref = ref_transcript, hyp = hyp_transcript, num_speakers = 2, sample_rate = sample_rate, ignore_silence_and_overlapped_speech = False)
+			der_err_ = der(ref_rttm_path = ref_rttm_path, hyp_rttm_path = hyp_rttm_path)
+			transcripts.remap_speaker(hyp_transcript, hyp_perm)
+
+			err = dict(
+				ser = ser_err,
+				der = der_err,
+				der_ = der_err_
+			)
 			diarization_transcript.append(dict(
-				metric = d, 
-				audio_path = hyp_transcript[0]['audio_path'],
-				audio_name = transcripts.audio_name(hyp_transcript[0]),
+				audio_path = audio_path,
+				audio_name = transcripts.audio_name(audio_path),
 				ref = ref_transcript, 
-				hyp = hyp_transcript
+				hyp = hyp_transcript,
+				**err
 			))
-			print(f'{rttm}: {d:.2f}')
-			ders.append(d)
+			print(rttm, '{ser:.2f}, {der:.2f} | {der_:.2f}'.format(**err))
+			errs.append(err)
 		print('===')
-		print(sum(ders) / len(ders))
+		print({k : sum(e) / len(e) for k in errs[0] for e in [[err[k] for err in errs]]})
 		
 		if html:
-			print(vis.diarization(diarization_transcript, html, debug_audio))
+			print(vis.diarization(sorted(diarization_transcript, key = lambda t: t['ser'], reverse = True), html, debug_audio))
 
 
 if __name__ == '__main__':

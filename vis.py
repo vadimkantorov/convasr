@@ -87,13 +87,20 @@ def diarization(diarization_transcript, html_path, debug_audio):
 		html.write(f'<script>{play_script}</script>\n')
 		html.write(f'<script>{onclick_img_script}</script>')
 		html.write('<table>\n')
-		html.write('<tr><th>audio_name</th><th>duration</th><th>refhyp</th><th>metric</th><th>audio</th><th>barcode</th></tr>\n')
-		html.write('<tr class="border-hyp"><td>{num_files}</td><td>{total_duration:.02f}</td><td>avg</td><td>{avg_metric:.02f}</td><td></td><td></td></tr>\n'.format(num_files = len(diarization_transcript), total_duration = sum(map(transcripts.compute_duration, diarization_transcript)), avg_metric = sum(t['metric'] for t in diarization_transcript) / len(diarization_transcript)))
+		html.write('<tr><th>audio_name</th><th>duration</th><th>refhyp</th><th>ser</th><th>der</th><th>der_</th><th>audio</th><th>barcode</th></tr>\n')
+		avg = lambda l: sum(l) / len(l)
+		html.write('<tr class="border-hyp"><td>{num_files}</td><td>{total_duration:.02f}</td><td>avg</td><td>{avg_ser:.02f}</td><td>{avg_der:.02f}</td><td>{avg_der_:.02f}</td><td></td><td></td></tr>\n'.format(
+			num_files = len(diarization_transcript), 
+			total_duration = sum(map(transcripts.compute_duration, diarization_transcript)), 
+			avg_ser = avg([t['ser'] for t in diarization_transcript]),
+			avg_der = avg([t['der'] for t in diarization_transcript]),
+			avg_der_ = avg([t['der_'] for t in diarization_transcript])
+		))
 		for i, dt in enumerate(diarization_transcript):
 			audio_html = '<audio id="audio{channel}" controls src="{data_uri}"></audio>'.format(channel = i, data_uri = audio_data_uri(dt['audio_path'])) if debug_audio else ''
 			begin, end = 0.0, transcripts.compute_duration(dt)
 			for refhyp in ['ref', 'hyp']:
-				html.write('<tr class="border-{refhyp}"><td class="nowrap">{audio_name}</td><td>{end:.02f}</td><td>{refhyp}</td><td>{metric:.02f}</td><td rospan="{rowspan}">{audio_html}</td><td>{barcode}</td></tr>\n'.format(audio_name = dt['audio_name'], audio_html = audio_html if refhyp == 'ref' else '', rowspan = 2 if refhyp == 'ref' else 1, refhyp = refhyp, end = end, metric = dt['metric'], barcode = speaker_barcode_img(dt[refhyp], begin = begin, end = end, onclick = None if debug_audio else '', dataset = dict(channel = i))))
+				html.write('<tr class="border-{refhyp}"><td class="nowrap">{audio_name}</td><td>{end:.02f}</td><td>{refhyp}</td><td>{ser:.02f}</td><td>{der:.02f}</td><td>{der_:.02f}</td><td rospan="{rowspan}">{audio_html}</td><td>{barcode}</td></tr>\n'.format(audio_name = dt['audio_name'], audio_html = audio_html if refhyp == 'ref' else '', rowspan = 2 if refhyp == 'ref' else 1, refhyp = refhyp, end = end, ser = dt['ser'], der = dt['der'], der_ = dt['der_'], barcode = speaker_barcode_img(dt[refhyp], begin = begin, end = end, onclick = None if debug_audio else '', dataset = dict(channel = i))))
 
 		html.write('</table></body></html>')
 	return html_path
