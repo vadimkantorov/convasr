@@ -569,9 +569,9 @@ class LogFilterBankFrontend(nn.Module):
 	def forward(self, signal: shaping.BT, mask: shaping.BT = None) -> shaping.BCT:
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
 
-		#signal_max = signal.abs().max(dim=-1, keepdim=True).values.item()
-		#signal_mean = signal.abs().mean(dim=-1, keepdim=True).values.item()
-		#signal_min = signal.abs().min(dim=-1, keepdim=True).values.item()
+		# strange bug with shape of signal. In case if shape of signal [24000] cause exception in padding F.pad
+		if len(signal.shape) < 2:
+			signal = signal.unsqueeze(0)
 
 		signal = normalize_signal(signal, self.debug_short_long_records_normalize_signal_multiplier) if self.normalize_signal else signal
 		signal = apply_dither(signal, self.dither0)

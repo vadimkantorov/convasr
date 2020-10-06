@@ -34,6 +34,13 @@ def setup(args):
 			normalize_signal=args.normalize_signal,
 			debug_short_long_records_normalize_signal_multiplier=args.debug_short_long_records_normalize_signal_multiplier
 	)
+
+	augmented_frontend = models.AugmentationFrontend(
+			frontend,
+			waveform_transform=None,
+			feature_transform=None
+	)
+
 	labels = datasets.Labels(datasets.Language(checkpoint['args']['lang']), name = 'char')
 	model = getattr(models, args.model or checkpoint['args']['model'])(
 		args.num_input_features, [len(labels)],
@@ -58,7 +65,7 @@ def setup(args):
 		num_workers = args.num_workers,
 		topk = args.decoder_topk
 	)
-	return labels, frontend, model, decoder
+	return labels, augmented_frontend, model, decoder
 
 
 def main(args):
@@ -315,6 +322,7 @@ if __name__ == '__main__':
 	parser.add_argument('--normalize-signal', action = 'store_true')
 	parser.add_argument('--debug-short-long-records-normalize-signal-multiplier', action = 'store_true')
 	parser.add_argument('--debug-short-long-records-features-from-whole-normalized-signal', action = 'store_true')
+	parser.add_argument('--frontend', type=str, default='LogFilterBankFrontend')
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
