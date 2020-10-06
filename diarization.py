@@ -19,7 +19,7 @@ class PyannoteDiarizationModel(nn.Module):
 		self.pipeline = torch.hub.load('pyannote/pyannote-audio', 'dia', **kwargs)
 
 	def forward(signal, sample_rate, extra = {}):
-		res = self.pipeline(dict(waveform = signal, sample_rate = sample_rate))
+		res = self.pipeline(dict(waveform = signal.t().numpy(), sample_rate = sample_rate))
 		transcript = [dict(begin = turn.start, end = turn.end, speaker_name = speaker, **extra) for turn, _, speaker in res.itertracks(yield_label = True)]
 		return transcript
 
@@ -91,8 +91,10 @@ def ref(input_path, output_path, sample_rate, window_size, device, max_duration,
 		signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = False, dtype = 'float32', duration = max_duration)
 
 		speaker_id_ref, speaker_id_ref_ = select_speaker(signal.to(device), silence_absolute_threshold = 0.05, silence_relative_threshold = 0.2, kernel_size_smooth_signal = 128, kernel_size_smooth_speaker = 4096, kernel_size_smooth_silence = 4096)
+
+		transcript = [dict(audio_path = audio_path, begin = float(begin) / sample_rate, end = (float(begin) + float(duration)) / sample_rate, speaker = speaker, speaker_name = transcripts.default_speaker_names[speaker]) for speaker in range(1, len(speaker_id_ref_)) for begin, duration, mask in zip(*models.rle1d(speaker_id_ref_[speaker])) if mask == 1]
 		
-		transcript = [dict(audio_path = audio_path, begin = float(begin) / sample_rate, end = (float(begin) + float(duration)) / sample_rate, speaker_name = str(int(speaker)), speaker = int(speaker)) for begin, duration, speaker in zip(*models.rle1d(speaker_id_ref.cpu()))]
+		#transcript = [dict(audio_path = audio_path, begin = float(begin) / sample_rate, end = (float(begin) + float(duration)) / sample_rate, speaker_name = str(int(speaker)), speaker = int(speaker)) for begin, duration, speaker in zip(*models.rle1d(speaker_id_ref.cpu()))]
 
 		transcript_without_speaker_missing = [t for t in transcript if t['speaker'] != transcripts.speaker_missing]
 		transcripts.save(transcript_path, transcript_without_speaker_missing)

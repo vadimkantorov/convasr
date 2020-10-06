@@ -5,6 +5,8 @@ import torch.nn.functional as F
 
 import utils
 
+default_speaker_names = '_AB'
+
 ref_missing = ''
 speaker_name_missing = ''
 speaker_missing = 0
