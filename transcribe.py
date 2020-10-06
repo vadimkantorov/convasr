@@ -239,8 +239,7 @@ def main(args):
 		if args.output_json:
 			transcript_path = os.path.join(args.output_path, audio_name + '.json')
 			print(transcript_path)
-			with open(transcript_path, 'w') as f:
-				json.dump(filtered_transcript, f, ensure_ascii = False, sort_keys = True, indent = 2)
+			transcripts.save(transcript_path, filtered_transcript)
 
 		if args.output_html:
 			transcript_path = os.path.join(args.output_path, audio_name + '.html')

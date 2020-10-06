@@ -1,4 +1,4 @@
-#python3 diarization.py ref $@ -i diarization/stereo -o data/diarization/ref --html --audio
+#python3 diarization.py ref $@ -i diarization/stereo -o data/diarization/ref --html
 
 #python3 diarization.py hyp $@ -i diarization/mono -o data/diarization/hyp --html
 

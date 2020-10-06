@@ -13,11 +13,30 @@ time_missing = -1
 		
 def load(data_path):
 	assert os.path.exists(data_path)
-	if data_path.endswith('.json') or data_path.endswith('.json.gz'):
-		return json.load(utils.open_maybe_gz(data_path))
+	
+	if data_path.endswith('.rttm'):
+		with open(file_path) as f:
+			transcript = [dict(audio_name = splitted[1], begin = float(splitted[3]), end = float(splitted[3]) + float(splitted[4]), speaker_name = splitted[7]) for splitted in map(str.split, f)]
+		set_speaker(transcript)
+		return transcript
+	
+	elif data_path.endswith('.json') or data_path.endswith('.json.gz'):
+		with utils.open_maybe_gz(data_path) as f:
+			return json.load(f)
+	
 	if os.path.exists(data_path + '.json'):
-		return json.load(open(data_path + '.json'))
+		with open(data_path + '.json') as f: 
+			return json.load(f)
+	
 	return [dict(audio_path = data_path)]
+
+def save(data_path, transcript):
+	with open(data_path, 'w') as f:
+		if data_path.endswith('.json'):
+			json.dump(transcript, f, ensure_ascii = False, sort_keys = True, indent = 2)
+		elif data_path.endswith('.rttm'):
+			audio_name_ = audio_name(transcript[0])
+			f.writelines('SPEAKER {audio_name} 1 {begin:.3f} {duration:.3f} <NA> <NA> {speaker} <NA> <NA>\n'.format(audio_name = audio_name, begin = t['begin'], duration = compute_duration(t), speaker = t['speaker']) for t in transcript if t['speaker'] != speaker_missing)
 
 
 def strip(transcript, keys = []):

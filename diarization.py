@@ -2,6 +2,7 @@ import os
 import argparse
 import json
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import audio
 import models
@@ -13,6 +14,15 @@ import pyannote.core
 import pyannote.database.util 
 import pyannote.metrics.diarization
 
+class PyannoteDiarizationModel(nn.Module):
+	def __init__(self, **kwargs)
+		self.pipeline = torch.hub.load('pyannote/pyannote-audio', 'dia', **kwargs)
+
+	def forward(signal, sample_rate, extra = {}):
+		res = self.pipeline(dict(waveform = signal, sample_rate = sample_rate))
+		transcript = [dict(begin = turn.start, end = turn.end, speaker_name = speaker, **extra) for turn, _, speaker in res.itertracks(yield_label = True)]
+		return transcript
+
 def resize_to_min_size_(*tensors, dim = -1):
 	size = min(t.shape[dim] for t in tensors)
 	for t in tensors:
@@ -23,16 +33,6 @@ def resize_to_min_size_(*tensors, dim = -1):
 def convert_speaker_id(speaker_id, to_bipole = False, from_bipole = False):
 	k, b = (1 - 3/2, 3 / 2) if from_bipole else (-2, 3) if to_bipole else (None, None)
 	return (speaker_id != 0) * (speaker_id * k + b)
-
-def write_rttm(file_path, transcript):
-	audio_name = transcripts.audio_name(transcript[0])
-	with open(file_path, 'w') as f:
-		f.writelines('SPEAKER {audio_name} 1 {begin:.3f} {duration:.3f} <NA> <NA> {speaker} <NA> <NA>\n'.format(audio_name = audio_name, begin = t['begin'], duration = transcripts.compute_duration(t), speaker = t['speaker']) for t in transcript)
-
-def load_rttm(file_path):
-	transcript = [dict(audio_name = splitted[1], begin = float(splitted[3]), end = float(splitted[3]) + float(splitted[4]), speaker_name = splitted[7]) for splitted in map(str.split, open(file_path))]
-	transcripts.set_speaker(transcript)
-	return transcript
 
 def select_speaker(signal : shaping.BT, kernel_size_smooth_silence : int, kernel_size_smooth_signal : int, kernel_size_smooth_speaker : int, silence_absolute_threshold : float = 0.2, silence_relative_threshold : float = 0.5, eps : float = 1e-9, normalization_percentile = 0.9) -> shaping.T:
 	assert len(signal) == 2
@@ -94,10 +94,11 @@ def ref(input_path, output_path, sample_rate, window_size, device, max_duration,
 		
 		transcript = [dict(audio_path = audio_path, begin = float(begin) / sample_rate, end = (float(begin) + float(duration)) / sample_rate, speaker_name = str(int(speaker)), speaker = int(speaker)) for begin, duration, speaker in zip(*models.rle1d(speaker_id_ref.cpu()))]
 
-		json.dump([t for t in transcript if t['speaker'] != 0], open(transcript_path, 'w'), indent = 2, sort_keys = True)
+		transcript_without_speaker_missing = [t for t in transcript if t['speaker'] != transcripts.speaker_missing]
+		transcripts.save(transcript_path, transcript_without_speaker_missing)
 		print(transcript_path)
 
-		write_rttm(rttm_path, transcript)
+		transcripts.save(rttm_path, transcript_without_speaker_missing)
 		print(rttm_path)
 		
 		if debug_audio:
@@ -109,10 +110,10 @@ def ref(input_path, output_path, sample_rate, window_size, device, max_duration,
 			vis.transcript(html_path, sample_rate = sample_rate, mono = True, transcript = transcript, duration = max_duration)
 
 def hyp(input_path, output_path, device, batch_size, html, ext, sample_rate, max_duration):
-	pipeline = torch.hub.load('pyannote/pyannote-audio', 'dia', device = device, batch_size = batch_size)
 	
 	os.makedirs(output_path, exist_ok = True)
 	audio_source = ([(input_path, audio_name) for audio_name in os.listdir(input_path)] if os.path.isdir(input_path) else [(os.path.dirname(input_path), os.path.basename(input_path))])
+	model = PyannoteDiarizationModel(device = device, batch_size = batch_size)
 	for i, (input_path, audio_name) in enumerate(audio_source):
 		print(i, '/', len(audio_source), audio_name)
 		audio_path = os.path.join(input_path, audio_name)
@@ -120,11 +121,11 @@ def hyp(input_path, output_path, device, batch_size, html, ext, sample_rate, max
 		transcript_path = os.path.join(output_path, noextname + '.json')
 		rttm_path = os.path.join(output_path, noextname + '.rttm')
 	
-		res = pipeline(dict(audio = audio_path))
-		transcript = [dict(audio_path = audio_path, begin = turn.start, end = turn.end, speaker_name = speaker) for turn, _, speaker in res.itertracks(yield_label = True)]
+		signal, sample_rate = audio.read_audio(audio_path, mono = True, dtype = 'float32', duration = max_duration)
+		transcript = model(signal, sample_rate = sample_rate, extra = dict(audio_path = audio_path))
 		transcripts.set_speaker(transcript)
 		
-		json.dump(transcript, open(transcript_path, 'w'), indent = 2, sort_keys = True)
+		transcripts.save(transcript_path, transcript)
 		print(transcript_path)
 
 		res.write_rttm(open(rttm_path, 'w'))
@@ -152,6 +153,7 @@ def speaker_error(ref, hyp, num_speakers, sample_rate = 8000, hyp_speaker_mappin
 	ref_mask = speaker_mask(ref,  num_speakers, duration, sample_rate)
 	hyp_mask_ = speaker_mask(hyp, num_speakers, duration, sample_rate)
 
+	print('duration', duration)
 	vals = []
 	for hyp_perm in ([[0, 1, 2], [0, 2, 1]] if hyp_speaker_mapping is None else hyp_speaker_mapping):
 		hyp_mask = hyp_mask_[hyp_perm]
@@ -160,6 +162,14 @@ def speaker_error(ref, hyp, num_speakers, sample_rate = 8000, hyp_speaker_mappin
 			silence_or_overlap_mask = ref_mask[1] == ref_mask[2]
 			speaker_mismatch = speaker_mismatch[~silence_or_overlap_mask]
 
+		confusion = (hyp_mask[1] & ref_mask[2] & (~ref_mask[1])) | (hyp_mask[2] & ref_mask[1] & (~ref_mask[2]))
+		false_alarm = (hyp_mask[1] | hyp_mask[2]) & (~ref_mask[1]) & (~ref_mask[2])
+		miss = (~hyp_mask[1]) & (~hyp_mask[2]) & (ref_mask[1] | ref_mask[2])
+		total = ref_mask[1] | ref_mask[2]
+
+		confusion, false_alarm, miss, total = [float(x.float().mean()) * duration for x in [confusion, false_alarm, miss, total]]
+
+		print('my', 'confusion', confusion, 'false_alarm', false_alarm, 'miss', miss, 'total', total)
 		err = float(speaker_mismatch.float().mean())
 		vals.append((err, hyp_perm))
 
@@ -175,10 +185,12 @@ def eval(ref, hyp, html, debug_audio, sample_rate = 100):
 		for rttm in os.listdir(ref):
 			if not rttm.endswith('.rttm'):
 				continue
+
+			print(rttm)
 			audio_path = transcripts.load(os.path.join(hyp, rttm).replace('.rttm', '.json'))[0]['audio_path']
 
 			ref_rttm_path, hyp_rttm_path = os.path.join(ref, rttm), os.path.join(hyp, rttm)
-			ref_transcript, hyp_transcript = map(load_rttm, [ref_rttm_path, hyp_rttm_path])
+			ref_transcript, hyp_transcript = map(transcripts.load, [ref_rttm_path, hyp_rttm_path])
 			ser_err, hyp_perm = speaker_error(ref = ref_transcript, hyp = hyp_transcript, num_speakers = 2, sample_rate = sample_rate, ignore_silence_and_overlapped_speech = True)
 			der_err, *_ = speaker_error(ref = ref_transcript, hyp = hyp_transcript, num_speakers = 2, sample_rate = sample_rate, ignore_silence_and_overlapped_speech = False)
 			der_err_ = der(ref_rttm_path = ref_rttm_path, hyp_rttm_path = hyp_rttm_path)
@@ -197,6 +209,7 @@ def eval(ref, hyp, html, debug_audio, sample_rate = 100):
 				**err
 			))
 			print(rttm, '{ser:.2f}, {der:.2f} | {der_:.2f}'.format(**err))
+			print()
 			errs.append(err)
 		print('===')
 		print({k : sum(e) / len(e) for k in errs[0] for e in [[err[k] for err in errs]]})
