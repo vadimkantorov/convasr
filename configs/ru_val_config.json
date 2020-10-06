@@ -2,11 +2,11 @@
 	"word_tags" : {"stop" : ["ну", "вот", "это", "эта", "бы", "б", "а", "и", "у", "о"]},
 	"error_analyzer" :
 	{
-		"default": {"phonetic_replace_groups" : ["её"], "collapse_repeat" : true},
-		"words_without_stop": {"word_exclude_tags" : ["stop"]},
-		"words_easy" : {"word_exclude_tags" : ["stop", "num","comp","name","abbr"]},
-		"words_easy_errors_easy": {"word_exclude_tags" : ["stop", "num","comp","name","abbr"], "error_include_tags" : ["ok", "typo_easy"]},
-		"words_only_number" : {"word_include_tags" : ["num"]},
-		"words_only_proper" : {"word_include_tags" : ["comp", "name", "abbr"]}
+		"default": {"collapse_repeat" : false},
+		"words_without_stop": {"collapse_repeat" : false, "word_exclude_tags" : ["stop"]},
+		"words_easy" : {"collapse_repeat" : false, "word_exclude_tags" : ["stop", "num", "comp", "name", "abbr"]},
+		"words_easy_errors_easy": {"collapse_repeat" : false, "word_exclude_tags" : ["stop", "num", "comp", "name", "abbr"], "error_exclude_tags" : ["ok", "typo_easy"]},
+		"words_only_number" : {"collapse_repeat" : false, "word_include_tags" : ["num"]},
+		"words_only_proper" : {"collapse_repeat" : false, "word_include_tags" : ["comp", "name", "abbr"]}
 	}
 }

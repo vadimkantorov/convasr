@@ -97,6 +97,7 @@ def main(args):
 		exclude = exclude,
 		max_duration = args.transcribe_first_n_sec,
 		join_transcript = args.join_transcript,
+		string_array_encoding = args.dataset_string_array_encoding,
 		debug_short_long_records_features_from_whole_normalized_signal = args.debug_short_long_records_features_from_whole_normalized_signal
 	)
 	num_examples = len(val_dataset)
@@ -107,6 +108,7 @@ def main(args):
 	csv_sep = dict(tab = '\t', comma = ',')[args.csv_sep]
 	output_lines = []  # only used if args.output_csv is True
 
+	oom_handler = utils.OomHandler(max_retries = args.oom_retries)
 	for i, (meta, s, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
 
@@ -202,8 +204,9 @@ def main(args):
 						speakers = val_dataset.speakers
 					) for i in range(len(decoded))
 				]
+			oom_handler.reset()
 		except:
-			if (not args.oom_crash) and utils.handle_out_of_memory_exception(model.parameters()):
+			if oom_handler.try_recover(model.parameters()):
 				print(f'Skipping {i} / {num_examples}')
 				continue
 			else:
@@ -318,7 +321,8 @@ if __name__ == '__main__':
 	parser.add_argument('--transcribe-first-n-sec', type = int)
 	parser.add_argument('--join-transcript', action = 'store_true')
 	parser.add_argument('--pack-backpointers', action = 'store_true')
-	parser.add_argument('--oom-crash', action = 'store_true')
+	parser.add_argument('--oom-retries', type = int, default = 3)
+	parser.add_argument('--dataset-string-array-encoding', default = 'utf_32_le', choices = ['utf_16_le', 'utf_32_le'])
 	parser.add_argument('--normalize-signal', action = 'store_true')
 	parser.add_argument('--debug-short-long-records-normalize-signal-multiplier', action = 'store_true')
 	parser.add_argument('--debug-short-long-records-features-from-whole-normalized-signal', action = 'store_true')

@@ -1,17 +1,29 @@
+#TODO: add optimization time logging
+#TODO: add RSS logging
+#TODO: add CPU/GPU load logging
+#TODO: add PyTorch GPU caching allocator memory utilisation (utils.compute_memory_fragmentation) logging
+#TODO: add data loader process amount logging
+#TODO: add intra-op parallelism logging (including DataLoader)
+#TODO: add validaation logging to json
+
+import logging
+import logging.handlers
 import argparse
 import json
 import math
 import os
+import collections
 import random
 import shutil
+import datetime
 import time
+import multiprocessing
 import torch.utils.data
 import torch.utils.tensorboard
 import onnxruntime
 import apex
 import datasets
 import decoders
-#import exphtml
 import metrics
 import models
 import optimizers
@@ -20,18 +32,100 @@ import transforms
 import vis
 import utils
 import transcripts
-import multiprocessing
+import perf
+import itertools
+import torch.distributed as dist
 
-def apply_model(data_loader, model, labels, decoder, device, crash_on_oom):
+class JsonlistSink:
+	def __init__(self, file_path, mode = 'w'):
+		self.json_file = open(file_path, mode) if file_path else None
+
+	def log(self, perf, iteration, train_dataset_name):
+		if self.json_file is None:
+			return
+
+		self.json_file.write(json.dumps(dict(train_dataset_name = train_dataset_name,
+											 loss_BT_normalized_avg = perf['avg_loss_BT_normalized'],
+											 lr_avg = perf['avg_lr'],
+											 time_ms_data_avg = perf['performance_avg_time_ms_data'],
+											 time_ms_forward_avg = perf['performance_avg_time_ms_fwd'],
+											 time_ms_backward_avg = perf['performance_avg_time_ms_bwd'],
+											 input_B_cur = perf['performance_cur_input_B'],
+											 input_T_cur = perf['performance_cur_input_T'],
+											 iteration = iteration)))
+		self.json_file.write('\n')
+		self.json_file.flush()
+
+class TensorboardSink:
+	def __init__(self, summary_writer):
+		self.summary_writer = summary_writer
+
+	def perf(self, perf, iteration, rank = None):
+		filter_key = 'performance_'
+		aggregated_metrics = collections.defaultdict(dict)
+		for key, value in perf.items():
+			if filter_key == key[:len(filter_key)]:
+				key = key[len(filter_key):]
+			else:
+				continue
+			agg_type = key.split('_')[0]
+			name = ''.join(key.split('_')[1:])
+			aggregated_metrics[name][agg_type] = value
+
+		for name, value in aggregated_metrics.items():
+			if rank is not None:
+				tag = f'perf/{name}_node<{rank}>'
+			else:
+				tag = f'perf/{name}'
+			self.summary_writer.add_scalars(tag, value, iteration)
+
+	def train_stats(self, perf, iteration, train_dataset_name, lr_scaler = 1e4):
+		self.summary_writer.add_scalars(f'datasets/{train_dataset_name}', dict(loss_BT_normalized_avg=perf['avg_loss_BT_normalized'], lr_avg_scaled=perf['avg_lr'] * lr_scaler), iteration)
+
+	def val_stats(self, iteration, val_dataset_name, labels_name, perf):
+		prefix = f'datasets_val_{val_dataset_name}_{labels_name}_cur_'
+		self.summary_writer.add_scalars(
+			prefix.replace('datasets_', 'datasets/'),
+			dict(
+				wer = perf[prefix + 'wer'] * 100.0,
+				cer = perf[prefix + 'cer'] * 100.0,
+				loss = perf[prefix + 'loss']
+			),
+			iteration
+		)
+
+		# https://github.com/pytorch/pytorch/issues/24234
+		self.summary_writer.flush()
+
+	def weight_stats(self, iteration, model, log_weight_distribution, eps = 1e-9):
+		for param_name, param in models.master_module(model).named_parameters():
+			if param.grad is None:
+				continue
+
+			tag = 'params/' + param_name.replace('.', '/')
+			norm, grad_norm = param.norm(), param.grad.norm()
+			ratio = grad_norm / (eps + norm)
+			self.summary_writer.add_scalars(
+				tag,
+				dict(norm = float(norm), grad_norm = float(grad_norm), ratio = float(ratio)),
+				iteration
+			)
+			
+			if log_weight_distribution:
+				self.summary_writer.add_histogram(tag, param, iteration)
+				self.summary_writer.add_histogram(tag + '/grad', param.grad, iteration)
+	
+
+def apply_model(data_loader, model, labels, decoder, device, oom_handler):
 	for meta, s, x, xlen, y, ylen in data_loader:
 		x, xlen, y, ylen = x.to(device, non_blocking = True), xlen.to(device, non_blocking = True), y.to(device, non_blocking = True), ylen.to(device, non_blocking = True)
 		with torch.no_grad():
 			try:
 				logits, log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'olen', 'loss'])
+				oom_handler.reset()
 			except:
-				if (not crash_on_oom) and utils.handle_out_of_memory_exception(model.parameters()):
-					continue
-				else:
+				## TODO remove args.world_size > 1 after OOM recover fix for DDP
+				if args.world_size > 1 or not oom_handler.try_recover(model.parameters(), _print = utils.get_root_logger_print(level = logging.ERROR)):
 					raise
 
 		entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, olen))
@@ -50,40 +144,75 @@ def evaluate_model(
 	error_analyzer,
 	optimizer = None,
 	sampler = None,
-	tensorboard = None,
+	tensorboard_sink = None,
+	logfile_sink = None,
 	epoch = None,
 	iteration = None
 ):
+	_print = utils.get_root_logger_print()
+
 	training = epoch is not None and iteration is not None
 	columns = {}
+	oom_handler = utils.OomHandler(max_retries=args.oom_retries)
 	for val_dataset_name, val_data_loader in val_data_loaders.items():
-		print(f'\n{val_dataset_name}@{iteration}')
-		transcript, logits_, y_ = [], [], []
+		if args.world_size > 1:
+			# synchronize process, because rank 0 process do result analisys and io
+			dist.barrier()
+		_print(f'\n{val_dataset_name}@{iteration}')
 		analyze = args.analyze == [] or (args.analyze is not None and val_dataset_name in args.analyze)
 
 		model.eval()
 		if args.adapt_bn:
 			models.reset_bn_running_stats_(model)
-			for _ in apply_model(val_data_loader, model, labels, decoder, args.device, args.val_crash_oom):
+			for _ in apply_model(val_data_loader, model, labels, decoder, args.device, oom_handler):
 				pass
 		model.eval()
-		cpu_list = lambda l: [[t.cpu() for t in t_] for t_ in l]
 
 		tic = time.time()
 		ref_, hyp_, audio_path_, loss_, entropy_ = [], [], [], [], []
 		for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(
-				val_data_loader, model, labels, decoder, args.device, args.val_crash_oom)):
+				val_data_loader, model, labels, decoder, args.device, oom_handler)):
 			loss_.extend(loss.tolist())
 			entropy_.extend(entropy.tolist())
-			logits_.extend(zip(*cpu_list(logits)) if not training and args.logits else [])
-			y_.extend(cpu_list(y))
 			audio_path_.extend(m['audio_path'] for m in meta)
 			ref_.extend(labels[0].normalize_text(m['ref']) for m in meta)
 			hyp_.extend(zip(*hyp))
 		toc_apply_model = time.time()
-		print(f"Apply model {toc_apply_model - tic:.1f} sec", end=", ")
+		time_sec_val_apply_model = toc_apply_model - tic
+		perf.update(dict(time_sec_val_apply_model = time_sec_val_apply_model), prefix = f'datasets_{val_dataset_name}')
+		_print(f"Apply model {time_sec_val_apply_model:.1f} sec")
 
-		analyze_inputs_gen = (
+		if args.world_size > 1:
+			def sync_float_list(float_list):
+				sync = utils.gather_tensors(torch.tensor(float_list, dtype=torch.float32, device=args.device), world_size=args.world_size)
+				return list(itertools.chain.from_iterable([x.cpu().tolist() for x in sync]))
+
+			def sync_string_list(str_list):
+				string_storage = utils.TensorBackedStringArray(str_list, device = args.device)
+				string_storage.synchronize(args.world_size)
+				return list(string_storage.to('cpu'))
+			_print(f"Synchronize validation results started")
+			sync_tic = time.time()
+			loss_ = sync_float_list(loss_)
+			_print(f'loss sync time {time.time() - sync_tic:.1f} sec');sync_tic = time.time()
+			entropy_ = sync_float_list(entropy_)
+			_print(f'entropy sync time {time.time() - sync_tic:.1f} sec');sync_tic = time.time()
+			audio_path_ = sync_string_list(audio_path_)
+			_print(f'audio_path sync time {time.time()  - sync_tic:.1f} sec');sync_tic = time.time()
+			ref_ = sync_string_list(ref_)
+			_print(f'ref sync time {time.time() - sync_tic:.1f} sec');sync_tic = time.time()
+			hyps_by_labels = list(map(list, zip(*hyp_)))
+			for i in range(len(hyps_by_labels)):
+				hyps_by_labels[i] = sync_string_list(hyps_by_labels[i])
+			hyp_ = list(map(list, zip(*hyps_by_labels)))
+			_print(f'hyp sync time {time.time()- sync_tic:.1f} sec')
+			time_sec_val_sync_results = time.time() - toc_apply_model
+			perf.update(dict(time_sec_val_sync_results=time_sec_val_sync_results), prefix=f'datasets_{val_dataset_name}')
+			_print(f"Synchronize validation results {time_sec_val_sync_results:.1f} sec")
+			if args.rank != 0:
+				continue
+
+		analyze_args_gen = (
 			(
 				hyp,
 				ref,
@@ -100,23 +229,26 @@ def evaluate_model(
 			for ref, hyp_tuple, audio_path, loss, entropy in zip(ref_, hyp_, audio_path_, loss_, entropy_)
 			for label, hyp in zip(labels, hyp_tuple)
 		)
+
 		if args.analyze_num_workers <= 0:
-			transcript = []
-			for i, analyze_args in enumerate(analyze_inputs_gen):
-				transcript.append(error_analyzer.analyze(*analyze_args))
-				if args.verbose:
-					print(f'{val_dataset_name}@{iteration}: {i // len(labels)}/{len(audio_path_)}|{args.experiment_id}')
-					# TODO: don't forget to fix aligned hyp & ref output!
-					# hyp = new_transcript['alignment']['hyp'] if analyze else new_transcript['hyp']
-					# ref = new_transcript['alignment']['ref'] if analyze else new_transcript['ref']
-					print('REF: {labels_name} "{ref}"'.format(**transcript[-1]))
-					print('HYP: {labels_name} "{hyp}"'.format(**transcript[-1]))
-					print('WER: {labels_name} {wer:.02%} | CER: {cer:.02%}\n'.format(**transcript[-1]))
+			transcript = [error_analyzer.analyze(*args) for args in analyze_args_gen]
 		else:
-			with multiprocessing.pool.Pool(processes=args.analyze_num_workers) as pool:
-				transcript = pool.starmap(error_analyzer.analyze, analyze_inputs_gen)
+			with multiprocessing.pool.Pool(processes = args.analyze_num_workers) as pool:
+				transcript = pool.starmap(error_analyzer.analyze, analyze_args_gen)
+
 		toc_analyze = time.time()
-		print(f"Analyze {toc_analyze - toc_apply_model:.1f} sec, Total {toc_analyze - tic:.1f} sec")
+		time_sec_val_analyze = toc_analyze - toc_apply_model
+		time_sec_val_total = toc_analyze - tic
+		perf.update(dict(time_sec_val_analyze = time_sec_val_analyze, time_sec_val_total = time_sec_val_total), prefix = f'datasets_{val_dataset_name}')
+		_print(f"Analyze {time_sec_val_analyze:.1f} sec, Total {time_sec_val_total:.1f} sec")
+		
+		for i, t in enumerate(transcript if args.verbose else []):		
+			_print(f'{val_dataset_name}@{iteration}: {i // len(labels)} / {len(audio_path_)} | {args.experiment_id}')
+			# TODO: don't forget to fix aligned hyp & ref output!
+			_print('{labels_name} AUDIO_NAME: {audio_name}'.format(**t))
+			_print('{labels_name} REF: "{ref}"'.format(**t))
+			_print('{labels_name} HYP: "{hyp}"'.format(**t))
+			_print('{labels_name} WER: {wer:.02%} | CER: {cer:.02%}\n'.format(**t))
 
 		transcripts_path = os.path.join(
 			args.experiment_dir,
@@ -127,73 +259,39 @@ def evaluate_model(
 		)
 		for i, label in enumerate(labels):
 			transcript_by_label = transcript[i:: len(labels)]
-			stats = error_analyzer.aggregate(transcript_by_label)
+			aggregated = error_analyzer.aggregate(transcript_by_label, sep = '__', defaults = dict(words_easy_errors_easy__cer_pseudo = -1, mer_wordwise = -1, hyp_vocabness = -1, ref_vocabness = -1))
 			if analyze:
 				with open(f'{transcripts_path}.errors.csv', 'w') as f:
-					f.writelines('{hyp},{ref},{error_tag}\n'.format(**w) for w in stats['errors']['words'])
+					f.writelines('{hyp},{ref},{error_tag}\n'.format(**w) for w in aggregated['errors']['words'])
 
-			print('errors', stats['errors']['distribution'])
-			cer = torch.FloatTensor([r['cer'] for r in transcript_by_label])
-			loss = torch.FloatTensor([r['loss'] for r in transcript_by_label])
-			print('cer', metrics.quantiles(cer))
-			print('loss', metrics.quantiles(loss))
-			print(
+			_print('errors', aggregated['errors']['distribution'])
+			_print('cer', metrics.quantiles(t['cer'] for t in transcript_by_label))
+			_print('loss', metrics.quantiles(t['loss'] for t in transcript_by_label))
+			_print(
 				f'{args.experiment_id} {val_dataset_name} {label.name}',
 				f'| epoch {epoch} iter {iteration}' if training else '',
 				f'| {transcripts_path} |',
-				('Entropy: {entropy:.02f} Loss: {loss:.02f} | WER:  {wer:.02%} CER: {cer:.02%} [{words_easy_errors_easy__cer_pseudo:.02%}],  MER: {mer_wordwise:.02%} DER: {hyp_der:.02%}/{ref_der:.02%}\n')
-				.format(**stats)
+				('Entropy: {entropy:.02f} Loss: {loss:.02f} | WER:  {wer:.02%} CER: {cer:.02%} [{words_easy_errors_easy__cer_pseudo:.02%}],  MER: {mer_wordwise:.02%} V: {hyp_vocabness:.02%}/{ref_vocabness:.02%}\n')
+				.format(**aggregated)
 			)
-			#columns[val_dataset_name + '_' + labels_name] = {'cer' : stats['cer_avg'], '.wer' : stats['wer_avg'], '.loss' : stats['loss_avg'], '.entropy' : stats['entropy_avg'], '.cer_easy' : stats['cer_easy_avg'], '.cer_hard':  stats['cer_hard_avg'], '.cer_missing' : stats['cer_missing_avg'], 'E' : dict(value = stats['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_name', 'cer', 'mer', 'alignment')] + [(r['audio_name'], r['cer'], r['mer'], vis.word_alignment(r['words'])) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
+			
 			if training:
-				tensorboard.add_scalars(
-					'datasets/' + val_dataset_name + '_' + label.name,
-					dict(
-						wer = stats['wer'] * 100.0,
-						cer = stats['cer'] * 100.0,
-						loss = stats['loss']
-					),
-					iteration
+				perf.update(dict(
+						wer = aggregated['wer'],
+						cer = aggregated['cer'],
+						loss = aggregated['loss']
+					), prefix = f'datasets_val_{val_dataset_name}_{label.name}'
 				)
-				tensorboard.flush()
+				tensorboard_sink.val_stats(iteration, val_dataset_name, label.name, perf.default())
 
 		with open(transcripts_path, 'w') as f:
 			json.dump(transcript, f, ensure_ascii = False, indent = 2, sort_keys = True)
 		if analyze:
 			vis.errors([transcripts_path], audio = args.vis_errors_audio)
 
-		# TODO: transcript got flattened make this code work:
-		# if args.logits:
-		# 	logits_file_path = args.logits.format(val_dataset_name = val_dataset_name)
-		# 	torch.save(
-		# 		list(
-		# 			sorted([
-		# 				dict(
-		# 					**r_,
-		# 					logits = l_ if not args.logits_topk else models.sparse_topk(l_, args.logits_topk, dim = 0),
-		# 					y = y_,
-		# 					ydecoded = labels_.decode(y_.tolist())
-		# 				) for r,
-		# 				l,
-		# 				y in zip(transcript, logits_, y_) for labels_,
-		# 				r_,
-		# 				l_,
-		# 				y_ in zip(labels, r, l, y)
-		# 			],
-		# 					key = lambda r: r['cer'],
-		# 					reverse = True)
-		# 		),
-		# 		logits_file_path
-		# 	)
-		# 	print('Logits saved:', logits_file_path)
-
 	checkpoint_path = os.path.join(
 		args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)
 	) if training and not args.checkpoint_skip else None
-	#if args.exphtml:
-	#	columns['checkpoint_path'] = checkpoint_path
-	#	exphtml.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, tag = 'train' if training else 'test', git_http = args.githttp)
-	#	exphtml.exphtml(args.exphtml)
 
 	if training and not args.checkpoint_skip:
 		torch.save(
@@ -234,7 +332,7 @@ def main(args):
 	args.experiment_id = args.experiment_id.format(
 		model = args.model,
 		frontend = args.frontend,
-		train_batch_size = args.train_batch_size,
+		train_batch_size = args.train_batch_size * args.world_size,
 		optimizer = args.optimizer,
 		lr = args.lr,
 		weight_decay = args.weight_decay,
@@ -251,21 +349,41 @@ def main(args):
 	args.experiment_dir = args.experiment_dir.format(
 		experiments_dir = args.experiments_dir, experiment_id = args.experiment_id
 	)
+
+	os.makedirs(args.experiment_dir, exist_ok = True)
+
+	if args.log_json:
+		args.log_json = os.path.join(args.experiment_dir, f'log.node{args.rank}.json')
+
+	if args.rank == 0:
+		log_level = logging.INFO
+	else:
+		log_level = logging.ERROR
+
+	log_path = os.path.join(args.experiment_dir, 'log.txt')
+	log_mode = 'w'
+
 	if checkpoint:
 		args.lang, args.model, args.num_input_features, args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['lang', 'model', 'num_input_features', 'sample_rate', 'window', 'window_size', 'window_stride'])
+		if len(args.train_data_path) > 0:
+			log_mode = 'a'
+	utils.set_up_root_logger(log_path, mode = log_mode, level = log_level)
+	logfile_sink = JsonlistSink(args.log_json, mode = log_mode)
 
-	print('\n', 'Arguments:', args)
-	print('\n', 'Experiment id:', args.experiment_id, '\n')
+
+	_print = utils.get_root_logger_print()
+	_print('\n', 'Arguments:', args)
+	_print(f'"CUDA_VISIBLE_DEVICES={os.environ.get("CUDA_VISIBLE_DEVICES", default = "")}"')
+	_print(f'"CUDA_LAUNCH_BLOCKING={os.environ.get("CUDA_LAUNCH_BLOCKING", default="")}"')
+	_print('Experiment id:', args.experiment_id, '\n')
 	if args.dry:
 		return
-	utils.set_random_seed(args.seed)
 	if args.cudnn == 'benchmark':
 		torch.backends.cudnn.benchmark = True
 
 	lang = datasets.Language(args.lang)
 	#TODO: , candidate_sep = datasets.Labels.candidate_sep
-	normalize_text_config = json.load(open(args.normalize_text_config)) if os.path.exists(args.normalize_text_config
-																							) else {}
+	normalize_text_config = json.load(open(args.normalize_text_config)) if os.path.exists(args.normalize_text_config) else {}
 	labels = [datasets.Labels(lang, name = 'char', normalize_text_config = normalize_text_config)] + [
 		datasets.Labels(lang, bpe = bpe, name = f'bpe{i}', normalize_text_config = normalize_text_config) for i,
 		bpe in enumerate(args.bpe)
@@ -290,7 +408,7 @@ def main(args):
 		**(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx else {})
 	)
 
-	print(' Model capacity:', int(models.compute_capacity(model, scale = 1e6)), 'million parameters\n')
+	_print('Model capacity:', int(models.compute_capacity(model, scale = 1e6)), 'million parameters\n')
 
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'], strict = False)
@@ -342,6 +460,8 @@ def main(args):
 		# add metadata to model
 		return
 
+	perf.init_default(loss=dict(K=50, max=1000), memory_cuda_allocated=dict(K=50), entropy=dict(K=4), time_ms_iteration=dict(K=50, max=10_000), lr=dict(K=50, max=1))
+
 	val_config = json.load(open(args.val_config)) if os.path.exists(args.val_config) else {}
 	word_tags = json.load(open(args.word_tags)) if os.path.exists(args.word_tags) else {}
 	for word_tag, words in val_config.get('word_tags', {}).items():
@@ -361,12 +481,25 @@ def main(args):
 			args.val_waveform_transform_debug_dir,
 			str(val_frontend.waveform_transform)
 			if isinstance(val_frontend.waveform_transform, transforms.RandomCompose) else
-			val.waveform_transform.__class__.__name__
+			val_frontend.waveform_transform.__class__.__name__
 		)
 		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
 
-	val_data_loaders = {
-		os.path.basename(val_data_path): torch.utils.data.DataLoader(
+	val_data_loaders = {}
+	for val_data_path in args.val_data_path:
+		val_dataset = datasets.AudioTextDataset(val_data_path, labels, args.sample_rate,
+												frontend = val_frontend if not args.frontend_in_model else None,
+												waveform_transform_debug_dir = args.val_waveform_transform_debug_dir,
+												min_duration = args.min_duration,
+												time_padding_multiple = args.batch_time_padding_multiple,
+												pop_meta = True,
+												_print = _print)
+		if args.world_size > 1:
+			sampler = torch.utils.data.DistributedSampler(val_dataset, num_replicas = args.world_size, rank = args.rank, shuffle = False)
+		else:
+			sampler = None
+
+		val_data_loader = torch.utils.data.DataLoader(
 			val_dataset,
 			num_workers = args.num_workers,
 			collate_fn = val_dataset.collate_fn,
@@ -374,21 +507,12 @@ def main(args):
 			shuffle = False,
 			batch_size = args.val_batch_size,
 			worker_init_fn = datasets.worker_init_fn,
+			sampler = sampler,
 			timeout = args.timeout if args.num_workers > 0 else 0
 		)
-		for val_data_path in args.val_data_path for val_dataset in [
-			datasets.AudioTextDataset(
-				val_data_path,
-				labels,
-				args.sample_rate,
-				frontend = val_frontend if not args.frontend_in_model else None,
-				waveform_transform_debug_dir = args.val_waveform_transform_debug_dir,
-				min_duration = args.min_duration,
-				time_padding_multiple = args.batch_time_padding_multiple,
-				pop_meta = True
-			)
-		]
-	}
+
+		val_data_loaders[os.path.basename(val_data_path)] = val_data_loader
+
 	decoder = [
 		decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(
 			labels[0],
@@ -407,7 +531,9 @@ def main(args):
 		model.eval()
 		if not args.adapt_bn:
 			model.fuse_conv_bn_eval()
-		if args.device != 'cpu':
+		if args.world_size > 1:
+			model, *_ = models.distributed_data_parallel_and_autocast(model, args.local_rank, opt_level = args.fp16, synchronize_bn = args.synchronize_bn, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+		elif args.device != 'cpu':
 			model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 		evaluate_model(args, val_data_loaders, model, labels, decoder, error_analyzer)
 		return
@@ -420,30 +546,66 @@ def main(args):
 		feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob)
 	)
 	tic = time.time()
-	train_dataset = datasets.AudioTextDataset(
-		args.train_data_path,
-		labels,
-		args.sample_rate,
-		frontend = train_frontend if not args.frontend_in_model else None,
-		min_duration = args.min_duration,
-		max_duration = args.max_duration,
-		time_padding_multiple = args.batch_time_padding_multiple,
-		bucket = lambda example: int(
-			math.ceil(
-				((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
-			)
-		),
-		pop_meta = True
-	)
+	if args.local_rank == 0:
+		train_dataset = datasets.AudioTextDataset(
+			args.train_data_path,
+			labels,
+			args.sample_rate,
+			frontend = train_frontend if not args.frontend_in_model else None,
+			min_duration = args.min_duration,
+			max_duration = args.max_duration,
+			time_padding_multiple = args.batch_time_padding_multiple,
+			bucket = lambda example: int(
+				math.ceil(
+					((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
+				)
+			),
+			pop_meta = True,
+			_print = _print
+		)
+		if args.world_size > 1:
+			cache_path = f'{args.experiment_dir}/dataset_cache.pt'
+			if os.path.exists(cache_path):
+				os.remove(cache_path)
+			torch.save(train_dataset.state_dict(), cache_path)
 
-	print('Time train dataset created:', time.time() - tic, 'sec')
+	if args.world_size > 1:
+		# waiting for dataset cache serialization
+		dist.barrier()
+
+	if args.local_rank != 0:
+		train_dataset = datasets.AudioTextDataset(
+			[],
+			labels,
+			args.sample_rate,
+			frontend=train_frontend if not args.frontend_in_model else None,
+			min_duration=args.min_duration,
+			max_duration=args.max_duration,
+			time_padding_multiple=args.batch_time_padding_multiple,
+			bucket=lambda example: int(
+				math.ceil(
+					((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
+				)
+			),
+			pop_meta=True,
+			_print=_print
+		)
+		train_dataset.load_state_dict(torch.load(f'{args.experiment_dir}/dataset_cache.pt'))
+
+	if args.world_size > 1:
+		# waiting for dataset cache loading
+		dist.barrier()
+
+	_print('Time train dataset created:', time.time() - tic, 'sec')
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
 	tic = time.time()
 	sampler = datasets.BucketingBatchSampler(
 		train_dataset,
 		batch_size = args.train_batch_size,
 	)
-	print('Time train sampler created:', time.time() - tic, 'sec')
+	if args.world_size > 1:
+		sampler = datasets.DistributedSamplerWrapper(sampler, num_replicas=args.world_size, rank=args.rank)
+	_print('Time train sampler created:', time.time() - tic, 'sec')
 
 	train_data_loader = torch.utils.data.DataLoader(
 		train_dataset,
@@ -454,32 +616,43 @@ def main(args):
 		worker_init_fn = datasets.worker_init_fn,
 		timeout = args.timeout if args.num_workers > 0 else 0
 	)
-	optimizer = torch.optim.SGD(
-		model.parameters(),
-		lr = args.lr,
-		momentum = args.momentum,
-		weight_decay = args.weight_decay,
-		nesterov = args.nesterov
-	) if args.optimizer == 'SGD' else torch.optim.AdamW(
-		model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay
-	) if args.optimizer == 'AdamW' else optimizers.NovoGrad(
-		model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay
-	) if args.optimizer == 'NovoGrad' else apex.optimizers.FusedNovoGrad(
-		model.parameters(), lr = args.lr, betas = args.betas, weight_decay = args.weight_decay
-	) if args.optimizer == 'FusedNovoGrad' else None
+
+	if args.optimizer == 'SGD':
+		optimizer = torch.optim.SGD(model.parameters(),
+									lr = args.lr,
+									momentum = args.momentum,
+									weight_decay = args.weight_decay,
+									nesterov = args.nesterov)
+	elif args.optimizer == 'AdamW':
+		optimizer = torch.optim.AdamW(model.parameters(),
+									   lr = args.lr,
+									   betas = args.betas,
+									   weight_decay = args.weight_decay)
+	elif args.optimizer == 'NovoGrad':
+		optimizer = optimizers.NovoGrad(model.parameters(),
+										lr = args.lr,
+										betas = args.betas,
+										weight_decay = args.weight_decay)
+	elif args.optimizer == 'FusedNovoGrad':
+		optimizer = apex.optimizers.FusedNovoGrad(model.parameters(),
+												  lr = args.lr,
+												  betas = args.betas,
+												  weight_decay = args.weight_decay)
+	else:
+		optimizer = None
 
 	if checkpoint and checkpoint['optimizer_state_dict'] is not None:
 		optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 		if not args.skip_optimizer_reset:
 			optimizers.reset_options(optimizer)
 
-	scheduler = optimizers.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones
-										) if args.scheduler == 'MultiStepLR' else optimizers.PolynomialDecayLR(
-											optimizer,
-											power = args.decay_power,
-											decay_steps = len(train_data_loader) * args.decay_epochs,
-											end_lr = args.decay_lr
-										) if args.scheduler == 'PolynomialDecayLR' else optimizers.NoopLR(optimizer)
+	if args.scheduler == 'MultiStepLR':
+		scheduler = optimizers.MultiStepLR(optimizer, gamma = args.decay_gamma, milestones = args.decay_milestones)
+	elif args.scheduler == 'PolynomialDecayLR':
+		scheduler = optimizers.PolynomialDecayLR(optimizer, power = args.decay_power, decay_steps = len(train_data_loader) * args.decay_epochs, end_lr = args.decay_lr)
+	else:
+		scheduler = optimizers.NoopLR(optimizer)
+
 	epoch, iteration = 0, 0
 	if checkpoint:
 		epoch, iteration = checkpoint['epoch'], checkpoint['iteration']
@@ -495,59 +668,73 @@ def main(args):
 		assert epoch_skip_fraction < args.max_epoch_skip_fraction, \
 			f'args.iterations_per_epoch must not skip more than {args.max_epoch_skip_fraction:.1%} of each epoch'
 
-	if args.device != 'cpu':
-		model, optimizer = models.data_parallel_and_autocast(model, optimizer, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
+	if args.world_size > 1:
+		model, optimizer = models.distributed_data_parallel_and_autocast(model, args.local_rank, optimizer, opt_level=args.fp16, keep_batchnorm_fp32=args.fp16_keep_batchnorm_fp32)
+	elif args.device != 'cpu':
+		model, optimizer = models.data_parallel_and_autocast(model, optimizer, opt_level=args.fp16, keep_batchnorm_fp32=args.fp16_keep_batchnorm_fp32)
 	if checkpoint and args.fp16 and checkpoint['amp_state_dict'] is not None:
 		apex.amp.load_state_dict(checkpoint['amp_state_dict'])
 
 	model.train()
 
-	os.makedirs(args.experiment_dir, exist_ok = True)
 	tensorboard_dir = os.path.join(args.experiment_dir, 'tensorboard')
-	if checkpoint and args.experiment_name:
-		tensorboard_dir_checkpoint = os.path.join(os.path.dirname(args.checkpoint[0]), 'tensorboard')
-		if os.path.exists(tensorboard_dir_checkpoint) and not os.path.exists(tensorboard_dir):
-			shutil.copytree(tensorboard_dir_checkpoint, tensorboard_dir)
-	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
-	performance_meter = metrics.PerformanceMeter()
-	with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
-		json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
+	utils.copy_tensorboard_dir_from_previous_checkpoint_if_exists(args, tensorboard_dir)
 
-	with open(os.path.join(args.experiment_dir, args.dump_model_config), 'w') as f:
-		model_config = {
-			'init_params': models.master_module(model).init_params, 'model': repr(models.master_module(model))
-		}
-		json.dump(model_config, f, sort_keys = True, ensure_ascii = False, indent = 2)
+	if args.world_size > 1:
+		if args.local_rank == 0:
+			os.makedirs(tensorboard_dir, exist_ok=True)
+		dist.barrier()
+	tensorboard = torch.utils.tensorboard.SummaryWriter(tensorboard_dir)
+	tensorboard_sink = TensorboardSink(tensorboard)
+
+	if args.rank == 0:
+		with open(os.path.join(args.experiment_dir, args.args), 'w') as f:
+			json.dump(vars(args), f, sort_keys = True, ensure_ascii = False, indent = 2)
+
+		with open(os.path.join(args.experiment_dir, args.dump_model_config), 'w') as f:
+			model_config = dict(init_params = models.master_module(model).init_params, model = repr(models.master_module(model)))
+			json.dump(model_config, f, sort_keys = True, ensure_ascii = False, indent = 2)
 
 	tic, toc_fwd, toc_bwd = time.time(), time.time(), time.time()
-	loss_avg, entropy_avg, time_ms_avg, lr_avg = 0.0, 0.0, 0.0, 0.0
 
+	oom_handler = utils.OomHandler(max_retries = args.oom_retries)
 	for epoch in range(epoch, args.epochs):
-		sampler.shuffle(epoch + args.seed_sampler)
+		sampler.set_epoch(epoch + args.seed_sampler)
 		time_epoch_start = time.time()
 		for batch_idx, (meta, s, x, xlen, y, ylen) in enumerate(train_data_loader, start = sampler.batch_idx):
 			toc_data = time.time()
 			if batch_idx == 0:
 				time_ms_launch_data_loader = (toc_data - tic) * 1000
-				print('Time data loader launch @ ', epoch, ':', time_ms_launch_data_loader / 1000, 'sec')
+				_print('Time data loader launch @ ', epoch, ':', time_ms_launch_data_loader / 1000, 'sec')
 			
 			lr = optimizer.param_groups[0]['lr']
-			lr_avg = metrics.exp_moving_average(lr_avg, lr, max = 1)
+			perf.update(dict(lr = lr))
 
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
 			try:
 				#TODO check nan values in tensors, they can break running_stats in bn
 				log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'olen', 'loss'])
+				oom_handler.reset()
 			except:
-				if (not args.train_crash_oom) and utils.handle_out_of_memory_exception(model.parameters()):
-					continue
-				else:
+				## TODO remove args.world_size > 1 after OOM recover fix for DDP
+				if args.world_size > 1 or not oom_handler.try_recover(model.parameters(), _print=utils.get_root_logger_print(level=logging.ERROR)):
 					raise
 			example_weights = ylen[:, 0]
-			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, float(loss.mean())
-			entropy = float(models.entropy(log_probs[0], olen[0], dim = 1).mean())
+			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, loss.mean()
+			entropy = models.entropy(log_probs[0], olen[0], dim=1).mean()
+
+			if args.world_size > 1:
+				dist.all_reduce(loss_cur, op=dist.ReduceOp.SUM)
+				dist.all_reduce(entropy, op=dist.ReduceOp.SUM)
+				loss_cur = loss_cur / args.world_size
+				entropy = entropy / args.world_size
+
+			perf.update(dict(entropy = entropy.item()))
+			perf.update(dict(loss_BT_normalized = loss_cur.item()))
+
 			toc_fwd = time.time()
-			if not (torch.isinf(loss) or torch.isnan(loss)):
+			#TODO: inf/nan still corrupts BN stats
+			if not (torch.isinf(loss_cur) or torch.isnan(loss_cur)):
 				if args.fp16:
 					with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
 						scaled_loss.backward()
@@ -559,46 +746,34 @@ def main(args):
 						apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm
 					)
 					optimizer.step()
-
-					if iteration % args.log_iteration_interval == 0:
-						tensorboard.add_scalars(
-							f'datasets/{train_dataset_name}',
-							dict(loss_avg = loss_avg, lr_avg_x1e4 = lr_avg * 1e4),
-							iteration
-						)
-						for name, value in performance_meter.items():
-							tensorboard.add_scalar(name, value, iteration)
-						for param_name, param in models.master_module(model).named_parameters():
-							if param.grad is None:
-								continue
-							tag = 'params/' + param_name.replace('.', '/')
-							norm, grad_norm = param.norm(), param.grad.norm()
-							ratio = grad_norm / (1e-9 + norm)
-							tensorboard.add_scalars(
-								tag,
-								dict(norm = float(norm), grad_norm = float(grad_norm), ratio = float(ratio)),
-								iteration
-							)
-							if args.log_weight_distribution:
-								tensorboard.add_histogram(tag, param, iteration)
-								tensorboard.add_histogram(tag + '/grad', param.grad, iteration)
-
-					performance_meter.update_memory_metrics()
 					optimizer.zero_grad()
 					scheduler.step(iteration)
 
-				loss_avg = metrics.exp_moving_average(loss_avg, loss_cur, max = 1000)
-				entropy_avg = metrics.exp_moving_average(entropy_avg, entropy, max = 4)
+				if iteration > 0 and iteration % args.log_iteration_interval == 0:
+					if args.world_size > 1:
+						perf.update(utils.compute_cuda_memory_stats(devices = [args.local_rank]), prefix = 'performance')
+						tensorboard_sink.perf(perf.default(), iteration, rank = args.rank)
+					else:
+						perf.update(utils.compute_cuda_memory_stats(), prefix = 'performance')
+						tensorboard_sink.perf(perf.default(), iteration, train_dataset_name)
+					if args.rank == 0:
+						tensorboard_sink.train_stats(perf.default(), iteration, train_dataset_name)
+						tensorboard_sink.weight_stats(iteration, model, args.log_weight_distribution)
+					logfile_sink.log(perf.default(), iteration, train_dataset_name)
+			else:
+				_print('Loss corruption detected, skip step.')
+				if (torch.isinf(loss) or torch.isnan(loss)):
+					logging.getLogger().error(f'Loss value is corrupted! {args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] | Rank: {args.rank} | Loss: {loss.item()}')
 			toc_bwd = time.time()
 
 			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = map(lambda sec: sec * 1000, [toc_data - tic, toc_fwd - toc_data, toc_bwd - toc_fwd, toc_bwd - toc_data])
-			performance_meter.update_time_metrics(time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model)
-			time_ms_avg = metrics.exp_moving_average(time_ms_avg, time_ms_data + time_ms_model, max = 10_000)
-			print(
-				f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] ent: <{entropy_avg:.2f}> loss: {loss_cur:.2f} <{loss_avg:.2f}> time: ({"x".join(map(str, x.shape))}) {time_ms_data:.2f}+{time_ms_fwd:4.0f}+{time_ms_bwd:4.0f} <{time_ms_avg:.0f}> | lr: {lr:.5f}'
-			)
+			perf.update(dict(time_ms_data = time_ms_data, time_ms_fwd = time_ms_fwd, time_ms_bwd = time_ms_bwd, time_ms_iteration = time_ms_data + time_ms_model), prefix = 'performance')
+			perf.update(dict(input_B = x.shape[0], input_T = x.shape[-1]), prefix = 'performance')
+			print_left = f'{args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] {"x".join(map(str, x.shape))}'
+			print_right = 'ent: <{avg_entropy:.2f}> loss: {cur_loss_BT_normalized:.2f} <{avg_loss_BT_normalized:.2f}> time: {performance_cur_time_ms_data:.2f}+{performance_cur_time_ms_fwd:4.0f}+{performance_cur_time_ms_bwd:4.0f} <{performance_avg_time_ms_iteration:.0f}> | lr: {cur_lr:.5f}'.format(**perf.default())
+			_print(print_left, print_right)
 			iteration += 1
-			sampler.batch_idx += 1
+			sampler.batch_idx += args.world_size
 
 			if iteration > 0 and (iteration % args.val_iteration_interval == 0 or iteration == args.iterations):
 				evaluate_model(
@@ -610,7 +785,8 @@ def main(args):
 					error_analyzer,
 					optimizer,
 					sampler,
-					tensorboard,
+					tensorboard_sink,
+					logfile_sink,
 					epoch,
 					iteration
 				)
@@ -624,7 +800,7 @@ def main(args):
 			tic = time.time()
 
 		sampler.batch_idx = 0
-		print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
+		_print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')
 		if not args.skip_on_epoch_end_evaluation:
 			evaluate_model(
 				args,
@@ -635,10 +811,36 @@ def main(args):
 				error_analyzer,
 				optimizer,
 				sampler,
-				tensorboard,
+				tensorboard_sink,
+				logfile_sink,
 				epoch + 1,
 				iteration
 			)
+
+
+def init_process(args):
+	""" Initialize the distributed environment. """
+	utils.set_random_seed(args.seed)
+	if args.backend is None:
+		args.backend = 'nccl' if args.device == 'cuda' else 'gloo'
+
+	if args.device == 'cuda':
+		torch.backends.cudnn.deterministic = True
+		torch.cuda.set_device(args.local_rank)
+		assert args.backend == 'nccl', 'CUDA supports only nccl backend'
+		# synchronization timeout do not work without this env variable
+		if args.synchronization_timeout:
+			os.environ['NCCL_BLOCKING_WAIT'] = '1'
+	else:
+		assert args.backend != 'nccl', f'nccl backend do not support this device {args.device}'
+
+	print(f"Initialize worker with rank {args.rank} in world size {args.world_size} at {args.master_ip}:{args.master_port}")
+	dist.init_process_group(args.backend,
+							init_method = f"tcp://{args.master_ip}:{args.master_port}",
+							rank = args.rank,
+							world_size = args.world_size,
+							timeout = datetime.timedelta(seconds = args.synchronization_timeout) if args.synchronization_timeout else datetime.timedelta(minutes = 30))
+	main(args)
 
 
 if __name__ == '__main__':
@@ -825,8 +1027,44 @@ if __name__ == '__main__':
 	parser.add_argument('--normalize-text-config', default = 'data/normalize_text_config.json')
 	parser.add_argument('--frontend-in-model', action = 'store_true')
 	parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
-	parser.add_argument('--train-crash-oom', action = 'store_true')
-	parser.add_argument('--val-crash-oom', action = 'store_true')
+	parser.add_argument('--oom-retries', type = int, default = 3)
 	parser.add_argument('--val-config', default = 'configs/ru_val_config.json')
 	parser.add_argument('--analyze-num-workers', type = int, default = 0)
-	main(parser.parse_args())
+	parser.add_argument('--log-json', action = 'store_true')
+	# DDP settings
+	parser.add_argument('--start-rank', type = int, default = 0, help = 'processes ranks equal: start_rank+local_rank')
+	parser.add_argument('--local-ranks', type = int, nargs = '+', default = [0], help ='processes local ranks, equals to cuda device id')
+	parser.add_argument('--world-size', type = int, default = 1, help = 'amount of processes')
+	parser.add_argument('--backend', choices = ['nccl', 'gloo'], help = 'processes communication backend')
+	parser.add_argument('--master-ip', default = '0.0.0.0', help = 'DDP MASTER_ADDR')
+	parser.add_argument('--master-port', default = '12345', help = 'DDP MASTER_PORT')
+	parser.add_argument('--synchronize-bn', action = 'store_true', help = 'replace all instance of torch.nn.modules.batchnorm._BatchNorm to SyncBatchNorm')
+	parser.add_argument('--synchronization-timeout', type = int, help = 'DDP synchronization method timeout in seconds')
+
+	args = parser.parse_args()
+
+	try:
+		if args.world_size > 1:
+			processes = []
+			assert args.num_workers % args.world_size == 0, f'''--num-workers should be must be a multiple of --world-size,
+																but now: --num-workers {args.num_workers} --world-size {args.world_size}, 
+																num-workers % world-size should be 0, but get {args.num_workers % args.world_size}'''
+			args.num_workers = int(args.num_workers / args.world_size)
+			args.train_batch_size = int(args.train_batch_size / args.world_size)
+			args.val_batch_size = int(args.val_batch_size / args.world_size)
+			for rank in args.local_ranks:
+				args.local_rank = rank
+				args.rank = args.start_rank + rank
+				p = torch.multiprocessing.Process(target=init_process, args=(args,))
+				p.start()
+				processes.append(p)
+
+			for p in processes:
+				p.join()
+		else:
+			args.local_rank = 0
+			args.rank = 0
+			main(args)
+	except Exception as e:
+		logging.getLogger().critical(e, exc_info=True)
+		raise

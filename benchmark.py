@@ -8,6 +8,7 @@ import apex
 import onnxruntime
 import models
 import datasets
+import utils
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--checkpoint')
@@ -127,7 +128,7 @@ for i in range(args.iterations):
 	tic = tictoc()
 	y = model(load_batch(batch))
 	toc = tictoc()
-	fragmentation[i] = models.compute_memory_fragmentation()
+	fragmentation[i] = utils.compute_memory_fragmentation()
 	if args.backward:
 		y.sum().backward()
 	tac = tictoc()

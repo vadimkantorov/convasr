@@ -3,9 +3,10 @@ set -e
 python3 train.py $@ \
   --analyze \
   --device cpu \
+  --checkpoint data/speechcore/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs512____rerun_finetune_after_self_train_epoch183_iter0290000.pt \
   --val-data-path kontur_calls_micro/kontur_calls_micro.csv.json # data/speechcore/best_checkpoint_and_valset_2508/valset_16082020.csv.json --frontend-in-model 
 
-#  --checkpoint data/speechcore/best_checkpoint_and_valset_2508/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs512____longtrain_finetune_after_self_train_checkpoint_epoch400_iter0740000.pt \
+# --checkpoint data/speechcore/best_checkpoint_and_valset_2508/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs512____longtrain_finetune_after_self_train_checkpoint_epoch400_iter0740000.pt \
 
 #  --fp16 O2 \
 
