@@ -223,9 +223,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		some_segments_have_ref = any(bool(t['ref']) for t in transcript)
 		replace_transcript = self.join_transcript or (not transcript) or (some_segments_have_not_begin_end and some_segments_have_ref)
 
-		assert not replace_transcript, "todo: vadimkantorov pls fix this code!"
-			if replace_transcript:
-				assert len(signal) == 1, 'only mono supported for now'
+		if replace_transcript:
+			assert len(signal) == 1, 'only mono supported for now'
 			# replacing ref by normalizing only with default preprocessor
 			ref_full = [self.labels[0].normalize_text(t['ref']) for t in transcript]
 			speaker = torch.cat([
@@ -268,18 +267,18 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		for t in transcript:
 			channel = t.pop('channel')
 			time_slice = slice(t.pop('begin_samples'), t.pop('end_samples')) # pop is required independent of segmented
-			if self.segmented:
+			if self.segmented and not self.debug_short_long_records_features_from_whole_normalized_signal:
 				segment = signal[None, channel, time_slice]
 			else:
 				segment = signal[None, channel, :] # begin, end meta could be corrupted, thats why we dont use it here
 			if self.frontend is not None:
 				if self.debug_short_long_records_features_from_whole_normalized_signal:
 					segment_features = self.frontend(segment)
-					hop_lenght = self.frontend.hop_length
-					segment_features = segment_features[:, :, t.pop('begin_samples') // hop_lenght:t.pop('end_samples') // hop_lenght]
-					features.append(segment_features)
+					hop_length = self.frontend.hop_length
+					segment_features = segment_features[:, :, time_slice.start // hop_length:time_slice.stop // hop_length]
+					features.append(segment_features.squeeze(0))
 				else:
-					features.append(self.frontend(segment, waveform_transform_debug = waveform_transform_debug))
+					features.append(self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0))
 			else:
 				features.append(segment)
 

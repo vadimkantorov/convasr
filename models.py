@@ -564,7 +564,7 @@ class LogFilterBankFrontend(nn.Module):
 		else:
 			self.stft = None
 
-	def forward(self, signal: shaping.BT, mask: shaping.BT = None) -> shaping.BCT:
+	def forward(self, signal: shaping.BT, mask: shaping.BT = None, **kwargs) -> shaping.BCT:
 		assert signal.ndim == 2
 
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)

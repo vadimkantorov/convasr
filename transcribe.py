@@ -35,16 +35,11 @@ def setup(args):
 			debug_short_long_records_normalize_signal_multiplier=args.debug_short_long_records_normalize_signal_multiplier
 	)
 
-	augmented_frontend = models.AugmentationFrontend(
-			frontend,
-			waveform_transform=None,
-			feature_transform=None
-	)
-
 	labels = datasets.Labels(datasets.Language(checkpoint['args']['lang']), name = 'char')
+
 	model = getattr(models, args.model or checkpoint['args']['model'])(
 		args.num_input_features, [len(labels)],
-		frontend = None,
+		frontend = frontend if args.frontend_in_model else None,
 		dict = lambda logits,
 		log_probs,
 		olen,
@@ -65,7 +60,7 @@ def setup(args):
 		num_workers = args.num_workers,
 		topk = args.decoder_topk
 	)
-	return labels, augmented_frontend, model, decoder
+	return labels, frontend, model, decoder
 
 
 def main(args):
@@ -89,7 +84,7 @@ def main(args):
 	val_dataset = datasets.AudioTextDataset(
 		data_paths, [labels],
 		args.sample_rate,
-		frontend = frontend,
+		frontend = frontend if not args.frontend_in_model else None,
 		segmented = True,
 		mono = args.mono,
 		time_padding_multiple = args.batch_time_padding_multiple,
@@ -327,6 +322,7 @@ if __name__ == '__main__':
 	parser.add_argument('--debug-short-long-records-normalize-signal-multiplier', action = 'store_true')
 	parser.add_argument('--debug-short-long-records-features-from-whole-normalized-signal', action = 'store_true')
 	parser.add_argument('--frontend', type=str, default='LogFilterBankFrontend')
+	parser.add_argument('--frontend-in-model', action='store_true')
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)

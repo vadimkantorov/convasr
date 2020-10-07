@@ -223,7 +223,7 @@ def csv2json(input_path, gz, group, reset_begin_end, csv_sep, audio_name_pattern
 			transcription['group'] = audio_path.split('/')[group]
 		res.append(transcription)
 
-	res = list(sorted(res, key=lambda x: x['begin']))
+	res.sort(key=lambda x: x['begin'])
 
 	output_path = (debug_short_long_records_output_path if debug_short_long_records_output_path else input_path) + '.json' + ('.gz' if gz else '')
 	json.dump(res, utils.open_maybe_gz(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = False)
