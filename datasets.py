@@ -67,6 +67,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		max_num_channels = 2,
 		ref_len_filter = True,
 		mono = True,
+		audio_dtype = 'float32',
 		segmented = False,
 		time_padding_multiple = 1,
 		audio_backend = None,
@@ -188,7 +189,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		
 		transcript = self.load_example(index)
 		
-		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration = self.max_duration) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
+		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration = self.max_duration, dtype = self.audio_dtype) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
 
 		#TODO: support forced mono even if transcript is given
 		#TODO: subsample speaker labels according to features

@@ -19,6 +19,19 @@ import transcripts
 import pyannote.core
 import pyannote.database.util 
 import pyannote.metrics.diarization
+import webrtcvad
+
+class WebrtcSpeechActivityDetectionModel(nn.Module):
+	def __init__(self, aggressiveness):
+		self.vad = webrtcvad.Vad(aggressiveness)
+	
+	def forward(self, signal, sample_rate, window_size = 0.02, extra = {}):
+		assert sample_rate in [8_000, 16_000, 32_000, 48_000] and signal.dtype == torch.int16 and window_size in [0.01, 0.02, 0.03]
+		frame_len = int(window_size * sample_rate)
+		speech = torch.as_tensor([[len(chunk) == frame_len and self.vad.is_speech(bytearray(chunk.numpy()), sample_rate) for chunk in channel.split(frame_len)]	for channel in signal])
+		transcript = [dict(begin = float(begin) * window_size, end = (float(begin) + float(duration)) * window_size, speaker = 1 + channel, speaker_name = transcripts.default_speaker_names[1 + channel], **extra) for channel in range(len(signal)) for begin, duration, mask in zip(*models.rle1d(speech[speaker])) if mask == 1]
+		return transcript
+
 
 class PyannoteDiarizationModel(nn.Module):
 	def __init__(self, **kwargs):

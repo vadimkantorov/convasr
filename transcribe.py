@@ -18,6 +18,7 @@ import ctc
 import transcripts
 import vis
 import utils
+import diarization
 
 
 def setup(args):
@@ -51,7 +52,9 @@ def setup(args):
 		num_workers = args.num_workers,
 		topk = args.decoder_topk
 	)
-	return labels, frontend, model, decoder
+	segmentation_model = diarization_model.PyannoteDiarizationModel() if args.diarize else diarization_model.WebrtcSpeechActivityDetectionModel() if args.vad is not False else None
+
+	return labels, frontend, model, decoder, segmentation_model
 
 
 def main(args):
@@ -71,7 +74,7 @@ def main(args):
 	)
 	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
 
-	labels, frontend, model, decoder = setup(args)
+	labels, frontend, model, decoder, segmentation_model = setup(args)
 	val_dataset = datasets.AudioTextDataset(
 		data_paths, [labels],
 		args.sample_rate,
@@ -112,10 +115,6 @@ def main(args):
 			tic = time.time()
 			y, ylen = y.to(args.device), ylen.to(args.device)
 			log_probs, olen = model(x.squeeze(1).to(args.device), xlen.to(args.device))
-
-			#speech = vad.detect_speech(x.squeeze(1), args.sample_rate, args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)
-			#speech = vad.upsample(speech, log_probs)
-			#log_probs.masked_fill_(models.silence_space_mask(log_probs, speech, space_idx = labels.space_idx, blank_idx = labels.blank_idx), float('-inf'))
 
 			decoded = decoder.decode(log_probs, olen)
 
@@ -204,6 +203,9 @@ def main(args):
 			if ref:
 				ref_segments = list(transcripts.segment(ref_transcript, args.max_segment_duration))
 				hyp_segments = list(transcripts.segment(hyp_transcript, ref_segments))
+			elif segmentation_model is not None:
+				ref_segments = segmentation_model(x, args.sample_rate)
+				hyp_segments = list(transcripts.segment(hyp_transcript, ref_segments))
 			else:
 				hyp_segments = list(transcripts.segment(hyp_transcript, args.max_segment_duration))
 				ref_segments = [[] for _ in hyp_segments]
@@ -288,7 +290,6 @@ if __name__ == '__main__':
 	parser.add_argument('--beam-alpha', type = float, default = 0.3)
 	parser.add_argument('--beam-beta', type = float, default = 1.0)
 	parser.add_argument('--lm')
-	parser.add_argument('--vad', type = int, choices = [0, 1, 2, 3], default = False, nargs = '?')
 	parser.add_argument('--align', action = 'store_true')
 	parser.add_argument('--align-boundary-words', action = 'store_true')
 	parser.add_argument('--align-words', action = 'store_true')
@@ -306,6 +307,7 @@ if __name__ == '__main__':
 	parser.add_argument('--pack-backpointers', action = 'store_true')
 	parser.add_argument('--oom-retries', type = int, default = 3)
 	parser.add_argument('--dataset-string-array-encoding', default = 'utf_32_le', choices = ['utf_16_le', 'utf_32_le'])
+	parser.add_argument('--diarize', action = 'store_true')
+	parser.add_argument('--vad', type = int, choices = [0, 1, 2, 3], default = False, nargs = '?')
 	args = parser.parse_args()
-	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
