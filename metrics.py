@@ -4,6 +4,7 @@ import collections
 import json
 import functools
 import typing
+import text
 import Levenshtein
 
 placeholder = '|'
@@ -62,11 +63,12 @@ class WordTagger(collections.defaultdict):
 
 	def __init__(self, lang = None, word_tags = {}, vocab = set()):
 		self.lang = lang
+		self.stemmer = text.Stemmer(lang)
 		self.vocab = vocab
-		self.stem2tag = {lang.stem(word) if self.lang is not None else word: tag for tag, words in word_tags.items() for word in words}
+		self.stem2tag = {self.stemmer.stem(word): tag for tag, words in word_tags.items() for word in words}
 
 	def __missing__(self, word):
-		self[word] = self.get(word) or self.stem2tag.get(self.lang.stem(word) if self.lang is not None else word)
+		self[word] = self.stem2tag.get(self.stemmer.stem(word))
 		return self[word]
 
 	def tag(self, word):
@@ -75,10 +77,11 @@ class WordTagger(collections.defaultdict):
 		return vocab_tags + ([word_tag] if word_tag else [])
 
 class ErrorAnalyzer:
-	def __init__(self, word_tagger = WordTagger(), error_tagger = ErrorTagger(), configs = {}):
+	def __init__(self, word_tagger = WordTagger(), error_tagger = ErrorTagger(), configs = {}, postprocessors = {}):
 		self.word_tagger = word_tagger
 		self.error_tagger = error_tagger
 		self.configs = configs or dict(default = {})
+		self.postprocessors = postprocessors
 
 	def aggregate(self, analyzed, sep = '__', defaults = {}):
 		keys_with_number_vals = lambda d: [k for k, v in d.items() if isinstance(v, float) or isinstance(v, int)]
@@ -179,9 +182,7 @@ class ErrorAnalyzer:
 			hyp_vocabness = hyp_vocabness
 		)
 
-	def analyze(self, hyp : str, ref : str, detailed : bool = False, extra : dict = {}, postprocess_transcript : typing.Optional[typing.Callable[..., str]] = None, split_candidates : typing.Optional[typing.Callable[[str], typing.List[str]]] = None) -> dict:
-		if postprocess_transcript is None:
-			postprocess_transcript = lambda s, *args, **kwargs: s
+	def analyze(self, hyp : str, ref : str, detailed : bool = False, extra : dict = {}, split_candidates : typing.Optional[typing.Callable[[str], typing.List[str]]] = None) -> dict:
 		if split_candidates is None:
 			split_candidates = lambda s: [s]
 
@@ -191,11 +192,9 @@ class ErrorAnalyzer:
 		#TODO: hyp_postproc, ref_postproc = map(postprocess_transcript, [hyp, ref])
 
 		assert 'default' in self.configs, 'default must be present'
-		postprocess_transcript_default = functools.partial(postprocess_transcript,
-															collapse_repeat = self.configs['default'].get('collapse_repeat', False),
-															phonetic_replace_groups = self.configs['default'].get('phonetic_replace_groups', []))
-		postproc_default_ref = postprocess_transcript_default(ref)
-		postproc_default_hyp = postprocess_transcript_default(hyp)
+		default_postprocessor = self.postprocessors[self.configs['default']['postprocessor']]
+		postproc_default_ref = default_postprocessor.process(ref)
+		postproc_default_hyp = default_postprocessor.process(hyp)
 
 		# TODO: document common choices for extra
 		res = dict(
@@ -209,7 +208,7 @@ class ErrorAnalyzer:
 		)
 
 		if detailed:
-			_hyp_, _ref_ = align_strings(hyp = hyp, ref = ref)
+			_hyp_, _ref_ = align_strings(hyp = postproc_default_hyp, ref = postproc_default_ref)
 			word_alignment = align_words(_hyp_ = _hyp_, _ref_ = _ref_, word_tagger = self.word_tagger, error_tagger = self.error_tagger, compute_cer = True)
 			#TODO: rename into words
 			res['alignment'] = word_alignment
@@ -226,14 +225,12 @@ class ErrorAnalyzer:
 			res['char_stats'] = char_stats
 
 			for config_name, config in self.configs.items():
-				postprocess_transcript_reified = functools.partial(postprocess_transcript,
-																   collapse_repeat = config.get('collapse_repeat', False),
-																   phonetic_replace_groups = config.get('phonetic_replace_groups', []))
+				config_postprocessor = self.postprocessors[config['postprocessor']]
 				filtered_alignment = self.filter_words(word_alignment, **config)
 				res[config_name] = self.compute_wordwise_metrics(filtered_alignment = filtered_alignment)
 
 				for m in [self.compute_filtered_metrics, self.compute_pseudo_metrics, self.compute_vocabness_metrics]:
-					res[config_name].update(m(word_alignment, filtered_alignment, postprocess_transcript_reified, **config))
+					res[config_name].update(m(word_alignment, filtered_alignment, config_postprocessor.process, **config))
 
 		return res
 

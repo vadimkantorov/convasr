@@ -1,12 +1,11 @@
 {
 	"word_tags" : {"stop" : ["ну", "вот", "это", "эта", "бы", "б", "а", "и", "у", "о"]},
-	"error_analyzer" :
-	{
-		"default": {"collapse_repeat" : false},
-		"words_without_stop": {"collapse_repeat" : false, "word_exclude_tags" : ["stop"]},
-		"words_easy" : {"collapse_repeat" : false, "word_exclude_tags" : ["stop", "num", "comp", "name", "abbr"]},
-		"words_easy_errors_easy": {"collapse_repeat" : false, "word_exclude_tags" : ["stop", "num", "comp", "name", "abbr"], "error_exclude_tags" : ["ok", "typo_easy"]},
-		"words_only_number" : {"collapse_repeat" : false, "word_include_tags" : ["num"]},
-		"words_only_proper" : {"collapse_repeat" : false, "word_include_tags" : ["comp", "name", "abbr"]}
+	"error_analyzer" : {
+		"default": {"postprocessor": "default"},
+		"words_without_stop": {"word_exclude_tags" : ["stop"], "postprocessor": "default"},
+		"words_easy" : {"word_exclude_tags" : ["stop", "num","comp","name","abbr"], "postprocessor": "default"},
+		"words_easy_errors_easy": {"word_exclude_tags" : ["stop", "num","comp","name","abbr"], "error_include_tags" : ["ok", "typo_easy"], "postprocessor": "default"},
+		"words_only_number" : {"word_include_tags" : ["num"], "postprocessor": "default"},
+		"words_only_proper" : {"word_include_tags" : ["comp", "name", "abbr"], "postprocessor": "default"}
 	}
 }

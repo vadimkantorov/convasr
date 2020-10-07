@@ -12,6 +12,9 @@ class BCT(torch.Tensor):
 class BCt(torch.Tensor):
 	pass
 
+class Bt(torch.Tensor):
+	pass
+
 class TBC(torch.Tensor):
 	pass
 

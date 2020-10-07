@@ -1,6 +1,16 @@
 import re
 import typing
 
+class Stemmer:
+	def __init__(self, lang: str = 'ru'):
+		self.lang = lang
+
+	def stem(self, word):
+		if self.lang is None:
+			return word
+		else:
+			## TODO replace by normal stemmer
+			return word[:-3] if len(word) > 8 else word[:-2] if len(word) > 5 else word
 
 class TextProcessor:
 	def __init__(self,
@@ -93,7 +103,7 @@ class TextPostprocessor(TextProcessor):
 		]
 
 	def handle_repeat(self, text):
-		if self.repeat_character is None:
+		if self.repeat_character is None or len(text) == 0:
 			return text
 		result = [text[0]] if text[0] != self.repeat_character else []
 		for i in range(1, len(text)):

@@ -45,7 +45,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	def __init__(
 		self,
 		data_paths,
-		labels,
+		tokenizers: typing.List,
+		preprocessors: typing.List,
 		sample_rate,
 		frontend = None,
 		speaker_names = None,
@@ -68,9 +69,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		string_array_encoding = 'utf_16_le',
 		_print = print
 	):
+		assert len(tokenizers) == len(preprocessors), 'Amount of tokenizers and preprocessors should be same'
+		self.tokenizers = tokenizers
+		self.preprocessors = preprocessors
 		self.join_transcript = join_transcript
 		self.max_duration = max_duration
-		self.labels = labels
 		self.frontend = frontend
 		self.sample_rate = sample_rate
 		self.waveform_transform_debug_dir = waveform_transform_debug_dir
@@ -223,8 +226,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 		if replace_transcript:
 			assert len(signal) == 1, 'only mono supported for now'
-			# replacing ref by normalizing only with default preprocessor
-			ref_full = [self.labels[0].normalize_text(t['ref']) for t in transcript]
+			ref_full = [t['ref'] for t in transcript]
 			speaker = torch.cat([
 				torch.full((len(ref) + 1, ), t['speaker'],
 							dtype = torch.int64).scatter_(0, torch.tensor(len(ref)), self.speaker_missing) for t,
@@ -235,7 +237,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 					audio_path = audio_path,
 					ref = ' '.join(ref_full),
 					example_id = self.example_id(dict(audio_path = audio_path)),
-
 					channel = 0,
 					begin_samples = 0,
 					end_samples = None
@@ -274,10 +275,15 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			else:
 				features.append(segment)
 
-		targets = [[labels.encode(t['ref'], normalize = normalize_text)[1]
-					for t in transcript]
-					for labels in self.labels]
-		
+		targets = []
+		for preprocessor, tokenizer in zip(self.preprocessors, self.tokenizers):
+			encoded_transcripts = []
+			for t in transcript:
+				processed = preprocessor.process(t['ref'])
+				tokens = torch.tensor(tokenizer.encode(processed)[0], dtype = torch.long, device = 'cpu')
+				encoded_transcripts.append(tokens)
+			targets.append(encoded_transcripts)
+
 		# not batch mode
 		if not self.segmented:
 			transcript, speaker, features = transcript[0], speaker[0], features[0][0]
