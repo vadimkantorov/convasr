@@ -113,6 +113,8 @@ def take_between(transcript, ind_last_taken, t, first, last, sort_by_time = True
 def segment(transcript, max_segment_seconds, break_on_speaker_change = True, break_on_channel_change = True):
 	ind_last_taken = -1
 	if isinstance(max_segment_seconds, list):
+		if len(max_segment_seconds) == 0:
+			return []
 		for j in range(len(max_segment_seconds)):
 			first, last = ind_last_taken == -1, j == len(max_segment_seconds) - 1
 			ind_last_taken, transcript_segment = take_between(transcript, ind_last_taken, max_segment_seconds[j + 1][0] if not last else None, first, last, sort_by_time=True)

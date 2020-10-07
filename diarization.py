@@ -1,3 +1,9 @@
+# pip install pyannote.metrics
+# pip install pyannote.pipeline
+# pip install pescador
+# pip install optuna
+# pip install filelock
+# pip install git+https://github.com/pyannote/pyannote-audio
 import os
 import argparse
 import json
@@ -15,10 +21,12 @@ import pyannote.database.util
 import pyannote.metrics.diarization
 
 class PyannoteDiarizationModel(nn.Module):
-	def __init__(self, **kwargs)
+	def __init__(self, **kwargs):
+		super().__init__()
 		self.pipeline = torch.hub.load('pyannote/pyannote-audio', 'dia', **kwargs)
 
-	def forward(signal, sample_rate, extra = {}):
+	def forward(self, signal, sample_rate, extra = {}):
+		assert sample_rate == 16_000
 		res = self.pipeline(dict(waveform = signal.t().numpy(), sample_rate = sample_rate))
 		transcript = [dict(begin = turn.start, end = turn.end, speaker_name = speaker, **extra) for turn, _, speaker in res.itertracks(yield_label = True)]
 		return transcript
@@ -123,14 +131,14 @@ def hyp(input_path, output_path, device, batch_size, html, ext, sample_rate, max
 		transcript_path = os.path.join(output_path, noextname + '.json')
 		rttm_path = os.path.join(output_path, noextname + '.rttm')
 	
-		signal, sample_rate = audio.read_audio(audio_path, mono = True, dtype = 'float32', duration = max_duration)
+		signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = True, dtype = 'float32', duration = max_duration)
 		transcript = model(signal, sample_rate = sample_rate, extra = dict(audio_path = audio_path))
 		transcripts.set_speaker(transcript)
 		
 		transcripts.save(transcript_path, transcript)
 		print(transcript_path)
 
-		res.write_rttm(open(rttm_path, 'w'))
+		transcripts.save(rttm_path, transcript)
 		print(rttm_path)
 
 		if html:
@@ -241,7 +249,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--input-path', '-i')
 	cmd.add_argument('--output-path', '-o')
 	cmd.add_argument('--batch-size', type = int, default = 8)
-	cmd.add_argument('--sample-rate', type = int, default = 8_000)
+	cmd.add_argument('--sample-rate', type = int, default = 16_000)
 	cmd.add_argument('--html', action = 'store_true')
 	cmd.add_argument('--ext', default = '.mp3.wav')
 	cmd.add_argument('--max-duration', type = float)
