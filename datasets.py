@@ -288,10 +288,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 		# not batch mode
 		if not self.segmented:
-			if self.frontend is None:
-				transcript, speaker, features = transcript[0], speaker[0], features[0][0]
-			else:
-				transcript, speaker, features = transcript[0], speaker[0], features[0]
+			transcript, speaker, features = transcript[0], speaker[0], features[0]
 			targets = [target[0] for target in targets]
 		return [transcript, speaker, features] + targets
 

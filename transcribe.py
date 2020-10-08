@@ -39,7 +39,7 @@ def setup(args):
 
 	model = getattr(models, args.model or checkpoint['args']['model'])(
 		args.num_input_features, [len(labels)],
-		frontend = frontend if not args.frontend_not_in_model else None,
+		frontend = frontend if args.frontend_in_model else None,
 		dict = lambda logits,
 		log_probs,
 		olen,
@@ -84,7 +84,7 @@ def main(args):
 	val_dataset = datasets.AudioTextDataset(
 		data_paths, [labels],
 		args.sample_rate,
-		frontend = frontend if args.frontend_not_in_model else None,
+		frontend = frontend if not args.frontend_in_model else None,
 		segmented = True,
 		mono = args.mono,
 		time_padding_multiple = args.batch_time_padding_multiple,
@@ -322,7 +322,7 @@ if __name__ == '__main__':
 	parser.add_argument('--debug-short-long-records-normalize-signal-multiplier', action = 'store_true')
 	parser.add_argument('--debug-short-long-records-features-from-whole-normalized-signal', action = 'store_true')
 	parser.add_argument('--frontend', type=str, default='LogFilterBankFrontend')
-	parser.add_argument('--frontend-not-in-model', action='store_true')
+	parser.add_argument('--frontend-in-model', type=lambda x: bool(int(x or 0)), nargs='?', const=True, default=True)
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
