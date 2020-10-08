@@ -20,7 +20,7 @@ import torch.nn.functional as F
 import audio
 import tools
 import datasets
-import generators
+import transcript_generators
 import metrics
 import models
 import ctc
@@ -230,7 +230,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 def logits(logits, audio_name, MAX_ENTROPY = 1.0):
 	good_audio_name = set(map(str.strip, open(audio_name[0])) if os.path.exists(audio_name[0]) else audio_name)
 	labels = datasets.Labels(ru)
-	decoder = generators.GreedyGenerator()
+	decoder = transcript_generators.GreedyCTCGenerator()
 	tick_params = lambda ax, labelsize = 2.5, length = 0, **kwargs: ax.tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length, **kwargs) or [ax.set_linewidth(0) for ax in ax.spines.values()]
 	logits_path = logits + '.html'
 	html = open(logits_path, 'w')

@@ -3,7 +3,7 @@ import math
 import time
 import json
 import itertools
-import functools
+import language_processing
 import importlib
 import torch.utils.data
 import sentencepiece
@@ -45,8 +45,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	def __init__(
 		self,
 		data_paths,
-		tokenizers: typing.List,
-		preprocessors: typing.List,
+		text_pipelines: typing.List[language_processing.ProcessingPipeline],
 		sample_rate,
 		frontend = None,
 		speaker_names = None,
@@ -69,9 +68,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		string_array_encoding = 'utf_16_le',
 		_print = print
 	):
-		assert len(tokenizers) == len(preprocessors), 'Amount of tokenizers and preprocessors should be same'
-		self.tokenizers = tokenizers
-		self.preprocessors = preprocessors
+		self.text_pipelines = text_pipelines
 		self.join_transcript = join_transcript
 		self.max_duration = max_duration
 		self.frontend = frontend
@@ -154,7 +151,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.channel = torch.CharTensor([t['channel'] for t in transcript])
 		self.speaker = torch.LongTensor([t['speaker'] for t in transcript])
 		self.cumlen = torch.ShortTensor(examples_lens).cumsum(dim = 0, dtype = torch.int64)
-		self.meta = { self.example_id(t) : t for t in transcript } if not pop_meta else {}
+		self.meta = {self.example_id(t) : t for t in transcript } if not pop_meta else {}
 		_print('Dataset tensors creation time: ', time.time() - tic)
 
 	def state_dict(self) -> dict:
@@ -242,7 +239,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 					end_samples = None
 				)
 			]
-			normalize_text = False
 		else:
 			transcript = [
 				dict(
@@ -260,7 +256,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				for channel in ([t['channel']] if t['channel'] != self.channel_missing else range(len(signal)))
 			]
 			speaker = torch.LongTensor([t.pop('speaker') for t in transcript]).unsqueeze(-1)
-			normalize_text = True
 
 		features = []
 		for t in transcript:
@@ -276,11 +271,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				features.append(segment)
 
 		targets = []
-		for preprocessor, tokenizer in zip(self.preprocessors, self.tokenizers):
+		for pipeline in self.text_pipelines:
 			encoded_transcripts = []
 			for t in transcript:
-				processed = preprocessor.process(t['ref'])
-				tokens = torch.tensor(tokenizer.encode(processed)[0], dtype = torch.long, device = 'cpu')
+				processed = pipeline.preprocess(t['ref'])
+				tokens = torch.tensor(pipeline.encode([processed])[0], dtype = torch.long, device = 'cpu')
 				encoded_transcripts.append(tokens)
 			targets.append(encoded_transcripts)
 

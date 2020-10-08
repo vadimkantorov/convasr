@@ -13,7 +13,7 @@ import torch
 import datasets
 import models
 import metrics
-import generators
+import transcript_generators
 import ctc
 import transcripts
 import vis
@@ -42,7 +42,7 @@ def setup(args):
 	model.fuse_conv_bn_eval()
 	if args.device != 'cpu':
 		model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16)
-	decoder = generators.GreedyGenerator() if args.decoder == 'GreedyDecoder' else generators.BeamSearchDecoder(
+	decoder = transcript_generators.GreedyCTCGenerator() if args.decoder == 'GreedyDecoder' else transcript_generators.BeamSearchDecoder(
 		labels,
 		lm_path = args.lm,
 		beam_width = args.beam_width,

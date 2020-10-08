@@ -6,7 +6,6 @@ from collections import defaultdict
 
 class CharTokenizerLegacy:
     def __init__(self, name: str, alphabet: str):
-        self.name = name
         self.alphabet = alphabet
         self.unk_token = '*'
         self.punkt_token = '.'
@@ -19,7 +18,8 @@ class CharTokenizerLegacy:
         self.char2idx = defaultdict(lambda: unk_idx)
         self.char2idx.update({char: idx for idx, char in enumerate(self.idx2char)})
 
-        self.space_token_idx = self.char2idx[self.space_token]
+        self.space_id = self.char2idx[self.space_token]
+        self.eps_id = self.char2idx[self.eps_token]
 
     @property
     def vocab(self):
@@ -37,15 +37,15 @@ class CharTokenizerLegacy:
         '''
         Returns true if new word started from this token
         '''
-        return idx == self.space_token_idx
+        return idx == self.space_id
 
-    def encode(self, sentences: typing.Iterable[str], **kwargs) -> typing.List[typing.List[int]]:
+    def encode(self, sentences: typing.List[str], **kwargs) -> typing.List[typing.List[int]]:
         tokens = []
         for sentence in sentences:
             tokens.append([self.char2idx[char] for char in sentence])
         return tokens
 
-    def decode(self, tokens: typing.Iterable[typing.Iterable[int]], **kwargs) -> typing.List[str]:
+    def decode(self, tokens: typing.Iterable[typing.List[int]], **kwargs) -> typing.List[str]:
         sentences = []
         for sentence_tokens in tokens:
             sentences.append(''.join([self.idx2char[idx] for idx in sentence_tokens]))
@@ -54,7 +54,6 @@ class CharTokenizerLegacy:
 
 class BPETokenizer:
     def __init__(self, model_path: str, name: str):
-        self.name = name
         self.bpe = sentencepiece.SentencePieceProcessor(model_file = model_path)
         self.vocab = [self.bpe.id_to_piece(idx) for idx in range(self.bpe.get_piece_size())]
         self.word_start_tokens = set(idx for idx in range(self.bpe.get_piece_size()) if '\u2581' in self.vocab[idx])
@@ -89,8 +88,8 @@ class BPETokenizer:
     def pad_id(self):
         return self.bpe.pad_id
 
-    def encode(self, sentences: typing.Iterable[str], bos = False, eos = False, **kwargs) -> typing.List[typing.List[int]]:
+    def encode(self, sentences: typing.List[str], bos = False, eos = False, **kwargs) -> typing.List[typing.List[int]]:
         return self.bpe.encode(sentences, add_bos = bos, add_eos = eos)
 
-    def decode(self, tokens: typing.Iterable[typing.Iterable[int]], **kwargs) -> typing.List[str]:
+    def decode(self, tokens: typing.List[typing.List[int]], **kwargs) -> typing.List[str]:
         return self.bpe.decode(tokens)

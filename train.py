@@ -23,7 +23,7 @@ import torch.utils.tensorboard
 import onnxruntime
 import apex
 import datasets
-import generators
+import transcript_generators
 import metrics
 import models
 import optimizers
@@ -35,7 +35,7 @@ import transcripts
 import perf
 import itertools
 import tokenizers
-import text
+import language_processing
 import torch.distributed as dist
 
 class JsonlistSink:
@@ -118,7 +118,7 @@ class TensorboardSink:
 				self.summary_writer.add_histogram(tag + '/grad', param.grad, iteration)
 	
 
-def apply_model(data_loader, model, generators, device, oom_handler):
+def apply_model(data_loader, model, generator, text_pipelines, device, oom_handler):
 	for meta, s, x, xlen, y, ylen in data_loader:
 		x, xlen, y, ylen = x.to(device, non_blocking = True), xlen.to(device, non_blocking = True), y.to(device, non_blocking = True), ylen.to(device, non_blocking = True)
 		with torch.no_grad():
@@ -132,9 +132,9 @@ def apply_model(data_loader, model, generators, device, oom_handler):
 
 		entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, olen))
 		hyp = []
-		for g, lp, o in zip(generators, log_probs, olen):
-			hypotheses = g.generate(lp, begin = 0, end = 0, output_lengths = o)
-			hyp.append([''.join([segment['hyp'] for segment in hypothesis[0]]) for hypothesis in hypotheses])
+		for pipeline, lp, o in zip(text_pipelines, log_probs, olen):
+			generated_transcripts = generator.generate(pipeline.tokenizer, lp, begin = 0.0, end = 0.0, output_lengths = o)
+			hyp.append([transcript[0].text for transcript in generated_transcripts])
 
 		logits = list(map(models.unpad, logits, olen))
 		y = list(map(models.unpad, y, ylen))
@@ -145,7 +145,8 @@ def evaluate_model(
 	args,
 	val_data_loaders,
 	model,
-	generators,
+	generator,
+	text_pipelines,
 	error_analyzer,
 	optimizer = None,
 	sampler = None,
@@ -157,7 +158,6 @@ def evaluate_model(
 	_print = utils.get_root_logger_print()
 
 	training = epoch is not None and iteration is not None
-	columns = {}
 	oom_handler = utils.OomHandler(max_retries=args.oom_retries)
 	for val_dataset_name, val_data_loader in val_data_loaders.items():
 		if args.world_size > 1:
@@ -169,17 +169,17 @@ def evaluate_model(
 		model.eval()
 		if args.adapt_bn:
 			models.reset_bn_running_stats_(model)
-			for _ in apply_model(val_data_loader, model, generators, args.device, oom_handler):
+			for _ in apply_model(val_data_loader, model, generator, text_pipelines, args.device, oom_handler):
 				pass
 		model.eval()
 
 		tic = time.time()
 		ref_, hyp_, audio_path_, loss_, entropy_ = [], [], [], [], []
-		for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(val_data_loader, model, generators, args.device, oom_handler)):
+		for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(val_data_loader, model, generator, text_pipelines, args.device, oom_handler)):
 			loss_.extend(loss.tolist())
 			entropy_.extend(entropy.tolist())
 			audio_path_.extend(m['audio_path'] for m in meta)
-			ref_.extend(m['ref'] for m in meta)
+			ref_.extend([pipeline.preprocess(m['ref']) for pipeline in text_pipelines] for m in meta)
 			hyp_.extend(zip(*hyp))
 		toc_apply_model = time.time()
 		time_sec_val_apply_model = toc_apply_model - tic
@@ -203,12 +203,15 @@ def evaluate_model(
 			_print(f'entropy sync time {time.time() - sync_tic:.1f} sec');sync_tic = time.time()
 			audio_path_ = sync_string_list(audio_path_)
 			_print(f'audio_path sync time {time.time()  - sync_tic:.1f} sec');sync_tic = time.time()
-			ref_ = sync_string_list(ref_)
+			ref_by_pipelines = list(map(list, zip(*ref_)))
+			for i in range(len(ref_by_pipelines)):
+				ref_by_pipelines[i] = sync_string_list(ref_by_pipelines[i])
+			ref_ = list(map(list, zip(*ref_by_pipelines)))
 			_print(f'ref sync time {time.time() - sync_tic:.1f} sec');sync_tic = time.time()
-			hyps_by_labels = list(map(list, zip(*hyp_)))
-			for i in range(len(hyps_by_labels)):
-				hyps_by_labels[i] = sync_string_list(hyps_by_labels[i])
-			hyp_ = list(map(list, zip(*hyps_by_labels)))
+			hyps_by_pipelines = list(map(list, zip(*hyp_)))
+			for i in range(len(hyps_by_pipelines)):
+				hyps_by_pipelines[i] = sync_string_list(hyps_by_pipelines[i])
+			hyp_ = list(map(list, zip(*hyps_by_pipelines)))
 			_print(f'hyp sync time {time.time()- sync_tic:.1f} sec')
 			time_sec_val_sync_results = time.time() - toc_apply_model
 			perf.update(dict(time_sec_val_sync_results=time_sec_val_sync_results), prefix=f'datasets_{val_dataset_name}')
@@ -220,17 +223,18 @@ def evaluate_model(
 			(
 				hyp,
 				ref,
+				pipeline,
 				analyze,
 				dict(
-					labels_name=generator.name,
+					labels_name=pipeline.name,
 					audio_path=audio_path,
 					audio_name=transcripts.audio_name(audio_path),
 					loss=loss,
 					entropy=entropy
 				),
 			)
-			for ref, hyp_tuple, audio_path, loss, entropy in zip(ref_, hyp_, audio_path_, loss_, entropy_)
-			for generator, hyp in zip(generators, hyp_tuple)
+			for ref_tuple, hyp_tuple, audio_path, loss, entropy in zip(ref_, hyp_, audio_path_, loss_, entropy_)
+			for pipeline, ref, hyp in zip(text_pipelines, ref_tuple, hyp_tuple)
 		)
 
 		if args.analyze_num_workers <= 0:
@@ -246,7 +250,7 @@ def evaluate_model(
 		_print(f"Analyze {time_sec_val_analyze:.1f} sec, Total {time_sec_val_total:.1f} sec")
 		
 		for i, t in enumerate(transcript if args.verbose else []):		
-			_print(f'{val_dataset_name}@{iteration}: {i // len(generators)} / {len(audio_path_)} | {args.experiment_id}')
+			_print(f'{val_dataset_name}@{iteration}: {i // len(text_pipelines)} / {len(audio_path_)} | {args.experiment_id}')
 			# TODO: don't forget to fix aligned hyp & ref output!
 			_print('{labels_name} AUDIO_NAME: {audio_name}'.format(**t))
 			_print('{labels_name} REF: "{ref}"'.format(**t))
@@ -260,8 +264,8 @@ def evaluate_model(
 		) if training else args.val_transcripts_format.format(
 			val_dataset_name = val_dataset_name, decoder = args.decoder
 		)
-		for i, generator in enumerate(generators):
-			transcript_by_label = transcript[i:: len(generators)]
+		for i, pipeline in enumerate(text_pipelines):
+			transcript_by_label = transcript[i:: len(text_pipelines)]
 			aggregated = error_analyzer.aggregate(transcript_by_label, sep = '__', defaults = dict(words_easy_errors_easy__cer_pseudo = -1, mer_wordwise = -1, hyp_vocabness = -1, ref_vocabness = -1))
 			if analyze:
 				with open(f'{transcripts_path}.errors.csv', 'w') as f:
@@ -271,7 +275,7 @@ def evaluate_model(
 			_print('cer', metrics.quantiles(t['cer'] for t in transcript_by_label))
 			_print('loss', metrics.quantiles(t['loss'] for t in transcript_by_label))
 			_print(
-				f'{args.experiment_id} {val_dataset_name} {generator.name}',
+				f'{args.experiment_id} {val_dataset_name} {pipeline.name}',
 				f'| epoch {epoch} iter {iteration}' if training else '',
 				f'| {transcripts_path} |',
 				('Entropy: {entropy:.02f} Loss: {loss:.02f} | WER:  {wer:.02%} CER: {cer:.02%} [{words_easy_errors_easy__cer_pseudo:.02%}],  MER: {mer_wordwise:.02%} V: {hyp_vocabness:.02%}/{ref_vocabness:.02%}\n')
@@ -283,9 +287,9 @@ def evaluate_model(
 						wer = aggregated['wer'],
 						cer = aggregated['cer'],
 						loss = aggregated['loss']
-					), prefix = f'datasets_val_{val_dataset_name}_{generator.name}'
+					), prefix = f'datasets_val_{val_dataset_name}_{pipeline.name}'
 				)
-				tensorboard_sink.val_stats(iteration, val_dataset_name, generator.name, perf.default())
+				tensorboard_sink.val_stats(iteration, val_dataset_name, pipeline.name, perf.default())
 
 		with open(transcripts_path, 'w') as f:
 			json.dump(transcript, f, ensure_ascii = False, indent = 2, sort_keys = True)
@@ -307,7 +311,7 @@ def evaluate_model(
 				iteration = iteration,
 				args = vars(args),
 				time = time.time(),
-				generators = [g.name for g in generators]
+				generators = [pipeline.name for pipeline in text_pipelines]
 			),
 			checkpoint_path
 		)
@@ -376,7 +380,7 @@ def main(args):
 	_print = utils.get_root_logger_print()
 	_print('\n', 'Arguments:', args)
 	_print(f'"CUDA_VISIBLE_DEVICES={os.environ.get("CUDA_VISIBLE_DEVICES", default = "")}"')
-	_print(f'"CUDA_LAUNCH_BLOCKING={os.environ.get("CUDA_LAUNCH_BLOCKING", default="")}"')
+	_print(f'"CUDA_LAUNCH_BLOCKING={os.environ.get("CUDA_LAUNCH_BLOCKING", default = "")}"')
 	_print('Experiment id:', args.experiment_id, '\n')
 	if args.dry:
 		return
@@ -384,17 +388,20 @@ def main(args):
 		torch.backends.cudnn.benchmark = True
 
 	text_config = json.load(open(args.text_config)) if os.path.exists(args.text_config) else {}
-	assert len(args.tokenizers) == len(args.preprocessors), "amount of tokenizers and preprocessors should be same"
 	lang = text_config['lang']
-	model_tokenizers = []
-	model_preprocessors = []
-	for tokenizer_name, preprocessor_name in zip(args.tokenizers, args.preprocessors):
+	text_pipelines = []
+	for pipeline_name in args.text_pipelines:
+		pipeline_config = text_config['pipelines'][pipeline_name]
+		tokenizer_name = pipeline_config['tokenizer']
 		tokenizer_config = text_config['tokenizers'][tokenizer_name].copy()
-		model_tokenizers.append(getattr(tokenizers, tokenizer_config.pop('class'))(name = tokenizer_name, **tokenizer_config))
-		preprocessor_config = text_config['preprocess'][preprocessor_name]
-		model_preprocessors.append(text.TextPreprocessor(**preprocessor_config))
+		tokenizer = getattr(tokenizers, tokenizer_config.pop('class'))(name = tokenizer_name, **tokenizer_config)
+		preprocessor_config = text_config['preprocess'][pipeline_config['preprocessor']]
+		preprocessor = language_processing.TextPreprocessor(**preprocessor_config)
+		postprocessor_config = text_config['postprocess'][pipeline_config['postprocessor']]
+		postprocessor = language_processing.TextPostprocessor(**postprocessor_config)
+		text_pipelines.append(language_processing.ProcessingPipeline(name = pipeline_name, tokenizer = tokenizer, preprocessor = preprocessor, postprocessor = postprocessor))
 
-	validation_postprocessors = {name: text.TextPostprocessor(**config) for name, config in text_config['postprocess'].items()}
+	validation_postprocessors = {name: language_processing.TextPostprocessor(**config) for name, config in text_config['postprocess'].items()}
 
 	frontend = getattr(models, args.frontend)(
 		out_channels = args.num_input_features,
@@ -409,9 +416,9 @@ def main(args):
 	)
 	model = getattr(models, args.model)(
 		num_input_features = args.num_input_features,
-		num_classes = [tokenizer.vocab_size for tokenizer in model_tokenizers],
+		num_classes = [pipeline.tokenizer.vocab_size for pipeline in text_pipelines],
 		dropout = args.dropout,
-		decoder_type = None,
+		decoder_type = 'bpe' if any(isinstance(pipeline.tokenizer, tokenizers.BPETokenizer) for pipeline in text_pipelines) else None,
 		frontend = frontend if args.onnx or args.frontend_in_model else None,
 		**(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx else {})
 	)
@@ -475,10 +482,8 @@ def main(args):
 	for word_tag, words in val_config.get('word_tags', {}).items():
 		word_tags[word_tag] = word_tags.get(word_tag, []) + words
 	vocab = set(map(str.strip, open(args.vocab))) if os.path.exists(args.vocab) else set()
-	error_analyzer = metrics.ErrorAnalyzer(metrics.WordTagger(lang, vocab = vocab, word_tags = word_tags),
-	                                       metrics.ErrorTagger(),
-	                                       val_config.get('error_analyzer', {}),
-	                                       validation_postprocessors)
+	stemmer = language_processing.Stemmer(lang)
+	error_analyzer = metrics.ErrorAnalyzer(metrics.WordTagger(stemmer = stemmer, vocab = vocab, word_tags = word_tags), metrics.ErrorTagger(), val_config.get('error_analyzer', {}), validation_postprocessors)
 
 	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
 	val_frontend = models.AugmentationFrontend(
@@ -498,7 +503,7 @@ def main(args):
 
 	val_data_loaders = {}
 	for val_data_path in args.val_data_path:
-		val_dataset = datasets.AudioTextDataset(val_data_path, model_tokenizers, model_preprocessors, args.sample_rate,
+		val_dataset = datasets.AudioTextDataset(val_data_path, text_pipelines, args.sample_rate,
 												frontend = val_frontend if not args.frontend_in_model else None,
 												waveform_transform_debug_dir = args.val_waveform_transform_debug_dir,
 												min_duration = args.min_duration,
@@ -524,8 +529,7 @@ def main(args):
 
 		val_data_loaders[os.path.basename(val_data_path)] = val_data_loader
 
-	model_generators = [generators.GreedyGenerator(tokenizer) for tokenizer in model_tokenizers]
-
+	generator = transcript_generators.GreedyCTCGenerator()
 	model.to(args.device)
 
 	if not args.train_data_path:
@@ -536,7 +540,7 @@ def main(args):
 			model, *_ = models.distributed_data_parallel_and_autocast(model, args.local_rank, opt_level = args.fp16, synchronize_bn = args.synchronize_bn, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 		elif args.device != 'cpu':
 			model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-		evaluate_model(args, val_data_loaders, model, model_generators, error_analyzer)
+		evaluate_model(args, val_data_loaders, model, generator, text_pipelines, error_analyzer)
 		return
 
 	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder, frontend = args.freeze_frontend)
@@ -550,8 +554,7 @@ def main(args):
 	if args.local_rank == 0:
 		train_dataset = datasets.AudioTextDataset(
 			args.train_data_path,
-			model_tokenizers,
-			model_preprocessors,
+			text_pipelines,
 			args.sample_rate,
 			frontend = train_frontend if not args.frontend_in_model else None,
 			min_duration = args.min_duration,
@@ -578,8 +581,7 @@ def main(args):
 	if args.local_rank != 0:
 		train_dataset = datasets.AudioTextDataset(
 			[],
-			model_tokenizers,
-			model_preprocessors,
+			text_pipelines,
 			args.sample_rate,
 			frontend=train_frontend if not args.frontend_in_model else None,
 			min_duration=args.min_duration,
@@ -780,7 +782,8 @@ def main(args):
 					args,
 					val_data_loaders,
 					model,
-					model_generators,
+					generator,
+					text_pipelines,
 					error_analyzer,
 					optimizer,
 					sampler,
@@ -805,7 +808,8 @@ def main(args):
 				args,
 				val_data_loaders,
 				model,
-				model_generators,
+				generator,
+				text_pipelines,
 				error_analyzer,
 				optimizer,
 				sampler,
@@ -982,8 +986,6 @@ if __name__ == '__main__':
 		help = 'weight for decoded transcript length (TODO: check in ctcdecode)'
 	)
 	parser.add_argument('--lm', help = 'path to KenLM language model for ctcdecode')
-	parser.add_argument('--tokenizers', nargs = '+', help = 'tokenizer names for model (names should be defined in text-config)', default = ['char_legacy'])
-	parser.add_argument('--preprocessors', nargs = '+', help = 'preprocessors names for tokenizers', default = ['default'])
 	parser.add_argument(
 		'--timeout', type = float, default = 0, help = 'crash after specified timeout spent in DataLoader'
 	)
@@ -1024,6 +1026,7 @@ if __name__ == '__main__':
 	parser.add_argument('--vocab', default = 'data/vocab_word_list.txt')
 	parser.add_argument('--word-tags', default = 'data/word_tags.json')
 	parser.add_argument('--text-config', default = 'configs/ru_text_config.json')
+	parser.add_argument('--text-pipelines', nargs = '+', help = 'text processing pipelines (names should be defined in text-config)', default = ['char_legacy'])
 	parser.add_argument('--frontend-in-model', action = 'store_true')
 	parser.add_argument('--batch-time-padding-multiple', type = int, default = 128)
 	parser.add_argument('--oom-retries', type = int, default = 3)

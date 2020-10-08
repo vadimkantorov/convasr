@@ -4,7 +4,7 @@ import collections
 import json
 import functools
 import typing
-import text
+import language_processing
 import Levenshtein
 
 placeholder = '|'
@@ -61,14 +61,13 @@ class WordTagger(collections.defaultdict):
 	vocab_miss = 'vocab_miss'
 	stop = 'stop'
 
-	def __init__(self, lang = None, word_tags = {}, vocab = set()):
-		self.lang = lang
-		self.stemmer = text.Stemmer(lang)
+	def __init__(self, stemmer = None, word_tags = {}, vocab = set()):
+		self.stemmer = stemmer if stemmer is not None else lambda word: word
 		self.vocab = vocab
-		self.stem2tag = {self.stemmer.stem(word): tag for tag, words in word_tags.items() for word in words}
+		self.stem2tag = {self.stemmer(word): tag for tag, words in word_tags.items() for word in words}
 
 	def __missing__(self, word):
-		self[word] = self.stem2tag.get(self.stemmer.stem(word))
+		self[word] = self.stem2tag.get(self.stemmer(word))
 		return self[word]
 
 	def tag(self, word):
@@ -182,7 +181,7 @@ class ErrorAnalyzer:
 			hyp_vocabness = hyp_vocabness
 		)
 
-	def analyze(self, hyp : str, ref : str, detailed : bool = False, extra : dict = {}, split_candidates : typing.Optional[typing.Callable[[str], typing.List[str]]] = None) -> dict:
+	def analyze(self, hyp : str, ref : str, text_pipeline: typing.Optional[language_processing.ProcessingPipeline] = None, detailed : bool = False, extra : dict = {}, split_candidates : typing.Optional[typing.Callable[[str], typing.List[str]]] = None) -> dict:
 		if split_candidates is None:
 			split_candidates = lambda s: [s]
 
@@ -191,24 +190,22 @@ class ErrorAnalyzer:
 		# some default options were already chosen
 		#TODO: hyp_postproc, ref_postproc = map(postprocess_transcript, [hyp, ref])
 
-		assert 'default' in self.configs, 'default must be present'
-		default_postprocessor = self.postprocessors[self.configs['default']['postprocessor']]
-		postproc_default_ref = default_postprocessor.process(ref)
-		postproc_default_hyp = default_postprocessor.process(hyp)
+		postproc_ref = text_pipeline.postprocess(ref) if text_pipeline is not None else ref
+		postproc_hyp = text_pipeline.postprocess(hyp) if text_pipeline is not None else hyp
 
 		# TODO: document common choices for extra
 		res = dict(
-			ref=postproc_default_ref,
-			hyp=postproc_default_hyp,
+			ref=postproc_ref,
+			hyp=postproc_hyp,
 			ref_orig = ref,
 			hyp_orig = hyp,
-			cer = cer(hyp = postproc_default_hyp, ref = postproc_default_ref),
-			wer = wer(hyp = postproc_default_hyp, ref = postproc_default_ref),
+			cer = cer(hyp = postproc_hyp, ref = postproc_ref),
+			wer = wer(hyp = postproc_hyp, ref = postproc_ref),
 			**extra
 		)
 
 		if detailed:
-			_hyp_, _ref_ = align_strings(hyp = postproc_default_hyp, ref = postproc_default_ref)
+			_hyp_, _ref_ = align_strings(hyp = postproc_hyp, ref = postproc_ref)
 			word_alignment = align_words(_hyp_ = _hyp_, _ref_ = _ref_, word_tagger = self.word_tagger, error_tagger = self.error_tagger, compute_cer = True)
 			#TODO: rename into words
 			res['alignment'] = word_alignment
@@ -225,12 +222,12 @@ class ErrorAnalyzer:
 			res['char_stats'] = char_stats
 
 			for config_name, config in self.configs.items():
-				config_postprocessor = self.postprocessors[config['postprocessor']]
+				config_postprocessor = self.postprocessors[config['postprocessor']] if 'postprocessor' in config else lambda word: word
 				filtered_alignment = self.filter_words(word_alignment, **config)
 				res[config_name] = self.compute_wordwise_metrics(filtered_alignment = filtered_alignment)
 
 				for m in [self.compute_filtered_metrics, self.compute_pseudo_metrics, self.compute_vocabness_metrics]:
-					res[config_name].update(m(word_alignment, filtered_alignment, config_postprocessor.process, **config))
+					res[config_name].update(m(word_alignment, filtered_alignment, config_postprocessor, **config))
 
 		return res
 

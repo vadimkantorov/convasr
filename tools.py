@@ -18,7 +18,7 @@ import random
 import hashlib
 import multiprocessing
 import utils
-import text
+import language_processing
 
 
 def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, unk, num_speakers):
@@ -288,7 +288,7 @@ def lserrorwords(input_path, output_path, comment_path, freq_path, sortdesc, sor
 	transcript = json.load(open(input_path))
 	transcript = list(filter(lambda t: [(w.get('type') or w.get('error_tag')) for w in t['words']].count('missing_ref') <= 2, transcript))
 
-	stem = text.Stemmer(lang)
+	stem = language_processing.Stemmer(lang)
 	words_ok = [w['ref'].replace(metrics.placeholder, '') for t in transcript for w in t['words'] if (w.get('type') or w.get('error_tag')) == 'ok']
 	words_error = [
 		w['ref'].replace(metrics.placeholder, '')

@@ -1,32 +1,54 @@
 import re
 import typing
 
+
 class Stemmer:
 	def __init__(self, lang: str = 'ru'):
 		self.lang = lang
 
-	def stem(self, word):
+	def __call__(self, word):
 		if self.lang is None:
 			return word
 		else:
 			## TODO replace by normal stemmer
 			return word[:-3] if len(word) > 8 else word[:-2] if len(word) > 5 else word
 
+
+class ProcessingPipeline:
+	def __init__(self, name: str, tokenizer, preprocessor, postprocessor):
+		self.name = name
+		self.tokenizer = tokenizer
+		self.preprocessor = preprocessor
+		self.postprocessor = postprocessor
+
+	def preprocess(self, text):
+		return self.preprocessor(text)
+
+	def postprocess(self, text):
+		return self.postprocessor(text)
+
+	def encode(self, sentences: typing.List[str], **kwargs) -> typing.List[typing.List[int]]:
+		return self.tokenizer.encode(sentences)
+
+	def decode(self, sentences: typing.List[int], **kwargs) -> typing.List[typing.List[str]]:
+		return self.tokenizer.encode(sentences)
+
+
 class TextProcessor:
 	def __init__(self,
 				drop_space_at_borders: bool = True,
 				to_lower_case: bool = True,
-				collapse_char_series: typing.Iterable[str] = tuple(),
-				drop_substrings: typing.Iterable[str] = tuple(),
-				replace_chars: typing.Iterable[str] = tuple(),
+				collapse_char_series: bool = True,
+				drop_substrings: typing.List[str] = tuple(),
+				replace_chars: typing.List[str] = tuple(),
 				**kwargs):
 		self.drop_space_at_borders = drop_space_at_borders
 		self.to_lower_case = to_lower_case
-		self.collapse_char_series = collapse_char_series #collapse any amount of this chars repeats to one
+		self.collapse_char_series = collapse_char_series #collapse any amount of chars repeats to one
 		self.drop_substrings = drop_substrings #drop any substring in this list from text
 		self.replace_chars = replace_chars #list contain replace groups, replace group is string where first character is replacer and  other are replaceable
 
-		self.handers = [
+		self.handlers = [
 			self.handle_strip,
 			self.handle_case,
 			self.handle_collapse,
@@ -34,8 +56,8 @@ class TextProcessor:
 			self.handle_replace
 		]
 
-	def process(self, text):
-		for	handler in self.handers:
+	def __call__(self, text):
+		for	handler in self.handlers:
 			text = handler(text)
 		return text
 
@@ -46,8 +68,7 @@ class TextProcessor:
 		return text.lower() if self.to_lower_case else text
 
 	def handle_collapse(self, text):
-		for char in self.collapse_char_series:
-			text = re.sub(rf'({char})\1+', rf'\g<1>', text)
+		text = re.sub(rf'(.)\1+', rf'\g<1>', text)
 		return text
 
 	def handle_drop(self, text):
@@ -71,7 +92,7 @@ class TextPreprocessor(TextProcessor):
 		super().__init__(**kwargs)
 		self.repeat_character = repeat_character #if not none all doubled chars will be replaced by single char and repeat char
 
-		self.handers = [
+		self.handlers = [
 			self.handle_strip,
 			self.handle_case,
 			self.handle_repeat,
@@ -93,12 +114,12 @@ class TextPostprocessor(TextProcessor):
 		super().__init__(**kwargs)
 		self.repeat_character = repeat_character
 
-		self.handers = [
+		self.handlers = [
 			self.handle_strip,
 			self.handle_case,
-			self.handle_repeat,
 			self.handle_collapse,
 			self.handle_drop,
+			self.handle_repeat,
 			self.handle_replace
 		]
 
