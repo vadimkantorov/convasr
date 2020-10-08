@@ -646,9 +646,9 @@ def margin(log_probs, dim = 1):
 def compute_capacity(model, scale = 1):
 	return sum(map(torch.numel, model.parameters())) / scale
 
-def normalize_signal(signal, dim = -1, eps = 1e-5, debug_short_long_records_normalize_signal_multiplier  = 1.0):
+def normalize_signal(signal, dim = -1, eps = 1e-5, denom_multiplier  = 1.0):
 	signal_max = signal.abs().max(dim = dim, keepdim = True).values + eps
-	return signal / (signal_max * debug_short_long_records_normalize_signal_multiplier) if signal.numel() > 0 else signal
+	return signal / (signal_max * denom_multiplier) if signal.numel() > 0 else signal
 
 class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 	def __init__(self, *args, temporal_mask = False, legacy = True, **kwargs):
