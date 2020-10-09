@@ -569,10 +569,6 @@ class LogFilterBankFrontend(nn.Module):
 
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
 
-		# strange bug with shape of signal. In case if shape of signal [24000] cause exception in padding F.pad
-		if len(signal.shape) < 2:
-			signal = signal.unsqueeze(0)
-
 		signal = normalize_signal(signal, denom_multiplier=self.debug_short_long_records_normalize_signal_multiplier) if self.normalize_signal else signal
 		signal = apply_dither(signal, self.dither0)
 		signal = torch.cat([signal[..., :1], signal[..., 1:] -
