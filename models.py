@@ -573,7 +573,7 @@ class LogFilterBankFrontend(nn.Module):
 		if len(signal.shape) < 2:
 			signal = signal.unsqueeze(0)
 
-		signal = normalize_signal(signal, debug_short_long_records_normalize_signal_multiplier=self.debug_short_long_records_normalize_signal_multiplier) if self.normalize_signal else signal
+		signal = normalize_signal(signal, denom_multiplier=self.debug_short_long_records_normalize_signal_multiplier) if self.normalize_signal else signal
 		signal = apply_dither(signal, self.dither0)
 		signal = torch.cat([signal[..., :1], signal[..., 1:] -
 							self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
