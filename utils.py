@@ -8,6 +8,12 @@ import psutil
 import logging
 import logging.handlers
 
+def strip_suffixes(s, suffixes):
+	for suffix in sorted(suffixes, key = len, reverse = True):
+		if s.endswith(suffix):
+			return s[:-len(suffix)]
+	return s
+
 def get_root_logger_print():
 	logger = logging.getLogger()
 	return (lambda *args: logger.info(' '.join(map(str, args))))

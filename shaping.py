@@ -6,7 +6,13 @@ class T(torch.Tensor):
 class B(torch.Tensor):
 	pass
 
+class S(torch.Tensor):
+	pass
+
 class BCT(torch.Tensor):
+	pass
+
+class CT(torch.Tensor):
 	pass
 
 class BCt(torch.Tensor):

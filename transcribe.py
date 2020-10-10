@@ -52,21 +52,26 @@ def setup(args):
 		num_workers = args.num_workers,
 		topk = args.decoder_topk
 	)
-	segmentation_model = diarization_model.PyannoteDiarizationModel() if args.diarize else diarization_model.WebrtcSpeechActivityDetectionModel() if args.vad is not False else None
+	segmentation_model = diarization.PyannoteDiarizationModel() if args.diarize else diarization.WebrtcSpeechActivityDetectionModel() if args.vad is not False else None
 
 	return labels, frontend, model, decoder, segmentation_model
 
 
-def main(args):
+def main(args, ext_json = ['.json', '.json.gz']):
 	utils.enable_jit_fusion()
 
 	assert args.output_json or args.output_html or args.output_txt or args.output_csv, \
 		'at least one of the output formats must be provided'
 	os.makedirs(args.output_path, exist_ok = True)
-	data_paths = [
+	
+	audio_data_paths = set(
 		p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f])
 		if os.path.isfile(p) and any(map(p.endswith, args.ext))
-	] + [p for p in args.input_path if any(map(p.endswith, ['.json', '.json.gz']))]
+	)
+	json_data_paths = set(p for p in args.input_path if any(map(p.endswith, ext_json)) and not utils.strip_suffixes(p, ext_json) in audio_data_paths)
+
+	data_paths = list(audio_data_paths | json_data_paths)
+
 	exclude = set(
 		[os.path.splitext(basename)[0]
 			for basename in os.listdir(args.output_path)
@@ -90,6 +95,7 @@ def main(args):
 	)
 	num_examples = len(val_dataset)
 	print('Examples count: ', num_examples)
+	val_meta = val_dataset.pop_meta()
 	val_data_loader = torch.utils.data.DataLoader(
 		val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers
 	)
@@ -100,16 +106,13 @@ def main(args):
 	for i, (meta, s, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
 
-		meta = [val_dataset.meta.get(m['example_id']) for m in meta]
-		audio_path = meta[0]['audio_path']
+		meta = [val_meta.get(m['example_id']) for m in meta]
+		audio_path, begin, end = map(meta[0].get, ['audio_path', 'begin', 'end'])
+		audio_name = transcripts.audio_name(audio_path)
 
 		if x.numel() == 0:
 			print(f'Skipping empty [{audio_path}].')
 			continue
-
-		begin = meta[0]['begin']
-		end = meta[0]['end']
-		audio_name = transcripts.audio_name(audio_path)
 
 		try:
 			tic = time.time()
@@ -198,32 +201,39 @@ def main(args):
 
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic_alignment))
 
+		ref_transcript, hyp_transcript = [list(sorted(sum(segments, []), key = transcripts.sort_key)) for segments in [ref_segments, hyp_segments]]
+
 		if args.max_segment_duration:
-			ref_transcript, hyp_transcript = [list(sorted(sum(segments, []), key = transcripts.sort_key)) for segments in [ref_segments, hyp_segments]]
 			if ref:
-				ref_segments = list(transcripts.segment(ref_transcript, args.max_segment_duration))
-				hyp_segments = list(transcripts.segment(hyp_transcript, ref_segments))
-			elif segmentation_model is not None:
-				ref_segments = segmentation_model(x, args.sample_rate)
-				hyp_segments = list(transcripts.segment(hyp_transcript, ref_segments))
+				ref_segments = list(transcripts.segment_by_time(ref_transcript, args.max_segment_duration))
+				hyp_segments = list(transcripts.segment_by_segments(hyp_transcript, ref_segments))
 			else:
-				hyp_segments = list(transcripts.segment(hyp_transcript, args.max_segment_duration))
+				hyp_segments = list(transcripts.segment_by_time(hyp_transcript, args.max_segment_duration))
 				ref_segments = [[] for _ in hyp_segments]
 
+		elif args.join_transcript:
+			ref_segments = [[t] for t in transcripts.load(audio_path + '.json')]
+			hyp_segments = list(transcripts.segment_by_segments(hyp_transcript, ref_segments, set_speaker = True))
+
+		has_ref = any(t.get('ref') for ref_transcript in ref_segments for t in ref_transcript)
 		transcript = [
 			dict(
 				audio_path = audio_path,
 				ref = ref,
 				hyp = hyp,
-				speaker = transcripts.speaker(ref = ref_transcript, hyp = hyp_transcript),
-				cer = metrics.cer(hyp = hyp, ref = ref),
+				speaker_name = transcripts.speaker_name(ref = ref_transcript, hyp = hyp_transcript),
+				
 				words = metrics.align_words(hyp = hyp, ref = ref)[-1] if args.align_words else [],
-				alignment = dict(ref = ref_transcript, hyp = hyp_transcript),
-				**transcripts.summary(hyp_transcript)
-			) for ref_transcript,
-			hyp_transcript in zip(ref_segments, hyp_segments) for ref,
-			hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]
+				words_ref = ref_transcript,
+				words_hyp = hyp_transcript,
+				
+				**transcripts.summary(hyp_transcript),
+				**(dict(cer = metrics.cer(hyp = hyp, ref = ref)) if has_ref else {})
+
+			) for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments) for ref, hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]
 		]
+		transcripts.set_speaker(transcript)
+
 		filtered_transcript = list(
 			transcripts.prune(
 				transcript,

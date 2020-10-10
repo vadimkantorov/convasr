@@ -716,7 +716,7 @@ def rle1d(tensor):
 	#return [dict(begin = i / sample_rate, end = j / sample_rate, channel = channel) for channel, i, _, j in channel_i_channel_j.tolist()]
 	
 	assert tensor.ndim == 1
-	starts = torch.cat(( torch.LongTensor([0], device = tensor.device), (tensor[1:] != tensor[:-1]).nonzero(as_tuple = False).add_(1).squeeze(1), torch.LongTensor([tensor.shape[-1]], device = tensor.device) ))
+	starts = torch.cat(( torch.tensor([0], dtype = torch.long, device = tensor.device), (tensor[1:] != tensor[:-1]).nonzero(as_tuple = False).add_(1).squeeze(1), torch.tensor([tensor.shape[-1]], dtype = torch.long, device = tensor.device)))
 	starts, lengths, values = starts[:-1], (starts[1:] - starts[:-1]), tensor[starts[:-1]]
 	return starts, lengths, values
 

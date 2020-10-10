@@ -79,6 +79,27 @@ function ontimeupdate_(evt)
 }
 '''
 
+subtitle_script = '''
+function subtitle(segments, time, channel)
+{
+	return (segments.find(([rh, c, b, e]) => c == channel && b <= time && time <= e ) || ['', channel, null, null])[0];
+}
+
+function update_span(proceed, evt)
+{
+	if(!proceed)
+		return false;
+
+	const time = evt.target.currentTime;
+	document.querySelector('h5').innerText = time.toString();
+	const [spanhyp0, spanref0, spanhyp1, spanref1] = document.querySelectorAll('span.subtitle');
+	//[spanhyp0.innerHTML, spanref0.innerHTML, spanhyp1.innerHTML, spanref1.innerHTML] = [subtitle(hyp_segments, time, 0), subtitle(ref_segments, time, 0), subtitle(hyp_segments, time, 1), subtitle(ref_segments, time, 1)];
+}
+
+//const make_segment = td => [td.querySelector('template').innerHTML, td.dataset.channel, td.dataset.begin, td.dataset.end];
+//const hyp_segments = Array.from(document.querySelectorAll('.hyp')).map(make_segment), ref_segments = Array.from(document.querySelectorAll('.ref')).map(make_segment);
+'''
+
 channel_colors = ['gray', 'red', 'blue']
 
 def diarization(diarization_transcript, html_path, debug_audio):
@@ -112,16 +133,17 @@ def speaker_barcode_img(transcript, begin = None, end = None, colors = channel_c
 		end = max(t['end'] for t in transcript)
 	if onclick is None:
 		onclick = 'onclick_img(event)'
+	color = lambda s: colors[s] if s < len(colors) else transcripts.speaker_missing
 
 	plt.figure(figsize = (8, 0.2))
 	plt.xlim(begin, end)
 	plt.yticks([])
 	plt.axis('off')
 	for t in transcript:
-		plt.axvspan(t['begin'], t['end'], color = colors[t.get('speaker', 0)])
+		plt.axvspan(t['begin'], t['end'], color = color(t.get('speaker', transcripts.speaker_missing)))
 	plt.subplots_adjust(left = 0, right = 1, bottom = 0, top = 1)
 	buf = io.BytesIO()
-	plt.savefig(buf, format = 'jpg', dpi = 150, facecolor = colors[0])
+	plt.savefig(buf, format = 'jpg', dpi = 150, facecolor = color(transcripts.speaker_missing))
 	plt.close()
 	uri_speaker_barcode = base64.b64encode(buf.getvalue()).decode()
 	dataset = ' '.join(f'data-{k}="{v}"' for k, v in dataset.items())
@@ -131,15 +153,16 @@ def speaker_barcode_img(transcript, begin = None, end = None, colors = channel_c
 def speaker_barcode_svg(transcript, begin, end, colors = channel_colors, max_segment_seconds = 60, onclick = None):
 	if onclick is None:
 		onclick = 'onclick_svg(event)'
+	color = lambda s: colors[s] if s < len(colors) else transcripts.speaker_missing
 	html = ''
-	segments = transcripts.segment(transcript, max_segment_seconds = max_segment_seconds, break_on_speaker_change = False, break_on_channel_change = False)
+	segments = transcripts.segment_by_time(transcript, max_segment_seconds = max_segment_seconds, break_on_speaker_change = False, break_on_channel_change = False)
 	for segment in segments:
 		summary = transcripts.summary(segment)
 		duration = transcripts.compute_duration(summary)
 		if duration <= max_segment_seconds:
 			duration = max_segment_seconds
 		header = '<div style="width: 100%; height: 15px; border: 1px black solid"><svg viewbox="0 0 1 1" style="width:100%; height:100%" preserveAspectRatio="none">'
-		body = '\n'.join('<rect data-begin="{begin}" data-end="{end}" x="{x}" width="{width}" height="1" style="fill:{color}" onclick="{onclick}"><title>speaker{speaker} | {begin:.2f} - {end:.2f} [{duration:.2f}]</title></rect>'.format(onclick = onclick, x = (t['begin'] - summary['begin']) / duration, width = (t['end'] - t['begin']) / duration, color = channel_colors[t['speaker']], duration = transcripts.compute_duration(t), **t) for t in transcript) 
+		body = '\n'.join('<rect data-begin="{begin}" data-end="{end}" x="{x}" width="{width}" height="1" style="fill:{color}" onclick="{onclick}"><title>speaker{speaker} | {begin:.2f} - {end:.2f} [{duration:.2f}]</title></rect>'.format(onclick = onclick, x = (t['begin'] - summary['begin']) / duration, width = (t['end'] - t['begin']) / duration, color = color(t['speaker']), duration = transcripts.compute_duration(t), **t) for t in transcript) 
 		footer = '</svg></div>'
 		html += header + body + footer
 	return html
@@ -230,13 +253,12 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	if isinstance(transcript, str):
 		transcript = json.load(open(transcript))
 
-	has_hyp = any(t.get('hyp') for t in transcript)
-	has_ref = any(t.get('ref') for t in transcript)
-
 	audio_path = transcript[0]['audio_path']
 	signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = mono, duration = duration)
+	default_channel = 0
+	channel_or_default = lambda channel: default_channel if channel == transcripts.channel_missing else channel 
 
-	fmt_link = lambda ref = '', hyp = '', channel = 0, begin = 0, end = 0, speaker = '', i = '', j = '', audio_path = '', **kwargs: (f'<a onclick="return play(event, {channel},{begin},{end})"' if ref not in [0, 1] else '<span') + f' title="#{channel}. {speaker}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + ((ref + hyp) if isinstance(ref, str) else f'{begin:.02f}' if ref == 0 else f'{end:.02f}' if ref == 1 else f'{end - begin:.02f}') + ('</a>' if ref not in [0, 1] else '</span>')
+	fmt_link = lambda ref = '', hyp = '', channel = default_channel, begin = 0, end = 0, speaker = '', i = '', j = '', audio_path = '', **kwargs: (f'<a onclick="return play(event, {channel_or_default(channel)}, {begin}, {end})"' if ref not in [0, 1] else '<span') + f' title="#{channel}. {speaker}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + ((ref + hyp) if isinstance(ref, str) else f'{begin:.02f}' if ref == 0 else f'{end:.02f}' if ref == 1 else f'{end - begin:.02f}') + ('</a>' if ref not in [0, 1] else '</span>')
 	fmt_words = lambda rh: ' '.join(fmt_link(**w) for w in rh)
 	fmt_begin_end = 'data-begin="{begin}" data-end="{end}"'.format
 
@@ -247,7 +269,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	html.write(
 		f'<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>'
 	)
-	html_speaker_barcode = speaker_barcode_svg(transcript, begin = 0.0, end = signal.shape[-1] / sample_rate)
+	html_speaker_barcode = '' # speaker_barcode_svg(transcript, begin = 0.0, end = signal.shape[-1] / sample_rate)
 
 	html.writelines(
 		f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="update_span(ontimeupdate_(event), event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="{uri_audio}"></audio>{html_speaker_barcode}</figure>'
@@ -259,59 +281,37 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	html.write(
 		f'<pre class="channel"><h3 class="channel0 channel">hyp #0:<span class="subtitle"></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span class="subtitle"></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span class="subtitle"></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span class="subtitle"></span></h3></pre><hr/><table style="width:100%">'
 	)
-	def format_th(has_hyp, has_ref):
+	def format_th():
 		speaker_th = '<th>speaker</th>'
 		begin_th = '<th>begin</th>'
 		end_th = '<th>end</th>'
 		duration_th = '<th>dur</th>'
-		hyp_th = '<th style="width:50%">hyp</th>' if has_hyp else ''
-		ref_th = '<th style="width:50%">ref</th>' + begin_th + end_th + duration_th + '<th>cer</th>' if has_ref else ''
+		hyp_th = '<th style="width:50%">hyp</th>'
+		ref_th = '<th style="width:50%">ref</th>' + begin_th + end_th + duration_th + '<th>cer</th>' 
 		return '<tr>' + speaker_th + begin_th + end_th + duration_th + hyp_th + ref_th
 
-	html.write(format_th(has_hyp, has_ref))
-
-	def format_tr(t, ok, has_hyp, has_ref, hyp, ref, channel, speaker):
+	def format_tr(t, ok, hyp, ref, channel, speaker, cer):
 		speaker_td = f'''<td class="top {ok and 'ok'} speaker{speaker}">{speaker}</td>'''
 		begin_td = f'<td class="top">{fmt_link(0, **transcripts.summary(hyp, ij = True))}</td>'
 		end_td = f'<td class="top">{fmt_link(1, **transcripts.summary(hyp, ij = True))}</td>'
 		duration_td = f'<td class="top">{fmt_link(2, **transcripts.summary(hyp, ij = True))}</td>'
-		hyp_td = '<td class="top hyp" data-channel="{c}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}<template>{word_alignment(t.get("words", []), tag = "", hyp = True)}</template></td>' if has_hyp else ''
-		ref_td = f'<td class="top reference ref" data-channel="{channel}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}<template>{word_alignment(t.get("words", []), tag = "", ref = True)}</template></td><td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td><td class="top">{t.get("cer", -1):.2%}</td>' if (has_ref and ref) else ('<td></td>' * 5 if has_ref else '')
+		hyp_td = f'<td class="top hyp" data-channel="{channel}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}<template></template></td>' # {word_alignment(hyp, tag = "", hyp = True)}
+		ref_td = f'<td class="top reference ref" data-channel="{channel}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}<template></template></td><td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td><td class="top">{cer:.2%}</td>' # {word_alignment(ref, tag = "", ref = True)}
 		return f'<tr class="channel{channel}">' + speaker_td + begin_td + end_td + duration_td + hyp_td + ref_td + '</tr>'
 
-	html.writelines(format_tr(t, ok, has_hyp, has_ref, hyp, ref, channel, speaker) for t in transcripts.sort(transcript)
-		for ok in [t in filtered_transcript] for channel,
+	html.write(format_th())
+	html.writelines(format_tr(t, ok, hyp, ref, channel, speaker, cer) for t in transcripts.sort(transcript)
+		for ok in [t in filtered_transcript] for cer, channel,
 		speaker,
 		ref,
-		hyp in [(t.get('channel', 0), t.get('speaker', 0), t.get('words_ref', [t]), t.get('words_hyp', [t]))]
+		hyp in [(t.get('cer', transcripts._er_missing), t.get('channel', 0), t.get('speaker', transcripts.speaker_missing), t.get('words_ref', [t]), t.get('words_hyp', [t]))]
 	)
 	html.write('</tbody></table>')
 	html.write(f'<script>{play_script}</script>')
 	html.write(f'<script>{onclick_svg_script}</script>')
-	html.write('''
-		<script>
-		
-		function subtitle(segments, time, channel)
-		{
-			return (segments.find(([rh, c, b, e]) => c == channel && b <= time && time <= e ) || ['', channel, null, null])[0];
-		}
-
-		function update_span(do, evt)
-		{
-			if(!do)
-				return false;
-
-			const time = evt.target.currentTime;
-			document.querySelector('h5').innerText = time.toString();
-			const [spanhyp0, spanref0, spanhyp1, spanref1] = document.querySelectorAll('span.subtitle');
-			[spanhyp0.innerHTML, spanref0.innerHTML, spanhyp1.innerHTML, spanref1.innerHTML] = [subtitle(hyp_segments, time, 0), subtitle(ref_segments, time, 0), subtitle(hyp_segments, time, 1), subtitle(ref_segments, time, 1)];
-		}
-
-		const make_segment = td => [td.querySelector('template').innerHTML, td.dataset.channel, td.dataset.begin, td.dataset.end];
-		const hyp_segments = Array.from(document.querySelectorAll('.hyp')).map(make_segment), ref_segments = Array.from(document.querySelectorAll('.ref')).map(make_segment);
-	</script></body></html>'''
-	)
-	print(html_path)
+	html.write(f'<script>{subtitle_script}</script>')
+	html.write('</body></html>')
+	return html_path
 
 
 def logits(logits, audio_name, MAX_ENTROPY = 1.0):
@@ -529,7 +529,7 @@ def errors(
 		)
 	)
 	f.write('</table></body></html>')
-	print(html_path)
+	return html_path
 
 
 def audiosample(input_path, output_path, K):
@@ -558,7 +558,7 @@ def audiosample(input_path, output_path, K):
 			)
 		f.write('</table>')
 
-	print(output_path)
+	return iutput_path
 
 
 def summary(input_path, lang):
@@ -680,8 +680,8 @@ def word_alignment(transcript, ref = None, hyp = None, flat = False, tag = '<pre
 		ref_ = transcript.get('ref', '')
 		hyp_ = transcript.get('hyp', '')
 	else:
-		ref_ = ' '.join(span(w['ref'], 'ok' if error_tag(w) == 'ok' else None) for w in transcript)
-		hyp_ = ' '.join(span(w['hyp'], error_tag(w)) for w in transcript)
+		ref_ = ' '.join(span(w.get('ref', ''), 'ok' if error_tag(w) == 'ok' else None) for w in transcript)
+		hyp_ = ' '.join(span(w.get('hyp', ''), error_tag(w)) for w in transcript)
 
 	ref_ = ('ref: ' if prefix else '') + ref_
 	hyp_ = ('hyp: ' if prefix else '') + hyp_
@@ -706,7 +706,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--mono', action = 'store_true')
 	cmd.add_argument('--sample-rate', type = int, default = 8_000)
 	cmd.add_argument('--html-path', '-o')
-	cmd.set_defaults(func = transcript)
+	cmd.set_defaults(func = lambda *args, **kwargs: print(transcript(*args, **kwargs)))
 
 	cmd = subparsers.add_parser('errors')
 	cmd.add_argument('input_path', nargs = '+', default = ['data/transcripts.json'])
@@ -721,7 +721,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--mer', type = transcripts.number_tuple)
 	cmd.add_argument('--duration', type = transcripts.number_tuple)
 	cmd.add_argument('--strip-audio-path-prefix', default = '')
-	cmd.set_defaults(func = errors)
+	cmd.set_defaults(func = lambda *args, **kwargs: print(errors(*args, **kwargs)))
 
 	cmd = subparsers.add_parser('tabulate')
 	cmd.add_argument('experiment_id')
@@ -762,7 +762,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--output-path', '-o', required = True)
 	cmd.add_argument('--dataset-root', default = '')
 	cmd.add_argument('-K', type = int, default = 10)
-	cmd.set_defaults(func = audiosample)
+	cmd.set_defaults(func = lambda *args, **kwargs: print(audiosample(*args, **kwargs)))
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')

@@ -39,7 +39,7 @@ class PyannoteDiarizationModel(nn.Module):
 		self.pipeline = torch.hub.load('pyannote/pyannote-audio', 'dia', **kwargs)
 
 	def forward(self, signal, sample_rate, extra = {}):
-		assert sample_rate == 16_000
+		#assert sample_rate == 16_000
 		res = self.pipeline(dict(waveform = signal.t().numpy(), sample_rate = sample_rate))
 		transcript = [dict(begin = turn.start, end = turn.end, speaker_name = speaker, **extra) for turn, _, speaker in res.itertracks(yield_label = True)]
 		return transcript

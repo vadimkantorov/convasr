@@ -3,6 +3,7 @@ import json
 import torch
 import torch.nn.functional as F
 
+import audio
 import utils
 
 default_speaker_names = '_AB'
@@ -12,7 +13,8 @@ speaker_name_missing = ''
 speaker_missing = 0
 channel_missing = -1
 time_missing = -1
-		
+_er_missing = -1.0
+
 def load(data_path):
 	assert os.path.exists(data_path)
 	
@@ -20,17 +22,20 @@ def load(data_path):
 		with open(file_path) as f:
 			transcript = [dict(audio_name = splitted[1], begin = float(splitted[3]), end = float(splitted[3]) + float(splitted[4]), speaker_name = splitted[7]) for splitted in map(str.split, f)]
 		set_speaker(transcript)
-		return transcript
 	
 	elif data_path.endswith('.json') or data_path.endswith('.json.gz'):
 		with utils.open_maybe_gz(data_path) as f:
-			return json.load(f)
+			transcript = json.load(f)
 	
-	if os.path.exists(data_path + '.json'):
+	elif os.path.exists(data_path + '.json'):
 		with open(data_path + '.json') as f: 
-			return json.load(f)
-	
-	return [dict(audio_path = data_path)]
+			transcript = json.load(f)
+			for t in transcript:
+				t['audio_path'] = data_path
+	else:
+		transcript = [dict(audio_path = data_path)]
+
+	return transcript
 
 def save(data_path, transcript):
 	with open(data_path, 'w') as f:
@@ -47,7 +52,7 @@ def strip(transcript, keys = []):
 
 
 def join(ref = [], hyp = []):
-	return ' '.join(t['ref'] for t in ref).strip() + ' '.join(t['hyp'] for t in hyp).strip()
+	return ' '.join(filter(bool, [t.get('ref', '') for t in ref] + [t.get('hyp', '') for t in hyp])).strip()
 
 def remap_speaker(transcript, speaker_perm):
 	speaker_names_ = speaker_names(transcript, num_speakers = len(speaker_perm) - 1)
@@ -86,15 +91,15 @@ def speaker_names(transcript, num_speakers = None):
 			if speaker_name is not None:
 				speaker_names_[t['speaker']] = speaker_name
 	else:
-		speaker_names_ = [None] + sorted(set(t['speaker_name'] for t in transcript))	
+		speaker_names_ = [None] + sorted(set(t['speaker_name'] for t in transcript), key = lambda s: (s.count(','), s))
 	
 	return speaker_names_
 
-def speaker(ref = None, hyp = None):
-	return ', '.join(sorted(filter(bool, set(t.get('speaker') for t in ref + hyp)))) or None
+def speaker_name(ref = None, hyp = None):
+	return ', '.join(sorted(filter(bool, set(t.get('speaker_name') for t in ref + hyp)))) or None
 
 
-def take_between(transcript, ind_last_taken, t, first, last, sort_by_time = True):
+def take_between(transcript, ind_last_taken, t, first, last, sort_by_time = True, set_speaker = False):
 	if sort_by_time:
 		lt = lambda a, b: a['end'] < b['begin']
 		gt = lambda a, b: a['begin'] > b['begin']
@@ -107,27 +112,40 @@ def take_between(transcript, ind_last_taken, t, first, last, sort_by_time = True
 			u in enumerate(transcript)
 			if (first or ind_last_taken < 0 or lt(transcript[ind_last_taken], u)) and (last or gt(t, u))]
 	ind_last_taken, transcript = zip(*res) if res else ([ind_last_taken], [])
+
+	if set_speaker:
+		for u in transcript:
+			u['speaker'] = t.get('speaker', speaker_missing)
+			if t.get('speaker_name') is not None:
+				u['speaker_name'] = t['speaker_name']
+
 	return ind_last_taken[-1], list(transcript)
 
 
-def segment(transcript, max_segment_seconds, break_on_speaker_change = True, break_on_channel_change = True):
+def segment_by_time(transcript, max_segment_seconds, break_on_speaker_change = True, break_on_channel_change = True):
 	ind_last_taken = -1
-	if isinstance(max_segment_seconds, list):
-		if len(max_segment_seconds) == 0:
-			return []
-		for j in range(len(max_segment_seconds)):
-			first, last = ind_last_taken == -1, j == len(max_segment_seconds) - 1
-			ind_last_taken, transcript_segment = take_between(transcript, ind_last_taken, max_segment_seconds[j + 1][0] if not last else None, first, last, sort_by_time=True)
-			yield transcript_segment
-	else:
-		for j, t in enumerate(transcript):
-			first, last = ind_last_taken == -1, j == len(transcript) - 1
-			if last or (t['end'] - transcript[ind_last_taken + 1]['begin'] > max_segment_seconds) \
-                                or (break_on_speaker_change and j >= 1 and t['speaker'] != transcript[j - 1]['speaker']) \
-                                or (break_on_channel_change and j >= 1 and t['channel'] != transcript[j - 1]['channel']):
-				ind_last_taken, transcript_segment = take_between(transcript, ind_last_taken, t, first, last, sort_by_time=False)
-				if transcript_segment:
-					yield transcript_segment
+	for j, t in enumerate(transcript):
+		first, last = ind_last_taken == -1, j == len(transcript) - 1
+		
+		if last or (t['end'] - transcript[ind_last_taken + 1]['begin'] > max_segment_seconds) \
+				or (break_on_speaker_change and j >= 1 and t['speaker'] != transcript[j - 1]['speaker']) \
+				or (break_on_channel_change and j >= 1 and t['channel'] != transcript[j - 1]['channel']):
+
+			ind_last_taken, transcript_segment = take_between(transcript, ind_last_taken, t, first, last, sort_by_time=False)
+			#import IPython; IPython.embed()
+			
+			if transcript_segment:
+				yield transcript_segment
+
+def segment_by_segments(transcript, transcript_ref, set_speaker = False):
+	ind_last_taken = -1
+	if len(transcript_ref) == 0:
+		return []
+
+	for j in range(len(transcript_ref)):
+		first, last = ind_last_taken == -1, j == len(transcript_ref) - 1
+		ind_last_taken, transcript_segment = take_between(transcript, ind_last_taken, transcript_ref[j + 1][0] if not last else None, first, last, sort_by_time=True, set_speaker = set_speaker)
+		yield transcript_segment
 
 
 def summary(transcript, ij = False):
@@ -191,10 +209,16 @@ def prune(
 
 
 def compute_duration(t, hours = False):
+	seconds = None
+	
 	if 'begin' in t or 'end' in t:
 		seconds = t.get('end', 0) - t.get('begin', 0)
 	elif 'hyp' in t or 'ref' in t:
 		seconds = max(t_['end'] for k in ['hyp', 'ref'] for t_ in t.get(k, []))
+	elif 'audio_path' in t:
+		seconds = audio.compute_duration(t['audio_path'])
+
+	assert seconds is not None
 
 	return seconds / (60 * 60) if hours else seconds
 
