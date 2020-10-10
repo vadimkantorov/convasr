@@ -66,8 +66,10 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		bucket = None,
 		pop_meta = False,
 		string_array_encoding = 'utf_16_le',
-		_print = print
+		_print = print,
+		debug_short_long_records_features_from_whole_normalized_signal=False
 	):
+		self.debug_short_long_records_features_from_whole_normalized_signal = debug_short_long_records_features_from_whole_normalized_signal
 		self.join_transcript = join_transcript
 		self.max_duration = max_duration
 		self.labels = labels
@@ -252,7 +254,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 					channel = channel,
 					begin_samples = int(t['begin'] * sample_rate) if t['begin'] != self.time_missing else 0,
 					end_samples = 1 + int(t['end'] * sample_rate) if t['end'] != self.time_missing else signal.shape[1],
-					
+
 					speaker = t['speaker']
 				)
 				for t in sorted(transcript, key = transcripts.sort_key)
@@ -265,22 +267,28 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		for t in transcript:
 			channel = t.pop('channel')
 			time_slice = slice(t.pop('begin_samples'), t.pop('end_samples')) # pop is required independent of segmented
-			if self.segmented:
+			if self.segmented and not self.debug_short_long_records_features_from_whole_normalized_signal:
 				segment = signal[None, channel, time_slice]
 			else:
 				segment = signal[None, channel, :] # begin, end meta could be corrupted, thats why we dont use it here
 			if self.frontend is not None:
-				features.append(self.frontend(segment, waveform_transform_debug = waveform_transform_debug))
+				if self.debug_short_long_records_features_from_whole_normalized_signal:
+					segment_features = self.frontend(segment)
+					hop_length = self.frontend.hop_length
+					segment_features = segment_features[:, :, time_slice.start // hop_length:time_slice.stop // hop_length]
+					features.append(segment_features.squeeze(0))
+				else:
+					features.append(self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0))
 			else:
 				features.append(segment)
 
 		targets = [[labels.encode(t['ref'], normalize = normalize_text)[1]
 					for t in transcript]
 					for labels in self.labels]
-		
+
 		# not batch mode
 		if not self.segmented:
-			transcript, speaker, features = transcript[0], speaker[0], features[0][0]
+			transcript, speaker, features = transcript[0], speaker[0], features[0]
 			targets = [target[0] for target in targets]
 		return [transcript, speaker, features] + targets
 

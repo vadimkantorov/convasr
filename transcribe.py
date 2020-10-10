@@ -25,12 +25,21 @@ def setup(args):
 	checkpoint = torch.load(args.checkpoint, map_location = 'cpu')
 	args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
 	frontend = models.LogFilterBankFrontend(
-		args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, eps = 1e-6
+		args.num_input_features,
+			args.sample_rate,
+			args.window_size,
+			args.window_stride,
+			args.window,
+			eps = 1e-6,
+			normalize_signal=args.normalize_signal,
+			debug_short_long_records_normalize_signal_multiplier=args.debug_short_long_records_normalize_signal_multiplier
 	)
+
 	labels = datasets.Labels(datasets.Language(checkpoint['args']['lang']), name = 'char')
+
 	model = getattr(models, args.model or checkpoint['args']['model'])(
 		args.num_input_features, [len(labels)],
-		frontend = frontend,
+		frontend = frontend if args.frontend_in_model else None,
 		dict = lambda logits,
 		log_probs,
 		olen,
@@ -75,7 +84,7 @@ def main(args):
 	val_dataset = datasets.AudioTextDataset(
 		data_paths, [labels],
 		args.sample_rate,
-		frontend = None,
+		frontend = frontend if not args.frontend_in_model else None,
 		segmented = True,
 		mono = args.mono,
 		time_padding_multiple = args.batch_time_padding_multiple,
@@ -83,7 +92,8 @@ def main(args):
 		exclude = exclude,
 		max_duration = args.transcribe_first_n_sec,
 		join_transcript = args.join_transcript,
-		string_array_encoding = args.dataset_string_array_encoding
+		string_array_encoding = args.dataset_string_array_encoding,
+		debug_short_long_records_features_from_whole_normalized_signal = args.debug_short_long_records_features_from_whole_normalized_signal
 	)
 	num_examples = len(val_dataset)
 	print('Examples count: ', num_examples)
@@ -254,7 +264,8 @@ def main(args):
 				f.write(hyp)
 
 		if args.output_csv:
-			output_lines.append(csv_sep.join((audio_path, hyp, str(begin), str(end))) + '\n')
+			[output_lines.append(csv_sep.join((audio_path, h, str(meta[i]['begin']), str(meta[i]['end']))) + '\n')
+				for i, h in enumerate(hyp.split('\n'))]
 
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
@@ -307,6 +318,11 @@ if __name__ == '__main__':
 	parser.add_argument('--pack-backpointers', action = 'store_true')
 	parser.add_argument('--oom-retries', type = int, default = 3)
 	parser.add_argument('--dataset-string-array-encoding', default = 'utf_32_le', choices = ['utf_16_le', 'utf_32_le'])
+	parser.add_argument('--normalize-signal', action = 'store_true')
+	parser.add_argument('--debug-short-long-records-normalize-signal-multiplier', action = 'store_true')
+	parser.add_argument('--debug-short-long-records-features-from-whole-normalized-signal', action = 'store_true')
+	parser.add_argument('--frontend', type=str, default='LogFilterBankFrontend')
+	parser.add_argument('--frontend-in-model', type=lambda x: bool(int(x or 0)), nargs='?', const=True, default=True)
 	args = parser.parse_args()
 	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)

@@ -17,17 +17,18 @@ def get_root_logger_print(level = logging.INFO):
 	logger = logging.getLogger()
 	return (lambda *args: logger.log(level, ' '.join(map(str, args))))
 
+
 def set_up_root_logger(log_file_path = None, mode = 'a', max_bytes = 1_000_000, fmt = '%(asctime)s [%(levelname)s]: %(message)s', level = logging.INFO):
 	logger = logging.getLogger()
 	logger.setLevel(level)
-	
+
 	formatter = logging.Formatter(fmt)
 	handler = logging.StreamHandler()
 	handler.setFormatter(formatter)
 	# hack to avoid duplicate messages in stdout
 	handler.addFilter(lambda record: record.levelno != logging.CRITICAL)
 	logger.addHandler(handler)
-	
+
 	if log_file_path:
 		handler = logging.handlers.RotatingFileHandler(log_file_path, maxBytes = max_bytes, backupCount = 0)
 		# workaround logging logic to enforce simple file append/create logic
@@ -82,7 +83,6 @@ def compute_memory_fragmentation():
 def open_maybe_gz(data_path, mode = 'r'):
 	return gzip.open(data_path, mode + 't') if data_path.endswith('.gz') else open(data_path, mode)
 
-
 def reset_cpu_threads(num_threads):
 	torch.set_num_threads(num_threads)
 	#os.environ['OMP_NUM_THREADS'] = str(num_threads)
@@ -117,7 +117,7 @@ class OomHandler:
 			self.retries += 1
 			if self.retries > self.max_retries:
 				return False
-			
+
 			_print('RECOVERING FROM OOM --- BEFORE FREE')
 			_print(''.join(traceback.format_exception(exc_type, exc_value, exc_traceback)))
 			for p in model_parameters:

@@ -518,12 +518,14 @@ class LogFilterBankFrontend(nn.Module):
 		preemphasis = 0.97,
 		eps = torch.finfo(torch.float16).tiny,
 		normalize_signal = True,
+		debug_short_long_records_normalize_signal_multiplier = 1.0,
 		stft_mode = None,
 		window_periodic = True,
 		normalize_features = False,
 		**kwargs
 	):
 		super().__init__()
+		self.debug_short_long_records_normalize_signal_multiplier = debug_short_long_records_normalize_signal_multiplier
 		self.stft_mode = stft_mode
 		self.dither = dither
 		self.dither0 = dither0
@@ -562,11 +564,12 @@ class LogFilterBankFrontend(nn.Module):
 		else:
 			self.stft = None
 
-	def forward(self, signal: shaping.BT, mask: shaping.BT = None) -> shaping.BCT:
+	def forward(self, signal: shaping.BT, mask: shaping.BT = None, **kwargs) -> shaping.BCT:
 		assert signal.ndim == 2
 
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
-		signal = normalize_signal(signal) if self.normalize_signal else signal
+
+		signal = normalize_signal(signal, denom_multiplier=self.debug_short_long_records_normalize_signal_multiplier) if self.normalize_signal else signal
 		signal = apply_dither(signal, self.dither0)
 		signal = torch.cat([signal[..., :1], signal[..., 1:] -
 							self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
@@ -639,10 +642,9 @@ def margin(log_probs, dim = 1):
 def compute_capacity(model, scale = 1):
 	return sum(map(torch.numel, model.parameters())) / scale
 
-
-def normalize_signal(signal, dim = -1, eps = 1e-5):
-	return signal / (signal.abs().max(dim = dim, keepdim = True).values + eps) if signal.numel() > 0 else signal
-
+def normalize_signal(signal, dim = -1, eps = 1e-5, denom_multiplier  = 1.0):
+	signal_max = signal.abs().max(dim = dim, keepdim = True).values + eps
+	return signal / (signal_max * denom_multiplier) if signal.numel() > 0 else signal
 
 class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 	def __init__(self, *args, temporal_mask = False, legacy = True, **kwargs):
