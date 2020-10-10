@@ -177,7 +177,7 @@ def csv2json(input_path, gz, group, reset_begin_end, csv_sep, audio_name_pattern
 	)
 	# default is Kontur calls pattern, match example: '198.38-200.38_2.0_0_1582594487.376404.wav'
 
-	def match_begin_end(audio_name):
+	def begin_end(audio_name):
 		match = audio_name_regex.fullmatch(audio_name)
 		assert match is not None, f'audio_name {audio_name!r} must match {audio_name_regex.pattern}'
 		begin, end = float(match['begin']), float(match['end'])
@@ -185,12 +185,8 @@ def csv2json(input_path, gz, group, reset_begin_end, csv_sep, audio_name_pattern
 		return begin, end
 
 	def duration(audio_name):
-		begin, end = match_begin_end(audio_name)
+		begin, end = begin_end(audio_name)
 		return end - begin
-
-	def begin_end(audio_name):
-		begin, end = match_begin_end(audio_name)
-		return (begin, end)
 
 	def channel_then_recordid(audio_path):
 		return os.path.basename(audio_path).split('_')[-2] + '_' + os.path.basename(audio_path).split('_')[-1]
@@ -208,7 +204,6 @@ def csv2json(input_path, gz, group, reset_begin_end, csv_sep, audio_name_pattern
 			(begin, end) = begin_end(os.path.basename(audio_path))
 			transcription['begin'] = begin
 			transcription['end'] = end
-			#transcription['audio_path'] = os.path.join(os.path.join(*os.path.split(audio_path)[:-1]), os.path.basename(audio_path).split('_')[-2] + '_' + os.path.basename(audio_path).split('_')[-1])
 		if debug_short_long_records_reset_audio_path:
 			transcription['old_audio_path'] = audio_path
 			transcription['audio_path'] = os.path.join(new_sub_path if new_sub_path else os.path.join(*os.path.split(audio_path)[:-1]),
