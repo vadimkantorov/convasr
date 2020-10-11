@@ -11,7 +11,7 @@ export CUDA_VISIBLE_DEVICES=2
 #python3 diarization.py hyp -i diarization/mono/00d13c16-ac0d-409c-8a5e-36741a9e750a.mp3.wav -o data/diarization_test/
 
 python3 transcribe.py -i data/diarization_test \
-  --checkpoint data/speechcore/best_checkpoint_and_valset_2508/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs512____longtrain_finetune_after_self_train_checkpoint_epoch400_iter0740000.pt --output-json --output-html --max-segment-duration=0 --join-transcript 
+  --checkpoint data/speechcore/best_checkpoint_and_valset_2508/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs512____longtrain_finetune_after_self_train_checkpoint_epoch400_iter0740000.pt --output-json --output-html --max-segment-duration=0 --join-transcript --align-words
 
 
 

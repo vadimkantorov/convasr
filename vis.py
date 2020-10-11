@@ -48,6 +48,14 @@ function onclick_svg(evt)
 
 play_script = '''
 var playTimeStampMillis = 0.0;
+
+function download_audio(evt, channel)
+{
+	const a = evt.target;
+	a.href = document.getElementById(`audio${channel}`).src;
+	return true;
+}
+
 function play(evt, channel, begin, end, relative)
 {
 	Array.from(document.querySelectorAll('audio')).map(audio => audio.pause());
@@ -80,9 +88,9 @@ function ontimeupdate_(evt)
 '''
 
 subtitle_script = '''
-function subtitle(segments, time, channel)
+function subtitle(segments, time, channel, speaker)
 {
-	return (segments.find(([rh, c, b, e]) => c == channel && b <= time && time <= e ) || ['', channel, null, null])[0];
+	return (segments.find(([rh, c, s, b, e]) => (c == channel || s == speaker) && b <= time && time <= e ) || ['', channel, speaker, null, null])[0];
 }
 
 function update_span(proceed, evt)
@@ -93,14 +101,17 @@ function update_span(proceed, evt)
 	const time = evt.target.currentTime;
 	document.querySelector('h5').innerText = time.toString();
 	const [spanhyp0, spanref0, spanhyp1, spanref1] = document.querySelectorAll('span.subtitle');
-	//[spanhyp0.innerHTML, spanref0.innerHTML, spanhyp1.innerHTML, spanref1.innerHTML] = [subtitle(hyp_segments, time, 0), subtitle(ref_segments, time, 0), subtitle(hyp_segments, time, 1), subtitle(ref_segments, time, 1)];
+	[spanhyp0.innerHTML, spanref0.innerHTML, spanhyp1.innerHTML, spanref1.innerHTML] = [subtitle(hyp_segments, time, 0, 1), subtitle(ref_segments, time, 0, 1), subtitle(hyp_segments, time, 1, 2), subtitle(ref_segments, time, 1, 2)];
 }
 
-//const make_segment = td => [td.querySelector('template').innerHTML, td.dataset.channel, td.dataset.begin, td.dataset.end];
-//const hyp_segments = Array.from(document.querySelectorAll('.hyp')).map(make_segment), ref_segments = Array.from(document.querySelectorAll('.ref')).map(make_segment);
+const make_segment = td => [td.querySelector('template').innerHTML, td.dataset.channel, td.dataset.speaker, td.dataset.begin, td.dataset.end];
+const hyp_segments = Array.from(document.querySelectorAll('.hyp')).map(make_segment);
+const ref_segments = Array.from(document.querySelectorAll('.ref')).map(make_segment);
 '''
 
-channel_colors = ['gray', 'red', 'blue']
+channel_colors = ['violet', 'lightblue']
+speaker_colors = ['gray', 'violet', 'lightblue']
+#speaker_colors = ['gray', 'red', 'blue']
 
 def diarization(diarization_transcript, html_path, debug_audio):
 	with open(html_path, 'w') as html:
@@ -126,7 +137,7 @@ def diarization(diarization_transcript, html_path, debug_audio):
 		html.write('</table></body></html>')
 	return html_path
 
-def speaker_barcode_img(transcript, begin = None, end = None, colors = channel_colors, onclick = None, dataset = {}):
+def speaker_barcode_img(transcript, begin = None, end = None, colors = speaker_colors, onclick = None, dataset = {}):
 	if begin is None:
 		begin = 0
 	if end is None:
@@ -150,7 +161,7 @@ def speaker_barcode_img(transcript, begin = None, end = None, colors = channel_c
 	return f'<img onclick="{onclick}" src="data:image/jpeg;base64,{uri_speaker_barcode}" style="width:100% {dataset}"></img>'
 
 
-def speaker_barcode_svg(transcript, begin, end, colors = channel_colors, max_segment_seconds = 60, onclick = None):
+def speaker_barcode_svg(transcript, begin, end, colors = speaker_colors, max_segment_seconds = 60, onclick = None):
 	if onclick is None:
 		onclick = 'onclick_svg(event)'
 	color = lambda s: colors[s] if s < len(colors) else transcripts.speaker_missing
@@ -193,37 +204,36 @@ def label(output_path, transcript, info, page_size, prefix):
 		html.write(
 			'<html><head><meta charset="UTF-8"><style>figure{margin:0} h6{margin:0}</style></head><body onkeydown="return onkeydown_(event)">'
 		)
-		html.write(
-			'''<script>
-			function export_user_input()
-			{
-				const data_text_plain_base64_encode_utf8 = str => 'data:text/plain;base64,' + btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1) {return String.fromCharCode(parseInt(p1, 16)) }));
-				
-				const after = Array.from(document.querySelectorAll('input.after'));
-				const data = after.map(input => ({audio_name : input.name, before : input.dataset.before, after : input.value}));
+		html.write('''<script>
+function export_user_input()
+{
+	const data_text_plain_base64_encode_utf8 = str => 'data:text/plain;base64,' + btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1) {return String.fromCharCode(parseInt(p1, 16)) }));
+	
+	const after = Array.from(document.querySelectorAll('input.after'));
+	const data = after.map(input => ({audio_name : input.name, before : input.dataset.before, after : input.value}));
 
-				const href = data_text_plain_base64_encode_utf8(JSON.stringify(data, null, 2));
-				const unixtime = Math.round((new Date()).getTime() / 1000);
-				let a = document.querySelector('a');
-				const {page, prefix} = a.dataset;
-				a.download = `${prefix}_page${page}_time${unixtime}.json`;
-				a.href = href;
-			}
+	const href = data_text_plain_base64_encode_utf8(JSON.stringify(data, null, 2));
+	const unixtime = Math.round((new Date()).getTime() / 1000);
+	let a = document.querySelector('a');
+	const {page, prefix} = a.dataset;
+	a.download = `${prefix}_page${page}_time${unixtime}.json`;
+	a.href = href;
+}
 
-			function onkeydown_(evt)
-			{
-					const tab = evt.keyCode == 9, shift = evt.shiftKey;
-					const tabIndex = (document.activeElement || {tabIndex : -1}).tabIndex;
-					if(tab)
-					{
-							const newTabIndex = shift ? Math.max(0, tabIndex - 1) : tabIndex + 1;
-							const newElem = document.querySelector(`[tabindex="${newTabIndex}"`);
-							if(newElem)
-									newElem.focus();
-							return false;
-					}
-					return true;
-			}
+function onkeydown_(evt)
+{
+		const tab = evt.keyCode == 9, shift = evt.shiftKey;
+		const tabIndex = (document.activeElement || {tabIndex : -1}).tabIndex;
+		if(tab)
+		{
+				const newTabIndex = shift ? Math.max(0, tabIndex - 1) : tabIndex + 1;
+				const newElem = document.querySelector(`[tabindex="${newTabIndex}"`);
+				if(newElem)
+						newElem.focus();
+				return false;
+		}
+		return true;
+}
 		</script>'''
 		)
 		html.write(
@@ -249,68 +259,73 @@ def label(output_path, transcript, info, page_size, prefix):
 		print(html_path)
 
 
-def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [], duration = None):
+def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [], duration = None, NA = 'N/A', default_channel = 0):
 	if isinstance(transcript, str):
 		transcript = json.load(open(transcript))
 
 	audio_path = transcript[0]['audio_path']
+	audio_name = transcripts.audio_name(audio_path)
+
 	signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = mono, duration = duration)
-	default_channel = 0
 	channel_or_default = lambda channel: default_channel if channel == transcripts.channel_missing else channel 
 
-	fmt_link = lambda ref = '', hyp = '', channel = default_channel, begin = 0, end = 0, speaker = '', i = '', j = '', audio_path = '', **kwargs: (f'<a onclick="return play(event, {channel_or_default(channel)}, {begin}, {end})"' if ref not in [0, 1] else '<span') + f' title="#{channel}. {speaker}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">' + ((ref + hyp) if isinstance(ref, str) else f'{begin:.02f}' if ref == 0 else f'{end:.02f}' if ref == 1 else f'{end - begin:.02f}') + ('</a>' if ref not in [0, 1] else '</span>')
+	def fmt_link(ref = '', hyp = '', channel = default_channel, begin = transcripts.time_missing, end = transcripts.time_missing, speaker = transcripts.speaker_missing, i = '', j = '', audio_path = '', special_begin = 0, special_end = 1, **kwargs):
+		span = ref in [special_begin, special_end] or begin == transcripts.time_missing or end == transcripts.time_missing
+		tag_open = '<span' if span else f'<a onclick="return play(event, {channel_or_default(channel)}, {begin}, {end})"'
+		tag_attr = f' title="channel{channel}. speaker{speaker}: {begin:.04f} - {end:.04f} | {i} - {j}" href="#" target="_blank">'
+		tag_contents = (ref + hyp) if isinstance(ref, str) else (f'{begin:.02f}' if begin != transcripts.time_missing else NA) if ref == special_begin else (f'{end:.02f}' if end != transcripts.time_missing else NA) if ref == special_end else (f'{end - begin:.02f}' if begin != transcripts.time_missing and end != transcripts.time_missing else NA)
+		tag_close = '</span>' if span else '</a>'
+		return tag_open + tag_attr + tag_contents + tag_close
+	
 	fmt_words = lambda rh: ' '.join(fmt_link(**w) for w in rh)
 	fmt_begin_end = 'data-begin="{begin}" data-end="{end}"'.format
 
 	html = open(html_path, 'w')
-	style = ' '.join(f'.speaker{i} {{background-color : {c}; }}' for i, c in enumerate(channel_colors)) + ' a {text-decoration: none;} .reference{opacity:0.4} .channel{margin:0px} .channel0 .hyp{padding-right:150px} .channel1 .hyp{padding-left:150px} .ok{background-color:green} .m0{margin:0px} .top{vertical-align:top} .channel0{background-color:violet} .channel1{background-color:lightblue; ' + ('display:none' if len(signal) == 1 else '') + '}'
+	style = ' '.join(f'.speaker{i} {{background-color : {c}; }}' for i, c in enumerate(speaker_colors)) + ' '.join(f'.channel{i} {{background-color : {c}; }}' for i, c in enumerate(channel_colors)) + ' a {text-decoration: none;} .reference{opacity:0.4} .channel{margin:0px} .ok{background-color:green} .m0{margin:0px} .top{vertical-align:top}' 
 	
 	html.write(f'<html><head><meta charset="UTF-8"><style>{style}</style></head><body>')
+	html.writelines(map('<script>{}</script>\n'.format, [play_script, onclick_svg_script]))
 	html.write(
-		f'<div style="overflow:auto"><h4 style="float:left">{os.path.basename(audio_path)}</h4><h5 style="float:right">0.000000</h5></div>'
+		f'<div style="overflow:auto"><h4 style="float:left">{audio_name}</h4><h5 style="float:right">0.000000</h5></div>'
 	)
 	html_speaker_barcode = '' # speaker_barcode_svg(transcript, begin = 0.0, end = signal.shape[-1] / sample_rate)
 
 	html.writelines(
-		f'<figure class="m0"><figcaption>channel #{c}:</figcaption><audio ontimeupdate="update_span(ontimeupdate_(event), event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="{uri_audio}"></audio>{html_speaker_barcode}</figure>'
+		f'<figure class="m0"><figcaption><a href="#" download="channel{c}.{audio_name}" onclick="return download_audio(event, {c})">channel #{c}:</a></figcaption><audio ontimeupdate="update_span(ontimeupdate_(event), event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="{uri_audio}"></audio>{html_speaker_barcode}</figure>'
 		for c,
 		uri_audio in enumerate(
 			audio_data_uri(signal[channel], sample_rate) for channel in ([0, 1] if len(signal) == 2 else []) + [...]
 		)
 	)
-	html.write(
-		f'<pre class="channel"><h3 class="channel0 channel">hyp #0:<span class="subtitle"></span></h3></pre><pre class="channel"><h3 class="channel0 reference channel">ref #0:<span class="subtitle"></span></h3></pre><pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span class="subtitle"></span></h3></pre><pre class="channel"><h3 class="channel1 reference channel">ref #1:<span class="subtitle"></span></h3></pre><hr/><table style="width:100%">'
-	)
-	def format_th():
+	html.write('<pre class="channel"><h3 class="channel0 channel">hyp #0:<span class="subtitle"></span></h3></pre>')
+	html.write('<pre class="channel"><h3 class="channel0 reference channel">ref #0:<span class="subtitle"></span></h3></pre>')
+	html.write('<pre class="channel" style="margin-top: 10px"><h3 class="channel1 channel">hyp #1:<span class="subtitle"></span></h3></pre>')
+	html.write('<pre class="channel"><h3 class="channel1 reference channel">ref #1:<span class="subtitle"></span></h3></pre>')
+
+	def fmt_th():
+		idx_th = '<th>#</th>'
 		speaker_th = '<th>speaker</th>'
 		begin_th = '<th>begin</th>'
 		end_th = '<th>end</th>'
 		duration_th = '<th>dur</th>'
 		hyp_th = '<th style="width:50%">hyp</th>'
 		ref_th = '<th style="width:50%">ref</th>' + begin_th + end_th + duration_th + '<th>cer</th>' 
-		return '<tr>' + speaker_th + begin_th + end_th + duration_th + hyp_th + ref_th
+		return '<tr>' + idx_th + speaker_th + begin_th + end_th + duration_th + hyp_th + ref_th
+ 
+	def fmt_tr(i, ok, t, words, hyp, ref, channel, speaker, speaker_name, cer):
+		idx_td = f'''<td class="top {ok and 'ok'}">#{i}</td>'''
+		speaker_td = f'<td class="speaker{speaker}" title="speaker{speaker}">{speaker_name}</td>'
+		left_td = f'<td class="top">{fmt_link(0, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(hyp, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(hyp, ij = True))}</td>'
+		hyp_td = f'<td class="top hyp" data-channel="{channel}" data-speaker="{speaker}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}{fmt_alignment(words, hyp = True, prefix = "", tag = "<template>")}</td>'
+		ref_td = f'<td class="top reference ref" data-channel="{channel}" data-speaker="{speaker}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}{fmt_alignment(words, ref = True, prefix = "", tag = "<template>")}</td>'
+		right_td = f'<td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td>'
+		cer_td = f'<td class="top">' + (f'{cer:.2%}' if cer != transcripts._er_missing else NA) + '</td>' 
+		return f'<tr class="channel{channel} speaker{speaker}">' + idx_td + speaker_td + left_td + hyp_td + ref_td + right_td + cer_td + '</tr>\n'
 
-	def format_tr(t, ok, hyp, ref, channel, speaker, cer):
-		speaker_td = f'''<td class="top {ok and 'ok'} speaker{speaker}">{speaker}</td>'''
-		begin_td = f'<td class="top">{fmt_link(0, **transcripts.summary(hyp, ij = True))}</td>'
-		end_td = f'<td class="top">{fmt_link(1, **transcripts.summary(hyp, ij = True))}</td>'
-		duration_td = f'<td class="top">{fmt_link(2, **transcripts.summary(hyp, ij = True))}</td>'
-		hyp_td = f'<td class="top hyp" data-channel="{channel}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}<template></template></td>' # {word_alignment(hyp, tag = "", hyp = True)}
-		ref_td = f'<td class="top reference ref" data-channel="{channel}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}<template></template></td><td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td><td class="top">{cer:.2%}</td>' # {word_alignment(ref, tag = "", ref = True)}
-		return f'<tr class="channel{channel}">' + speaker_td + begin_td + end_td + duration_td + hyp_td + ref_td + '</tr>'
-
-	html.write(format_th())
-	html.writelines(format_tr(t, ok, hyp, ref, channel, speaker, cer) for t in transcripts.sort(transcript)
-		for ok in [t in filtered_transcript] for cer, channel,
-		speaker,
-		ref,
-		hyp in [(t.get('cer', transcripts._er_missing), t.get('channel', 0), t.get('speaker', transcripts.speaker_missing), t.get('words_ref', [t]), t.get('words_hyp', [t]))]
-	)
-	html.write('</tbody></table>')
-	html.write(f'<script>{play_script}</script>')
-	html.write(f'<script>{onclick_svg_script}</script>')
-	html.write(f'<script>{subtitle_script}</script>')
-	html.write('</body></html>')
+	html.write('<hr/><table style="width:100%">')
+	html.write(fmt_th())
+	html.writelines(fmt_tr(i, t in filtered_transcript, t, t.get('words', []), t.get('words_hyp', [t]), t.get('words_ref', [t]), t.get('channel', transcripts.channel_missing), t.get('speaker', transcripts.speaker_missing), t.get('speaker_name', 'speaker{}'.format(t.get('speaker', transcripts.speaker_missing))), t.get('cer', transcripts._er_missing)) for i, t in enumerate(transcripts.sort(transcript)))
+	html.write(f'</tbody></table><script>{subtitle_script}</script></body></html>')
 	return html_path
 
 
@@ -321,19 +336,18 @@ def logits(logits, audio_name, MAX_ENTROPY = 1.0):
 	tick_params = lambda ax, labelsize = 2.5, length = 0, **kwargs: ax.tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length, **kwargs) or [ax.set_linewidth(0) for ax in ax.spines.values()]
 	logits_path = logits + '.html'
 	html = open(logits_path, 'w')
-	html.write(
-		'''<html><meta charset="utf-8"/><body><script>
-		function onclick_(evt)
-		{
-			const img = evt.target;
-			const dim = img.getBoundingClientRect();
-			const t = (evt.clientX - dim.left) / dim.width;
-			const audio = img.nextSibling;
-			audio.currentTime = t * audio.duration;
-			audio.play();
-		}
-	</script>'''
-	)
+	html.write('''<html><meta charset="utf-8"/><body><script>
+
+function onclick_(evt)
+{
+	const img = evt.target;
+	const dim = img.getBoundingClientRect();
+	const t = (evt.clientX - dim.left) / dim.width;
+	const audio = img.nextSibling;
+	audio.currentTime = t * audio.duration;
+	audio.play();
+}
+	</script>''')
 	for r in torch.load(logits):
 		logits = r['logits']
 		if good_audio_name and r['audio_name'] not in good_audio_name:
@@ -418,7 +432,7 @@ def logits(logits, audio_name, MAX_ENTROPY = 1.0):
 		plt.close()
 
 		html.write('<h4>{audio_name} | cer: {cer:.02f}</h4>'.format(**r))
-		html.write(word_alignment(r['words']))
+		html.write(fmt_alignment(r['words']))
 		html.write(
 			'<img onclick="onclick_(event)" style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(
 				encoded = base64.b64encode(buf.getvalue()).decode()
@@ -519,9 +533,9 @@ def errors(
 				f'<audio controls src="{audio_data_uri(utt[0]["audio_path"][len(strip_audio_path_prefix):])}"></audio>'
 				if audio else ''
 			) +
-			f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{word_alignment(utt[0], ref = True, flat = True)}</td><td>{word_alignment(utt[0], ref = True, flat = True)}</td></tr>'
+			f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{fmt_alignment(utt[0], ref = True, flat = True)}</td><td>{fmt_alignment(utt[0], ref = True, flat = True)}</td></tr>'
 			+ '\n'.join(
-				'<tr class="any"><td class="br">{audio_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td class="br">{mer:.02%}</td><td>{word_alignment}</td><td>{word_alignment_flat}</td></tr>'.format(audio_name = transcripts.audio_name(input_path[i]), cer_easy = a.get("words_easy_errors_easy", {}).get("cer_pseudo", -1), cer = a.get("cer", 1), wer_easy = a.get("words_easy_errors_easy", {}).get("wer_pseudo", -1), wer = a.get("wer", 1), mer = a.get("mer_wordwise", 1), word_alignment = word_alignment(a.get('words', [])), word_alignment_flat = word_alignment(a, hyp = True, flat = True))
+				'<tr class="any"><td class="br">{audio_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td class="br">{mer:.02%}</td><td>{fmt_alignment}</td><td>{fmt_alignment_flat}</td></tr>'.format(audio_name = transcripts.audio_name(input_path[i]), cer_easy = a.get("words_easy_errors_easy", {}).get("cer_pseudo", -1), cer = a.get("cer", 1), wer_easy = a.get("words_easy_errors_easy", {}).get("wer_pseudo", -1), wer = a.get("wer", 1), mer = a.get("mer_wordwise", 1), fmt_alignment = fmt_alignment(a.get('words', [])), fmt_alignment_flat = fmt_alignment(a, hyp = True, flat = True))
 				for i,
 				a in enumerate(utt)
 			)
@@ -672,8 +686,8 @@ def histc_vega(tensor, min, max, bins):
 						).mark_bar().encode(x = altair.X('x:Q'), y = altair.Y('y:Q')).to_dict()
 
 
-def word_alignment(transcript, ref = None, hyp = None, flat = False, tag = '<pre>', prefix = True):
-	span = lambda word, t = None: '<span style="{style}" title="{word_alignment_error_type}">{word}</span>'.format(word = word, style = ('background-color:' + dict(ok = 'green', missing = 'red', missing_ref = 'darkred', typo_easy = 'lightgreen', typo_hard = 'pink')[t]) if t is not None else '', word_alignment_error_type = t)
+def fmt_alignment(transcript, ref = None, hyp = None, flat = False, tag = '<pre>', prefix = True):
+	span = lambda word, t = None: '<span style="{style}" title="{fmt_alignment_error_type}">{word}</span>'.format(word = word, style = ('background-color:' + dict(ok = 'green', missing = 'red', missing_ref = 'darkred', typo_easy = 'lightgreen', typo_hard = 'pink')[t]) if t is not None else '', fmt_alignment_error_type = t)
 
 	error_tag = lambda w: w.get('type') or w.get('error_tag')
 	if flat:
@@ -686,6 +700,7 @@ def word_alignment(transcript, ref = None, hyp = None, flat = False, tag = '<pre
 	ref_ = ('ref: ' if prefix else '') + ref_
 	hyp_ = ('hyp: ' if prefix else '') + hyp_
 	contents = '\n'.join([ref_] if ref is True else [hyp_] if hyp is True else [ref_, hyp_])
+	
 	return tag + contents + tag.replace('<', '</')
 
 

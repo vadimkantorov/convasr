@@ -2,11 +2,15 @@ import gc
 import sys
 import traceback
 import random
-import torch
+import functools
 import gzip
-import psutil
 import logging
 import logging.handlers
+import psutil
+import torch
+
+def flatten(lists):
+	return functools.reduce(lambda acc, l: acc.extend(l) or acc, lists, [])
 
 def strip_suffixes(s, suffixes):
 	for suffix in sorted(suffixes, key = len, reverse = True):

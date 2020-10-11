@@ -111,6 +111,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		
 		duration = lambda example: sum(map(transcripts.compute_duration, example))
 		segments_by_audio_path.sort(key = duration)
+		
 		# TODO: not segmented mode may fail if several examples have same audio_path
 		for example in segments_by_audio_path:
 			exclude_ok = ((not exclude) or (transcripts.audio_name(e[0]) not in exclude))
@@ -132,6 +133,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				speaker_names_filtered.update(str(t['speaker']) for t in example if t.get('speaker'))
 				examples_lens.append(len(example))
 		
+		#### TODO: replace by transcripts.set_speaker
 		if speaker_names:
 			self.speaker_names = speaker_names
 		else:
@@ -142,7 +144,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		for t in transcript:
 			t['speaker'] = t['speaker'] if isinstance(t.get('speaker'), int) else self.speaker_names_index.get(t['speaker'], transcripts.speaker_missing) if isinstance(t.get('speaker'), str) else 1 + t['channel'] if 'channel' in t else transcripts.speaker_missing
 			t['speaker_name'] = self.speaker_names[t['speaker']]
-		
+		###
+
 		_print('Dataset construction time: ', time.time() - tic); tic = time.time()
 		
 		self.bucket = torch.ShortTensor([e[0]['bucket'] for e in examples_filtered]) 

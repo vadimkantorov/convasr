@@ -132,7 +132,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 			ts = (x.shape[-1] / args.sample_rate) * torch.linspace(0, 1, steps = log_probs.shape[
 				-1]).unsqueeze(0) + torch.FloatTensor([t['begin'] for t in meta]).unsqueeze(1)
 			channel = [t['channel'] for t in meta]
-			speaker = [t['speaker'] for t in meta]
+			speaker = [t.get('speaker', transcripts.speaker_missing) for t in meta]
 			ref_segments = [[
 				dict(
 					channel = channel[i],
@@ -146,11 +146,11 @@ def main(args, ext_json = ['.json', '.json.gz']):
 					decoded[i],
 					ts[i],
 					channel = channel[i],
+					speaker = speaker[i],
 					replace_blank = True,
-					replace_blank_series = args.replace_blank_series,
 					replace_repeat = True,
 					replace_space = False,
-					speaker = speaker[i] if isinstance(speaker[i], str) else None
+					replace_blank_series = args.replace_blank_series,
 				) for i in range(len(decoded))
 			]
 
@@ -201,21 +201,26 @@ def main(args, ext_json = ['.json', '.json.gz']):
 
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic_alignment))
 
-		ref_transcript, hyp_transcript = [list(sorted(sum(segments, []), key = transcripts.sort_key)) for segments in [ref_segments, hyp_segments]]
+		ref_transcript, hyp_transcript = [sorted(transcripts.flatten(segments), key = transcripts.sort_key) for segments in [ref_segments, hyp_segments]]
 
 		if args.max_segment_duration:
 			if ref:
 				ref_segments = list(transcripts.segment_by_time(ref_transcript, args.max_segment_duration))
-				hyp_segments = list(transcripts.segment_by_segments(hyp_transcript, ref_segments))
+				hyp_segments = list(transcripts.segment_by_ref(hyp_transcript, ref_segments))
 			else:
 				hyp_segments = list(transcripts.segment_by_time(hyp_transcript, args.max_segment_duration))
 				ref_segments = [[] for _ in hyp_segments]
 
 		elif args.join_transcript:
-			ref_segments = [[t] for t in transcripts.load(audio_path + '.json')]
-			hyp_segments = list(transcripts.segment_by_segments(hyp_transcript, ref_segments, set_speaker = True))
+			ref_segments = [[t] for t in sorted(transcripts.load(audio_path + '.json'), key = transcripts.sort_key)]
+			hyp_segments = list(transcripts.segment_by_ref(hyp_transcript, ref_segments, set_speaker = True, soft = False))
+			ref_transcript = transcripts.flatten(ref_segments)
 
-		has_ref = any(t.get('ref') for ref_transcript in ref_segments for t in ref_transcript)
+		transcripts.save('data/debug_transcript_hyp.json', hyp_transcript)
+		transcripts.save('data/debug_transcript_ref.json', ref_transcript)
+
+		has_ref = bool(transcripts.join(ref = transcripts.flatten(ref_segments)))
+
 		transcript = [
 			dict(
 				audio_path = audio_path,
