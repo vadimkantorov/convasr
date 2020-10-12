@@ -148,7 +148,7 @@ def hyp(input_path, output_path, device, batch_size, html, ext, sample_rate, max
 	
 		signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = True, dtype = 'float32', duration = max_duration)
 		transcript = model(signal, sample_rate = sample_rate, extra = dict(audio_path = audio_path))
-		transcripts.set_speaker(transcript)
+		transcripts.collect_speaker_names(transcript, set_speaker = True)
 		
 		transcripts.save(transcript_path, transcript)
 		print(transcript_path)

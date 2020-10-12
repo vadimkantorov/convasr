@@ -6,7 +6,8 @@ import torch.nn.functional as F
 import audio
 import utils
 
-default_speaker_names = '_AB'
+default_speaker_names = '_' + ''.join(chr(ord('A') + i) for i in range(26))
+default_channel_names = {channel_missing : 'channel_', 0 : 'channel0', 1 : 'channel1'}
 
 ref_missing = ''
 speaker_name_missing = ''
@@ -24,7 +25,6 @@ def load(data_path):
 	if data_path.endswith('.rttm'):
 		with open(file_path) as f:
 			transcript = [dict(audio_name = splitted[1], begin = float(splitted[3]), end = float(splitted[3]) + float(splitted[4]), speaker_name = splitted[7]) for splitted in map(str.split, f)]
-		set_speaker(transcript)
 	
 	elif data_path.endswith('.json') or data_path.endswith('.json.gz'):
 		with utils.open_maybe_gz(data_path) as f:
@@ -59,48 +59,47 @@ def join(ref = [], hyp = []):
 	return ' '.join(filter(bool, [t.get('ref', '') for t in ref] + [t.get('hyp', '') for t in hyp])).strip()
 
 def remap_speaker(transcript, speaker_perm):
-	speaker_names_ = speaker_names(transcript, num_speakers = len(speaker_perm) - 1)
+	speaker_names = collect_speaker_names(transcript, num_speakers = len(speaker_perm) - 1)
 	for t in transcript:
 		speaker_ = speaker_perm[t['speaker']]
 		t['speaker'], t['speaker_name'] = speaker_, speaker_names_[speaker_]
 
 
-def set_speaker(transcript):
+def collect_speaker_names(transcript, speaker_names = [], num_speakers = None, set_speaker = False):
+	#TODO: convert channel to 0+
+	
 	if not transcript:
 		return
 
-	has_speaker = all(t.get('speaker') is not None for t in transcript)
-	has_speaker_names = all(bool(t.get('speaker_name')) for t in transcript)
+	has_speaker = has_speaker_names = has_channel = True
+	for t in transcript:
+		has_speaker &= t.get('speaker') is not None 
+		has_speaker_names &= bool(t.get('speaker_name'))
+		has_channel &= t.get('channel', channel_missing) != channel_missing 
+
+	if not speaker_names:
+		if has_speaker_names:
+			speaker_names = [speaker_name_missing] + sorted(set(t['speaker_name'] for t in transcript))
+			speaker_names_index = {speaker_name_missing : speaker_missing, **{speaker_name : i for i, speaker_name in enumerate(speaker_names)}}
+
+		elif has_channel:
+			speaker_names_index = {default_channel_names[speaker] : speaker for speaker in [channel_missing] + list(range(num_speakers or 2))}
+			speaker_names = [default_channel_names[channel] for channel in range(num_channels)]
+
+		elif has_speaker:
+			speaker_names = {t['speaker'] : default_speaker_names[t['speaker']] for t in transcript}
+			assert speaker_missing not in speaker_names
+			speaker_names[speaker_missing] = speaker_name_missing
+			speaker_names = [speaker_names.get(speaker, speaker_name_missing) for speaker in range(1 + max(speaker_names.values()))]
+
+	assert (not num_speakers) or len(speaker_names) >= 1 + num_speakers
 	
-	if has_speaker:
-		return
-
-	if has_speaker_names:
-		if all(t['speaker_name'].isdigit() for t in transcript):
-			for t in transcript:
-				t['speaker'] = int(t['speaker_name'])
-		else:
-			speaker_names_ = speaker_names(transcript)
-			for t in transcript:
-				t['speaker'] = speaker_names_.index(t['speaker_name'])
-
-def speaker_names(transcript, num_speakers = None):
-	has_speaker = all(t.get('speaker') is not None for t in transcript)
-	
-	int2str = lambda speaker : chr(ord('A') + speaker - 1)
-
-	if has_speaker:
-		num_speakers = num_speakers if num_speakers is not None else len(set(t['speaker'] for t in transcript if t['speaker'] != speaker_missing))
-		speaker_names_ = [None if speaker == speaker_missing else int2str(speaker) for speaker in range(1 + num_speakers)]
-
+	if set_speaker and (not has_speaker):
 		for t in transcript:
-			speaker_name = t.get('speaker_name')
-			if speaker_name is not None:
-				speaker_names_[t['speaker']] = speaker_name
-	else:
-		speaker_names_ = [None] + sorted(set(t['speaker_name'] for t in transcript), key = lambda s: (s.count(','), s))
-	
-	return speaker_names_
+			speaker_name = t.get('speaker_name', default_channel_names[t.get('channel', channel_missing)])
+			t['speaker'] = speaker_names_index[speaker_name]
+
+	return speaker_names
 
 def speaker_name(ref = None, hyp = None):
 	return ', '.join(sorted(filter(bool, set(t.get('speaker_name') for t in ref + hyp)))) or None

@@ -238,7 +238,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 
 			) for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments) for ref, hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]
 		]
-		transcripts.set_speaker(transcript)
+		transcripts.collect_speaker_names(transcript, set_speaker = True)
 
 		filtered_transcript = list(
 			transcripts.prune(

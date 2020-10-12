@@ -130,21 +130,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 				examples_filtered.append(example)
 				transcript.extend(example)
-				speaker_names_filtered.update(str(t['speaker']) for t in example if t.get('speaker'))
 				examples_lens.append(len(example))
 		
-		#### TODO: replace by transcripts.set_speaker
-		if speaker_names:
-			self.speaker_names = speaker_names
-		else:
-			speaker_names = list(sorted(speaker_names_filtered)) or [f'channel{1 + c}' for c in range(max_num_channels)]
-			self.speaker_names = [transcripts.speaker_name_missing] + speaker_names
-		self.speaker_names_index = {speaker_name : i for i, speaker_name in enumerate(self.speaker_names)}
-		assert self.speaker_names_index.get(transcripts.speaker_name_missing) == transcripts.speaker_missing
-		for t in transcript:
-			t['speaker'] = t['speaker'] if isinstance(t.get('speaker'), int) else self.speaker_names_index.get(t['speaker'], transcripts.speaker_missing) if isinstance(t.get('speaker'), str) else 1 + t['channel'] if 'channel' in t else transcripts.speaker_missing
-			t['speaker_name'] = self.speaker_names[t['speaker']]
-		###
+		self.speaker_names = transcripts.collect_speaker_names(transcript, speaker_names = speaker_names, num_speakers = max_num_channels, set_speaker = True)
 
 		_print('Dataset construction time: ', time.time() - tic); tic = time.time()
 		
