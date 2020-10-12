@@ -162,7 +162,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			self.meta = { self.example_id(t) : t for t in transcript }
 			if self.join_transcript:
 				#TODO: harmonize dummy transcript of replace_transcript case (and fix channel)
-				self.meta.update({ self.example_id(t) : t for e in examples_filtered for t in [dict(audio_path = e[0]['audio_path'], begin = transcripts.time_missing, end = transcripts.time_missing, channel = transcripts.channel_missing, speaker = transcripts.speaker_missing)]})
+				self.meta.update({ self.example_id(t_src) : t_tgt for e in examples_filtered for t_src, t_tgt in [(dict(audio_path = e[0]['audio_path'], begin = transcripts.time_missing, end = transcripts.time_missing, channel = transcripts.channel_missing, speaker = transcripts.speaker_missing), dict(audio_path = e[0]['audio_path'], begin = 0.0, end = audio.compute_duration(e[0]['audio_path'], backend = None), channel = transcripts.channel_missing, speaker = transcripts.speaker_missing))]})
 		
 		_print('Dataset tensors creation time: ', time.time() - tic)
 
@@ -403,9 +403,10 @@ class Labels:
 		replace_blank_series = False,
 		replace_space = False,
 		replace_repeat = True,
+		strip = True,
 		key = 'hyp'
 	):
-		decode_ = lambda i, j: self.postprocess_transcript(''.join(self[idx[k]] for k in range(i, j + 1) if replace_repeat is False or k == 0 or idx[k] != idx[k - 1]), replace_blank = replace_blank, replace_space = replace_space, replace_repeat = replace_repeat)
+		decode_ = lambda i, j: self.postprocess_transcript(''.join(self[idx[k]] for k in range(i, j + 1) if replace_repeat is False or k == 0 or idx[k] != idx[k - 1]), replace_blank = replace_blank, replace_space = replace_space, replace_repeat = replace_repeat, strip = strip)
 		speaker_ = lambda i, j: (int(speaker[i:1 + j].max()) if torch.is_tensor(speaker) else speaker) if speaker is not None and speakers is None else speakers[int(speaker[i:1 + j].max())] if speaker is not None and speakers is not None else None
 		channel_ = lambda i_, j_: channel if isinstance(channel, int) else int(channel[i_])
 

@@ -20,7 +20,6 @@ import vis
 import utils
 import diarization
 
-
 def setup(args):
 	torch.set_grad_enabled(False)
 	checkpoint = torch.load(args.checkpoint, map_location = 'cpu')
@@ -105,10 +104,14 @@ def main(args, ext_json = ['.json', '.json.gz']):
 	oom_handler = utils.OomHandler(max_retries = args.oom_retries)
 	for i, (meta, s, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
+		meta = [val_meta[t['example_id']] for t in meta]
 
-		meta = [val_meta.get(m['example_id']) for m in meta]
-		audio_path, begin, end = map(meta[0].get, ['audio_path', 'begin', 'end'])
+		audio_path = meta[0]['audio_path']
+		begin_end = [dict(begin = t['begin'], end = t['end']) for t in meta]
 		audio_name = transcripts.audio_name(audio_path)
+		duration = x.shape[-1] / args.sample_rate
+		channel = [t['channel'] for t in meta]
+		speaker = [t.get('speaker', transcripts.speaker_missing) for t in meta]
 
 		if x.numel() == 0:
 			print(f'Skipping empty [{audio_path}].')
@@ -125,19 +128,17 @@ def main(args, ext_json = ['.json', '.json.gz']):
 			print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
 			print(
 				'Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(
-					audio = sum(transcripts.compute_duration(t) for t in meta), processing = time.time() - tic
+					audio = sum(map(transcripts.compute_duration, meta)), processing = time.time() - tic
 				)
 			)
 
-			ts = (x.shape[-1] / args.sample_rate) * torch.linspace(0, 1, steps = log_probs.shape[
-				-1]).unsqueeze(0) + torch.FloatTensor([t['begin'] for t in meta]).unsqueeze(1)
-			channel = [t['channel'] for t in meta]
-			speaker = [t.get('speaker', transcripts.speaker_missing) for t in meta]
+
+			ts = duration * torch.linspace(0, 1, steps = log_probs.shape[-1]).unsqueeze(0) + torch.FloatTensor([t['begin'] for t in begin_end]).unsqueeze(1)
 			ref_segments = [[
 				dict(
 					channel = channel[i],
-					begin = meta[i]['begin'],
-					end = meta[i]['end'],
+					begin = begin_end[i]['begin'],
+					end = begin_end[i]['end'],
 					ref = labels.decode(y[i, 0, :ylen[i]].tolist())
 				)
 			] for i in range(len(decoded))]
@@ -269,13 +270,20 @@ def main(args, ext_json = ['.json', '.json.gz']):
 			with open(transcript_path, 'w') as f:
 				f.write(hyp)
 
-		if args.output_csv:
-			output_lines.append(csv_sep.join((audio_path, hyp, str(begin), str(end))) + '\n')
+		#if args.output_csv:
+		#	output_lines.append(csv_sep.join((audio_path, hyp, str(begin), str(end))) + '\n')
 
 		if args.logits:
 			logits_file_path = os.path.join(args.output_path, audio_name + '.pt')
-			torch.save([dict(audio_path = audio_path, logits = logits)], logits_file_path)
-		 	print('Logits saved:', logits_file_path)
+			if args.logits_crop:
+				begin_end = [dict(zip(['begin', 'end'], [t['begin'] + c / float(o) * (t['end'] - t['begin']) for c in args.logits_crop])) for o, t in zip(olen, begin_end)]
+				logits_crop = [slice(*args.logits_crop) for o in olen] 
+			else:
+				logits_crop = [slice(int(o)) for o in olen]
+
+			# TODO: filter ref / hyp by channel?
+			torch.save([dict(audio_path = audio_path, logits = l[..., logits_crop[i]], **begin_end[i], ref = ref, hyp = hyp ) for i, l in enumerate(logits.cpu())], logits_file_path)
+			print(logits_file_path)
 
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
@@ -330,5 +338,6 @@ if __name__ == '__main__':
 	parser.add_argument('--dataset-string-array-encoding', default = 'utf_32_le', choices = ['utf_16_le', 'utf_32_le'])
 	parser.add_argument('--diarize', action = 'store_true')
 	parser.add_argument('--vad', type = int, choices = [0, 1, 2, 3], default = False, nargs = '?')
+	parser.add_argument('--logits-crop', type = int, nargs = 2, default = [])
 	args = parser.parse_args()
 	main(args)

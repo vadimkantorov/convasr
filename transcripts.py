@@ -55,7 +55,6 @@ def strip(transcript, keys = []):
 	return [{k: v for k, v in t.items() if k not in keys} for t in transcript]
 
 
-
 def join(ref = [], hyp = []):
 	return ' '.join(filter(bool, [t.get('ref', '') for t in ref] + [t.get('hyp', '') for t in hyp])).strip()
 
@@ -107,6 +106,7 @@ def speaker_name(ref = None, hyp = None):
 	return ', '.join(sorted(filter(bool, set(t.get('speaker_name') for t in ref + hyp)))) or None
 
 def segment_by_time(transcript, max_segment_seconds, break_on_speaker_change = True, break_on_channel_change = True):
+	transcript = [t for t in transcript if t['begin'] != time_missing and t['end'] != time_missing]
 	ind_last_taken = -1
 	for j, t in enumerate(transcript):
 		first, last = ind_last_taken == -1, j == len(transcript) - 1
@@ -116,9 +116,6 @@ def segment_by_time(transcript, max_segment_seconds, break_on_speaker_change = T
 				or (break_on_channel_change and j >= 1 and t['channel'] != transcript[j - 1]['channel']):
 
 			ind_last_taken, transcript_segment = take_between(transcript, ind_last_taken, t, first, last, sort_by_time=False)
-			#TODO: fixup barcode_svg, 60 seconds
-			#import IPython; IPython.embed()
-			
 			if transcript_segment:
 				yield transcript_segment
 

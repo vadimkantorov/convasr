@@ -26,14 +26,22 @@ import models
 import ctc
 import transcripts
 
+meta_charset = '<meta charset="UTF-8">'
+
 onclick_img_script = '''
 function onclick_img(evt)
 {
 	const img = evt.target;
 	const dim = img.getBoundingClientRect();
-	const t = (evt.clientX - dim.left) / dim.width;
+	let begin = (evt.clientX - dim.left) / dim.width;
+	let relative = true;
+	if(img.dataset.begin != null && img.dataset.begin != '' && img.dataset.end != null && img.dataset.end != '')
+	{
+		begin = parseFloat(img.dataset.begin) + (parseFloat(img.dataset.end) - parseFloat(img.dataset.begin)) * begin;
+		relative = false;
+	}
 	const channel = img.dataset.channel || 0;
-	play(evt, channel, t, 0, true);
+	play(evt, channel, begin, 0, false);
 }
 '''
 
@@ -115,7 +123,7 @@ speaker_colors = ['gray', 'violet', 'lightblue']
 
 def diarization(diarization_transcript, html_path, debug_audio):
 	with open(html_path, 'w') as html:
-		html.write('<html><head><meta charset="UTF-8"><style>.nowrap{white-space:nowrap} table {border-collapse:collapse} .border-hyp {border-bottom: 2px black solid}</style></head><body>\n')
+		html.write('<html><head>' + meta_charset + '<style>.nowrap{white-space:nowrap} table {border-collapse:collapse} .border-hyp {border-bottom: 2px black solid}</style></head><body>\n')
 		html.write(f'<script>{play_script}</script>\n')
 		html.write(f'<script>{onclick_img_script}</script>')
 		html.write('<table>\n')
@@ -129,15 +137,15 @@ def diarization(diarization_transcript, html_path, debug_audio):
 			avg_der_ = avg([t['der_'] for t in diarization_transcript])
 		))
 		for i, dt in enumerate(diarization_transcript):
-			audio_html = '<audio id="audio{channel}" controls src="{data_uri}"></audio>'.format(channel = i, data_uri = audio_data_uri(dt['audio_path'])) if debug_audio else ''
+			audio_html = fmt_audio(audio_path, channel = channel) if debug_audio else ''
 			begin, end = 0.0, transcripts.compute_duration(dt)
 			for refhyp in ['ref', 'hyp']:
-				html.write('<tr class="border-{refhyp}"><td class="nowrap">{audio_name}</td><td>{end:.02f}</td><td>{refhyp}</td><td>{ser:.02f}</td><td>{der:.02f}</td><td>{der_:.02f}</td><td rospan="{rowspan}">{audio_html}</td><td>{barcode}</td></tr>\n'.format(audio_name = dt['audio_name'], audio_html = audio_html if refhyp == 'ref' else '', rowspan = 2 if refhyp == 'ref' else 1, refhyp = refhyp, end = end, ser = dt['ser'], der = dt['der'], der_ = dt['der_'], barcode = speaker_barcode_img(dt[refhyp], begin = begin, end = end, onclick = None if debug_audio else '', dataset = dict(channel = i))))
+				html.write('<tr class="border-{refhyp}"><td class="nowrap">{audio_name}</td><td>{end:.02f}</td><td>{refhyp}</td><td>{ser:.02f}</td><td>{der:.02f}</td><td>{der_:.02f}</td><td rospan="{rowspan}">{audio_html}</td><td>{barcode}</td></tr>\n'.format(audio_name = dt['audio_name'], audio_html = audio_html if refhyp == 'ref' else '', rowspan = 2 if refhyp == 'ref' else 1, refhyp = refhyp, end = end, ser = dt['ser'], der = dt['der'], der_ = dt['der_'], barcode = fmt_img_speaker_barcode(dt[refhyp], begin = begin, end = end, onclick = None if debug_audio else '', dataset = dict(channel = i))))
 
 		html.write('</table></body></html>')
 	return html_path
 
-def speaker_barcode_img(transcript, begin = None, end = None, colors = speaker_colors, onclick = None, dataset = {}):
+def fmt_img_speaker_barcode(transcript, begin = None, end = None, colors = speaker_colors, onclick = None, dataset = {}):
 	if begin is None:
 		begin = 0
 	if end is None:
@@ -161,12 +169,14 @@ def speaker_barcode_img(transcript, begin = None, end = None, colors = speaker_c
 	return f'<img onclick="{onclick}" src="data:image/jpeg;base64,{uri_speaker_barcode}" style="width:100% {dataset}"></img>'
 
 
-def speaker_barcode_svg(transcript, begin, end, colors = speaker_colors, max_segment_seconds = 60, onclick = None):
+def fmt_svg_speaker_barcode(transcript, begin, end, colors = speaker_colors, max_segment_seconds = 60, onclick = None):
 	if onclick is None:
 		onclick = 'onclick_svg(event)'
 	color = lambda s: colors[s] if s < len(colors) else transcripts.speaker_missing
 	html = ''
+	
 	segments = transcripts.segment_by_time(transcript, max_segment_seconds = max_segment_seconds, break_on_speaker_change = False, break_on_channel_change = False)
+	
 	for segment in segments:
 		summary = transcripts.summary(segment)
 		duration = transcripts.compute_duration(summary)
@@ -189,8 +199,8 @@ def audio_data_uri(audio_path, sample_rate = None, audio_backend = 'scipy', audi
 		
 	return data_uri(audio_format = audio_format, audio_bytes = audio_bytes)
 
-def fmt_audio(audio_path, channel):
-	return f'<audio id="audio{channel}" style="width:100%" controls src="{audio_data_uri(audio_path)}"></audio>
+def fmt_audio(audio_path, channel = 0):
+	return f'<audio id="audio{channel}" style="width:100%" controls src="{audio_data_uri(audio_path)}"></audio>\n'
 
 def label(output_path, transcript, info, page_size, prefix):
 	if isinstance(transcript, str):
@@ -204,7 +214,7 @@ def label(output_path, transcript, info, page_size, prefix):
 		html_path = output_path + f'.page{p}.html'
 		html = open(html_path, 'w')
 		html.write(
-			'<html><head><meta charset="UTF-8"><style>figure{margin:0} h6{margin:0}</style></head><body onkeydown="return onkeydown_(event)">'
+			'<html><head>' + meta_charset + '<style>figure{margin:0} h6{margin:0}</style></head><body onkeydown="return onkeydown_(event)">'
 		)
 		html.write('''<script>
 function export_user_input()
@@ -246,9 +256,10 @@ function onkeydown_(evt)
 		for j, i in enumerate(info[k:k + page_size]):
 			i['after'] = i.get('after', '')
 			t = transcript[i['audio_name']]
+			audio_path = t['audio_path'][len('/data/'):]
 			html.write('<hr/>\n')
 			html.write(
-				f'<figure><figcaption>page {p}/{page_count}:<strong>{k + j}</strong><pre>{transcripts.audio_name(t)}</pre></figcaption><audio style="width:100%" controls src="{audio_data_uri(t["audio_path"][len("/data/"):])}"></audio><figcaption><pre>{t["ref"]}</pre></figcaption></figure>'
+				f'<figure><figcaption>page {p}/{page_count}:<strong>{k + j}</strong><pre>{transcripts.audio_name(t)}</pre></figcaption>{fmt_audio(audio_path)}<figcaption><pre>{t["ref"]}</pre></figcaption></figure>'
 			)
 			html.write('<h6>before</h6>')
 			html.write('<pre name="{audio_name}" class="before">{before}</pre>'.format(**i))
@@ -285,15 +296,15 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	html = open(html_path, 'w')
 	style = ' '.join(f'.speaker{i} {{background-color : {c}; }}' for i, c in enumerate(speaker_colors)) + ' '.join(f'.channel{i} {{background-color : {c}; }}' for i, c in enumerate(channel_colors)) + ' a {text-decoration: none;} .reference{opacity:0.4} .channel{margin:0px} .ok{background-color:green} .m0{margin:0px} .top{vertical-align:top}' 
 	
-	html.write(f'<html><head><meta charset="UTF-8"><style>{style}</style></head><body>')
+	html.write(f'<html><head>' + meta_charset + f'<style>{style}</style></head><body>')
 	html.write(f'<script>{play_script}{onclick_svg_script}</script>')
 	html.write(
 		f'<div style="overflow:auto"><h4 style="float:left">{audio_name}</h4><h5 style="float:right">0.000000</h5></div>'
 	)
-	html_speaker_barcode = '' # speaker_barcode_svg(transcript, begin = 0.0, end = signal.shape[-1] / sample_rate)
+	html_speaker_barcode = fmt_svg_speaker_barcode(transcript, begin = 0.0, end = signal.shape[-1] / sample_rate)
 
 	html.writelines(
-		f'<figure class="m0"><figcaption><a href="#" download="channel{c}.{audio_name}" onclick="return download_audio(event, {c})">channel #{c}:</a></figcaption><audio ontimeupdate="update_span(ontimeupdate_(event), event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="{uri_audio}"></audio>{html_speaker_barcode}</figure>'
+		f'<figure class="m0"><figcaption><a href="#" download="channel{c}.{audio_name}" onclick="return download_audio(event, {c})">channel #{c}:</a></figcaption><audio ontimeupdate="update_span(ontimeupdate_(event), event)" onpause="onpause_(event)" id="audio{c}" style="width:100%" controls src="{uri_audio}"></audio>{html_speaker_barcode}</figure><hr />'
 		for c,
 		uri_audio in enumerate(
 			audio_data_uri(signal[channel], sample_rate) for channel in ([0, 1] if len(signal) == 2 else []) + [...]
@@ -331,18 +342,23 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	return html_path
 
 
-def logits(lang, logits, audio_name, MAX_ENTROPY = 1.0):
-	good_audio_name = set(map(str.strip, open(audio_name[0])) if os.path.exists(audio_name[0]) else audio_name)
+def logits(lang, logits, audio_name = None, MAX_ENTROPY = 1.0):
+	good_audio_name = set(map(str.strip, open(audio_name[0])) if os.path.exists(audio_name[0]) else audio_name) if audio_name is not None else []
 	labels = datasets.Labels(datasets.Language(lang))
 	decoder = decoders.GreedyDecoder()
 	tick_params = lambda ax, labelsize = 2.5, length = 0, **kwargs: ax.tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length, **kwargs) or [ax.set_linewidth(0) for ax in ax.spines.values()]
 	logits_path = logits + '.html'
 	html = open(logits_path, 'w')
-	html.write(f'<html><meta charset="utf-8"/><body><script>{play_script}{onclick_img_script}</script>')
+	html.write('<html><head>' + meta_charset + f'</head><body><script>{play_script}{onclick_img_script}</script>')
+
 	for i, t in enumerate(torch.load(logits)):
-		audio_path, y, logits = map(t.get, ['audio_path', 'y', 'logits'])
-		words = r.get('words', [t])
-		audio_name  = transcripts.audio_name(audio_path)
+		audio_path, logits = t['audio_path'], t['logits']
+		words = t.get('words', [t])
+		y = t.get('y', torch.zeros(1, 0, dtype = torch.long))
+		begin = t.get('begin', '')
+		end = t.get('end', '')
+		audio_name = transcripts.audio_name(audio_path)
+		extra_metrics = dict(cer = t['cer']) if 'cer' in t else {}
 
 		if good_audio_name and audio_name not in good_audio_name:
 			continue
@@ -354,16 +370,16 @@ def logits(lang, logits, audio_name, MAX_ENTROPY = 1.0):
 		margin = models.margin(log_probs, dim = 0)
 		#energy = features.exp().sum(dim = 0)[::2]
 
-		alignment = ctc.alignment(
-			log_probs.unsqueeze(0).permute(2, 0, 1),
-			y.unsqueeze(0).long(),
-			torch.LongTensor([log_probs.shape[-1]]),
-			torch.LongTensor([len(y)]),
-			blank = len(log_probs) - 1
-		).squeeze(0)
-
 		plt.figure(figsize = (6, 2))
+		ax = plt.subplot(211)
+		plt.imshow(logits, aspect = 'auto')
+		plt.xlim(0, logits.shape[-1] - 1)
+		#plt.yticks([])
+		plt.axis('off')
+		tick_params(plt.gca())
+		#plt.subplots_adjust(left = 0, right = 1, bottom = 0.12, top = 0.95)
 
+		plt.subplot(212, sharex = ax)
 		prob_top1, prob_top2 = log_probs.exp().topk(2, dim = 0).values
 		plt.hlines(1.0, 0, entropy.shape[-1] - 1, linewidth = 0.2)
 		artist_prob_top1, = plt.plot(prob_top1, 'b', linewidth = 0.3)
@@ -375,16 +391,10 @@ def logits(lang, logits, audio_name, MAX_ENTROPY = 1.0):
 					loc = 1,
 					fontsize = 'xx-small',
 					frameon = False)
-		bad = (entropy > MAX_ENTROPY).tolist()
-		#runs = []
-		#for i, b in enumerate(bad):
-		#	if b:
-		#		if not runs or not bad[i - 1]:
-		#			runs.append([i, i])
-		#		else:
-		#			runs[-1][1] += 1
-		#for begin, end in runs:
-		#	plt.axvspan(begin, end, color='red', alpha=0.2)
+		
+		for b, e, v in zip(*models.rle1d(entropy > MAX_ENTROPY)):
+			if bool(v):
+				plt.axvspan(int(b), int(e), color='red', alpha=0.2)
 
 		plt.ylim(0, 3.0)
 		plt.xlim(0, entropy.shape[-1] - 1)
@@ -395,21 +405,29 @@ def logits(lang, logits, audio_name, MAX_ENTROPY = 1.0):
 				'\n'.join,
 				zip(
 					*[
-						labels.decode(d, replace_blank = '.', replace_space = '_', replace_repeat = False)
+						labels.decode(d, replace_blank = '.', replace_space = '_', replace_repeat = False, strip = False)
 						for d in decoded
 					]
 				)
 			)
 		)
-		#xlabels_ = labels.decode(log_probs.argmax(dim = 0).tolist(), blank = '.', space = '_', replace2 = False)
 		plt.xticks(torch.arange(entropy.shape[-1]), xlabels, fontfamily = 'monospace')
 		tick_params(plt.gca())
 
-		ax = plt.gca().secondary_xaxis('top')
-		ref, ref_ = labels.decode(.tolist(), replace_blank = '.', replace_space = '_', replace_repeat = False), alignment
-		ax.set_xticklabels(ref)
-		ax.set_xticks(ref_)
-		tick_params(ax, colors = 'red')
+		if y.numel() > 0:
+			alignment = ctc.alignment(
+				log_probs.unsqueeze(0).permute(2, 0, 1),
+				y.unsqueeze(0).long(),
+				torch.LongTensor([log_probs.shape[-1]]),
+				torch.LongTensor([len(y)]),
+				blank = len(log_probs) - 1
+			).squeeze(0)
+			
+			ax = plt.gca().secondary_xaxis('top')
+			ref, ref_ = labels.decode(y.tolist(), replace_blank = '.', replace_space = '_', replace_repeat = False, strip = False), alignment
+			ax.set_xticklabels(ref)
+			ax.set_xticks(ref_)
+			tick_params(ax, colors = 'red')
 
 		#k = 0
 		#for i, c in enumerate(ref + ' '):
@@ -423,17 +441,15 @@ def logits(lang, logits, audio_name, MAX_ENTROPY = 1.0):
 		plt.savefig(buf, format = 'jpg', dpi = 600)
 		plt.close()
 
-		html.write('<h4>{audio_name} | cer: {cer:.02f}</h4>'.format(audio_name = audio_name, cer = cer))
+		html.write(f'<h4>{audio_name}')
+		html.write(' | '.join('{k}: {v:.02f}' for k, v in extra_metrics.items()))
+		html.write('</h4>')
 		html.write(fmt_alignment(words))
-		html.write(
-			'<img data-channel="{i}" onclick="onclick_img(event)" style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(
-				encoded = base64.b64encode(buf.getvalue()).decode()
-			)
-		)
+		html.write('<img data-begin="{begin}" data-end="{end}" data-channel="{channel}" onclick="onclick_img(event)" style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>\n'.format(channel = i, begin = begin, end = end, encoded = base64.b64encode(buf.getvalue()).decode()))
 		html.write(fmt_audio(audio_path = audio_path, channel = i))
 		html.write('<hr/>')
 	html.write('</body></html>')
-	print('\n', logits_path)
+	return logits_path
 
 
 def errors(
@@ -481,9 +497,8 @@ def errors(
 	html_path = output_path or (input_path[0] + '.html')
 
 	f = open(html_path, 'w')
-	f.write(
-		'<html><meta charset="utf-8"><style> table{border-collapse:collapse; width: 100%;} audio {width:100%} .br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap} th.col{width:80px}</style>'
-	)
+	f.write('<html><head>' + meta_charset)
+	f.write('<style> table{border-collapse:collapse; width: 100%;} audio {width:100%} .br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap} th.col{width:80px}</style></head>')
 	f.write(
 		'<body><table><tr><th></th><th class="col">cer_easy</th><th class="col">cer</th><th class="col">wer_easy</th><th class="col">wer</th><th class="col">mer</th><th></th></tr>'
 	)
@@ -522,9 +537,8 @@ def errors(
 	f.write('<tr><td>&nbsp;</td></tr>')
 	f.write(
 		'\n'.join(
-			f'''<tr class="first"><td colspan="6">''' + (
-				f'<audio controls src="{audio_data_uri(utt[0]["audio_path"][len(strip_audio_path_prefix):])}"></audio>'
-				if audio else ''
+			'<tr class="first"><td colspan="6">' + (
+				fmt_audio(utt[0]["audio_path"][len(strip_audio_path_prefix):]) if audio else ''
 			) +
 			f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{fmt_alignment(utt[0], ref = True, flat = True)}</td><td>{fmt_alignment(utt[0], ref = True, flat = True)}</td></tr>'
 			+ '\n'.join(
@@ -546,7 +560,7 @@ def audiosample(input_path, output_path, K):
 	by_group = {k: list(g) for k, g in itertools.groupby(sorted(transcript, key = group), key = group)}
 
 	f = open(output_path, 'w')
-	f.write('<html><meta charset="UTF-8"><body>')
+	f.write(f'<html><head>{meta_charset}</head><body>')
 	for group, transcript in sorted(by_group.items()):
 		f.write(f'<h1>{group}</h1>')
 		f.write('<table>')
@@ -554,12 +568,12 @@ def audiosample(input_path, output_path, K):
 		random.shuffle(transcript)
 		for t in transcript[:K]:
 			try:
-				data_uri = audio_data_uri(os.path.join(args.dataset_root, t['audio_path']))
+				audio_path = os.path.join(args.dataset_root, t['audio_path'])
 			except:
 				f.write('<tr><td>file not found: {audio_path}</td></tr>'.format(**t))
 				continue
 			f.write(
-				'<tr><td>{audio_path}</td><td><audio controls src="{data_uri}"/></td><td>{ref}</td></tr>\n'.format(
+				'<tr><td>{audio_path}</td><td>{fmt_audio(audio_path)}</td><td>{ref}</td></tr>\n'.format(
 					encoded = encoded, **t
 				)
 			)
@@ -764,7 +778,7 @@ if __name__ == '__main__':
 	cmd.add_argument('logits')
 	cmd.add_argument('--audio-name', nargs = '*')
 	cmd.add_argument('--lang', default = 'ru')
-	cmd.set_defaults(func = logits)
+	cmd.set_defaults(func = lambda *args, **kwargs: print(logits(*args, **kwargs)))
 
 	cmd = subparsers.add_parser('audiosample')
 	cmd.add_argument('--input-path', '-i', required = True)

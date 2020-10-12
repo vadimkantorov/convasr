@@ -23,7 +23,7 @@ def read_audio(
         raw_sample_rate=None,
         raw_num_channels=None,
 ):
-	assert dtype in ['int16', 'float32']
+	assert dtype in [None, 'int16', 'float32']
 	assert backend in [None, 'scipy', 'soundfile', 'ffmpeg', 'sox']
 
 	try:
@@ -118,7 +118,7 @@ def read_audio(
 
 	signal = torch.as_tensor(signal)
 
-	if sample_rate_ != sample_rate:
+	if sample_rate is not None and sample_rate_ != sample_rate:
 		signal, sample_rate_ = resample(signal, sample_rate_, sample_rate)
 
 	return signal, sample_rate_
@@ -155,10 +155,19 @@ def resample(signal, sample_rate_, sample_rate):
 	return signal, sample_rate
 
 def compute_duration(audio_path, backend = 'ffmpeg'):
-	cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1'
-			] if backend == 'ffmpeg' else ['soxi', '-D'] if backend == 'sox' else None
-	return float(subprocess.check_output(cmd + [audio_path]))
-
+	assert backend in [None, 'scipy', 'ffmpeg', 'sox']
+	
+	if (backend is None and audio_path.endswith('.wav')) or backend == 'scipy':
+		signal, sample_rate = read_audio(audio_path, sample_rate = None, dtype = None, mono = False, backend = 'scipy')
+		return signal.shape[-1] / sample_rate
+	
+	elif backend == 'ffmpeg':
+		cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1'] 
+		return float(subprocess.check_output(cmd + [audio_path]))
+	
+	elif backend == 'sox':
+		cmd = ['soxi', '-D']
+		return float(subprocess.check_output(cmd + [audio_path]))
 
 if __name__ == '__main__':
     import argparse

@@ -56,6 +56,8 @@ def convert_speaker_id(speaker_id, to_bipole = False, from_bipole = False):
 	return (speaker_id != 0) * (speaker_id * k + b)
 
 def select_speaker(signal : shaping.BT, kernel_size_smooth_silence : int, kernel_size_smooth_signal : int, kernel_size_smooth_speaker : int, silence_absolute_threshold : float = 0.2, silence_relative_threshold : float = 0.5, eps : float = 1e-9, normalization_percentile = 0.9) -> shaping.T:
+	#TODO: remove bipole processing, smooth every speaker, conditioned on the other speaker
+
 	assert len(signal) == 2
 
 	padding = kernel_size_smooth_signal // 2
