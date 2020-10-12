@@ -35,7 +35,7 @@ def setup(args):
 		dict = lambda logits,
 		log_probs,
 		olen,
-		**kwargs: (logits[0], olen[0])
+		**kwargs: (log_probs[0], logits[0], olen[0])
 	)
 	model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 	model = model.to(args.device)
@@ -52,9 +52,9 @@ def setup(args):
 		num_workers = args.num_workers,
 		topk = args.decoder_topk
 	)
-	segmentation_model = diarization.PyannoteDiarizationModel() if args.diarize else diarization.WebrtcSpeechActivityDetectionModel() if args.vad is not False else None
+	#segmentation_model = diarization.PyannoteDiarizationModel() if args.diarize else diarization.WebrtcSpeechActivityDetectionModel() if args.vad is not False else None
 
-	return labels, frontend, model, decoder, segmentation_model
+	return labels, frontend, model, decoder
 
 
 def main(args, ext_json = ['.json', '.json.gz']):
@@ -79,7 +79,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 	)
 	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
 
-	labels, frontend, model, decoder, segmentation_model = setup(args)
+	labels, frontend, model, decoder = setup(args)
 	val_dataset = datasets.AudioTextDataset(
 		data_paths, [labels],
 		args.sample_rate,
@@ -117,7 +117,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 		try:
 			tic = time.time()
 			y, ylen = y.to(args.device), ylen.to(args.device)
-			log_probs, olen = model(x.squeeze(1).to(args.device), xlen.to(args.device))
+			log_probs, logits, olen = model(x.squeeze(1).to(args.device), xlen.to(args.device))
 
 			decoded = decoder.decode(log_probs, olen)
 
@@ -272,6 +272,11 @@ def main(args, ext_json = ['.json', '.json.gz']):
 		if args.output_csv:
 			output_lines.append(csv_sep.join((audio_path, hyp, str(begin), str(end))) + '\n')
 
+		if args.logits:
+			logits_file_path = os.path.join(args.output_path, audio_name + '.pt')
+			torch.save([dict(audio_path = audio_path, logits = logits)], logits_file_path)
+		 	print('Logits saved:', logits_file_path)
+
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
 	if args.output_csv:
@@ -306,6 +311,7 @@ if __name__ == '__main__':
 	parser.add_argument('--beam-beta', type = float, default = 1.0)
 	parser.add_argument('--lm')
 	parser.add_argument('--align', action = 'store_true')
+	parser.add_argument('--logits', action = 'store_true')
 	parser.add_argument('--align-boundary-words', action = 'store_true')
 	parser.add_argument('--align-words', action = 'store_true')
 	parser.add_argument('--window-size-dilate', type = float, default = 1.0)

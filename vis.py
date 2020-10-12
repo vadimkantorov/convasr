@@ -189,6 +189,8 @@ def audio_data_uri(audio_path, sample_rate = None, audio_backend = 'scipy', audi
 		
 	return data_uri(audio_format = audio_format, audio_bytes = audio_bytes)
 
+def fmt_audio(audio_path, channel):
+	return f'<audio id="audio{channel}" style="width:100%" controls src="{audio_data_uri(audio_path)}"></audio>
 
 def label(output_path, transcript, info, page_size, prefix):
 	if isinstance(transcript, str):
@@ -284,7 +286,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	style = ' '.join(f'.speaker{i} {{background-color : {c}; }}' for i, c in enumerate(speaker_colors)) + ' '.join(f'.channel{i} {{background-color : {c}; }}' for i, c in enumerate(channel_colors)) + ' a {text-decoration: none;} .reference{opacity:0.4} .channel{margin:0px} .ok{background-color:green} .m0{margin:0px} .top{vertical-align:top}' 
 	
 	html.write(f'<html><head><meta charset="UTF-8"><style>{style}</style></head><body>')
-	html.writelines(map('<script>{}</script>\n'.format, [play_script, onclick_svg_script]))
+	html.write(f'<script>{play_script}{onclick_svg_script}</script>')
 	html.write(
 		f'<div style="overflow:auto"><h4 style="float:left">{audio_name}</h4><h5 style="float:right">0.000000</h5></div>'
 	)
@@ -324,36 +326,26 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 
 	html.write('<hr/><table style="width:100%">')
 	html.write(fmt_th())
-	html.writelines(fmt_tr(i, t in filtered_transcript, t, t.get('words', []), t.get('words_hyp', [t]), t.get('words_ref', [t]), t.get('channel', transcripts.channel_missing), t.get('speaker', transcripts.speaker_missing), t.get('speaker_name', 'speaker{}'.format(t.get('speaker', transcripts.speaker_missing))), t.get('cer', transcripts._er_missing)) for i, t in enumerate(transcripts.sort(transcript)))
+	html.writelines(fmt_tr(i, t in filtered_transcript, t, t.get('words', [t]), t.get('words_hyp', [t]), t.get('words_ref', [t]), t.get('channel', transcripts.channel_missing), t.get('speaker', transcripts.speaker_missing), t.get('speaker_name', 'speaker{}'.format(t.get('speaker', transcripts.speaker_missing))), t.get('cer', transcripts._er_missing)) for i, t in enumerate(transcripts.sort(transcript)))
 	html.write(f'</tbody></table><script>{subtitle_script}</script></body></html>')
 	return html_path
 
 
-def logits(logits, audio_name, MAX_ENTROPY = 1.0):
+def logits(lang, logits, audio_name, MAX_ENTROPY = 1.0):
 	good_audio_name = set(map(str.strip, open(audio_name[0])) if os.path.exists(audio_name[0]) else audio_name)
-	labels = datasets.Labels(ru)
+	labels = datasets.Labels(datasets.Language(lang))
 	decoder = decoders.GreedyDecoder()
 	tick_params = lambda ax, labelsize = 2.5, length = 0, **kwargs: ax.tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length, **kwargs) or [ax.set_linewidth(0) for ax in ax.spines.values()]
 	logits_path = logits + '.html'
 	html = open(logits_path, 'w')
-	html.write('''<html><meta charset="utf-8"/><body><script>
+	html.write(f'<html><meta charset="utf-8"/><body><script>{play_script}{onclick_img_script}</script>')
+	for i, t in enumerate(torch.load(logits)):
+		audio_path, y, logits = map(t.get, ['audio_path', 'y', 'logits'])
+		words = r.get('words', [t])
+		audio_name  = transcripts.audio_name(audio_path)
 
-function onclick_(evt)
-{
-	const img = evt.target;
-	const dim = img.getBoundingClientRect();
-	const t = (evt.clientX - dim.left) / dim.width;
-	const audio = img.nextSibling;
-	audio.currentTime = t * audio.duration;
-	audio.play();
-}
-	</script>''')
-	for r in torch.load(logits):
-		logits = r['logits']
-		if good_audio_name and r['audio_name'] not in good_audio_name:
+		if good_audio_name and audio_name not in good_audio_name:
 			continue
-
-		ref_aligned, hyp_aligned = r['alignment']['ref'], r['alignment']['hyp']
 
 		log_probs = F.log_softmax(logits, dim = 0)
 		entropy = models.entropy(log_probs, dim = 0, sum = False)
@@ -364,9 +356,9 @@ function onclick_(evt)
 
 		alignment = ctc.alignment(
 			log_probs.unsqueeze(0).permute(2, 0, 1),
-			r['y'].unsqueeze(0).long(),
+			y.unsqueeze(0).long(),
 			torch.LongTensor([log_probs.shape[-1]]),
-			torch.LongTensor([len(r['y'])]),
+			torch.LongTensor([len(y)]),
 			blank = len(log_probs) - 1
 		).squeeze(0)
 
@@ -414,7 +406,7 @@ function onclick_(evt)
 		tick_params(plt.gca())
 
 		ax = plt.gca().secondary_xaxis('top')
-		ref, ref_ = labels.decode(r['y'].tolist(), replace_blank = '.', replace_space = '_', replace_repeat = False), alignment
+		ref, ref_ = labels.decode(.tolist(), replace_blank = '.', replace_space = '_', replace_repeat = False), alignment
 		ax.set_xticklabels(ref)
 		ax.set_xticks(ref_)
 		tick_params(ax, colors = 'red')
@@ -431,14 +423,15 @@ function onclick_(evt)
 		plt.savefig(buf, format = 'jpg', dpi = 600)
 		plt.close()
 
-		html.write('<h4>{audio_name} | cer: {cer:.02f}</h4>'.format(**r))
-		html.write(fmt_alignment(r['words']))
+		html.write('<h4>{audio_name} | cer: {cer:.02f}</h4>'.format(audio_name = audio_name, cer = cer))
+		html.write(fmt_alignment(words))
 		html.write(
-			'<img onclick="onclick_(event)" style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(
+			'<img data-channel="{i}" onclick="onclick_img(event)" style="width:100%" src="data:image/jpeg;base64,{encoded}"></img>'.format(
 				encoded = base64.b64encode(buf.getvalue()).decode()
 			)
 		)
-		html.write('<audio style="width:100%" controls src="{audio_data_uri(r["audio_path"])}"></audio><hr/>')
+		html.write(fmt_audio(audio_path = audio_path, channel = i))
+		html.write('<hr/>')
 	html.write('</body></html>')
 	print('\n', logits_path)
 
@@ -770,6 +763,7 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('logits')
 	cmd.add_argument('logits')
 	cmd.add_argument('--audio-name', nargs = '*')
+	cmd.add_argument('--lang', default = 'ru')
 	cmd.set_defaults(func = logits)
 
 	cmd = subparsers.add_parser('audiosample')
