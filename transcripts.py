@@ -3,6 +3,14 @@ import torch
 import torch.nn.functional as F
 
 
+class Segment(dict):
+	pass
+
+
+class Transcript(list):
+	pass
+
+
 def strip(transcript, keys = []):
 	return [{k: v for k, v in t.items() if k not in keys} for t in transcript]
 
@@ -12,9 +20,17 @@ def strip(transcript, keys = []):
 #	channel_i_channel_j = torch.cat([(speech & _notspeech_[..., :-2]).nonzero(), (speech & _notspeech_[..., 2:]).nonzero()], dim = -1)
 #	return [dict(begin = i / sample_rate, end = j / sample_rate, channel = channel) for channel, i, _, j in channel_i_channel_j.tolist()]
 
+def tag_segments(segments, tag: str):
+	if isinstance(segments, list):
+		return [tag_segments(x, tag) for x in segments]
+	elif isinstance(segments, Segment):
+		segments[tag] = segments.pop('text')
+		return segments
+	else:
+		return segments
 
 def join(ref = [], hyp = []):
-	return ' '.join(t['ref'] for t in ref).strip() + ' '.join(t['hyp'] for t in hyp).strip()
+	return ' '.join(t['ref'].strip() for t in ref) + ' '.join(t['hyp'].strip() for t in hyp)
 
 
 def speaker(ref = None, hyp = None):

@@ -133,8 +133,12 @@ def apply_model(data_loader, model, generator, text_pipelines, device, oom_handl
 		entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, olen))
 		hyp = []
 		for pipeline, lp, o in zip(text_pipelines, log_probs, olen):
-			generated_transcripts = generator.generate(pipeline.tokenizer, lp, begin = 0.0, end = 0.0, output_lengths = o)
-			hyp.append([transcript[0].text for transcript in generated_transcripts])
+			generated_transcripts = generator.generate(pipeline.tokenizer,
+			                                           lp,
+			                                           begin = torch.zeros([lp.shape[0]], dtype = torch.float, device = 'cpu'),
+			                                           end = torch.zeros([lp.shape[0]], dtype = torch.float, device = 'cpu'),
+			                                           output_lengths = o)
+			hyp.append([transcript.join(transcript[0]) for transcript in generated_transcripts])
 
 		logits = list(map(models.unpad, logits, olen))
 		y = list(map(models.unpad, y, ylen))
@@ -387,19 +391,11 @@ def main(args):
 	if args.cudnn == 'benchmark':
 		torch.backends.cudnn.benchmark = True
 
-	text_config = json.load(open(args.text_config)) if os.path.exists(args.text_config) else {}
+	text_config = json.load(open(args.text_config))
 	lang = text_config['lang']
 	text_pipelines = []
 	for pipeline_name in args.text_pipelines:
-		pipeline_config = text_config['pipelines'][pipeline_name]
-		tokenizer_name = pipeline_config['tokenizer']
-		tokenizer_config = text_config['tokenizers'][tokenizer_name].copy()
-		tokenizer = getattr(tokenizers, tokenizer_config.pop('class'))(name = tokenizer_name, **tokenizer_config)
-		preprocessor_config = text_config['preprocess'][pipeline_config['preprocessor']]
-		preprocessor = language_processing.TextPreprocessor(**preprocessor_config)
-		postprocessor_config = text_config['postprocess'][pipeline_config['postprocessor']]
-		postprocessor = language_processing.TextPostprocessor(**postprocessor_config)
-		text_pipelines.append(language_processing.ProcessingPipeline(name = pipeline_name, tokenizer = tokenizer, preprocessor = preprocessor, postprocessor = postprocessor))
+		text_pipelines.append(language_processing.ProcessingPipeline.make(text_config, pipeline_name))
 
 	validation_postprocessors = {name: language_processing.TextPostprocessor(**config) for name, config in text_config['postprocess'].items()}
 

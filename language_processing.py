@@ -1,6 +1,6 @@
 import re
 import typing
-
+import tokenizers
 
 class Stemmer:
 	def __init__(self, lang: str = 'ru'):
@@ -15,6 +15,18 @@ class Stemmer:
 
 
 class ProcessingPipeline:
+	@staticmethod
+	def make(config, name):
+		pipeline_config = config['pipelines'][name]
+		tokenizer_name = pipeline_config['tokenizer']
+		tokenizer_config = config['tokenizers'][tokenizer_name].copy()
+		tokenizer = getattr(tokenizers, tokenizer_config.pop('class'))(name = tokenizer_name, **tokenizer_config)
+		preprocessor_config = config['preprocess'][pipeline_config['preprocessor']]
+		preprocessor = TextPreprocessor(**preprocessor_config)
+		postprocessor_config = config['postprocess'][pipeline_config['postprocessor']]
+		postprocessor = TextPostprocessor(**postprocessor_config)
+		return ProcessingPipeline(name = name, tokenizer = tokenizer, preprocessor = preprocessor, postprocessor = postprocessor)
+
 	def __init__(self, name: str, tokenizer, preprocessor, postprocessor):
 		self.name = name
 		self.tokenizer = tokenizer
@@ -28,10 +40,10 @@ class ProcessingPipeline:
 		return self.postprocessor(text)
 
 	def encode(self, sentences: typing.List[str], **kwargs) -> typing.List[typing.List[int]]:
-		return self.tokenizer.encode(sentences)
+		return self.tokenizer.encode(sentences, **kwargs)
 
 	def decode(self, sentences: typing.List[int], **kwargs) -> typing.List[typing.List[str]]:
-		return self.tokenizer.encode(sentences)
+		return self.tokenizer.decode(sentences, **kwargs)
 
 
 class TextProcessor:
