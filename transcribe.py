@@ -18,6 +18,7 @@ import ctc
 import transcripts
 import vis
 import utils
+import diarization
 import tokenizers
 import language_processing
 
@@ -59,16 +60,21 @@ def setup(args):
 	return text_pipeline, frontend, model, generator
 
 
-def main(args):
+def main(args, ext_json = ['.json', '.json.gz']):
 	utils.enable_jit_fusion()
 
 	assert args.output_json or args.output_html or args.output_txt or args.output_csv, \
 		'at least one of the output formats must be provided'
 	os.makedirs(args.output_path, exist_ok = True)
-	data_paths = [
+
+	audio_data_paths = set(
 		p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f])
 		if os.path.isfile(p) and any(map(p.endswith, args.ext))
-	] + [p for p in args.input_path if any(map(p.endswith, ['.json', '.json.gz']))]
+	)
+	json_data_paths = set(p for p in args.input_path if any(map(p.endswith, ext_json)) and not utils.strip_suffixes(p, ext_json) in audio_data_paths)
+
+	data_paths = list(audio_data_paths | json_data_paths)
+
 	exclude = set(
 		[os.path.splitext(basename)[0]
 			for basename in os.listdir(args.output_path)
@@ -92,6 +98,7 @@ def main(args):
 	)
 	num_examples = len(val_dataset)
 	print('Examples count: ', num_examples)
+	val_meta = val_dataset.pop_meta()
 	val_data_loader = torch.utils.data.DataLoader(
 		val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers
 	)
@@ -101,17 +108,19 @@ def main(args):
 	oom_handler = utils.OomHandler(max_retries = args.oom_retries)
 	for i, (meta, s, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
+		meta = [val_meta[t['example_id']] for t in meta]
 
-		meta = [val_dataset.meta.get(m['example_id']) for m in meta]
 		audio_path = meta[0]['audio_path']
+		begin_end = [dict(begin = t['begin'], end = t['end']) for t in meta]
+		audio_name = transcripts.audio_name(audio_path)
+		#TODO check logic
+		duration = x.shape[-1] / args.sample_rate
+		channel = [t['channel'] for t in meta]
+		speaker = [t.get('speaker', transcripts.speaker_missing) for t in meta]
 
 		if x.numel() == 0:
 			print(f'Skipping empty [{audio_path}].')
 			continue
-
-		begin = meta[0]['begin']
-		end = meta[0]['end']
-		audio_name = transcripts.audio_name(audio_path)
 
 		try:
 			tic = time.time()
@@ -122,19 +131,18 @@ def main(args):
 			print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
 			print(
 				'Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(
-					audio = sum(transcripts.compute_duration(t) for t in meta), processing = time.time() - tic
+					audio = sum(map(transcripts.compute_duration, meta)), processing = time.time() - tic
 				)
 			)
 
 			ts = (x.shape[-1] / args.sample_rate) * torch.linspace(0, 1, steps = log_probs.shape[-1])
 			ts = ts.unsqueeze(0).expand(x.shape[0], -1).to(log_probs.device)
-			channel = [t['channel'] for t in meta]
-			speaker = [t['speaker'] for t in meta]
+
 			ref_segments = [[
 				dict(
 					channel = channel[i],
-					begin = meta[i]['begin'],
-					end = meta[i]['end'],
+					begin = begin_end[i]['begin'],
+					end = begin_end[i]['end'],
 					ref = text_pipeline.postprocess(text_pipeline.preprocess(meta[i]['ref']))
 				)
 			] for i in range(len(meta))]
@@ -183,29 +191,41 @@ def main(args):
 
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic_alignment))
 
+		ref_transcript, hyp_transcript = [sorted(transcripts.flatten(segments), key = transcripts.sort_key) for segments in [ref_segments, hyp_segments]]
+
 		if args.max_segment_duration:
-			ref_transcript, hyp_transcript = [list(sorted(sum(segments, []), key = transcripts.sort_key)) for segments in [ref_segments, hyp_segments]]
 			if ref:
-				ref_segments = list(transcripts.segment(ref_transcript, args.max_segment_duration))
-				hyp_segments = list(transcripts.segment(hyp_transcript, ref_segments))
+				ref_segments = list(transcripts.segment_by_time(ref_transcript, args.max_segment_duration))
+				hyp_segments = list(transcripts.segment_by_ref(hyp_transcript, ref_segments))
 			else:
-				hyp_segments = list(transcripts.segment(hyp_transcript, args.max_segment_duration))
+				hyp_segments = list(transcripts.segment_by_time(hyp_transcript, args.max_segment_duration))
 				ref_segments = [[] for _ in hyp_segments]
+
+		elif args.join_transcript:
+			ref_segments = [[t] for t in sorted(transcripts.load(audio_path + '.json'), key = transcripts.sort_key)]
+			hyp_segments = list(transcripts.segment_by_ref(hyp_transcript, ref_segments, set_speaker = True, soft = False))
+			ref_transcript = transcripts.flatten(ref_segments)
+
+		has_ref = bool(transcripts.join(ref = transcripts.flatten(ref_segments)))
 
 		transcript = [
 			dict(
 				audio_path = audio_path,
 				ref = ref,
 				hyp = hyp,
-				speaker = transcripts.speaker(ref = ref_transcript, hyp = hyp_transcript),
-				cer = metrics.cer(hyp = hyp, ref = ref),
+				speaker_name = transcripts.speaker_name(ref = ref_transcript, hyp = hyp_transcript),
+
 				words = metrics.align_words(hyp = hyp, ref = ref)[-1] if args.align_words else [],
-				alignment = dict(ref = ref_transcript, hyp = hyp_transcript),
-				**transcripts.summary(hyp_transcript)
-			) for ref_transcript,
-			hyp_transcript in zip(ref_segments, hyp_segments) for ref,
-			hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]
+				words_ref = ref_transcript,
+				words_hyp = hyp_transcript,
+
+				**transcripts.summary(hyp_transcript),
+				**(dict(cer = metrics.cer(hyp = hyp, ref = ref)) if has_ref else {})
+
+			) for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments) for ref, hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]
 		]
+		transcripts.collect_speaker_names(transcript, set_speaker = True)
+
 		filtered_transcript = list(
 			transcripts.prune(
 				transcript,
@@ -223,8 +243,7 @@ def main(args):
 		if args.output_json:
 			transcript_path = os.path.join(args.output_path, audio_name + '.json')
 			print(transcript_path)
-			with open(transcript_path, 'w') as f:
-				json.dump(filtered_transcript, f, ensure_ascii = False, sort_keys = True, indent = 2)
+			transcripts.save(transcript_path, filtered_transcript)
 
 		if args.output_html:
 			transcript_path = os.path.join(args.output_path, audio_name + '.html')
@@ -237,8 +256,20 @@ def main(args):
 			with open(transcript_path, 'w') as f:
 				f.write(hyp)
 
-		if args.output_csv:
-			output_lines.append(csv_sep.join((audio_path, hyp, str(begin), str(end))) + '\n')
+		#if args.output_csv:
+		#	output_lines.append(csv_sep.join((audio_path, hyp, str(begin), str(end))) + '\n')
+
+		if args.logits:
+			logits_file_path = os.path.join(args.output_path, audio_name + '.pt')
+			if args.logits_crop:
+				begin_end = [dict(zip(['begin', 'end'], [t['begin'] + c / float(o) * (t['end'] - t['begin']) for c in args.logits_crop])) for o, t in zip(olen, begin_end)]
+				logits_crop = [slice(*args.logits_crop) for o in olen]
+			else:
+				logits_crop = [slice(int(o)) for o in olen]
+
+			# TODO: filter ref / hyp by channel?
+			torch.save([dict(audio_path = audio_path, logits = l[..., logits_crop[i]], **begin_end[i], ref = ref, hyp = hyp ) for i, l in enumerate(logits.cpu())], logits_file_path)
+			print(logits_file_path)
 
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
@@ -273,8 +304,8 @@ if __name__ == '__main__':
 	parser.add_argument('--beam-alpha', type = float, default = 0.3)
 	parser.add_argument('--beam-beta', type = float, default = 1.0)
 	parser.add_argument('--lm')
-	parser.add_argument('--vad', type = int, choices = [0, 1, 2, 3], default = False, nargs = '?')
 	parser.add_argument('--align', action = 'store_true')
+	parser.add_argument('--logits', action = 'store_true')
 	parser.add_argument('--align-boundary-words', action = 'store_true')
 	parser.add_argument('--align-words', action = 'store_true')
 	parser.add_argument('--window-size-dilate', type = float, default = 1.0)
@@ -291,6 +322,8 @@ if __name__ == '__main__':
 	parser.add_argument('--pack-backpointers', action = 'store_true')
 	parser.add_argument('--oom-retries', type = int, default = 3)
 	parser.add_argument('--dataset-string-array-encoding', default = 'utf_32_le', choices = ['utf_16_le', 'utf_32_le'])
+	parser.add_argument('--diarize', action = 'store_true')
+	parser.add_argument('--vad', type = int, choices = [0, 1, 2, 3], default = False, nargs = '?')
+	parser.add_argument('--logits-crop', type = int, nargs = 2, default = [])
 	args = parser.parse_args()
-	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)
