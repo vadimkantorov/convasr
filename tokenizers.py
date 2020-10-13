@@ -5,7 +5,7 @@ from collections import defaultdict
 
 
 class CharTokenizerLegacy:
-    def __init__(self, name: str, alphabet: str):
+    def __init__(self, alphabet: str):
         self.alphabet = alphabet
         self.unk_token = '*'
         self.punkt_token = '.'
@@ -14,10 +14,9 @@ class CharTokenizerLegacy:
         self.eps_token = '|'
         self.idx2char = list(alphabet) + [self.unk_token, self.punkt_token, self.repeat_token, self.space_token, self.eps_token]
 
-        unk_idx = self.idx2char.index(self.unk_token)
-        self.char2idx = defaultdict(lambda: unk_idx)
-        self.char2idx.update({char: idx for idx, char in enumerate(self.idx2char)})
+        self.char2idx = {char: idx for idx, char in enumerate(self.idx2char)}
 
+        self.unk_idx = self.char2idx[self.unk_token]
         self.space_id = self.char2idx[self.space_token]
         self.eps_id = self.char2idx[self.eps_token]
 
@@ -42,7 +41,7 @@ class CharTokenizerLegacy:
     def encode(self, sentences: typing.List[str], **kwargs) -> typing.List[typing.List[int]]:
         tokens = []
         for sentence in sentences:
-            tokens.append([self.char2idx[char] for char in sentence])
+            tokens.append([self.char2idx.get(char, self.unk_idx) for char in sentence])
         return tokens
 
     def decode(self, tokens: typing.Iterable[typing.List[int]], **kwargs) -> typing.List[str]:

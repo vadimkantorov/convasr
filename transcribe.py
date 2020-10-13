@@ -160,7 +160,8 @@ def main(args, ext_json = ['.json', '.json.gz']):
 			                                   end = torch.tensor([t['end'] for t in begin_end], dtype = torch.float, device = 'cpu'),
 			                                   output_lengths = olen,
 			                                   time_stamps = ts,
-			                                   segment_text_key = 'hyp')]
+			                                   segment_text_key = 'hyp',
+				                               segment_extra_info = [{'speaker': s, 'channel': c} for s,c in zip(speaker, channel)])]
 			#TODO call text_pipeline.postprocess for hyp texts
 			ref, hyp = '\n'.join(transcripts.join(ref = r) for r in ref_segments).strip(), '\n'.join(transcripts.join(hyp = h) for h in hyp_segments).strip()
 			if args.verbose:
@@ -187,7 +188,8 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				                                   end = torch.tensor([t['end'] for t in begin_end], dtype = torch.float, device = 'cpu'),
 				                                   output_lengths = ylen,
 				                                   time_stamps = aligned_ts,
-			                                       segment_text_key = 'ref')]
+			                                       segment_text_key = 'ref',
+				                                   segment_extra_info = [{'speaker': s, 'channel': c} for s,c in zip(speaker, channel)])]
 			oom_handler.reset()
 		except:
 			if oom_handler.try_recover(model.parameters()):

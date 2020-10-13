@@ -29,7 +29,7 @@ def load(data_path):
 	assert os.path.exists(data_path)
 
 	if data_path.endswith('.rttm'):
-		with open(file_path) as f:
+		with open(data_path) as f:
 			transcript = [dict(audio_name = splitted[1], begin = float(splitted[3]), end = float(splitted[3]) + float(splitted[4]), speaker_name = splitted[7]) for splitted in map(str.split, f)]
 
 	elif data_path.endswith('.json') or data_path.endswith('.json.gz'):
@@ -97,7 +97,7 @@ def collect_speaker_names(transcript, speaker_names = [], num_speakers = None, s
 
 		elif has_channel:
 			speaker_names_index = {default_channel_names[speaker] : speaker for speaker in [channel_missing] + list(range(num_speakers or 2))}
-			speaker_names = [default_channel_names[channel] for channel in range(num_channels)]
+			speaker_names = [default_channel_names[channel] for channel in range(num_speakers)]
 
 		elif has_speaker:
 			speaker_names = {t['speaker'] : default_speaker_names[t['speaker']] for t in transcript}
@@ -105,12 +105,12 @@ def collect_speaker_names(transcript, speaker_names = [], num_speakers = None, s
 			speaker_names[speaker_missing] = speaker_name_missing
 			speaker_names = [speaker_names.get(speaker, speaker_name_missing) for speaker in range(1 + max(speaker_names.values()))]
 
-	assert (not num_speakers) or len(speaker_names) >= 1 + num_speakers
+	#assert (not num_speakers) or len(speaker_names) >= 1 + num_speakers
 
 	if set_speaker and (not has_speaker):
 		for t in transcript:
-			speaker_name = t.get('speaker_name', default_channel_names[t.get('channel', channel_missing)])
-			t['speaker'] = speaker_names_index[speaker_name]
+			#speaker_name = t.get('speaker_name', default_channel_names[t.get('channel', channel_missing)])
+			t['speaker'] = speaker_missing#speaker_names_index[speaker_name]
 
 	return speaker_names
 

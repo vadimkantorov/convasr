@@ -140,7 +140,7 @@ def apply_model(data_loader, model, generator, text_pipelines, device, oom_handl
 			                                           output_lengths = o,
 			                                           time_stamps = None,
 			                                           segment_text_key = 'hyp')
-			hyp.append([transcript.join(hyp = transcript[0]) for transcript in generated_transcripts])
+			hyp.append([transcripts.join(hyp = alternatives[0]) for alternatives in generated_transcripts])
 
 		logits = list(map(models.unpad, logits, olen))
 		y = list(map(models.unpad, y, ylen))
@@ -927,12 +927,11 @@ if __name__ == '__main__':
 	parser.add_argument(
 		'--experiment-id',
 		default =
-		'{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{train_waveform_transform}_{train_feature_transform}_{bpe}_{experiment_name}'
+		'{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{train_waveform_transform}_{train_feature_transform}_{experiment_name}'
 	)
 	parser.add_argument('--experiment-name', '--name', default = '')
 	parser.add_argument('--comment', default = '')
 	parser.add_argument('--dry', action = 'store_true')
-	parser.add_argument('--lang', default = 'ru')
 	parser.add_argument('--val-waveform-transform-debug-dir', help = 'debug dir for augmented audio at validation')
 	parser.add_argument(
 		'--val-waveform-transform',

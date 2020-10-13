@@ -18,9 +18,8 @@ class ProcessingPipeline:
 	@staticmethod
 	def make(config, name):
 		pipeline_config = config['pipelines'][name]
-		tokenizer_name = pipeline_config['tokenizer']
-		tokenizer_config = config['tokenizers'][tokenizer_name].copy()
-		tokenizer = getattr(tokenizers, tokenizer_config.pop('class'))(name = tokenizer_name, **tokenizer_config)
+		tokenizer_config = config['tokenizers'][pipeline_config['tokenizer']].copy()
+		tokenizer = getattr(tokenizers, tokenizer_config.pop('class'))(**tokenizer_config)
 		preprocessor_config = config['preprocess'][pipeline_config['preprocessor']]
 		preprocessor = TextPreprocessor(**preprocessor_config)
 		postprocessor_config = config['postprocess'][pipeline_config['postprocessor']]
