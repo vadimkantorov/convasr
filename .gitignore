@@ -1,6 +1,7 @@
 # Data
 data/
 asr_experiments/
+asr_tests/
 scripts/experiments
 youtube/
 youtube_lowpass/

@@ -162,7 +162,11 @@ def du(input_path):
 	)
 
 
-def csv2json(input_path, gz, group, reset_begin_end, csv_sep, audio_name_pattern=None):
+def csv2json(input_path, gz, group, reset_begin_end, csv_sep, audio_name_pattern=None, new_sub_path=None,
+		debug_short_long_records_set_begin_end_from_name=False,
+		debug_short_long_records_reset_audio_path=False,
+		debug_short_long_records_clean_out_ref=False,
+		debug_short_long_records_output_path=None):
 	""" Convert cvs transcripts file to .csv.json transcripts file. Each line in `input_path` file must have format:
 		'audio_path,transcription,begin,end\n'
 		csv_sep could be 'comma', representing ',', or 'tab', representing '\t'.
@@ -174,12 +178,19 @@ def csv2json(input_path, gz, group, reset_begin_end, csv_sep, audio_name_pattern
 	)
 	# default is Kontur calls pattern, match example: '198.38-200.38_2.0_0_1582594487.376404.wav'
 
-	def duration(audio_name):
+	def begin_end(audio_name):
 		match = audio_name_regex.fullmatch(audio_name)
 		assert match is not None, f'audio_name {audio_name!r} must match {audio_name_regex.pattern}'
 		begin, end = float(match['begin']), float(match['end'])
 		assert begin < end < 10_000, 'sanity check: begin and end must be below 10_000 seconds'
+		return begin, end
+
+	def duration(audio_name):
+		begin, end = begin_end(audio_name)
 		return end - begin
+
+	def channel_then_recordid(audio_path):
+		return os.path.basename(audio_path).split('_')[-2] + '_' + os.path.basename(audio_path).split('_')[-1]
 
 	csv_sep = dict(tab = '\t', comma = ',')[csv_sep]
 	res = []
@@ -190,6 +201,17 @@ def csv2json(input_path, gz, group, reset_begin_end, csv_sep, audio_name_pattern
 		if reset_begin_end:
 			transcription['begin'] = 0.0
 			transcription['end'] = duration(os.path.basename(audio_path))
+		if debug_short_long_records_set_begin_end_from_name:
+			(begin, end) = begin_end(os.path.basename(audio_path))
+			transcription['begin'] = begin
+			transcription['end'] = end
+		if debug_short_long_records_reset_audio_path:
+			transcription['old_audio_path'] = audio_path
+			transcription['audio_path'] = os.path.join(new_sub_path if new_sub_path else os.path.join(*os.path.split(audio_path)[:-1]),
+					channel_then_recordid(audio_path))
+			transcription['audio_path'] = transcription['audio_path'].replace('short_records', 'long_records')
+		if debug_short_long_records_clean_out_ref:
+			transcription['ref'] = ''
 
 		# add input_path folder name to the 'group' key of each transcription
 		# todo: rename --group parameter to something more sensible!
@@ -197,8 +219,10 @@ def csv2json(input_path, gz, group, reset_begin_end, csv_sep, audio_name_pattern
 			transcription['group'] = audio_path.split('/')[group]
 		res.append(transcription)
 
-	output_path = input_path + '.json' + ('.gz' if gz else '')
-	json.dump(res, utils.open_maybe_gz(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	res.sort(key=lambda x: x['begin'])
+
+	output_path = (debug_short_long_records_output_path if debug_short_long_records_output_path else input_path) + '.json' + ('.gz' if gz else '')
+	json.dump(res, utils.open_maybe_gz(output_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = False)
 	print(output_path)
 
 
@@ -512,7 +536,11 @@ if __name__ == '__main__':
 	cmd.add_argument('--gzip', dest = 'gz', action = 'store_true')
 	cmd.add_argument('--group', type = int, default = 0)
 	cmd.add_argument('--reset-begin-end', action = 'store_true')
+	cmd.add_argument('--debug-short-long-records-set-begin-end-from-name', action = 'store_true')
+	cmd.add_argument('--debug-short-long-records-reset-audio-path', action = 'store_true')
+	cmd.add_argument('--debug-short-long-records-clean-out-ref', action = 'store_true')
 	cmd.add_argument('--audio-name-pattern', type = str, default = None)
+	cmd.add_argument('--new-sub-path', type = str, default = None)
 	cmd.add_argument('--csv-sep', default = 'tab', choices = ['tab', 'comma'])
 	cmd.set_defaults(func = csv2json)
 

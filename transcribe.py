@@ -36,7 +36,14 @@ def setup(args):
 	checkpoint['args'] = legacy_compatibility_fix(checkpoint['args'])
 	args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
 	frontend = models.LogFilterBankFrontend(
-		args.num_input_features, args.sample_rate, args.window_size, args.window_stride, args.window, eps = 1e-6
+			args.num_input_features,
+			args.sample_rate,
+			args.window_size,
+			args.window_stride,
+			args.window,
+			eps = 1e-6,
+			normalize_signal=args.normalize_signal,
+			debug_short_long_records_normalize_signal_multiplier=args.debug_short_long_records_normalize_signal_multiplier
 	)
 
 	text_config = json.load(open(checkpoint['args']['text_config']))
@@ -44,7 +51,7 @@ def setup(args):
 
 	model = getattr(models, args.model or checkpoint['args']['model'])(
 		args.num_input_features, [text_pipeline.tokenizer.vocab_size],
-		frontend = frontend,
+		frontend = frontend if args.frontend_in_model else None,
 		dict = lambda logits,
 		log_probs,
 		olen,
@@ -86,7 +93,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 	val_dataset = datasets.AudioTextDataset(
 		data_paths, [text_pipeline],
 		args.sample_rate,
-		frontend = None,
+		frontend = frontend if not args.frontend_in_model else None,
 		segmented = True,
 		mono = args.mono,
 		time_padding_multiple = args.batch_time_padding_multiple,
@@ -94,7 +101,8 @@ def main(args, ext_json = ['.json', '.json.gz']):
 		exclude = exclude,
 		max_duration = args.transcribe_first_n_sec,
 		join_transcript = args.join_transcript,
-		string_array_encoding = args.dataset_string_array_encoding
+		string_array_encoding = args.dataset_string_array_encoding,
+		debug_short_long_records_features_from_whole_normalized_signal = args.debug_short_long_records_features_from_whole_normalized_signal
 	)
 	num_examples = len(val_dataset)
 	print('Examples count: ', num_examples)
@@ -256,8 +264,9 @@ def main(args, ext_json = ['.json', '.json.gz']):
 			with open(transcript_path, 'w') as f:
 				f.write(hyp)
 
-		#if args.output_csv:
-		#	output_lines.append(csv_sep.join((audio_path, hyp, str(begin), str(end))) + '\n')
+		# if args.output_csv:
+		# 	[output_lines.append(csv_sep.join((audio_path, h, str(meta[i]['begin']), str(meta[i]['end']))) + '\n')
+		# 	 for i, h in enumerate(hyp.split('\n'))]
 
 		if args.logits:
 			logits_file_path = os.path.join(args.output_path, audio_name + '.pt')
@@ -322,8 +331,12 @@ if __name__ == '__main__':
 	parser.add_argument('--pack-backpointers', action = 'store_true')
 	parser.add_argument('--oom-retries', type = int, default = 3)
 	parser.add_argument('--dataset-string-array-encoding', default = 'utf_32_le', choices = ['utf_16_le', 'utf_32_le'])
+	parser.add_argument('--normalize-signal', action = 'store_true')
+	parser.add_argument('--debug-short-long-records-normalize-signal-multiplier', action = 'store_true')
+	parser.add_argument('--debug-short-long-records-features-from-whole-normalized-signal', action = 'store_true')
+	parser.add_argument('--frontend', type=str, default='LogFilterBankFrontend')
+	parser.add_argument('--frontend-in-model', type=lambda x: bool(int(x or 0)), nargs='?', const=True, default=True)
 	parser.add_argument('--diarize', action = 'store_true')
-	parser.add_argument('--vad', type = int, choices = [0, 1, 2, 3], default = False, nargs = '?')
 	parser.add_argument('--logits-crop', type = int, nargs = 2, default = [])
 	args = parser.parse_args()
 	main(args)
