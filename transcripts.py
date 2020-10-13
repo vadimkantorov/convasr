@@ -155,7 +155,7 @@ def take_between(transcript, ind_last_taken, t, first, last, sort_by_time = True
 
 	return ind_last_taken[-1], list(transcript)
 
-def segment_by_ref(transcript, ref_segments, soft = True, set_speaker = set_speaker):
+def segment_by_ref(transcript, ref_segments, soft = True, set_speaker = False):
 	ind_last_taken = -1
 	if len(ref_segments) == 0:
 		return []

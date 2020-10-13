@@ -133,12 +133,14 @@ def apply_model(data_loader, model, generator, text_pipelines, device, oom_handl
 		entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, olen))
 		hyp = []
 		for pipeline, lp, o in zip(text_pipelines, log_probs, olen):
-			generated_transcripts = generator.generate(pipeline.tokenizer,
-			                                           lp,
+			generated_transcripts = generator.generate(tokenizer = pipeline.tokenizer,
+			                                           log_probs = lp,
 			                                           begin = torch.zeros([lp.shape[0]], dtype = torch.float, device = 'cpu'),
 			                                           end = torch.zeros([lp.shape[0]], dtype = torch.float, device = 'cpu'),
-			                                           output_lengths = o)
-			hyp.append([transcript.join(transcript[0]) for transcript in generated_transcripts])
+			                                           output_lengths = o,
+			                                           time_stamps = None,
+			                                           segment_text_key = 'hyp')
+			hyp.append([transcript.join(hyp = transcript[0]) for transcript in generated_transcripts])
 
 		logits = list(map(models.unpad, logits, olen))
 		y = list(map(models.unpad, y, ylen))

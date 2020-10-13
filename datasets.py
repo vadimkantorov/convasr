@@ -119,7 +119,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				transcript.extend(example)
 				examples_lens.append(len(example))
 		
-		self.speaker_names = transcripts.collect_speaker_names(transcript, speaker_names = speaker_names, num_speakers = max_num_channels, set_speaker = True)
+		self.speaker_names = transcripts.collect_speaker_names(transcript, speaker_names = speaker_names or [], num_speakers = max_num_channels, set_speaker = True)
 
 		_print('Dataset construction time: ', time.time() - tic); tic = time.time()
 		

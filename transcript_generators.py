@@ -3,7 +3,14 @@ import typing
 import transcripts
 
 class GreedyCTCGenerator:
-	def generate(self, tokenizer, log_probs: shaping.BCt, begin: shaping.B, end: shaping.B, output_lengths: typing.Optional[shaping.B] = None, time_stamps: typing.Optional[shaping.Bt] = None) -> typing.List[typing.List[transcripts.Transcript]]:
+	def generate(self,
+	             tokenizer,
+	             log_probs: shaping.BCt,
+	             begin: shaping.B,
+	             end: shaping.B,
+	             output_lengths: typing.Optional[shaping.B] = None,
+	             time_stamps: typing.Optional[shaping.Bt] = None,
+	             segment_text_key = 'hyp') -> typing.List[typing.List[transcripts.Transcript]]:
 		_transcripts = []
 		most_probable_idx = log_probs.argmax(dim = 1)
 		for i in range(len(most_probable_idx)):
@@ -23,7 +30,9 @@ class GreedyCTCGenerator:
 				if sample_idx[t] == tokenizer.eps_id or sample_idx[t] == tokens[-1]:
 					continue
 				if tokenizer.is_start_word_token(sample_idx[t]) and sample_ts is not None:
-					segment = transcripts.Segment(text = tokenizer.decode([tokens[1:]])[0], begin = time_begin.item(), end = time_end.item())
+					segment = transcripts.Segment(begin = time_begin.item(),
+					                              end = time_end.item(),
+					                              **{segment_text_key: tokenizer.decode([tokens[1:]])[0]})
 					transcript.append(segment)
 					tokens = [tokenizer.eps_id, sample_idx[t]]
 					time_begin = begin[i] + sample_ts[t] if sample_ts is not None else begin[i]
@@ -32,7 +41,9 @@ class GreedyCTCGenerator:
 				time_end = begin[i] + sample_ts[t] if sample_ts is not None else end[i]
 
 			if len(tokens) > 1:
-				segment = transcripts.Segment(text = tokenizer.decode([tokens[1:]])[0], begin = time_begin.item(), end = time_end.item())
+				segment = transcripts.Segment(begin = time_begin.item(),
+				                              end = time_end.item(),
+				                              **{segment_text_key: tokenizer.decode([tokens[1:]])[0]})
 				transcript.append(segment)
 			_transcripts.append([transcript])
 		return _transcripts

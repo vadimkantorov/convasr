@@ -4,7 +4,6 @@
 # upstream ctc changes
 # gpu levenshtein, needleman/hirschberg
 
-import gc
 import os
 import time
 import json
@@ -18,8 +17,7 @@ import ctc
 import transcripts
 import vis
 import utils
-import diarization
-import tokenizers
+import shaping
 import language_processing
 
 def legacy_compatibility_fix(args: dict):
@@ -143,7 +141,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				)
 			)
 
-			ts = (x.shape[-1] / args.sample_rate) * torch.linspace(0, 1, steps = log_probs.shape[-1])
+			ts = duration * torch.linspace(0, 1, steps = log_probs.shape[-1])
 			ts = ts.unsqueeze(0).expand(x.shape[0], -1).to(log_probs.device)
 
 			ref_segments = [[
@@ -155,15 +153,15 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				)
 			] for i in range(len(meta))]
 			##TODO add channel and speaker into segments
-			hyp_segments = [_transcripts[0] for _transcripts in
-			                generator.generate(text_pipeline.tokenizer,
-			                                  log_probs,
-			                                  torch.tensor([m['begin'] for m in meta], dtype = torch.float, device = 'cpu'),
-			                                  torch.tensor([m['end'] for m in meta], dtype = torch.float, device = 'cpu'),
-			                                  olen,
-			                                  ts)]
-			hyp_segments = transcripts.tag_segments(hyp_segments, 'hyp')
-
+			hyp_segments = [alternatives[0] for alternatives in
+			                generator.generate(tokenizer = text_pipeline.tokenizer,
+			                                   log_probs = log_probs,
+			                                   begin = torch.tensor([t['begin'] for t in begin_end], dtype = torch.float, device = 'cpu'),
+			                                   end = torch.tensor([t['end'] for t in begin_end], dtype = torch.float, device = 'cpu'),
+			                                   output_lengths = olen,
+			                                   time_stamps = ts,
+			                                   segment_text_key = 'hyp')]
+			#TODO call text_pipeline.postprocess for hyp texts
 			ref, hyp = '\n'.join(transcripts.join(ref = r) for r in ref_segments).strip(), '\n'.join(transcripts.join(hyp = h) for h in hyp_segments).strip()
 			if args.verbose:
 				print('HYP:', hyp)
@@ -179,16 +177,17 @@ def main(args, ext_json = ['.json', '.json.gz']):
 					blank = text_pipeline.tokenizer.eps_id,
 					pack_backpointers = args.pack_backpointers
 				)
-				aligned_ts = ts.gather(1, alignment)
-				##TODO add channel and speaker into segments
-				ref_segments = [_transcripts[0] for _transcripts in
-				                generator.generate(text_pipeline.tokenizer,
-				                                   torch.nn.functional.one_hot(y[:, 0, :], num_classes = log_probs.shape[1]).permute(0, 2, 1),
-				                                   torch.tensor([m['begin'] for m in meta], dtype = torch.float, device = 'cpu'),
-				                                   torch.tensor([m['end'] for m in meta], dtype = torch.float, device = 'cpu'),
-				                                   ylen,
-				                                   aligned_ts)]
-				ref_segments = transcripts.tag_segments(ref_segments, 'ref')
+				aligned_ts: shaping.Bt = ts.gather(1, alignment)
+				## TODO add channel and speaker into segments
+				## TODO call text_pipeline.postprocess for ref texts
+				ref_segments = [alternatives[0] for alternatives in
+				                generator.generate(tokenizer = text_pipeline.tokenizer,
+				                                   log_probs = torch.nn.functional.one_hot(y[:, 0, :], num_classes = log_probs.shape[1]).permute(0, 2, 1),
+				                                   begin = torch.tensor([t['begin'] for t in begin_end], dtype = torch.float, device = 'cpu'),
+				                                   end = torch.tensor([t['end'] for t in begin_end], dtype = torch.float, device = 'cpu'),
+				                                   output_lengths = ylen,
+				                                   time_stamps = aligned_ts,
+			                                       segment_text_key = 'ref')]
 			oom_handler.reset()
 		except:
 			if oom_handler.try_recover(model.parameters()):
@@ -212,26 +211,29 @@ def main(args, ext_json = ['.json', '.json.gz']):
 		elif args.join_transcript:
 			ref_segments = [[t] for t in sorted(transcripts.load(audio_path + '.json'), key = transcripts.sort_key)]
 			hyp_segments = list(transcripts.segment_by_ref(hyp_transcript, ref_segments, set_speaker = True, soft = False))
-			ref_transcript = transcripts.flatten(ref_segments)
 
 		has_ref = bool(transcripts.join(ref = transcripts.flatten(ref_segments)))
 
-		transcript = [
-			dict(
-				audio_path = audio_path,
-				ref = ref,
-				hyp = hyp,
-				speaker_name = transcripts.speaker_name(ref = ref_transcript, hyp = hyp_transcript),
+		transcript = []
+		for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments):
+			ref = transcripts.join(ref = ref_transcript)
+			hyp = transcripts.join(hyp = hyp_transcript)
+			transcript.append(
+				dict(
+					audio_path = audio_path,
+					ref = ref,
+					hyp = hyp,
+					speaker_name = transcripts.speaker_name(ref = ref_transcript, hyp = hyp_transcript),
 
-				words = metrics.align_words(hyp = hyp, ref = ref)[-1] if args.align_words else [],
-				words_ref = ref_transcript,
-				words_hyp = hyp_transcript,
+					words = metrics.align_words(_hyp_ = hyp, _ref_ = ref)[-1] if args.align_words else [],
+					words_ref = ref_transcript,
+					words_hyp = hyp_transcript,
 
-				**transcripts.summary(hyp_transcript),
-				**(dict(cer = metrics.cer(hyp = hyp, ref = ref)) if has_ref else {})
+					**transcripts.summary(hyp_transcript),
+					**(dict(cer = metrics.cer(hyp = hyp, ref = ref)) if has_ref else {})
+				)
+			)
 
-			) for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments) for ref, hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]
-		]
 		transcripts.collect_speaker_names(transcript, set_speaker = True)
 
 		filtered_transcript = list(
