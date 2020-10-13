@@ -75,7 +75,7 @@ def remap_speaker(transcript, speaker_perm):
 	speaker_names = collect_speaker_names(transcript, num_speakers = len(speaker_perm) - 1)
 	for t in transcript:
 		speaker_ = speaker_perm[t['speaker']]
-		t['speaker'], t['speaker_name'] = speaker_, speaker_names_[speaker_]
+		t['speaker'], t['speaker_name'] = speaker_, speaker_names[speaker_]
 
 
 def collect_speaker_names(transcript, speaker_names = [], num_speakers = None, set_speaker = False):
