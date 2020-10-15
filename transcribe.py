@@ -20,18 +20,9 @@ import utils
 import shaping
 import language_processing
 
-def legacy_compatibility_fix(args: dict):
-	if 'lang' in args and args['lang'] == 'ru':
-		args['text_config'] = 'configs/ru_text_config.json'
-		args['text_pipelines'] = ['char_legacy']
-	else:
-		raise RuntimeError('"args.lang" no supported more, manually add "text_config" and "text_pipelines" properties to your checkpoint')
-	return args
-
 def setup(args):
 	torch.set_grad_enabled(False)
 	checkpoint = torch.load(args.checkpoint, map_location = 'cpu')
-	checkpoint['args'] = legacy_compatibility_fix(checkpoint['args'])
 	args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
 	frontend = models.LogFilterBankFrontend(
 			args.num_input_features,
@@ -44,8 +35,9 @@ def setup(args):
 			debug_short_long_records_normalize_signal_multiplier=args.debug_short_long_records_normalize_signal_multiplier
 	)
 
-	text_config = json.load(open(checkpoint['args']['text_config']))
-	text_pipeline = language_processing.ProcessingPipeline.make(text_config, checkpoint['args']['text_pipelines'][0])
+	# for legacy compat
+	text_config = json.load(open(checkpoint['args'].get('text_config', args.text_config)))
+	text_pipeline = language_processing.ProcessingPipeline.make(text_config, checkpoint['args'].get('text_pipelines', args.text_pipelines)[0])
 
 	model = getattr(models, args.model or checkpoint['args']['model'])(
 		args.num_input_features, [text_pipeline.tokenizer.vocab_size],
@@ -118,6 +110,8 @@ def main(args, ext_json = ['.json', '.json.gz']):
 
 		audio_path = meta[0]['audio_path']
 		begin_end = [dict(begin = t['begin'], end = t['end']) for t in meta]
+		begin = torch.tensor([t['begin'] for t in begin_end], dtype = torch.float)	
+		end = torch.tensor([t['end'] for t in begin_end], dtype = torch.float)	
 		audio_name = transcripts.audio_name(audio_path)
 		#TODO check logic
 		duration = x.shape[-1] / args.sample_rate
@@ -141,8 +135,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				)
 			)
 
-			ts = duration * torch.linspace(0, 1, steps = log_probs.shape[-1])
-			ts = ts.unsqueeze(0).expand(x.shape[0], -1).to(log_probs.device)
+			ts = duration * torch.linspace(0, 1, steps = log_probs.shape[-1], device = log_probs.device).unsqueeze(0).expand(x.shape[0], -1)
 
 			ref_segments = [[
 				dict(
@@ -152,21 +145,21 @@ def main(args, ext_json = ['.json', '.json.gz']):
 					ref = text_pipeline.postprocess(text_pipeline.preprocess(meta[i]['ref']))
 				)
 			] for i in range(len(meta))]
-			##TODO add channel and speaker into segments
 			hyp_segments = [alternatives[0] for alternatives in
 			                generator.generate(tokenizer = text_pipeline.tokenizer,
 			                                   log_probs = log_probs,
-			                                   begin = torch.tensor([t['begin'] for t in begin_end], dtype = torch.float, device = 'cpu'),
-			                                   end = torch.tensor([t['end'] for t in begin_end], dtype = torch.float, device = 'cpu'),
+			                                   begin = begin,
+			                                   end = end,
 			                                   output_lengths = olen,
 			                                   time_stamps = ts,
 			                                   segment_text_key = 'hyp',
-				                               segment_extra_info = [{'speaker': s, 'channel': c} for s,c in zip(speaker, channel)])]
+				                               segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
 			#TODO call text_pipeline.postprocess for hyp texts
-			ref, hyp = '\n'.join(transcripts.join(ref = r) for r in ref_segments).strip(), '\n'.join(transcripts.join(hyp = h) for h in hyp_segments).strip()
+			hyp, ref = '\n'.join(transcripts.join(hyp = h) for h in hyp_segments).strip(), '\n'.join(transcripts.join(ref = r) for r in ref_segments).strip()
+			hyp, ref = map(text_pipeline.postprocess, [hyp, ref])
 			if args.verbose:
 				print('HYP:', hyp)
-			print('CER: {cer:.02%}'.format(cer = metrics.cer(hyp=hyp, ref=ref)))
+			print('CER: {cer:.02%}'.format(cer = metrics.cer(hyp = hyp, ref = ref)))
 
 			tic_alignment = time.time()
 			if args.align and y.numel() > 0:
@@ -179,17 +172,16 @@ def main(args, ext_json = ['.json', '.json.gz']):
 					pack_backpointers = args.pack_backpointers
 				)
 				aligned_ts: shaping.Bt = ts.gather(1, alignment)
-				## TODO add channel and speaker into segments
 				## TODO call text_pipeline.postprocess for ref texts
 				ref_segments = [alternatives[0] for alternatives in
 				                generator.generate(tokenizer = text_pipeline.tokenizer,
 				                                   log_probs = torch.nn.functional.one_hot(y[:, 0, :], num_classes = log_probs.shape[1]).permute(0, 2, 1),
-				                                   begin = torch.tensor([t['begin'] for t in begin_end], dtype = torch.float, device = 'cpu'),
-				                                   end = torch.tensor([t['end'] for t in begin_end], dtype = torch.float, device = 'cpu'),
+				                                   begin = begin,
+				                                   end = end,
 				                                   output_lengths = ylen,
 				                                   time_stamps = aligned_ts,
 			                                       segment_text_key = 'ref',
-				                                   segment_extra_info = [{'speaker': s, 'channel': c} for s,c in zip(speaker, channel)])]
+				                                   segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
 			oom_handler.reset()
 		except:
 			if oom_handler.try_recover(model.parameters()):
@@ -210,16 +202,18 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				hyp_segments = list(transcripts.segment_by_time(hyp_transcript, args.max_segment_duration))
 				ref_segments = [[] for _ in hyp_segments]
 
-		elif args.join_transcript:
-			ref_segments = [[t] for t in sorted(transcripts.load(audio_path + '.json'), key = transcripts.sort_key)]
+		elif args.ref_transcript_path and args.join_transcript:
+			audio_name_hack = audio_name.split('.')[0]  
+			ref_segments = [[t] for t in sorted(transcripts.load(os.path.join(args.ref_transcript_path, audio_name_hack + '.json')), key = transcripts.sort_key)]
 			hyp_segments = list(transcripts.segment_by_ref(hyp_transcript, ref_segments, set_speaker = True, soft = False))
 
 		has_ref = bool(transcripts.join(ref = transcripts.flatten(ref_segments)))
 
 		transcript = []
-		for ref_transcript, hyp_transcript in zip(ref_segments, hyp_segments):
-			ref = transcripts.join(ref = ref_transcript)
-			hyp = transcripts.join(hyp = hyp_transcript)
+		for hyp_transcript, ref_transcript in zip(hyp_segments, ref_segments):
+			hyp_transcript, ref_transcript = transcripts.map_text(text_pipeline.postprocess, hyp = hyp_transcript), transcripts.map_text(text_pipeline.postprocess, ref = ref_transcript)
+			hyp, ref = transcripts.join(hyp = hyp_transcript), transcripts.join(ref = ref_transcript)
+
 			transcript.append(
 				dict(
 					audio_path = audio_path,
@@ -227,7 +221,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 					hyp = hyp,
 					speaker_name = transcripts.speaker_name(ref = ref_transcript, hyp = hyp_transcript),
 
-					words = metrics.align_words(_hyp_ = hyp, _ref_ = ref)[-1] if args.align_words else [],
+					words = metrics.align_words(*metrics.align_strings(hyp = hyp, ref = ref)) if args.align_words else [],
 					words_ref = ref_transcript,
 					words_hyp = hyp_transcript,
 
@@ -340,7 +334,9 @@ if __name__ == '__main__':
 	parser.add_argument('--debug-short-long-records-features-from-whole-normalized-signal', action = 'store_true')
 	parser.add_argument('--frontend', type=str, default='LogFilterBankFrontend')
 	parser.add_argument('--frontend-in-model', type=lambda x: bool(int(x or 0)), nargs='?', const=True, default=True)
-	parser.add_argument('--diarize', action = 'store_true')
 	parser.add_argument('--logits-crop', type = int, nargs = 2, default = [])
+	parser.add_argument('--text-config', default = 'configs/ru_text_config.json')
+	parser.add_argument('--text-pipelines', nargs = '+', help = 'text processing pipelines (names should be defined in text-config)', default = ['char_legacy'])
+	parser.add_argument('--ref-transcript-path')
 	args = parser.parse_args()
 	main(args)

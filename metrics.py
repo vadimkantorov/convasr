@@ -250,7 +250,8 @@ def quantiles(vals):
 
 
 def align_words(_hyp_ : str, _ref_: str, word_tagger : WordTagger = WordTagger(), error_tagger : ErrorTagger = ErrorTagger(), postproc : bool = True, compute_cer : bool = False) -> typing.Tuple[str, str, typing.List[dict]]:
-	# _hyp_, _ref_ below stand for a pair of aligned strings, len(_hyp_) == len(_ref_)
+	# _hyp_, _ref_ below stand for a pair of aligned strings
+	assert len(_hyp_) == len(_ref_)
 
 	def split_by_space_into_word_pairs(*, _hyp_ : str, _ref_ : str, copy_space = False) -> typing.List[typing.Tuple[str, str]]:
 		assert len(_hyp_) == len(_ref_)

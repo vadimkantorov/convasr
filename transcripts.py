@@ -25,6 +25,9 @@ class Transcript(list):
 def flatten(segments):
 	return utils.flatten(segments)
 
+def map_text(postprocess, hyp = [], ref = []):
+	return [dict(**t, hyp = postprocess(t['hyp'])) for t in hyp] + [dict(**t, ref = postprocess(t['ref'])) for t in ref]
+
 def load(data_path):
 	assert os.path.exists(data_path)
 
@@ -88,29 +91,30 @@ def collect_speaker_names(transcript, speaker_names = [], num_speakers = None, s
 	for t in transcript:
 		has_speaker &= t.get('speaker') is not None
 		has_speaker_names &= bool(t.get('speaker_name'))
-		has_channel &= t.get('channel', channel_missing) != channel_missing
 
+	# assumes that either all have speaker | all have speaker_name
 	if not speaker_names:
-		if has_speaker_names:
-			speaker_names = [speaker_name_missing] + sorted(set(t['speaker_name'] for t in transcript))
-			speaker_names_index = {speaker_name_missing : speaker_missing, **{speaker_name : i for i, speaker_name in enumerate(speaker_names)}}
-
-		elif has_channel:
-			speaker_names_index = {default_channel_names[speaker] : speaker for speaker in [channel_missing] + list(range(num_speakers or 2))}
-			speaker_names = [default_channel_names[channel] for channel in range(num_speakers)]
-
-		elif has_speaker:
+		if has_speaker:
 			speaker_names = {t['speaker'] : default_speaker_names[t['speaker']] for t in transcript}
 			assert speaker_missing not in speaker_names
 			speaker_names[speaker_missing] = speaker_name_missing
 			speaker_names = [speaker_names.get(speaker, speaker_name_missing) for speaker in range(1 + max(speaker_names.values()))]
+		
+		elif has_speaker_names:
+			speaker_names = [speaker_name_missing] + sorted(set(t['speaker_name'] for t in transcript))
+			speaker_names_index = {speaker_name_missing : speaker_missing, **{speaker_name : i for i, speaker_name in enumerate(speaker_names)}}
 
-	#assert (not num_speakers) or len(speaker_names) >= 1 + num_speakers
+		else:
+			speaker_names_index = {default_channel_names[speaker] : speaker for speaker in [channel_missing] + list(range(num_speakers or 2))}
+			speaker_names = [default_channel_names[channel] for channel in range(num_speakers)]
 
 	if set_speaker and (not has_speaker):
 		for t in transcript:
-			#speaker_name = t.get('speaker_name', default_channel_names[t.get('channel', channel_missing)])
-			t['speaker'] = speaker_missing#speaker_names_index[speaker_name]
+			speaker_name = t.get('speaker_name', default_channel_names[t.get('channel', channel_missing)])
+			t['speaker'] = speaker_names_index[speaker_name]
+
+	if num_speakers is not None and len(speaker_names) < 1 + num_speakers:
+		speaker_names.extend(f'speaker{speaker}' for speaker in range(len(speaker_names), 1 + num_speakers))
 
 	return speaker_names
 

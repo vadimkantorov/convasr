@@ -137,7 +137,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			self.meta = { self.example_id(t) : t for t in transcript }
 			if self.join_transcript:
 				#TODO: harmonize dummy transcript of replace_transcript case (and fix channel)
-				self.meta.update({ self.example_id(t_src) : t_tgt for e in examples_filtered for t_src, t_tgt in [(dict(audio_path = e[0]['audio_path'], begin = transcripts.time_missing, end = transcripts.time_missing, channel = transcripts.channel_missing, speaker = transcripts.speaker_missing), dict(audio_path = e[0]['audio_path'], begin = 0.0, end = audio.compute_duration(e[0]['audio_path'], backend = None), channel = transcripts.channel_missing, speaker = transcripts.speaker_missing))]})
+				self.meta.update({ self.example_id(t_src) : t_tgt for e in examples_filtered for t_src, t_tgt in [(dict(audio_path = e[0]['audio_path'], begin = transcripts.time_missing, end = transcripts.time_missing, channel = transcripts.channel_missing, speaker = transcripts.speaker_missing), dict(audio_path = e[0]['audio_path'], begin = 0.0, end = audio.compute_duration(e[0]['audio_path'], backend = None), channel = transcripts.channel_missing, speaker = transcripts.speaker_missing, ref = ' '.join(filter(bool, [t.get('ref', '') for t in e])) ))] })
 
 		_print('Dataset tensors creation time: ', time.time() - tic)
 
