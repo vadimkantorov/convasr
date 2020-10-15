@@ -26,7 +26,7 @@ def flatten(segments):
 	return utils.flatten(segments)
 
 def map_text(postprocess, hyp = [], ref = []):
-	return [dict(**t, hyp = postprocess(t['hyp'])) for t in hyp] + [dict(**t, ref = postprocess(t['ref'])) for t in ref]
+	return [dict(t, hyp = postprocess(t.get('hyp', ''))) for t in hyp] + [dict(t, ref = postprocess(t.get('ref', ''))) for t in ref]
 
 def load(data_path):
 	assert os.path.exists(data_path)

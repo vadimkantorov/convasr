@@ -203,7 +203,8 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				ref_segments = [[] for _ in hyp_segments]
 
 		elif args.ref_transcript_path and args.join_transcript:
-			audio_name_hack = audio_name.split('.')[0]  
+			audio_name_hack = audio_name.split('.')[0]
+			#TODO: normalize ref field
 			ref_segments = [[t] for t in sorted(transcripts.load(os.path.join(args.ref_transcript_path, audio_name_hack + '.json')), key = transcripts.sort_key)]
 			hyp_segments = list(transcripts.segment_by_ref(hyp_transcript, ref_segments, set_speaker = True, soft = False))
 
