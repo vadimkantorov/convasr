@@ -220,3 +220,62 @@ bash scripts/read_audio_performance.sh
 [Docs](https://nikvaessen.github.io/jekyll/update/2017/08/24/gsoc2017_work_product_submission.html)
 
 [Configuration](https://github.com/jitsi/jigasi#using-jigasi-to-transcribe-a-jitsi-meet-conference)
+
+# Text processing dataflow
+
+All text processing are packed into pipelines. 
+
+`pipeline` is an object that implements methods:
+1. `preprocess(text: str) -> str` method for text preprocessing
+2. `postprocess(text: str) -> str` method for text postprocessing (assumed that input was preprocessed)
+3. `encode(texts: List[str]) -> List[List[int]]` method to convert texts into tokens
+4. `decode(texts: List[List[int]]) -> List[str]` method to convert tokens into texts
+
+
+## Train/Metrics
+
+dataset.py:
+1. Read `REF` and store it into `meta` dict of dataset example.
+2. Make `TARGET` for model training. 
+
+`REF -> pipeline.preprocess -> pipeline.encode -> TARGET`
+
+train.py:
+3. Get `log_probs` from model.
+4. Get `transcrips` from generator.
+5. Built `HYP` by concatenation of transcript segments.
+6. Apply `pipeline.preprocess` to REF. It is necessary for validation, because future postprocessing in validation assumed that text was preprocessed.
+
+`REF -> pipeline.preprocess -> REF`
+
+metrics.py:
+7. Apply `pipeline.postprocess` to both HYP and REF. 
+
+`HYP -> pipeline.postprocess -> HYP`
+`REF -> pipeline.postprocess -> REF`
+
+8. If val_config contains some additional postprocessor apply it to both HYP and REF.
+
+`HYP -> postprocessor -> HYP`
+`REF -> postprocessor -> REF`
+
+9. Compute metrics in according with config. 
+
+## Transcribe
+
+dataset.py:
+1. Read `REF` and store it into `meta` dict of dataset example.
+transcribe.py
+3. Get `log_probs` from model.
+4. Get `transcrips` from generator.
+5. Built `HYP` by concatenation of transcript segments.
+6. Apply `pipeline.preprocess` to REF.
+
+`REF -> pipeline.preprocess -> REF`
+
+7. Apply `pipeline.postprocess` to both HYP and REF. 
+
+`HYP -> pipeline.postprocess -> HYP`
+`REF -> pipeline.postprocess -> REF`
+
+8. Write `HYP` and `REF` into file.
