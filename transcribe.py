@@ -4,7 +4,6 @@
 # upstream ctc changes
 # gpu levenshtein, needleman/hirschberg
 
-import gc
 import os
 import time
 import json
@@ -13,19 +12,20 @@ import torch
 import datasets
 import models
 import metrics
-import decoders
+import transcript_generators
 import ctc
 import transcripts
 import vis
 import utils
-
+import shaping
+import language_processing
 
 def setup(args):
 	torch.set_grad_enabled(False)
 	checkpoint = torch.load(args.checkpoint, map_location = 'cpu')
 	args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
 	frontend = models.LogFilterBankFrontend(
-		args.num_input_features,
+			args.num_input_features,
 			args.sample_rate,
 			args.window_size,
 			args.window_stride,
@@ -35,15 +35,17 @@ def setup(args):
 			debug_short_long_records_normalize_signal_multiplier=args.debug_short_long_records_normalize_signal_multiplier
 	)
 
-	labels = datasets.Labels(datasets.Language(checkpoint['args']['lang']), name = 'char')
+	# for legacy compat
+	text_config = json.load(open(checkpoint['args'].get('text_config', args.text_config)))
+	text_pipeline = language_processing.ProcessingPipeline.make(text_config, checkpoint['args'].get('text_pipelines', args.text_pipelines)[0])
 
 	model = getattr(models, args.model or checkpoint['args']['model'])(
-		args.num_input_features, [len(labels)],
+		args.num_input_features, [text_pipeline.tokenizer.vocab_size],
 		frontend = frontend if args.frontend_in_model else None,
 		dict = lambda logits,
 		log_probs,
 		olen,
-		**kwargs: (logits[0], olen[0])
+		**kwargs: (log_probs[0], logits[0], olen[0])
 	)
 	model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 	model = model.to(args.device)
@@ -51,28 +53,25 @@ def setup(args):
 	model.fuse_conv_bn_eval()
 	if args.device != 'cpu':
 		model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16)
-	decoder = decoders.GreedyDecoder() if args.decoder == 'GreedyDecoder' else decoders.BeamSearchDecoder(
-		labels,
-		lm_path = args.lm,
-		beam_width = args.beam_width,
-		beam_alpha = args.beam_alpha,
-		beam_beta = args.beam_beta,
-		num_workers = args.num_workers,
-		topk = args.decoder_topk
-	)
-	return labels, frontend, model, decoder
+	generator = transcript_generators.GreedyCTCGenerator()
+	return text_pipeline, frontend, model, generator
 
 
-def main(args):
+def main(args, ext_json = ['.json', '.json.gz']):
 	utils.enable_jit_fusion()
 
 	assert args.output_json or args.output_html or args.output_txt or args.output_csv, \
 		'at least one of the output formats must be provided'
 	os.makedirs(args.output_path, exist_ok = True)
-	data_paths = [
+
+	audio_data_paths = set(
 		p for f in args.input_path for p in ([os.path.join(f, g) for g in os.listdir(f)] if os.path.isdir(f) else [f])
 		if os.path.isfile(p) and any(map(p.endswith, args.ext))
-	] + [p for p in args.input_path if any(map(p.endswith, ['.json', '.json.gz']))]
+	)
+	json_data_paths = set(p for p in args.input_path if any(map(p.endswith, ext_json)) and not utils.strip_suffixes(p, ext_json) in audio_data_paths)
+
+	data_paths = list(audio_data_paths | json_data_paths)
+
 	exclude = set(
 		[os.path.splitext(basename)[0]
 			for basename in os.listdir(args.output_path)
@@ -80,9 +79,9 @@ def main(args):
 	)
 	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
 
-	labels, frontend, model, decoder = setup(args)
+	text_pipeline, frontend, model, generator = setup(args)
 	val_dataset = datasets.AudioTextDataset(
-		data_paths, [labels],
+		data_paths, [text_pipeline],
 		args.sample_rate,
 		frontend = frontend if not args.frontend_in_model else None,
 		segmented = True,
@@ -97,6 +96,7 @@ def main(args):
 	)
 	num_examples = len(val_dataset)
 	print('Examples count: ', num_examples)
+	val_meta = val_dataset.pop_meta()
 	val_data_loader = torch.utils.data.DataLoader(
 		val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers
 	)
@@ -106,99 +106,82 @@ def main(args):
 	oom_handler = utils.OomHandler(max_retries = args.oom_retries)
 	for i, (meta, s, x, xlen, y, ylen) in enumerate(val_data_loader):
 		print(f'Processing: {i}/{num_examples}')
+		meta = [val_meta[t['example_id']] for t in meta]
 
-		meta = [val_dataset.meta.get(m['example_id']) for m in meta]
 		audio_path = meta[0]['audio_path']
+		begin_end = [dict(begin = t['begin'], end = t['end']) for t in meta]
+		begin = torch.tensor([t['begin'] for t in begin_end], dtype = torch.float)	
+		end = torch.tensor([t['end'] for t in begin_end], dtype = torch.float)	
+		audio_name = transcripts.audio_name(audio_path)
+		#TODO check logic
+		duration = x.shape[-1] / args.sample_rate
+		channel = [t['channel'] for t in meta]
+		speaker = [t.get('speaker', transcripts.speaker_missing) for t in meta]
 
 		if x.numel() == 0:
 			print(f'Skipping empty [{audio_path}].')
 			continue
 
-		begin = meta[0]['begin']
-		end = meta[0]['end']
-		audio_name = transcripts.audio_name(audio_path)
-
 		try:
 			tic = time.time()
 			y, ylen = y.to(args.device), ylen.to(args.device)
-			log_probs, olen = model(x.squeeze(1).to(args.device), xlen.to(args.device))
-
-			#speech = vad.detect_speech(x.squeeze(1), args.sample_rate, args.window_size, aggressiveness = args.vad, window_size_dilate = args.window_size_dilate)
-			#speech = vad.upsample(speech, log_probs)
-			#log_probs.masked_fill_(models.silence_space_mask(log_probs, speech, space_idx = labels.space_idx, blank_idx = labels.blank_idx), float('-inf'))
-
-			decoded = decoder.decode(log_probs, olen)
+			log_probs, logits, olen = model(x.squeeze(1).to(args.device), xlen.to(args.device))
 
 			print('Input:', audio_name)
 			print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
 			print(
 				'Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(
-					audio = sum(transcripts.compute_duration(t) for t in meta), processing = time.time() - tic
+					audio = sum(map(transcripts.compute_duration, meta)), processing = time.time() - tic
 				)
 			)
 
-			ts = (x.shape[-1] / args.sample_rate) * torch.linspace(0, 1, steps = log_probs.shape[
-				-1]).unsqueeze(0) + torch.FloatTensor([t['begin'] for t in meta]).unsqueeze(1)
-			channel = [t['channel'] for t in meta]
-			speaker = [t['speaker'] for t in meta]
+			ts = duration * torch.linspace(0, 1, steps = log_probs.shape[-1], device = log_probs.device).unsqueeze(0).expand(x.shape[0], -1)
+
 			ref_segments = [[
 				dict(
 					channel = channel[i],
-					begin = meta[i]['begin'],
-					end = meta[i]['end'],
-					ref = labels.decode(y[i, 0, :ylen[i]].tolist())
+					begin = begin_end[i]['begin'],
+					end = begin_end[i]['end'],
+					ref = text_pipeline.postprocess(text_pipeline.preprocess(meta[i]['ref']))
 				)
-			] for i in range(len(decoded))]
-			hyp_segments = [
-				labels.decode(
-					decoded[i],
-					ts[i],
-					channel = channel[i],
-					replace_blank = True,
-					replace_blank_series = args.replace_blank_series,
-					replace_repeat = True,
-					replace_space = False,
-					speaker = speaker[i] if isinstance(speaker[i], str) else None
-				) for i in range(len(decoded))
-			]
-
-			ref, hyp = '\n'.join(transcripts.join(ref = r) for r in ref_segments).strip(), '\n'.join(transcripts.join(hyp = h) for h in hyp_segments).strip()
+			] for i in range(len(meta))]
+			hyp_segments = [alternatives[0] for alternatives in
+			                generator.generate(tokenizer = text_pipeline.tokenizer,
+			                                   log_probs = log_probs,
+			                                   begin = begin,
+			                                   end = end,
+			                                   output_lengths = olen,
+			                                   time_stamps = ts,
+			                                   segment_text_key = 'hyp',
+				                               segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
+			#TODO call text_pipeline.postprocess for hyp texts
+			hyp, ref = '\n'.join(transcripts.join(hyp = h) for h in hyp_segments).strip(), '\n'.join(transcripts.join(ref = r) for r in ref_segments).strip()
+			hyp, ref = map(text_pipeline.postprocess, [hyp, ref])
 			if args.verbose:
 				print('HYP:', hyp)
-			print('CER: {cer:.02%}'.format(cer = metrics.cer(hyp=hyp, ref=ref)))
+			print('CER: {cer:.02%}'.format(cer = metrics.cer(hyp = hyp, ref = ref)))
 
 			tic_alignment = time.time()
 			if args.align and y.numel() > 0:
-				#if ref_full:# and not ref:
-				#	#assert len(set(t['channel'] for t in meta)) == 1 or all(t['type'] != 'channel' for t in meta)
-				#	#TODO: add space at the end
-				#	channel = torch.ByteTensor(channel).repeat_interleave(log_probs.shape[-1]).reshape(1, -1)
-				#	ts = ts.reshape(1, -1)
-				#	log_probs = log_probs.transpose(0, 1).unsqueeze(0).flatten(start_dim = -2)
-				#	olen = torch.tensor([log_probs.shape[-1]], device = log_probs.device, dtype = torch.long)
-				#	y = y_full[None, None, :].to(y.device)
-				#	ylen = torch.tensor([[y.shape[-1]]], device = log_probs.device, dtype = torch.long)
-				#	segments = [([], sum([h for r, h in segments], []))]
-
 				alignment = ctc.alignment(
 					log_probs.permute(2, 0, 1),
-					y.squeeze(1),
+					y[:,0,:], # assumed that 0 channel is char labels
 					olen,
-					ylen.squeeze(1),
-					blank = labels.blank_idx,
+					ylen[:,0],
+					blank = text_pipeline.tokenizer.eps_id,
 					pack_backpointers = args.pack_backpointers
 				)
-				ref_segments = [
-					labels.decode(
-						y[i, 0, :ylen[i]].tolist(),
-						ts[i],
-						alignment[i],
-						channel = channel[i],
-						speaker = speaker[i],
-						key = 'ref',
-						speakers = val_dataset.speakers
-					) for i in range(len(decoded))
-				]
+				aligned_ts: shaping.Bt = ts.gather(1, alignment)
+				## TODO call text_pipeline.postprocess for ref texts
+				ref_segments = [alternatives[0] for alternatives in
+				                generator.generate(tokenizer = text_pipeline.tokenizer,
+				                                   log_probs = torch.nn.functional.one_hot(y[:, 0, :], num_classes = log_probs.shape[1]).permute(0, 2, 1),
+				                                   begin = begin,
+				                                   end = end,
+				                                   output_lengths = ylen,
+				                                   time_stamps = aligned_ts,
+			                                       segment_text_key = 'ref',
+				                                   segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
 			oom_handler.reset()
 		except:
 			if oom_handler.try_recover(model.parameters()):
@@ -209,29 +192,47 @@ def main(args):
 
 		print('Alignment time: {:.02f} sec'.format(time.time() - tic_alignment))
 
+		ref_transcript, hyp_transcript = [sorted(transcripts.flatten(segments), key = transcripts.sort_key) for segments in [ref_segments, hyp_segments]]
+
 		if args.max_segment_duration:
-			ref_transcript, hyp_transcript = [list(sorted(sum(segments, []), key = transcripts.sort_key)) for segments in [ref_segments, hyp_segments]]
 			if ref:
-				ref_segments = list(transcripts.segment(ref_transcript, args.max_segment_duration))
-				hyp_segments = list(transcripts.segment(hyp_transcript, ref_segments))
+				ref_segments = list(transcripts.segment_by_time(ref_transcript, args.max_segment_duration))
+				hyp_segments = list(transcripts.segment_by_ref(hyp_transcript, ref_segments))
 			else:
-				hyp_segments = list(transcripts.segment(hyp_transcript, args.max_segment_duration))
+				hyp_segments = list(transcripts.segment_by_time(hyp_transcript, args.max_segment_duration))
 				ref_segments = [[] for _ in hyp_segments]
 
-		transcript = [
-			dict(
-				audio_path = audio_path,
-				ref = ref,
-				hyp = hyp,
-				speaker = transcripts.speaker(ref = ref_transcript, hyp = hyp_transcript),
-				cer = metrics.cer(hyp = hyp, ref = ref),
-				words = metrics.align_words(hyp = hyp, ref = ref)[-1] if args.align_words else [],
-				alignment = dict(ref = ref_transcript, hyp = hyp_transcript),
-				**transcripts.summary(hyp_transcript)
-			) for ref_transcript,
-			hyp_transcript in zip(ref_segments, hyp_segments) for ref,
-			hyp in [(transcripts.join(ref = ref_transcript), transcripts.join(hyp = hyp_transcript))]
-		]
+		elif args.ref_transcript_path and args.join_transcript:
+			audio_name_hack = audio_name.split('.')[0]
+			#TODO: normalize ref field
+			ref_segments = [[t] for t in sorted(transcripts.load(os.path.join(args.ref_transcript_path, audio_name_hack + '.json')), key = transcripts.sort_key)]
+			hyp_segments = list(transcripts.segment_by_ref(hyp_transcript, ref_segments, set_speaker = True, soft = False))
+
+		has_ref = bool(transcripts.join(ref = transcripts.flatten(ref_segments)))
+
+		transcript = []
+		for hyp_transcript, ref_transcript in zip(hyp_segments, ref_segments):
+			hyp_transcript, ref_transcript = transcripts.map_text(text_pipeline.postprocess, hyp = hyp_transcript), transcripts.map_text(text_pipeline.postprocess, ref = ref_transcript)
+			hyp, ref = transcripts.join(hyp = hyp_transcript), transcripts.join(ref = ref_transcript)
+
+			transcript.append(
+				dict(
+					audio_path = audio_path,
+					ref = ref,
+					hyp = hyp,
+					speaker_name = transcripts.speaker_name(ref = ref_transcript, hyp = hyp_transcript),
+
+					words = metrics.align_words(*metrics.align_strings(hyp = hyp, ref = ref)) if args.align_words else [],
+					words_ref = ref_transcript,
+					words_hyp = hyp_transcript,
+
+					**transcripts.summary(hyp_transcript),
+					**(dict(cer = metrics.cer(hyp = hyp, ref = ref)) if has_ref else {})
+				)
+			)
+
+		transcripts.collect_speaker_names(transcript, set_speaker = True, num_speakers = 2)
+
 		filtered_transcript = list(
 			transcripts.prune(
 				transcript,
@@ -249,8 +250,7 @@ def main(args):
 		if args.output_json:
 			transcript_path = os.path.join(args.output_path, audio_name + '.json')
 			print(transcript_path)
-			with open(transcript_path, 'w') as f:
-				json.dump(filtered_transcript, f, ensure_ascii = False, sort_keys = True, indent = 2)
+			transcripts.save(transcript_path, filtered_transcript)
 
 		if args.output_html:
 			transcript_path = os.path.join(args.output_path, audio_name + '.html')
@@ -263,9 +263,21 @@ def main(args):
 			with open(transcript_path, 'w') as f:
 				f.write(hyp)
 
-		if args.output_csv:
-			[output_lines.append(csv_sep.join((audio_path, h, str(meta[i]['begin']), str(meta[i]['end']))) + '\n')
-				for i, h in enumerate(hyp.split('\n'))]
+		# if args.output_csv:
+		# 	[output_lines.append(csv_sep.join((audio_path, h, str(meta[i]['begin']), str(meta[i]['end']))) + '\n')
+		# 	 for i, h in enumerate(hyp.split('\n'))]
+
+		if args.logits:
+			logits_file_path = os.path.join(args.output_path, audio_name + '.pt')
+			if args.logits_crop:
+				begin_end = [dict(zip(['begin', 'end'], [t['begin'] + c / float(o) * (t['end'] - t['begin']) for c in args.logits_crop])) for o, t in zip(olen, begin_end)]
+				logits_crop = [slice(*args.logits_crop) for o in olen]
+			else:
+				logits_crop = [slice(int(o)) for o in olen]
+
+			# TODO: filter ref / hyp by channel?
+			torch.save([dict(audio_path = audio_path, logits = l[..., logits_crop[i]], **begin_end[i], ref = ref, hyp = hyp ) for i, l in enumerate(logits.cpu())], logits_file_path)
+			print(logits_file_path)
 
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
@@ -300,8 +312,8 @@ if __name__ == '__main__':
 	parser.add_argument('--beam-alpha', type = float, default = 0.3)
 	parser.add_argument('--beam-beta', type = float, default = 1.0)
 	parser.add_argument('--lm')
-	parser.add_argument('--vad', type = int, choices = [0, 1, 2, 3], default = False, nargs = '?')
 	parser.add_argument('--align', action = 'store_true')
+	parser.add_argument('--logits', action = 'store_true')
 	parser.add_argument('--align-boundary-words', action = 'store_true')
 	parser.add_argument('--align-words', action = 'store_true')
 	parser.add_argument('--window-size-dilate', type = float, default = 1.0)
@@ -323,6 +335,9 @@ if __name__ == '__main__':
 	parser.add_argument('--debug-short-long-records-features-from-whole-normalized-signal', action = 'store_true')
 	parser.add_argument('--frontend', type=str, default='LogFilterBankFrontend')
 	parser.add_argument('--frontend-in-model', type=lambda x: bool(int(x or 0)), nargs='?', const=True, default=True)
+	parser.add_argument('--logits-crop', type = int, nargs = 2, default = [])
+	parser.add_argument('--text-config', default = 'configs/ru_text_config.json')
+	parser.add_argument('--text-pipelines', nargs = '+', help = 'text processing pipelines (names should be defined in text-config)', default = ['char_legacy'])
+	parser.add_argument('--ref-transcript-path')
 	args = parser.parse_args()
-	args.vad = args.vad if isinstance(args.vad, int) else 3
 	main(args)

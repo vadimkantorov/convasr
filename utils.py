@@ -4,14 +4,24 @@ import gc
 import sys
 import traceback
 import random
-import torch
+import functools
 import gzip
-import psutil
 import numpy
 import logging
 import typing
 import logging.handlers
 import torch.distributed
+import psutil
+import torch
+
+def flatten(lists):
+	return functools.reduce(lambda acc, l: acc.extend(l) or acc, lists, [])
+
+def strip_suffixes(s, suffixes):
+	for suffix in sorted(suffixes, key = len, reverse = True):
+		if s.endswith(suffix):
+			return s[:-len(suffix)]
+	return s
 
 def get_root_logger_print(level = logging.INFO):
 	logger = logging.getLogger()
@@ -79,7 +89,6 @@ def compute_memory_fragmentation():
 	snapshot = torch.cuda.memory_snapshot()
 	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
 
-
 def open_maybe_gz(data_path, mode = 'r'):
 	return gzip.open(data_path, mode + 't') if data_path.endswith('.gz') else open(data_path, mode)
 
@@ -87,7 +96,6 @@ def reset_cpu_threads(num_threads):
 	torch.set_num_threads(num_threads)
 	#os.environ['OMP_NUM_THREADS'] = str(num_threads)
 	#os.environ['MKL_NUM_THREADS'] = str(num_threads)
-
 
 def set_random_seed(seed):
 	for set_random_seed in [random.seed, torch.manual_seed, numpy.random.seed

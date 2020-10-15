@@ -18,6 +18,7 @@ import random
 import hashlib
 import multiprocessing
 import utils
+import language_processing
 
 
 def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, unk, num_speakers):
@@ -283,38 +284,6 @@ def bpetrain(input_path, output_prefix, vocab_size, model_type, max_sentencepiec
 	)
 
 
-def normalize(input_path, lang, dry = True):
-	lang = datasets.Language(lang)
-	labels = datasets.Labels(lang)
-	for transcript_path in input_path:
-		with open(transcript_path) as f:
-			transcript = json.load(f)
-		for t in transcript:
-			if 'ref' in t:
-				t['ref'] = labels.postprocess_transcript(lang.normalize_text(t['ref']))
-			if 'hyp' in t:
-				t['hyp'] = labels.postprocess_transcript(lang.normalize_text(t['hyp']))
-
-			if 'ref' in t and 'hyp' in t:
-				t['cer'] = t['cer'] if 'cer' in t else metrics.cer(t['hyp'], t['ref'])
-				t['wer'] = t['wer'] if 'wer' in t else metrics.wer(t['hyp'], t['ref'])
-
-		if not dry:
-			json.dump(transcript, open(transcript_path, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
-		else:
-			return transcript
-
-
-def summary(input_path, keys):
-	transcript = normalize([input_path], dry = True)
-	#transcript = json.load(open(input_path))
-	print(input_path)
-	for k in keys:
-		val = torch.FloatTensor([t[k] for t in transcript if t.get(k) is not None])
-		print('{k}: {v:.02f}'.format(k = k, v = float(val.mean())))
-	print()
-
-
 def transcode(input_path, output_path, ext, cmd):
 	transcript = json.load(open(input_path))
 	os.makedirs(output_path, exist_ok = True)
@@ -331,7 +300,6 @@ def transcode(input_path, output_path, ext, cmd):
 
 
 def lserrorwords(input_path, output_path, comment_path, freq_path, sortdesc, sortasc, comment_filter, lang):
-	lang = datasets.Language(lang)
 	regex = r'[ ]+-[ ]*', '-'
 	freq = {
 		splitted[0]: int(splitted[-1])
@@ -344,7 +312,7 @@ def lserrorwords(input_path, output_path, comment_path, freq_path, sortdesc, sor
 	transcript = json.load(open(input_path))
 	transcript = list(filter(lambda t: [(w.get('type') or w.get('error_tag')) for w in t['words']].count('missing_ref') <= 2, transcript))
 
-	stem = lambda word: (lang.stem(word), len(word))
+	stem = language_processing.Stemmer(lang)
 	words_ok = [w['ref'].replace(metrics.placeholder, '') for t in transcript for w in t['words'] if (w.get('type') or w.get('error_tag')) == 'ok']
 	words_error = [
 		w['ref'].replace(metrics.placeholder, '')
@@ -600,17 +568,6 @@ if __name__ == '__main__':
 	cmd.add_argument('--ext', choices = ['.mp3', '.wav', '.gsm', '.raw', '.m4a', '.ogg'])
 	cmd.add_argument('cmd', nargs = argparse.REMAINDER)
 	cmd.set_defaults(func = transcode)
-
-	cmd = subparsers.add_parser('normalize')
-	cmd.add_argument('input_path', nargs = '+')
-	cmd.add_argument('--dry', action = 'store_true')
-	cmd.add_argument('--lang', default = 'ru')
-	cmd.set_defaults(func = normalize)
-
-	cmd = subparsers.add_parser('summary')
-	cmd.add_argument('input_path')
-	cmd.add_argument('--keys', nargs = '+', default = ['cer', 'wer'])
-	cmd.set_defaults(func = summary)
 
 	cmd = subparsers.add_parser('lserrorwords')
 	cmd.add_argument('--input-path', '-i', required = True)
