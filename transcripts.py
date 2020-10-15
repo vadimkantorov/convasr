@@ -81,7 +81,7 @@ def remap_speaker(transcript, speaker_perm):
 		t['speaker'], t['speaker_name'] = speaker_, speaker_names[speaker_]
 
 
-def collect_speaker_names(transcript, speaker_names = [], num_speakers = None, set_speaker = False):
+def collect_speaker_names(transcript, speaker_names = [], num_speakers = 1, set_speaker = False):
 	#TODO: convert channel to 0+
 
 	if not transcript:
@@ -105,12 +105,12 @@ def collect_speaker_names(transcript, speaker_names = [], num_speakers = None, s
 			speaker_names_index = {speaker_name_missing : speaker_missing, **{speaker_name : i for i, speaker_name in enumerate(speaker_names)}}
 
 		else:
-			speaker_names_index = {default_channel_names[speaker] : speaker for speaker in [channel_missing] + list(range(num_speakers or 2))}
+			speaker_names_index = {default_channel_names[speaker] : speaker for speaker in [channel_missing] + list(range(num_speakers))}
 			speaker_names = [default_channel_names[channel] for channel in range(num_speakers)]
 
 	if set_speaker and (not has_speaker):
 		for t in transcript:
-			speaker_name = t.get('speaker_name', default_channel_names[t.get('channel', channel_missing)])
+			speaker_name = t.get('speaker_name') or default_channel_names[t.get('channel', channel_missing)]
 			t['speaker'] = speaker_names_index[speaker_name]
 
 	if num_speakers is not None and len(speaker_names) < 1 + num_speakers:

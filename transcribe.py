@@ -231,7 +231,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				)
 			)
 
-		transcripts.collect_speaker_names(transcript, set_speaker = True)
+		transcripts.collect_speaker_names(transcript, set_speaker = True, num_speakers = 2)
 
 		filtered_transcript = list(
 			transcripts.prune(
