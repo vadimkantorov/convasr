@@ -310,9 +310,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 
 class BucketingBatchSampler(torch.utils.data.Sampler):
-	def __init__(self, dataset, batch_size = 1):
+	def __init__(self, dataset, batch_size = 1, world_size = 1):
 		super().__init__(dataset)
-
+		self.world_size = world_size # this value ensure that `world_size` consecutive batches will be constructed from same bucket
 		self.dataset = dataset
 		self.batch_size = batch_size
 		self.buckets = {k : (self.dataset.bucket == k).nonzero(as_tuple = True)[0] for k in self.dataset.bucket.unique()}
@@ -330,11 +330,22 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 		rng.manual_seed(epoch)
 
 		def shuffle_and_split(g, batch_size):
-			g = torch.nn.functional.pad(g, [0, math.ceil(len(g) / batch_size) * batch_size - len(g)], value = g[-1])
-			return g[torch.randperm(len(g), generator = rng)].reshape(-1, batch_size)
+			required_samples_amount = math.ceil(len(g) / (batch_size * self.world_size)) * (batch_size * self.world_size)
+			extension_indices = torch.randint(0, len(g), size = (required_samples_amount - len(g),), generator = rng, device = g.device)
+			g_extended = torch.cat([g, g[extension_indices]])
+			return g_extended[torch.randperm(len(g_extended), generator = rng)].reshape(-1, batch_size)
 		
 		batches = torch.cat([shuffle_and_split(g, self.batch_size) for g in self.buckets.values()])
-		self.shuffled = batches[torch.randperm(len(batches), generator = rng)]
+		assert len(batches) % self.world_size == 0
+		batch_indices = torch.arange(0, len(batches))
+		shuffled_indices = torch.randperm(int(len(batches) / self.world_size), generator = rng)
+		if self.world_size > 1:
+			group_indices = batch_indices.view(-1, self.world_size)
+			shuffled_group_indices = group_indices[shuffled_indices]
+			shuffled_batch_indices = shuffled_group_indices.flatten()
+		else:
+			shuffled_batch_indices = batch_indices[shuffled_indices]
+		self.shuffled = batches[shuffled_batch_indices]
 
 	def state_dict(self):
 		return dict(batch_idx = self.batch_idx)

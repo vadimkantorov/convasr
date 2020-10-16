@@ -602,7 +602,7 @@ def main(args):
 	_print('Time train dataset created:', time.time() - tic, 'sec')
 	train_dataset_name = '_'.join(map(os.path.basename, args.train_data_path))
 	tic = time.time()
-	sampler = datasets.BucketingBatchSampler(train_dataset, batch_size = args.train_batch_size)
+	sampler = datasets.BucketingBatchSampler(train_dataset, batch_size = args.train_batch_size, world_size = args.world_size)
 	if args.world_size > 1:
 		sampler = datasets.DistributedSamplerWrapper(sampler, num_replicas=args.world_size, rank=args.rank)
 	_print('Time train sampler created:', time.time() - tic, 'sec')
