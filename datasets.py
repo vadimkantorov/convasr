@@ -336,7 +336,13 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 			return g_extended[torch.randperm(len(g_extended), generator = rng)].reshape(-1, batch_size)
 		
 		batches = torch.cat([shuffle_and_split(g, self.batch_size) for g in self.buckets.values()])
-		self.shuffled = batches[torch.randperm(len(batches), generator = rng)]
+		shuffled_batch_indices = torch.randperm(int(len(batches) / self.world_size), generator = rng)
+		if self.world_size > 1:
+			shuffled_batch_indices = (torch.arange(0, int(len(batches) / self.world_size)) * self.world_size)[shuffled_batch_indices]
+			shuffled_batch_indices = torch.repeat_interleave(shuffled_batch_indices.unsqueeze(0), repeats = self.world_size, dim = 0)
+			shuffled_batch_indices += torch.arange(0, self.world_size).unsqueeze(1)
+			shuffled_batch_indices = shuffled_batch_indices.transpose(0,1).flatten()
+		self.shuffled = batches[shuffled_batch_indices]
 
 	def state_dict(self):
 		return dict(batch_idx = self.batch_idx)
