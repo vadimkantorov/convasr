@@ -19,6 +19,8 @@ import vis
 import utils
 import shaping
 import language_processing
+import pickle
+
 
 def setup(args):
 	torch.set_grad_enabled(False)
@@ -110,8 +112,8 @@ def main(args, ext_json = ['.json', '.json.gz']):
 
 		audio_path = meta[0]['audio_path']
 		begin_end = [dict(begin = t['begin'], end = t['end']) for t in meta]
-		begin = torch.tensor([t['begin'] for t in begin_end], dtype = torch.float)	
-		end = torch.tensor([t['end'] for t in begin_end], dtype = torch.float)	
+		begin = torch.tensor([t['begin'] for t in begin_end], dtype = torch.float)
+		end = torch.tensor([t['end'] for t in begin_end], dtype = torch.float)
 		audio_name = transcripts.audio_name(audio_path)
 		#TODO check logic
 		duration = x.shape[-1] / args.sample_rate

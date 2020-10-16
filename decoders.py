@@ -15,6 +15,20 @@ class GreedyDecoder:
 			)
 		]
 
+class NewBeamSearchDecoder:
+	def __init__(self,
+		labels,
+		beam_width,
+		beam_alpha = 0.1,
+		beam_beta = 0.1,):
+		self.beam_beta = beam_beta
+		self.beam_alpha = beam_alpha
+		self.beam_width = beam_width
+		self.labels = labels
+
+	def decode(self, log_probs : shaping.BCt, output_lengths : typing.Optional[shaping.B] = None):
+		pass
+
 
 class BeamSearchDecoder:
 	def __init__(
