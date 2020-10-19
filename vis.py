@@ -5,8 +5,7 @@ import json
 import io
 import sys
 import math
-import time
-import random
+import typing
 import itertools
 import argparse
 import base64
@@ -453,104 +452,95 @@ def logits(lang, logits, audio_name = None, MAX_ENTROPY = 1.0):
 
 
 def errors(
-	input_path,
-	include = [],
-	exclude = [],
-	audio = False,
-	output_path = None,
-	sortdesc = None,
-	topk = None,
-	duration = None,
-	cer = None,
-	wer = None,
-	mer = None,
-	filter_transcripts = None,
-	strip_audio_path_prefix = ''
+	input_paths: typing.List[str],
+	output_path: typing.Optional[str] = None,
+	include_metrics: typing.List[str] = ('cer', 'wer',),
+	include_audio: bool = False,
+	filter_transripts: typing.Optional[typing.Callable] = lambda x: True, # typing.List[dict] -> bool,
+	sort_transcripts: typing.Optional[typing.Callable] = lambda x: x # typing.List[typing.List[dict]] -> typing.List[typing.List[dict]]
 ):
-	include, exclude = (set(sum([list(map(transcripts.audio_name, json.load(open(file_path)))) if file_path.endswith('.json') else open(file_path).read().splitlines() for file_path in clude], [])) for clude in [include, exclude])
-	read_transcript = lambda path: list(
-		filter(
-			lambda r: (not include or r['audio_name'] in include) and (not exclude or r['audio_name'] not in exclude),
-			json.load(open(path)) if isinstance(path, str) else path
-		)
-	) if path is not None else []
-	ours, theirs = list(transcripts.prune(read_transcript(input_path[0]), duration = duration, cer = cer, wer = wer, mer = mer)), [{r['audio_name'] : r for r in read_transcript(transcript)} for transcript in input_path[1:]]
-	
-	if filter_transcripts is None:
-		if sortdesc is not None:
-			filter_transcripts = lambda cat: list(sorted(cat, key = lambda utt: utt[0][sortdesc], reverse = True))
+	_transcripts = collections.defaultdict(list)
+	for path in input_paths:
+		with open(path) as json_file:
+			file_transcripts = json.load(json_file)
+			for _transcript in file_transcripts:
+				_transcripts[_transcript['audio_name']].append(_transcript)
+	_transcripts = list(_transcripts.values())
+	_transcripts = filter(lambda x: len(x) == len(input_paths), _transcripts)
+	_transcripts = list(filter(filter_transripts, _transcripts))
+	_transcripts = sort_transcripts(_transcripts)
+
+	template = '''
+		<html>
+		<head>
+		    <meta charset="utf-8">
+		    <style>
+		        table {border-collapse:collapse;}
+		        th {padding: 5px; padding-left: 10px; text-align: left}
+		        tr {padding: 5px;}
+		        tr.new_section {border-top: 1px solid black; padding: 5px;}
+		        td {border-left: 1px dashed black; border-right: 1px dashed black; padding: 5px; padding-left: 10px;}
+		    </style>
+		</head>
+		<body>
+		    <table>
+		        <<MAIN_TABLE>>
+		    </table>
+		</body>
+		</html>
+	'''
+	# Make average section
+	header = '<tr><th>Averages</th>' + '<th></th>' * (len(include_metrics) + 2) + '</tr>\n'
+	header += '<tr><th></th>' + ''.join(f'<th>{metric_name}</th>' for metric_name in include_metrics) + '<th></th>' * 2 + '</tr>\n'
+	content = []
+	for i, input_file in enumerate(input_paths):
+		file_name = os.path.basename(input_file)
+		file_transcripts = [transcript_group[i] for transcript_group in _transcripts]
+		metric_values = [metrics.nanmean(file_transcripts, metric_name) for metric_name in include_metrics]
+		content_line = f'<td><b>{file_name}</b></td>' + ''.join(f'<td>{metric_value:.2%}</td>' for metric_value in metric_values) + '<td></td>' * 2
+		if i == 0:
+			content_line = '<tr class="new_section">' + content_line + '</tr>'
 		else:
-			filter_transcripts = lambda cat: cat
+			content_line = '<tr>' + content_line + '</tr>'
+		content.append(content_line)
+	content = '\n'.join(content)
+	footer = '<tr class="new_section" style="height: 30px">' + '<th></th>' * (len(include_metrics) + 3) + '</tr>\n'
+	average_section = header + content + footer
 
-	cat = filter_transcripts([[a] + list(filter(None, [t.get(a['audio_name'], None)
-														for t in theirs]))
-								for a in ours])[slice(topk)]
-	cat_by_labels = collections.defaultdict(list)
-	for c in cat:
-		transcripts_by_labels = collections.defaultdict(list)
-		for transcript in c:
-			transcripts_by_labels[transcript['labels_name']] += c
-		for labels_name, grouped_transcripts in transcripts_by_labels.items():
-			cat_by_labels[labels_name] += grouped_transcripts
+	# Make samples section
+	header = '<tr><th>Samples</th>' + '<th></th>' * (len(include_metrics) + 2) + '</tr>\n'
+	content = []
+	for transcript_group in _transcripts:
+		audio_path = transcript_group[0]['audio_name']
+		ref = transcript_group[0]['ref_orig']
+		sample_header = f'<tr class="new_section"><td colspan="{len(include_metrics)+1}">{audio_path}</td><td></td><td>ref: {ref}</td></tr>'
+		sample_section = [sample_header]
+		for i, input_file in enumerate(input_paths):
+			file_name = os.path.basename(input_file)
+			metric_values = []
+			for metric_name in include_metrics:
+				try:
+					metric_value = metrics.extract_metric_value(transcript_group[i], metric_name)
+					metric_values.append(f'{metric_value:.2%}')
+				except KeyError:
+					metric_values.append('-')
+			alignment = fmt_alignment(transcript_group[i]['alignment'])
+			hyp = f'hyp: {transcript_group[i]["hyp"]}'
+			sample_line = f'<td>{file_name}</td>' + ''.join(f'<td>{metric_value}</td>' for metric_value in metric_values) + f'<td>{alignment}</td><td>{hyp}</td>'
+			if i == 0:
+				sample_line = '<tr class="new_section">' + sample_line + '</tr>'
+			else:
+				sample_line = '<tr>' + sample_line + '</tr>'
+			sample_section.append(sample_line)
+		content.append('\n'.join(sample_section))
+	content = '\n'.join(content)
+	samples_section = header + content
 
-	# TODO: add sorting https://stackoverflow.com/questions/14267781/sorting-html-table-with-javascript
-	html_path = output_path or (input_path[0] + '.html')
-
-	f = open(html_path, 'w')
-	f.write('<html><head>' + meta_charset)
-	f.write('<style> table{border-collapse:collapse; width: 100%;} audio {width:100%} .br{border-right:2px black solid} tr.first>td {border-top: 1px solid black} tr.any>td {border-top: 1px dashed black}  .nowrap{white-space:nowrap} th.col{width:80px}</style></head>')
-	f.write(
-		'<body><table><tr><th></th><th class="col">cer_easy</th><th class="col">cer</th><th class="col">wer_easy</th><th class="col">wer</th><th class="col">mer</th><th></th></tr>'
-	)
-	f.write('<tr><td><strong>averages<strong></td></tr>')
-	f.write(
-		'\n'.join(
-			'<tr><td class="br">{input_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td>{mer:.02%}</td></tr>'
-			.format(
-				input_name = os.path.basename(input_path[i]),
-				cer = metrics.nanmean(c, 'cer'),
-				wer = metrics.nanmean(c, 'wer'),
-				mer = metrics.nanmean(c, 'mer'),
-				cer_easy = metrics.nanmean(c, 'words_easy_errors_easy.cer_pseudo'),
-				wer_easy = metrics.nanmean(c, 'words_easy_errors_easy.wer_pseudo'),
-			) for i,
-			c in enumerate(zip(*cat))
-		)
-	)
-	if len(cat_by_labels.keys()) > 1:
-		for labels_name, labels_transcripts in cat_by_labels.items():
-			f.write(f'<tr><td><strong>averages ({labels_name})<strong></td></tr>')
-			f.write(
-				'\n'.join(
-					'<tr><td class="br">{input_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td>{mer:.02%}</td></tr>'
-					.format(
-						input_name = os.path.basename(input_path[i]),
-						cer = metrics.nanmean(c, 'cer'),
-						wer = metrics.nanmean(c, 'wer'),
-						mer = metrics.nanmean(c, 'mer_wordwise'),
-						cer_easy = metrics.nanmean(c, 'words_easy_errors_easy.cer_pseudo'),
-						wer_easy = metrics.nanmean(c, 'words_easy_errors_easy.wer_pseudo'),
-					) for i,
-					c in enumerate(zip(*labels_transcripts))
-				)
-			)
-	f.write('<tr><td>&nbsp;</td></tr>')
-	f.write(
-		'\n'.join(
-			'<tr class="first"><td colspan="6">' + (
-				fmt_audio(utt[0]["audio_path"][len(strip_audio_path_prefix):]) if audio else ''
-			) +
-			f'<div class="nowrap">{utt[0]["audio_name"]}</div></td><td>{fmt_alignment(utt[0], ref = True, flat = True)}</td><td>{fmt_alignment(utt[0], ref = True, flat = True)}</td></tr>'
-			+ '\n'.join(
-				'<tr class="any"><td class="br">{audio_name}</td><td>{cer_easy:.02%}</td><td>{cer:.02%}</td><td>{wer_easy:.02%}</td><td>{wer:.02%}</td><td class="br">{mer:.02%}</td><td>{fmt_alignment}</td><td>{fmt_alignment_flat}</td></tr>'.format(audio_name = transcripts.audio_name(input_path[i]), cer_easy = a.get("words_easy_errors_easy", {}).get("cer_pseudo", -1), cer = a.get("cer", 1), wer_easy = a.get("words_easy_errors_easy", {}).get("wer_pseudo", -1), wer = a.get("wer", 1), mer = a.get("mer_wordwise", 1), fmt_alignment = fmt_alignment(a.get('words', [])), fmt_alignment_flat = fmt_alignment(a, hyp = True, flat = True))
-				for i,
-				a in enumerate(utt)
-			)
-			for utt in cat
-		)
-	)
-	f.write('</table></body></html>')
-	return html_path
+	# make output html
+	report = template.replace('<<MAIN_TABLE>>', average_section + samples_section)
+	html_path = output_path or (input_paths[0] + '.html')
+	html_file = open(html_path, 'w')
+	html_file.write(report)
 
 
 def audiosample(input_path, output_path, K):
@@ -579,7 +569,7 @@ def audiosample(input_path, output_path, K):
 			)
 		f.write('</table>')
 
-	return iutput_path
+	return input_path
 
 
 def summary(input_path, lang):
@@ -711,6 +701,11 @@ def fmt_alignment(transcript, ref = None, hyp = None, flat = False, tag = '<pre>
 	return tag + contents + tag.replace('<', '</')
 
 
+def cmd_errors(*args, input_path = [], output_path = None,  **kwargs):
+	errors(input_path, output_path)
+
+
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -731,7 +726,7 @@ if __name__ == '__main__':
 	cmd.set_defaults(func = lambda *args, **kwargs: print(transcript(*args, **kwargs)))
 
 	cmd = subparsers.add_parser('errors')
-	cmd.add_argument('input_path', nargs = '+', default = ['data/transcripts.json'])
+	cmd.add_argument('--input-path', nargs = '+', default = ['data/transcripts.json'])
 	cmd.add_argument('--output-path', '-o')
 	cmd.add_argument('--include', nargs = '*', default = [])
 	cmd.add_argument('--exclude', nargs = '*', default = [])
@@ -743,7 +738,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--mer', type = transcripts.number_tuple)
 	cmd.add_argument('--duration', type = transcripts.number_tuple)
 	cmd.add_argument('--strip-audio-path-prefix', default = '')
-	cmd.set_defaults(func = lambda *args, **kwargs: print(errors(*args, **kwargs)))
+	cmd.set_defaults(func = cmd_errors)
 
 	cmd = subparsers.add_parser('tabulate')
 	cmd.add_argument('experiment_id')

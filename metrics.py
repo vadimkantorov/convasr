@@ -231,16 +231,25 @@ class ErrorAnalyzer:
 
 		return res
 
+
+def extract_metric_value(analysis_result: dict, key : str, sep : str = '.'):
+	keys = key.split(sep)
+	assert len(keys) <= 2
+	value = analysis_result
+	for _key in keys:
+		value = value[_key]
+	return value
+
+
 def nanmean(list_of_dicts : typing.List[dict], key : str, sep : str = '.'):
-	seps = key.count(sep)
-	assert seps < 2
-
-	if seps == 1:
-		prefix, key = key.split(sep)
-		vals = [d[key] for dd in list_of_dicts for d in [dd[prefix]] if key in d if math.isfinite(d[key])]
-	else:
-		vals = [d[key] for d in list_of_dicts if key in d and math.isfinite(d[key])]
-
+	vals = []
+	for analysis_result in list_of_dicts:
+		try:
+			val = extract_metric_value(analysis_result, key, sep)
+			if math.isfinite(val):
+				vals.append(val)
+		except KeyError:
+			pass
 	return sum(vals) / len(vals) if vals else -1.0
 
 
