@@ -10,6 +10,7 @@ domain_set/
 kontur_calls_micro/
 ru_open_stt/
 unsup_dataset/
+beam_search/
 
 # Archives
 *.pyc

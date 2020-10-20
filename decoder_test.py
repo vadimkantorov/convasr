@@ -2,7 +2,8 @@ import pickle
 
 import arpa
 import datasets
-from ctc_beam_search import decode, timing
+import labels
+from old_ctc_beam_search import decode, timing
 
 
 @timing
@@ -25,18 +26,18 @@ def main():
 	lm = arpa.loadf(lm_path)[0]
 	lm.log_p('да')
 
-	labels = datasets.Labels(datasets.Language('ru'), name='char')
+	l = labels.Labels(labels.Language('ru'), name='char')
 
 	to_decode = meta['log_probs'].squeeze(0).cpu().numpy()
 
-	decoded, score, beam = decode(to_decode, blank=labels.chr2idx['|'], lm=lm, beam_size=10, labels=labels, min_cutoff=1)
+	decoded, score, beam = decode(to_decode, blank=l.chr2idx['|'], lm=lm, beam_size=10, labels=labels, min_cutoff=1)
 	decoded = [list(decoded)]
 	other_beams = [list(e[0]) for e in beam]
 
 	print(decoded, score)
 
 	hyp_segments = [
-		labels.decode(
+		l.decode(
 				decoded[i],
 				None,
 				channel=0,
@@ -49,7 +50,7 @@ def main():
 	]
 
 	other_hyp_segments = [
-		labels.decode(
+		l.decode(
 				other_beams[i],
 				None,
 				channel=0,

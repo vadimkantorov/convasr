@@ -4,6 +4,8 @@ import collections
 import json
 import functools
 import typing
+
+import labels
 import language_processing
 import Levenshtein
 
@@ -611,7 +613,7 @@ def cmd_analyze(hyp, ref, val_config, vocab, lang, detailed):
 		import ru
 
 		labels = {
-			'ru': lambda: datasets.Labels(ru)
+			'ru': lambda: labels.Labels(ru)
 		}
 		postprocess_transcript = labels[lang]().postprocess_transcript
 	else:

@@ -146,6 +146,7 @@ def decode(probs, beam_size = 10, blank = 0, is_logprobs = True, lm=None, labels
 				reverse=True)
 		beam = beam[:beam_size]
 
+	print(beam)
 	best = beam[0]
 	return best[0], -logsumexp(*best[1]), beam
 

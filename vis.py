@@ -18,6 +18,7 @@ import altair
 import torch
 import torch.nn.functional as F
 import audio
+import labels
 import tools
 import datasets
 import decoders
@@ -344,7 +345,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 
 def logits(lang, logits, audio_name = None, MAX_ENTROPY = 1.0):
 	good_audio_name = set(map(str.strip, open(audio_name[0])) if os.path.exists(audio_name[0]) else audio_name) if audio_name is not None else []
-	labels = datasets.Labels(datasets.Language(lang))
+	labels = labels.Labels(datasets.Language(lang))
 	decoder = decoders.GreedyDecoder()
 	tick_params = lambda ax, labelsize = 2.5, length = 0, **kwargs: ax.tick_params(axis = 'both', which = 'both', labelsize = labelsize, length = length, **kwargs) or [ax.set_linewidth(0) for ax in ax.spines.values()]
 	logits_path = logits + '.html'
@@ -648,7 +649,7 @@ def tabulate(
 	lang
 ):
 	# TODO: bring back custom name to the filtration process, or remove filtration by labels_name entirely.
-	labels = datasets.Labels(lang=datasets.Language(lang), name='char')
+	labels = labels.Labels(lang=datasets.Language(lang), name='char')
 
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)

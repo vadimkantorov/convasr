@@ -6,6 +6,8 @@ import torch
 import torch.cuda.profiler
 import apex
 import onnxruntime
+
+import labels
 import models
 import datasets
 import utils
@@ -44,7 +46,7 @@ if checkpoint:
 
 use_cuda = 'cuda' in args.device
 
-labels = datasets.Labels(datasets.Language(args.lang))
+labels = labels.Labels(datasets.Language(args.lang))
 
 if args.onnx:
 	onnxruntime_session = onnxruntime.InferenceSession(args.onnx)

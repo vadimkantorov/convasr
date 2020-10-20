@@ -278,7 +278,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				logits_crop = [slice(int(o)) for o in olen]
 
 			# TODO: filter ref / hyp by channel?
-			torch.save([dict(audio_path = audio_path, logits = l[..., logits_crop[i]], **begin_end[i], ref = ref, hyp = hyp ) for i, l in enumerate(logits.cpu())], logits_file_path)
+			torch.save([dict(audio_path = audio_path, log_probs=log_probs, logits = l[..., logits_crop[i]], **begin_end[i], ref = ref, hyp = hyp ) for i, l in enumerate(logits.cpu())], logits_file_path)
 			print(logits_file_path)
 
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
