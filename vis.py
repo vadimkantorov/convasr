@@ -605,8 +605,7 @@ def errors(
 	                         filter_fn_table = filter_fn_table,
 	                         metrics_table = metrics_table)
 	html_path = output_path or (input_paths[0] + '.html')
-	html_file = open(html_path, 'w')
-	html_file.write(report)
+	open(html_path, 'w').write(report)
 	return html_path
 
 
@@ -775,10 +774,10 @@ def cmd_errors(*args,
                output_path = None,
                include = [],
                exclude = [],
-               audio = False,
+               debug_audio = False,
                sort_key = [],
                descending = False,
-               analyzed_metrics = ['cer', 'wer'],
+               include_metrics = ['cer', 'wer'],
                metric_filters = [],
                duration = None):
 	assert duration is None or len(duration) == 2, 'Wrong duration format'
@@ -786,11 +785,11 @@ def cmd_errors(*args,
 	allowed_metrics_intervals = dict()
 	for i in range(0, len(metric_filters), 3):
 		metric_name, lower, higher = metric_filters[i:i+3]
-		assert metric_name in analyzed_metrics, f'Wrong metric filter {metric_name} not in metrics list {analyzed_metrics}'
+		assert metric_name in include_metrics, f'Wrong metric filter {metric_name} not in metrics list {include_metrics}'
 		allowed_metrics_intervals[metric_name] = (float(lower), float(higher),)
 
 	for key in sort_key:
-		assert key in analyzed_metrics, f'Sorting key {key} not in metrics list {analyzed_metrics}'
+		assert key in include_metrics, f'Sorting key {key} not in metrics list {include_metrics}'
 
 	include = set(include)
 	exclude = set(exclude)
@@ -814,7 +813,7 @@ def cmd_errors(*args,
 		key_fn = lambda x: tuple(metrics.extract_metric_value(x[0], key, missing = missing) for key in sort_key)
 		return sorted(grouped_examples, key = key_fn, reverse = descending)
 
-	print(errors(input_path, output_path, include_metrics = analyzed_metrics, debug_audio = audio, filter_fn = filter_fn, sort_fn = sort_fn))
+	print(errors(input_path, output_path, include_metrics = include_metrics, debug_audio = debug_audio, filter_fn = filter_fn, sort_fn = sort_fn))
 
 
 
@@ -842,10 +841,10 @@ if __name__ == '__main__':
 	cmd.add_argument('--output-path', '-o')
 	cmd.add_argument('--include', nargs = '*', type = str, default = [])
 	cmd.add_argument('--exclude', nargs = '*', type = str, default = [])
-	cmd.add_argument('--audio', action = 'store_true')
+	cmd.add_argument('--audio', action = 'store_true', dest = 'debug_audio')
 	cmd.add_argument('--sort-key', type = str, nargs = '*', default = [])
 	cmd.add_argument('--descending', action = 'store_true')
-	cmd.add_argument('--analyzed-metrics', type = str, nargs = '+', default = ['cer', 'wer'])
+	cmd.add_argument('--metrics', type = str, nargs = '+', default = ['cer', 'wer'], dest = 'include_metrics')
 	cmd.add_argument('--metric-filters', nargs = '*', default = [], help = 'sequence of filters in format $metric_name $lower_boundary $upper_boundary, filter $lower_boundary <= value < $upper_boundary')
 	cmd.add_argument('--duration', type = transcripts.number_tuple)
 	cmd.set_defaults(func = cmd_errors)
