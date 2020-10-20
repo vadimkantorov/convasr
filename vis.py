@@ -687,12 +687,14 @@ def fmt_alignment(transcript, ref = None, hyp = None, flat = False, tag = '<pre>
 	span = lambda word, t = None: '<span style="{style}" title="{fmt_alignment_error_type}">{word}</span>'.format(word = word, style = ('background-color:' + dict(ok = 'green', missing = 'red', missing_ref = 'darkred', typo_easy = 'lightgreen', typo_hard = 'pink')[t]) if t is not None else '', fmt_alignment_error_type = t)
 
 	error_tag = lambda w: w.get('type') or w.get('error_tag')
+	get_hyp = lambda w: w.get('_hyp_') or w.get('hyp', '') # backward compatibility
+	get_ref = lambda w: w.get('_ref_') or w.get('ref', '')
 	if flat:
-		ref_ = transcript.get('ref', '')
-		hyp_ = transcript.get('hyp', '')
+		ref_ = get_ref(transcript)
+		hyp_ = get_hyp(transcript)
 	else:
-		ref_ = ' '.join(span(w.get('ref', ''), 'ok' if error_tag(w) == 'ok' else None) for w in transcript)
-		hyp_ = ' '.join(span(w.get('hyp', ''), error_tag(w)) for w in transcript)
+		ref_ = ' '.join(span(get_ref(w), 'ok' if error_tag(w) == 'ok' else None) for w in transcript)
+		hyp_ = ' '.join(span(get_hyp(w), error_tag(w)) for w in transcript)
 
 	ref_ = ('ref: ' if prefix else '') + ref_
 	hyp_ = ('hyp: ' if prefix else '') + hyp_
