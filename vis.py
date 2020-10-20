@@ -455,92 +455,142 @@ def errors(
 	input_paths: typing.List[str],
 	output_path: typing.Optional[str] = None,
 	include_metrics: typing.List[str] = ('cer', 'wer',),
-	include_audio: bool = False,
-	filter_transripts: typing.Optional[typing.Callable] = lambda x: True, # typing.List[dict] -> bool,
-	sort_transcripts: typing.Optional[typing.Callable] = lambda x: x # typing.List[typing.List[dict]] -> typing.List[typing.List[dict]]
+	debug_audio: bool = False,
+	filter_fn: typing.Optional[typing.Callable] = lambda x: True, # typing.List[typing.Tuple[dict]] -> bool,
+	sort_fn: typing.Optional[typing.Callable] = lambda x: x # typing.List[typing.Tuple[dict]] -> typing.List[typing.Tuple[dict]]
 ):
-	_transcripts = collections.defaultdict(list)
+	grouped_examples = collections.defaultdict(list)
+	examples_amount = {}
 	for path in input_paths:
-		with open(path) as json_file:
-			file_transcripts = json.load(json_file)
-			for _transcript in file_transcripts:
-				_transcripts[_transcript['audio_name']].append(_transcript)
-	_transcripts = list(_transcripts.values())
-	_transcripts = filter(lambda x: len(x) == len(input_paths), _transcripts)
-	_transcripts = list(filter(filter_transripts, _transcripts))
-	_transcripts = sort_transcripts(_transcripts)
+		examples = transcripts.load(path)
+		examples_amount[path] = len(examples)
+		for example in examples:
+			grouped_examples[example['audio_name']].append(example)
+	grouped_examples = list(filter(lambda x: len(x) == len(input_paths), grouped_examples.values()))
+	not_found_examples_amount = {path: amount - len(grouped_examples) for path, amount in examples_amount.items()}
+	grouped_examples = list(filter(filter_fn, grouped_examples))
+	filtred_examples_amount = {path: amount - len(grouped_examples) - not_found_examples_amount[path] for path, amount in examples_amount.items()}
+	grouped_examples = sort_fn(grouped_examples)
+	style = '''
+				.filters_table b.warning {color: red;}
+		        table.metrics_table {border-collapse:collapse;}
+		        .metrics_table th {padding: 5px; padding-left: 10px; text-align: left}
+		        .metrics_table tr {padding: 5px;}
+		        .metrics_table tr.new_section {border-top: 1px solid black; padding: 5px;}
+		        .metrics_table td {border-left: 1px dashed black; border-right: 1px dashed black; padding: 5px; padding-left: 10px;}   
+	'''
 
 	template = '''
 		<html>
 		<head>
 		    <meta charset="utf-8">
 		    <style>
-		        table {border-collapse:collapse;}
-		        th {padding: 5px; padding-left: 10px; text-align: left}
-		        tr {padding: 5px;}
-		        tr.new_section {border-top: 1px solid black; padding: 5px;}
-		        td {border-left: 1px dashed black; border-right: 1px dashed black; padding: 5px; padding-left: 10px;}
+		        {style}
 		    </style>
 		</head>
 		<body>
-		    <table>
-		        <<MAIN_TABLE>>
+			<b style="padding: 10px">Filters</b><br><br>
+            Dropped (example not found in other files):<br>
+            <table class="filters_table">
+		        {filter_not_found_table}
+		    </table><br>
+		    Dropped (filter_fn):
+		    <table class="filters_table">
+		        {filter_fn_table}
+		    </table><br>
+		    <table class="metrics_table">
+		        {metrics_table}
 		    </table>
 		</body>
 		</html>
 	'''
-	# Make average section
-	header = '<tr><th>Averages</th>' + '<th></th>' * (len(include_metrics) + 2) + '</tr>\n'
-	header += '<tr><th></th>' + ''.join(f'<th>{metric_name}</th>' for metric_name in include_metrics) + '<th></th>' * 2 + '</tr>\n'
-	content = []
+
+	# Make filter "not found" table
+	def fmt_filter_table(filtred_amount: dict) -> str:
+		filtred_table = []
+		for file_path, amount in filtred_amount.items():
+			css_class = 'warning' if amount > 0 else ''
+			file_name = os.path.basename(file_path)
+			filtred_table.append(f'<tr><td>{file_name}</td><td><b class="{css_class}">{amount}</b></td></tr>')
+		return '\n'.join(filtred_table)
+	filter_not_found_table = fmt_filter_table(not_found_examples_amount)
+
+	# Make filter "filter_fn" table
+	filter_fn_table = fmt_filter_table(filtred_examples_amount)
+
+	# Make averages table
+	def fmt_averages_table(include_metrics: typing.List[str], averages: dict) -> str:
+		header = '<tr><th>Averages</th>' + '<th></th>' * (len(include_metrics) + 2) + '</tr>\n'
+		header += '<tr><th></th>' + ''.join(f'<th>{metric_name}</th>' for metric_name in include_metrics) + '<th></th>' * 2 + '</tr>\n'
+		content = []
+		for i, (file_name, metric_values) in enumerate(averages.items()):
+			content_line = f'<td><b>{file_name}</b></td>' + ''.join(
+				f'<td>{metric_value:.2%}</td>' for metric_value in metric_values) + '<td></td>' * 2
+			if i == 0:
+				content_line = '<tr class="new_section">' + content_line + '</tr>'
+			else:
+				content_line = '<tr>' + content_line + '</tr>'
+			content.append(content_line)
+		content = '\n'.join(content)
+		footer = '<tr class="new_section" style="height: 30px">' + '<th></th>' * (len(include_metrics) + 3) + '</tr>\n'
+		return header + content + footer
+
+	averages = {}
 	for i, input_file in enumerate(input_paths):
 		file_name = os.path.basename(input_file)
-		file_transcripts = [transcript_group[i] for transcript_group in _transcripts]
-		metric_values = [metrics.nanmean(file_transcripts, metric_name) for metric_name in include_metrics]
-		content_line = f'<td><b>{file_name}</b></td>' + ''.join(f'<td>{metric_value:.2%}</td>' for metric_value in metric_values) + '<td></td>' * 2
-		if i == 0:
-			content_line = '<tr class="new_section">' + content_line + '</tr>'
-		else:
-			content_line = '<tr>' + content_line + '</tr>'
-		content.append(content_line)
-	content = '\n'.join(content)
-	footer = '<tr class="new_section" style="height: 30px">' + '<th></th>' * (len(include_metrics) + 3) + '</tr>\n'
-	average_section = header + content + footer
+		file_transcripts = [transcript_group[i] for transcript_group in grouped_examples]
+		averages[file_name] = [metrics.nanmean(file_transcripts, metric_name) for metric_name in include_metrics]
+	average_table = fmt_averages_table(include_metrics, averages)
 
-	# Make samples section
-	header = '<tr><th>Samples</th>' + '<th></th>' * (len(include_metrics) + 2) + '</tr>\n'
-	content = []
-	for transcript_group in _transcripts:
-		audio_path = transcript_group[0]['audio_name']
-		ref = transcript_group[0]['ref_orig']
-		sample_header = f'<tr class="new_section"><td colspan="{len(include_metrics)+1}">{audio_path}</td><td></td><td>ref: {ref}</td></tr>'
-		sample_section = [sample_header]
+	# Make examples table
+	def fmt_examples_table(include_metrics: typing.List[str], table_data: typing.List[dict]) -> str:
+		header = '<tr><th>Examples</th>' + '<th></th>' * (len(include_metrics) + 2) + '</tr>\n'
+		content = []
+		for i, examples_data in enumerate(table_data):
+			ref = '<pre>' + examples_data['ref'] + '</pre>'
+			audio_path = examples_data['audio_path']
+			examples_header = f'<tr class="new_section"><td colspan="{len(include_metrics)+1}"><b>{i}.</b>{audio_path}</td><td></td><td>ref: <pre>{ref}</pre></td></tr>'
+			examples_content = []
+			for i, example_data in enumerate(examples_data['examples']):
+				metric_values = [f'{value:.2%}' if value is not None else '-' for value in example_data['metric_values']]
+				file_name = example_data['file_name']
+				alignment = example_data['alignment']
+				hyp = '<pre>' + example_data['hyp'] + '</pre>'
+				content_line = (f'<td>{file_name}</td>' + ''.join(map('<td>{}</td>'.format, metric_values)) + f'<td>{alignment}</td><td>{hyp}</td>')
+				if i == 0:
+					examples_content.append('<tr class="new_section">' + content_line + '</tr>')
+				else:
+					examples_content.append('<tr>' + content_line + '</tr>')
+			content.append(examples_header)
+			content.extend(examples_content)
+		return header + '\n'.join(content)
+
+	table_data = []
+	for examples in grouped_examples:
+		examples_data = dict(
+			audio_path = examples[0]['audio_name'],
+			ref = examples[0]['ref_orig'],
+			examples = [])
 		for i, input_file in enumerate(input_paths):
-			file_name = os.path.basename(input_file)
-			metric_values = []
-			for metric_name in include_metrics:
-				try:
-					metric_value = metrics.extract_metric_value(transcript_group[i], metric_name)
-					metric_values.append(f'{metric_value:.2%}')
-				except KeyError:
-					metric_values.append('-')
-			alignment = fmt_alignment(transcript_group[i]['alignment'])
-			hyp = f'hyp: {transcript_group[i]["hyp"]}'
-			sample_line = f'<td>{file_name}</td>' + ''.join(f'<td>{metric_value}</td>' for metric_value in metric_values) + f'<td>{alignment}</td><td>{hyp}</td>'
-			if i == 0:
-				sample_line = '<tr class="new_section">' + sample_line + '</tr>'
-			else:
-				sample_line = '<tr>' + sample_line + '</tr>'
-			sample_section.append(sample_line)
-		content.append('\n'.join(sample_section))
-	content = '\n'.join(content)
-	samples_section = header + content
+			examples_data['examples'].append(dict(
+				file_name = os.path.basename(input_file),
+				metric_values = [metrics.extract_metric_value(examples[i], metric_name) for metric_name in include_metrics],
+				alignment = fmt_alignment(examples[i]['alignment']),
+				hyp = examples[i]["hyp"]))
+		table_data.append(examples_data)
+
+	examples_data = fmt_examples_table(include_metrics, table_data)
 
 	# make output html
-	report = template.replace('<<MAIN_TABLE>>', average_section + samples_section)
+	metrics_table = average_table + examples_data
+	report = template.format(style = style,
+	                         filter_not_found_table = filter_not_found_table,
+	                         filter_fn_table = filter_fn_table,
+	                         metrics_table = metrics_table)
 	html_path = output_path or (input_paths[0] + '.html')
 	html_file = open(html_path, 'w')
 	html_file.write(report)
+	return html_path
 
 
 def audiosample(input_path, output_path, K):

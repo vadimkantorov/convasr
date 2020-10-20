@@ -232,25 +232,25 @@ class ErrorAnalyzer:
 		return res
 
 
-def extract_metric_value(analysis_result: dict, key : str, sep : str = '.'):
+def extract_metric_value(analysis_result: dict, key : str, sep : str = '.', missing: typing.Optional[float] = None) -> typing.Optional[float]:
 	keys = key.split(sep)
 	assert len(keys) <= 2
 	value = analysis_result
 	for _key in keys:
-		value = value[_key]
+		try:
+			value = value[_key]
+		except KeyError:
+			return missing
 	return value
 
 
-def nanmean(list_of_dicts : typing.List[dict], key : str, sep : str = '.'):
+def nanmean(list_of_dicts : typing.List[dict], key : str, sep : str = '.', missing: float = -1.0) -> float:
 	vals = []
 	for analysis_result in list_of_dicts:
-		try:
-			val = extract_metric_value(analysis_result, key, sep)
-			if math.isfinite(val):
-				vals.append(val)
-		except KeyError:
-			pass
-	return sum(vals) / len(vals) if vals else -1.0
+		val = extract_metric_value(analysis_result, key, sep)
+		if val is not None and math.isfinite(val):
+			vals.append(val)
+	return sum(vals) / len(vals) if vals else missing
 
 
 def quantiles(vals):
