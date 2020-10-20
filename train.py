@@ -225,6 +225,7 @@ def evaluate_model(
 			if args.rank != 0:
 				continue
 
+		#TODO add duration to extra info dict
 		analyze_args_gen = (
 			(
 				hyp,
