@@ -232,19 +232,19 @@ class ErrorAnalyzer:
 		return res
 
 
-def extract_metric_value(analysis_result: dict, key : str, sep : str = '.', missing: typing.Optional[float] = None) -> typing.Optional[float]:
+def extract_metric_value(analysis_result: dict, key: str, sep: str = '.', missing: typing.Optional[float] = None) -> typing.Optional[float]:
 	keys = key.split(sep)
 	assert len(keys) <= 2
 	value = analysis_result
 	for _key in keys:
-		try:
-			value = value[_key]
-		except KeyError:
+		if isinstance(value, dict):
+			value = value.get(_key, missing)
+		else:
 			return missing
 	return value
 
 
-def nanmean(list_of_dicts : typing.List[dict], key : str, sep : str = '.', missing: float = -1.0) -> float:
+def nanmean(list_of_dicts: typing.List[dict], key: str, sep: str = '.', missing: float = -1.0) -> float:
 	vals = []
 	for analysis_result in list_of_dicts:
 		val = extract_metric_value(analysis_result, key, sep)

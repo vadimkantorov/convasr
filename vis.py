@@ -129,8 +129,8 @@ def diarization(diarization_transcript, html_path, debug_audio):
 		html.write('<tr><th>audio_name</th><th>duration</th><th>refhyp</th><th>ser</th><th>der</th><th>der_</th><th>audio</th><th>barcode</th></tr>\n')
 		avg = lambda l: sum(l) / len(l)
 		html.write('<tr class="border-hyp"><td>{num_files}</td><td>{total_duration:.02f}</td><td>avg</td><td>{avg_ser:.02f}</td><td>{avg_der:.02f}</td><td>{avg_der_:.02f}</td><td></td><td></td></tr>\n'.format(
-			num_files = len(diarization_transcript), 
-			total_duration = sum(map(transcripts.compute_duration, diarization_transcript)), 
+			num_files = len(diarization_transcript),
+			total_duration = sum(map(transcripts.compute_duration, diarization_transcript)),
 			avg_ser = avg([t['ser'] for t in diarization_transcript]),
 			avg_der = avg([t['der'] for t in diarization_transcript]),
 			avg_der_ = avg([t['der_'] for t in diarization_transcript])
@@ -173,29 +173,29 @@ def fmt_svg_speaker_barcode(transcript, begin, end, colors = speaker_colors, max
 		onclick = 'onclick_svg(event)'
 	color = lambda s: colors[s] if s < len(colors) else transcripts.speaker_missing
 	html = ''
-	
+
 	segments = transcripts.segment_by_time(transcript, max_segment_seconds = max_segment_seconds, break_on_speaker_change = False, break_on_channel_change = False)
-	
+
 	for segment in segments:
 		summary = transcripts.summary(segment)
 		duration = transcripts.compute_duration(summary)
 		if duration <= max_segment_seconds:
 			duration = max_segment_seconds
 		header = '<div style="width: 100%; height: 15px; border: 1px black solid"><svg viewbox="0 0 1 1" style="width:100%; height:100%" preserveAspectRatio="none">'
-		body = '\n'.join('<rect data-begin="{begin}" data-end="{end}" x="{x}" width="{width}" height="1" style="fill:{color}" onclick="{onclick}"><title>speaker{speaker} | {begin:.2f} - {end:.2f} [{duration:.2f}]</title></rect>'.format(onclick = onclick, x = (t['begin'] - summary['begin']) / duration, width = (t['end'] - t['begin']) / duration, color = color(t['speaker']), duration = transcripts.compute_duration(t), **t) for t in transcript) 
+		body = '\n'.join('<rect data-begin="{begin}" data-end="{end}" x="{x}" width="{width}" height="1" style="fill:{color}" onclick="{onclick}"><title>speaker{speaker} | {begin:.2f} - {end:.2f} [{duration:.2f}]</title></rect>'.format(onclick = onclick, x = (t['begin'] - summary['begin']) / duration, width = (t['end'] - t['begin']) / duration, color = color(t['speaker']), duration = transcripts.compute_duration(t), **t) for t in transcript)
 		footer = '</svg></div>'
 		html += header + body + footer
 	return html
 
 def audio_data_uri(audio_path, sample_rate = None, audio_backend = 'scipy', audio_format = 'wav'):
 	data_uri = lambda audio_format, audio_bytes: f'data:audio/{audio_format};base64,' + base64.b64encode(audio_bytes).decode()
-	
+
 	if isinstance(audio_path, str):
 		assert audio_path.endswith('.wav')
 		audio_bytes, audio_format = open(audio_path, 'rb').read(), 'wav'
 	else:
 		audio_bytes = audio.write_audio(io.BytesIO(), audio_path, sample_rate, backend = audio_backend, format = audio_format).getvalue()
-		
+
 	return data_uri(audio_format = audio_format, audio_bytes = audio_bytes)
 
 def fmt_audio(audio_path, channel = 0):
@@ -279,7 +279,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 	audio_name = transcripts.audio_name(audio_path)
 
 	signal, sample_rate = audio.read_audio(audio_path, sample_rate = sample_rate, mono = mono, duration = duration)
-	channel_or_default = lambda channel: default_channel if channel == transcripts.channel_missing else channel 
+	channel_or_default = lambda channel: default_channel if channel == transcripts.channel_missing else channel
 
 	def fmt_link(ref = '', hyp = '', channel = default_channel, begin = transcripts.time_missing, end = transcripts.time_missing, speaker = transcripts.speaker_missing, i = '', j = '', audio_path = '', special_begin = 0, special_end = 1, **kwargs):
 		span = ref in [special_begin, special_end] or begin == transcripts.time_missing or end == transcripts.time_missing
@@ -288,13 +288,13 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 		tag_contents = (ref + hyp) if isinstance(ref, str) else (f'{begin:.02f}' if begin != transcripts.time_missing else NA) if ref == special_begin else (f'{end:.02f}' if end != transcripts.time_missing else NA) if ref == special_end else (f'{end - begin:.02f}' if begin != transcripts.time_missing and end != transcripts.time_missing else NA)
 		tag_close = '</span>' if span else '</a>'
 		return tag_open + tag_attr + tag_contents + tag_close
-	
+
 	fmt_words = lambda rh: ' '.join(fmt_link(**w) for w in rh)
 	fmt_begin_end = 'data-begin="{begin}" data-end="{end}"'.format
 
 	html = open(html_path, 'w')
-	style = ' '.join(f'.speaker{i} {{background-color : {c}; }}' for i, c in enumerate(speaker_colors)) + ' '.join(f'.channel{i} {{background-color : {c}; }}' for i, c in enumerate(channel_colors)) + ' a {text-decoration: none;} .reference{opacity:0.4} .channel{margin:0px} .ok{background-color:green} .m0{margin:0px} .top{vertical-align:top}' 
-	
+	style = ' '.join(f'.speaker{i} {{background-color : {c}; }}' for i, c in enumerate(speaker_colors)) + ' '.join(f'.channel{i} {{background-color : {c}; }}' for i, c in enumerate(channel_colors)) + ' a {text-decoration: none;} .reference{opacity:0.4} .channel{margin:0px} .ok{background-color:green} .m0{margin:0px} .top{vertical-align:top}'
+
 	html.write(f'<html><head>' + meta_charset + f'<style>{style}</style></head><body>')
 	html.write(f'<script>{play_script}{onclick_svg_script}</script>')
 	html.write(
@@ -321,9 +321,9 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 		end_th = '<th>end</th>'
 		duration_th = '<th>dur</th>'
 		hyp_th = '<th style="width:50%">hyp</th>'
-		ref_th = '<th style="width:50%">ref</th>' + begin_th + end_th + duration_th + '<th>cer</th>' 
+		ref_th = '<th style="width:50%">ref</th>' + begin_th + end_th + duration_th + '<th>cer</th>'
 		return '<tr>' + idx_th + speaker_th + begin_th + end_th + duration_th + hyp_th + ref_th
- 
+
 	def fmt_tr(i, ok, t, words, hyp, ref, channel, speaker, speaker_name, cer):
 		idx_td = f'''<td class="top {ok and 'ok'}">#{i}</td>'''
 		speaker_td = f'<td class="speaker{speaker}" title="speaker{speaker}">{speaker_name}</td>'
@@ -331,7 +331,7 @@ def transcript(html_path, sample_rate, mono, transcript, filtered_transcript = [
 		hyp_td = f'<td class="top hyp" data-channel="{channel}" data-speaker="{speaker}" {fmt_begin_end(**transcripts.summary(hyp, ij = True))}>{fmt_words(hyp)}{fmt_alignment(words, hyp = True, prefix = "", tag = "<template>")}</td>'
 		ref_td = f'<td class="top reference ref" data-channel="{channel}" data-speaker="{speaker}" {fmt_begin_end(**transcripts.summary(ref, ij = True))}>{fmt_words(ref)}{fmt_alignment(words, ref = True, prefix = "", tag = "<template>")}</td>'
 		right_td = f'<td class="top">{fmt_link(0, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(1, **transcripts.summary(ref, ij = True))}</td><td class="top">{fmt_link(2, **transcripts.summary(ref, ij = True))}</td>'
-		cer_td = f'<td class="top">' + (f'{cer:.2%}' if cer != transcripts._er_missing else NA) + '</td>' 
+		cer_td = f'<td class="top">' + (f'{cer:.2%}' if cer != transcripts._er_missing else NA) + '</td>'
 		return f'<tr class="channel{channel} speaker{speaker}">' + idx_td + speaker_td + left_td + hyp_td + ref_td + right_td + cer_td + '</tr>\n'
 
 	html.write('<hr/><table style="width:100%">')
@@ -390,7 +390,7 @@ def logits(lang, logits, audio_name = None, MAX_ENTROPY = 1.0):
 					loc = 1,
 					fontsize = 'xx-small',
 					frameon = False)
-		
+
 		for b, e, v in zip(*models.rle1d(entropy > MAX_ENTROPY)):
 			if bool(v):
 				plt.axvspan(int(b), int(e), color='red', alpha=0.2)
@@ -421,7 +421,7 @@ def logits(lang, logits, audio_name = None, MAX_ENTROPY = 1.0):
 				torch.LongTensor([len(y)]),
 				blank = len(log_probs) - 1
 			).squeeze(0)
-			
+
 			ax = plt.gca().secondary_xaxis('top')
 			ref, ref_ = labels.decode(y.tolist(), replace_blank = '.', replace_space = '_', replace_repeat = False, strip = False), alignment
 			ax.set_xticklabels(ref)
@@ -456,20 +456,32 @@ def errors(
 	output_path: typing.Optional[str] = None,
 	include_metrics: typing.List[str] = ('cer', 'wer',),
 	debug_audio: bool = False,
-	filter_fn: typing.Optional[typing.Callable] = lambda x: True, # typing.List[typing.Tuple[dict]] -> bool,
-	sort_fn: typing.Optional[typing.Callable] = lambda x: x # typing.List[typing.Tuple[dict]] -> typing.List[typing.Tuple[dict]]
-):
+	filter_fn: typing.Optional[typing.Callable[[typing.Tuple[dict]], bool]] = lambda x: True,
+	sort_fn: typing.Optional[typing.Callable[[typing.List[typing.Tuple[dict]]], typing.List[typing.Tuple[dict]]]] = lambda x: x
+) -> str:
+	'''
+	Parameters:
+		input_paths: paths to json files with list of analyzed examples
+		output_path: path to output html (default: input_path[0]+.html)
+		debug_audio: include audio data into html if true
+		filter_fn: function to filter tuples of examples grouped by `audio_path`,
+				   function input: tuple of examples in order same as in `input_paths`
+				   function output: true to include examples into html, false otherwise
+		sort_fn: function to sort tuples of examples grouped by `audio_path`,
+				 function input: list of tuples of examples, each tuple has same order as in `input_paths`
+				 function output: same list but in sorted order
+	'''
 	grouped_examples = collections.defaultdict(list)
-	examples_amount = {}
+	examples_count = {}
 	for path in input_paths:
 		examples = transcripts.load(path)
-		examples_amount[path] = len(examples)
+		examples_count[path] = len(examples)
 		for example in examples:
-			grouped_examples[example['audio_name']].append(example)
+			grouped_examples[example['audio_path']].append(example)
 	grouped_examples = list(filter(lambda x: len(x) == len(input_paths), grouped_examples.values()))
-	not_found_examples_amount = {path: amount - len(grouped_examples) for path, amount in examples_amount.items()}
+	not_found_examples_count = {path: count - len(grouped_examples) for path, count in examples_count.items()}
 	grouped_examples = list(filter(filter_fn, grouped_examples))
-	filtred_examples_amount = {path: amount - len(grouped_examples) - not_found_examples_amount[path] for path, amount in examples_amount.items()}
+	filtered_examples_count = {path: count - len(grouped_examples) - not_found_examples_count[path] for path, count in examples_count.items()}
 	grouped_examples = sort_fn(grouped_examples)
 	style = '''
 				.filters_table b.warning {color: red;}
@@ -487,6 +499,9 @@ def errors(
 		    <style>
 		        {style}
 		    </style>
+		    <script>
+		        {scripts}
+		    </script>
 		</head>
 		<body>
 			<b style="padding: 10px">Filters</b><br><br>
@@ -506,17 +521,17 @@ def errors(
 	'''
 
 	# Make filter "not found" table
-	def fmt_filter_table(filtred_amount: dict) -> str:
-		filtred_table = []
-		for file_path, amount in filtred_amount.items():
-			css_class = 'warning' if amount > 0 else ''
+	def fmt_filter_table(filtered_count: dict) -> str:
+		filtered_table = []
+		for file_path, count in filtered_count.items():
+			css_class = 'warning' if count > 0 else ''
 			file_name = os.path.basename(file_path)
-			filtred_table.append(f'<tr><td>{file_name}</td><td><b class="{css_class}">{amount}</b></td></tr>')
-		return '\n'.join(filtred_table)
-	filter_not_found_table = fmt_filter_table(not_found_examples_amount)
+			filtered_table.append(f'<tr><td>{file_name}</td><td><b class="{css_class}">{count}</b></td></tr>')
+		return '\n'.join(filtered_table)
+	filter_not_found_table = fmt_filter_table(not_found_examples_count)
 
 	# Make filter "filter_fn" table
-	filter_fn_table = fmt_filter_table(filtred_examples_amount)
+	filter_fn_table = fmt_filter_table(filtered_examples_count)
 
 	# Make averages table
 	def fmt_averages_table(include_metrics: typing.List[str], averages: dict) -> str:
@@ -538,18 +553,19 @@ def errors(
 	averages = {}
 	for i, input_file in enumerate(input_paths):
 		file_name = os.path.basename(input_file)
-		file_transcripts = [transcript_group[i] for transcript_group in grouped_examples]
-		averages[file_name] = [metrics.nanmean(file_transcripts, metric_name) for metric_name in include_metrics]
+		file_examples = [examples[i] for examples in grouped_examples]
+		averages[file_name] = [metrics.nanmean(file_examples, metric_name) for metric_name in include_metrics]
 	average_table = fmt_averages_table(include_metrics, averages)
 
 	# Make examples table
-	def fmt_examples_table(include_metrics: typing.List[str], table_data: typing.List[dict]) -> str:
+	def fmt_examples_table(include_metrics: typing.List[str], table_data: typing.List[dict], debug_audio: bool) -> str:
 		header = '<tr><th>Examples</th>' + '<th></th>' * (len(include_metrics) + 2) + '</tr>\n'
 		content = []
 		for i, examples_data in enumerate(table_data):
 			ref = '<pre>' + examples_data['ref'] + '</pre>'
 			audio_path = examples_data['audio_path']
-			examples_header = f'<tr class="new_section"><td colspan="{len(include_metrics)+1}"><b>{i}.</b>{audio_path}</td><td></td><td>ref: <pre>{ref}</pre></td></tr>'
+			embedded_audio = fmt_audio(audio_path, i) if debug_audio else ''
+			examples_header = f'<tr class="new_section"><td colspan="{len(include_metrics)+1}"><b>{i}.</b>{audio_path}</td><td>{embedded_audio}</td><td>ref: <pre>{ref}</pre></td></tr>'
 			examples_content = []
 			for i, example_data in enumerate(examples_data['examples']):
 				metric_values = [f'{value:.2%}' if value is not None else '-' for value in example_data['metric_values']]
@@ -568,7 +584,7 @@ def errors(
 	table_data = []
 	for examples in grouped_examples:
 		examples_data = dict(
-			audio_path = examples[0]['audio_name'],
+			audio_path = examples[0]['audio_path'],
 			ref = examples[0]['ref_orig'],
 			examples = [])
 		for i, input_file in enumerate(input_paths):
@@ -579,11 +595,12 @@ def errors(
 				hyp = examples[i]["hyp"]))
 		table_data.append(examples_data)
 
-	examples_data = fmt_examples_table(include_metrics, table_data)
+	examples_data = fmt_examples_table(include_metrics, table_data, debug_audio)
 
 	# make output html
 	metrics_table = average_table + examples_data
 	report = template.format(style = style,
+	                         scripts = play_script if debug_audio else '',
 	                         filter_not_found_table = filter_not_found_table,
 	                         filter_fn_table = filter_fn_table,
 	                         metrics_table = metrics_table)
@@ -749,12 +766,55 @@ def fmt_alignment(transcript, ref = None, hyp = None, flat = False, tag = '<pre>
 	ref_ = ('ref: ' if prefix else '') + ref_
 	hyp_ = ('hyp: ' if prefix else '') + hyp_
 	contents = '\n'.join([ref_] if ref is True else [hyp_] if hyp is True else [ref_, hyp_])
-	
+
 	return tag + contents + tag.replace('<', '</')
 
 
-def cmd_errors(*args, input_path = [], output_path = None,  **kwargs):
-	errors(input_path, output_path)
+def cmd_errors(*args,
+               input_path = [],
+               output_path = None,
+               include = [],
+               exclude = [],
+               audio = False,
+               sort_key = [],
+               descending = False,
+               analyzed_metrics = ['cer', 'wer'],
+               metric_filters = [],
+               duration = None):
+	assert duration is None or len(duration) == 2, 'Wrong duration format'
+	assert len(metric_filters) % 3 == 0, 'Wrong metric filters format'
+	allowed_metrics_intervals = dict()
+	for i in range(0, len(metric_filters), 3):
+		metric_name, lower, higher = metric_filters[i:i+3]
+		assert metric_name in analyzed_metrics, f'Wrong metric filter {metric_name} not in metrics list {analyzed_metrics}'
+		allowed_metrics_intervals[metric_name] = (float(lower), float(higher),)
+
+	for key in sort_key:
+		assert key in analyzed_metrics, f'Sorting key {key} not in metrics list {analyzed_metrics}'
+
+	include = set(include)
+	exclude = set(exclude)
+
+	def filter_fn(examples: typing.Tuple[dict]) -> bool:
+		for example in examples:
+			if example['audio_path'] in exclude:
+				return False
+			if len(include) > 0 and example['audio_path'] not in include:
+				return False
+			if 'duration' in example.keys() and (example['duration'] >= duration[1] or example['duration'] < duration[0]):
+				return False
+			for metric_name, (lower, higher) in allowed_metrics_intervals.items():
+				metric_value = metrics.extract_metric_value(example, metric_name) * 100
+				if metric_value is None or metric_value < lower or metric_value >= higher:
+					return False
+			return True
+
+	def sort_fn(grouped_examples: typing.List[typing.Tuple[dict]]) -> typing.List[typing.Tuple[dict]]:
+		missing = float('-inf') if descending else float('inf')
+		key_fn = lambda x: tuple(metrics.extract_metric_value(x[0], key, missing = missing) for key in sort_key)
+		return sorted(grouped_examples, key = key_fn, reverse = descending)
+
+	print(errors(input_path, output_path, include_metrics = analyzed_metrics, debug_audio = audio, filter_fn = filter_fn, sort_fn = sort_fn))
 
 
 
@@ -780,16 +840,14 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('errors')
 	cmd.add_argument('--input-path', nargs = '+', default = ['data/transcripts.json'])
 	cmd.add_argument('--output-path', '-o')
-	cmd.add_argument('--include', nargs = '*', default = [])
-	cmd.add_argument('--exclude', nargs = '*', default = [])
+	cmd.add_argument('--include', nargs = '*', type = str, default = [])
+	cmd.add_argument('--exclude', nargs = '*', type = str, default = [])
 	cmd.add_argument('--audio', action = 'store_true')
-	cmd.add_argument('--sortdesc', choices = ['cer', 'wer', 'mer'])
-	cmd.add_argument('--topk', type = int)
-	cmd.add_argument('--cer', type = transcripts.number_tuple)
-	cmd.add_argument('--wer', type = transcripts.number_tuple)
-	cmd.add_argument('--mer', type = transcripts.number_tuple)
+	cmd.add_argument('--sort-key', type = str, nargs = '*', default = [])
+	cmd.add_argument('--descending', action = 'store_true')
+	cmd.add_argument('--analyzed-metrics', type = str, nargs = '+', default = ['cer', 'wer'])
+	cmd.add_argument('--metric-filters', nargs = '*', default = [], help = 'sequence of filters in format $metric_name $lower_boundary $upper_boundary, filter $lower_boundary <= value < $upper_boundary')
 	cmd.add_argument('--duration', type = transcripts.number_tuple)
-	cmd.add_argument('--strip-audio-path-prefix', default = '')
 	cmd.set_defaults(func = cmd_errors)
 
 	cmd = subparsers.add_parser('tabulate')
