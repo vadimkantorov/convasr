@@ -301,7 +301,7 @@ def evaluate_model(
 		with open(transcripts_path, 'w') as f:
 			json.dump(transcript, f, ensure_ascii = False, indent = 2, sort_keys = True)
 		if analyze:
-			vis.errors([transcripts_path], audio = args.vis_errors_audio)
+			vis.errors([transcripts_path], debug_audio = args.vis_errors_audio)
 
 	checkpoint_path = os.path.join(
 		args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)
