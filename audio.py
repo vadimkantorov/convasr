@@ -154,17 +154,25 @@ def resample(signal, sample_rate_, sample_rate):
 		signal = signal.unsqueeze(0)
 	return signal, sample_rate
 
-def compute_duration(audio_path, backend = 'ffmpeg'):
+
+def compute_duration(audio_path, backend = None):
 	assert backend in [None, 'scipy', 'ffmpeg', 'sox']
-	
-	if (backend is None and audio_path.endswith('.wav')) or backend == 'scipy':
+
+	if backend is None:
+		if audio_path.endswith('.wav'):
+			backend = 'scipy'
+		else:
+			backend = 'ffmpeg'
+
+	if backend == 'scipy':
 		signal, sample_rate = read_audio(audio_path, sample_rate = None, dtype = None, mono = False, backend = 'scipy')
 		return signal.shape[-1] / sample_rate
-	
+
 	elif backend == 'ffmpeg':
-		cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1'] 
+		cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of',
+		       'default=noprint_wrappers=1:nokey=1']
 		return float(subprocess.check_output(cmd + [audio_path]))
-	
+
 	elif backend == 'sox':
 		cmd = ['soxi', '-D']
 		return float(subprocess.check_output(cmd + [audio_path]))
