@@ -181,7 +181,7 @@ class ErrorAnalyzer:
 			hyp_vocabness = hyp_vocabness
 		)
 
-	def analyze(self, hyp : str, ref : str, text_pipeline: typing.Optional[language_processing.ProcessingPipeline] = None, detailed : bool = False, extra : dict = {}, split_candidates : typing.Optional[typing.Callable[[str], typing.List[str]]] = None) -> dict:
+	def analyze(self, hyp : str, ref : str, postprocess_fn: typing.Optional[typing.Callable[[str], str]] = None, detailed : bool = False, extra : dict = {}, split_candidates : typing.Optional[typing.Callable[[str], typing.List[str]]] = None) -> dict:
 		if split_candidates is None:
 			split_candidates = lambda s: [s]
 
@@ -190,8 +190,8 @@ class ErrorAnalyzer:
 		# some default options were already chosen
 		#TODO: hyp_postproc, ref_postproc = map(postprocess_transcript, [hyp, ref])
 
-		postproc_ref = text_pipeline.postprocess(ref) if text_pipeline is not None else ref
-		postproc_hyp = text_pipeline.postprocess(hyp) if text_pipeline is not None else hyp
+		postproc_ref = postprocess_fn(ref) if postprocess_fn is not None else ref
+		postproc_hyp = postprocess_fn(hyp) if postprocess_fn is not None else hyp
 
 		# TODO: document common choices for extra
 		res = dict(
@@ -613,18 +613,14 @@ class Needleman:
 		return self.backtrack()
 
 
-def cmd_analyze(hyp, ref, val_config, vocab, lang, detailed):
-	vocab = set(map(str.strip, open(vocab))) if os.path.exists(vocab) else set()
-	if lang is not None:
-		import datasets
-		import ru
+def cmd_analyze(hyp, ref, val_config, text_config, text_pipeline_name, vocab, detailed):
+	import language_processing
+	assert os.path.exists(text_config)
+	text_config = json.load(open(args.text_config))
+	text_pipeline = language_processing.ProcessingPipeline.make(text_config, text_pipeline_name)
+	validation_postprocessors = {name: language_processing.TextPostprocessor(**config) for name, config in text_config['postprocess'].items()}
 
-		labels = {
-			'ru': lambda: datasets.Labels(ru)
-		}
-		postprocess_transcript = labels[lang]().postprocess_transcript
-	else:
-		postprocess_transcript = False
+	vocab = set(map(str.strip, open(vocab))) if os.path.exists(vocab) else set()
 	if os.path.exists(val_config):
 		val_config = json.load(open(val_config))
 		analyzer_configs = val_config['error_analyzer']
@@ -635,8 +631,8 @@ def cmd_analyze(hyp, ref, val_config, vocab, lang, detailed):
 
 	word_tagger = WordTagger(word_tags = word_tags, vocab = vocab)
 	error_tagger = ErrorTagger()
-	analyzer = ErrorAnalyzer(word_tagger = word_tagger, error_tagger = error_tagger, configs = analyzer_configs)
-	report = analyzer.analyze(hyp = hyp, ref = ref, postprocess_transcript = postprocess_transcript, detailed=detailed)
+	analyzer = ErrorAnalyzer(word_tagger = word_tagger, error_tagger = error_tagger, configs = analyzer_configs, postprocessors = validation_postprocessors)
+	report = analyzer.analyze(hyp = hyp, ref = ref, postprocess_fn = text_pipeline.postprocess, detailed=detailed)
 	print(json.dumps(report, ensure_ascii = False, indent = 2, sort_keys = True))
 
 
@@ -654,10 +650,11 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('analyze')
 	cmd.add_argument('--hyp', required = True)
 	cmd.add_argument('--ref', required = True)
-	cmd.add_argument('--lang')
-	cmd.add_argument('--detailed', action='store_true')
-	cmd.add_argument('--vocab', default = 'data/vocab_word_list.txt')
 	cmd.add_argument('--val-config', default = 'configs/ru_val_config.json')
+	cmd.add_argument('--text-config', default = 'configs/ru_text_config.json')
+	cmd.add_argument('--pipeline', dest = 'text_pipeline_name', help = 'text processing pipelines (names should be defined in text-config)', default = 'char_legacy')
+	cmd.add_argument('--vocab', default = 'data/vocab_word_list.txt')
+	cmd.add_argument('--detailed', action = 'store_true')
 	cmd.set_defaults(func=cmd_analyze)
 
 	cmd = subparsers.add_parser('align')

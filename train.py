@@ -230,7 +230,7 @@ def evaluate_model(
 			(
 				hyp,
 				ref,
-				pipeline,
+				pipeline.postprocess,
 				analyze,
 				dict(
 					labels_name=pipeline.name,
