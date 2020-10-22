@@ -636,6 +636,38 @@ def cmd_analyze(hyp, ref, val_config, text_config, text_pipeline_name, vocab, de
 	print(json.dumps(report, ensure_ascii = False, indent = 2, sort_keys = True))
 
 
+def cmd_analyze_file(input_file, output_file, val_config, text_config, text_pipeline_name, vocab, detailed):
+	import language_processing
+	assert os.path.exists(text_config)
+	text_config = json.load(open(args.text_config))
+	text_pipeline = language_processing.ProcessingPipeline.make(text_config, text_pipeline_name)
+	validation_postprocessors = {name: language_processing.TextPostprocessor(**config) for name, config in
+	                             text_config['postprocess'].items()}
+
+	vocab = set(map(str.strip, open(vocab))) if os.path.exists(vocab) else set()
+	if os.path.exists(val_config):
+		val_config = json.load(open(val_config))
+		analyzer_configs = val_config['error_analyzer']
+		word_tags = val_config['word_tags']
+	else:
+		analyzer_configs = {}
+		word_tags = {}
+
+	word_tagger = WordTagger(word_tags = word_tags, vocab = vocab)
+	error_tagger = ErrorTagger()
+	analyzer = ErrorAnalyzer(word_tagger = word_tagger, error_tagger = error_tagger, configs = analyzer_configs,
+	                         postprocessors = validation_postprocessors)
+	reports = []
+	with open(input_file) as hyp_ref_file:
+		hyp_ref = json.load(hyp_ref_file)
+		for hyp_ref_dict in hyp_ref:
+			hyp = hyp_ref_dict['hyp']
+			ref = hyp_ref_dict['ref']
+			reports.append(analyzer.analyze(hyp = hyp, ref = ref, postprocess_fn = text_pipeline.postprocess, detailed = detailed))
+	json.dump(reports, open(output_file, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+	print(output_file)
+
+
 def cmd_align(hyp, ref):
 	alignment = align_strings(hyp=hyp, ref=ref)
 	print('\n'.join(f'{k}: {v}' for k, v in zip(['hyp', 'ref'], alignment)))
@@ -656,6 +688,16 @@ if __name__ == '__main__':
 	cmd.add_argument('--vocab', default = 'data/vocab_word_list.txt')
 	cmd.add_argument('--detailed', action = 'store_true')
 	cmd.set_defaults(func=cmd_analyze)
+
+	cmd = subparsers.add_parser('analyze-file')
+	cmd.add_argument('--input-file', required = True)
+	cmd.add_argument('--output-file', required = True)
+	cmd.add_argument('--val-config', default = 'configs/ru_val_config.json')
+	cmd.add_argument('--text-config', default = 'configs/ru_text_config.json')
+	cmd.add_argument('--pipeline', dest = 'text_pipeline_name', help = 'text processing pipelines (names should be defined in text-config)', default = 'char_legacy')
+	cmd.add_argument('--vocab', default = 'data/vocab_word_list.txt')
+	cmd.add_argument('--detailed', action = 'store_true')
+	cmd.set_defaults(func = cmd_analyze_file)
 
 	cmd = subparsers.add_parser('align')
 	cmd.add_argument('--hyp', required = True)
