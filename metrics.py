@@ -639,7 +639,7 @@ def cmd_analyze(hyp, ref, val_config, text_config, text_pipeline_name, vocab, de
 def cmd_analyze_file(input_file, output_file, val_config, text_config, text_pipeline_name, vocab, detailed):
 	import language_processing
 	assert os.path.exists(text_config)
-	text_config = json.load(open(args.text_config))
+	text_config = json.load(open(text_config))
 	text_pipeline = language_processing.ProcessingPipeline.make(text_config, text_pipeline_name)
 	validation_postprocessors = {name: language_processing.TextPostprocessor(**config) for name, config in
 	                             text_config['postprocess'].items()}
@@ -663,7 +663,7 @@ def cmd_analyze_file(input_file, output_file, val_config, text_config, text_pipe
 		for hyp_ref_dict in hyp_ref:
 			hyp = hyp_ref_dict['hyp']
 			ref = hyp_ref_dict['ref']
-			reports.append(analyzer.analyze(hyp = hyp, ref = ref, postprocess_fn = text_pipeline.postprocess, detailed = detailed))
+			reports.append(analyzer.analyze(hyp = hyp, ref = ref, postprocess_fn = text_pipeline.postprocess, detailed = detailed, extra = {'audio_path': hyp_ref_dict['audio_path']}))
 	json.dump(reports, open(output_file, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
 	print(output_file)
 
