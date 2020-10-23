@@ -75,9 +75,3 @@ def shapecheck(hints = None, auto = None, **kwargs):
 				else:
 					assert isinstance(v, h), f'Arg [{k}] should be typed [{h}] but is typed [{type(v)}]'
 					
-if __name__ == '__main__':
-	@shaping.shapecheck(auto = True)
-	def f(x : shaping.BCT, y : shaping.BT) -> shaping.B:
-		return x[:, 0, 0]
-
-  	f(x = torch.rand(3, 4, 5), y = torch.rand(3, 5))
