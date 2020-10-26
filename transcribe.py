@@ -263,9 +263,11 @@ def main(args, ext_json = ['.json', '.json.gz']):
 			with open(transcript_path, 'w') as f:
 				f.write(hyp)
 
-		# if args.output_csv:
-		# 	[output_lines.append(csv_sep.join((audio_path, h, str(meta[i]['begin']), str(meta[i]['end']))) + '\n')
-		# 	 for i, h in enumerate(hyp.split('\n'))]
+		if args.output_csv:
+			output_lines += [
+				csv_sep.join((t['audio_path'], t['hyp'], str(t['begin']), str(t['end']))) + '\n'
+				for i, t in enumerate(filtered_transcript)
+			]
 
 		if args.logits:
 			logits_file_path = os.path.join(args.output_path, audio_name + '.pt')
