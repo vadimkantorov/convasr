@@ -109,7 +109,7 @@ sudo docker build --build-arg CUDAVERSION=101 --build-arg CUDAVERSIONPOINT=10.1 
 sudo docker build --build-arg CUDAVERSION=102 --build-arg CUDAVERSIONPOINT=10.2 -t convasr scripts
 
 # run docker
-sudo docker run -p 7006:6006 --runtime=nvidia --privileged --cap-add=SYS_PTRACE -v ~/.ssh:/root/.ssh -v ~/stt_results:/root/stt_results -v ~/.gitconfig:/root/.gitconfig -v ~/.vimrc:/root/.vimrc -v ~/convasr:/root/convasr -v /home/data/ru_open_stt_wav:/root/convasr/ru_open_stt -v /home/data/kontur_calls_micro:/root/convasr/kontur_calls_micro -v /home/data/valset17122019:/root/convasr/valset17122019 -v /home/data/valset11102019:/root/convasr/valset11102019 -v /home/data/domain_set:/root/convasr/domain_set -v /home/data/speechcore:/root/convasr/data/speechcore -v/home/html:/root/convasr/data/html -v /home/data/youtube:/root/convasr/youtube -it --ipc=host convasr
+sudo docker run -p 7006:6006 --runtime=nvidia --privileged --cap-add=SYS_PTRACE -v ~/.ssh:/root/.ssh -v ~/.gitconfig:/root/.gitconfig -v ~/.vimrc:/root/.vimrc  -v ~/convasr:/root/convasr    -v ~/stt_results:/root/stt_results    -v /home/data/ru_open_stt_wav:/root/convasr/ru_open_stt -v /home/data/kontur_calls_micro:/root/convasr/kontur_calls_micro -v /home/data/valset17122019:/root/convasr/valset17122019 -v /home/data/valset11102019:/root/convasr/valset11102019 -v /home/data/domain_set:/root/convasr/domain_set -v /home/data/speechcore:/root/convasr/data/speechcore -v/home/html:/root/convasr/data/html -v /home/data/youtube:/root/convasr/youtube -v /home/data/echomsk6000:/root/convasr/echomsk6000     -it --ipc=host convasr
 
 sudo docker image rm -f convasr
 ```

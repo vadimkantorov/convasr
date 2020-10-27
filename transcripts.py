@@ -59,6 +59,8 @@ def save(data_path, transcript):
 			audio_name_ = audio_name(transcript[0])
 			f.writelines('SPEAKER {audio_name} 1 {begin:.3f} {duration:.3f} <NA> <NA> {speaker} <NA> <NA>\n'.format(audio_name = audio_name, begin = t['begin'], duration = compute_duration(t), speaker = t['speaker']) for t in transcript if t['speaker'] != speaker_missing)
 
+	return data_path
+
 def strip(transcript, keys = []):
 	return [{k: v for k, v in t.items() if k not in keys} for t in transcript]
 

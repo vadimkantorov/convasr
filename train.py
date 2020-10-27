@@ -169,7 +169,7 @@ def evaluate_model(
 		if args.world_size > 1:
 			# synchronize process, because rank 0 process do result analisys and io
 			dist.barrier()
-		_print(f'\n{val_dataset_name}@{iteration}')
+		_print(f'\n{val_dataset_name}@{iteration}: batches: {len(val_data_loader)}, examples: {len(val_data_loader.dataset)}')
 		analyze = args.analyze == [] or (args.analyze is not None and val_dataset_name in args.analyze)
 
 		model.eval()

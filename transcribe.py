@@ -30,7 +30,9 @@ def setup(args):
 			args.window_size,
 			args.window_stride,
 			args.window,
-			eps = 1e-6,
+			dither = args.dither,
+			dither0 = args.dither0,
+			#eps = 1e-6,
 			normalize_signal=args.normalize_signal,
 			debug_short_long_records_normalize_signal_multiplier=args.debug_short_long_records_normalize_signal_multiplier
 	)
@@ -249,23 +251,20 @@ def main(args, ext_json = ['.json', '.json.gz']):
 
 		if args.output_json:
 			transcript_path = os.path.join(args.output_path, audio_name + '.json')
-			print(transcript_path)
-			transcripts.save(transcript_path, filtered_transcript)
+			print(transcripts.save(transcript_path, filtered_transcript))
 
 		if args.output_html:
 			transcript_path = os.path.join(args.output_path, audio_name + '.html')
-			print(transcript_path)
-			vis.transcript(transcript_path, args.sample_rate, args.mono, transcript, filtered_transcript)
+			print(vis.transcript(transcript_path, args.sample_rate, args.mono, transcript, filtered_transcript))
 
 		if args.output_txt:
 			transcript_path = os.path.join(args.output_path, audio_name + '.txt')
-			print(transcript_path)
 			with open(transcript_path, 'w') as f:
 				f.write(hyp)
+			print(transcript_path)
 
-		# if args.output_csv:
-		# 	[output_lines.append(csv_sep.join((audio_path, h, str(meta[i]['begin']), str(meta[i]['end']))) + '\n')
-		# 	 for i, h in enumerate(hyp.split('\n'))]
+		if args.output_csv:
+		 	output_lines.extend(csv_sep.join([audio_path, h, str(meta[i]['begin']), str(meta[i]['end'])]) + '\n' for i, h in enumerate(hyp.split('\n')))
 
 		if args.logits:
 			logits_file_path = os.path.join(args.output_path, audio_name + '.pt')
@@ -282,8 +281,10 @@ def main(args, ext_json = ['.json', '.json.gz']):
 		print('Done: {:.02f} sec\n'.format(time.time() - tic))
 
 	if args.output_csv:
-		with open(os.path.join(args.output_path, 'transcripts.csv'), 'w') as f:
+		transcript_path = os.path.join(args.output_path, 'transcripts.csv')
+		with open(transcript_path, 'w') as f:
 			f.writelines(output_lines)
+		print(transcript_path)
 
 
 if __name__ == '__main__':
@@ -339,5 +340,7 @@ if __name__ == '__main__':
 	parser.add_argument('--text-config', default = 'configs/ru_text_config.json')
 	parser.add_argument('--text-pipelines', nargs = '+', help = 'text processing pipelines (names should be defined in text-config)', default = ['char_legacy'])
 	parser.add_argument('--ref-transcript-path')
+	parser.add_argument('--dither0', type = float, default = 0.0, help = 'Amount of dithering prior to preemph')
+	parser.add_argument('--dither', type = float, default = 0.0, help = '1e-5 used in training. Amount of dithering after preemph')
 	args = parser.parse_args()
 	main(args)

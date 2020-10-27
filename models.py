@@ -571,10 +571,10 @@ class LogFilterBankFrontend(nn.Module):
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
 
 		signal = normalize_signal(signal, denom_multiplier=self.debug_short_long_records_normalize_signal_multiplier) if self.normalize_signal else signal
-		signal = apply_dither(signal, self.dither0)
+		#signal = apply_dither(signal, self.dither0)
 		signal = torch.cat([signal[..., :1], signal[..., 1:] -
 							self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
-		signal = apply_dither(signal, self.dither)
+		#signal = apply_dither(signal, self.dither)
 		signal = signal * mask if mask is not None else signal
 
 		pad = self.freq_cutoff - 1
@@ -689,6 +689,7 @@ def reset_bn_running_stats_(model):
 
 def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, opt_level = None, **kwargs):
 	data_parallel = data_parallel and torch.cuda.device_count() > 1
+	model_training = model.training
 
 	if opt_level is None:
 		model = torch.nn.DataParallel(model) if data_parallel else model
@@ -701,6 +702,7 @@ def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, op
 	else:
 		model, optimizer = apex.amp.initialize(model, optimizers = optimizer, opt_level = opt_level, **kwargs) if optimizer is not None else (apex.amp.initialize(model, opt_level = opt_level, **kwargs), None)
 
+	model.train(model_training)
 	return model, optimizer
 
 
@@ -709,6 +711,7 @@ def distributed_data_parallel_and_autocast(model, local_rank, optimizer = None, 
 		model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 	model, optimizer = apex.amp.initialize(model, optimizer, opt_level=opt_level, **kwargs)
 	model = torch.nn.parallel.DistributedDataParallel(model, device_ids = [local_rank], output_device = local_rank, find_unused_parameters = True)
+	model.train(model_training)
 	return model, optimizer
 
 
