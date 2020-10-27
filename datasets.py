@@ -43,7 +43,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		sample_rate,
 		frontend = None,
 		speaker_names = None,
-		waveform_transform_debug_dir = None,
 		min_duration = None,
 		max_duration = None,
 		duration_filter = True,
@@ -70,7 +69,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.text_pipelines = text_pipelines
 		self.frontend = frontend
 		self.sample_rate = sample_rate
-		self.waveform_transform_debug_dir = waveform_transform_debug_dir
 		self.segmented = segmented
 		self.time_padding_multiple = time_padding_multiple
 		self.mono = mono
@@ -185,16 +183,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			) for i in range(int(self.cumlen[index - 1] if index >= 1 else 0), int(self.cumlen[index]))]
 
 	def __getitem__(self, index):
-		waveform_transform_debug = (
-			lambda audio_path,
-			sample_rate,
-			signal: audio.write_audio(
-				os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'),
-				signal,
-				sample_rate
-			)
-		) if self.waveform_transform_debug_dir else None
-
 		audio_path = self.audio_path[index]
 		
 		transcript = self.load_example(index)
@@ -259,7 +247,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 					segment_features = segment_features[:, :, time_slice.start // hop_length:time_slice.stop // hop_length]
 					features.append(segment_features.squeeze(0))
 				else:
-					features.append(self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0))
+					features.append(self.frontend(segment).squeeze(0))
 			else:
 				features.append(segment)
 

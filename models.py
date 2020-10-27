@@ -436,36 +436,6 @@ def relu_dropout(x, p = 0, inplace = False, training = False):
 	return x.masked_fill_(mask, 0).div_(p1m) if inplace else x.masked_fill(mask, 0).div(p1m)
 
 
-class AugmentationFrontend(nn.Module):
-	def __init__(self, frontend, feature_transform = None, waveform_transform = None):
-		super().__init__()
-		self.frontend = frontend
-		self.feature_transform = feature_transform
-		self.waveform_transform = waveform_transform
-
-	def forward(self, signal, audio_path = None, dataset_name = None, waveform_transform_debug = None, **kwargs):
-		if self.waveform_transform is not None:
-			signal = self.waveform_transform(signal, self.frontend.sample_rate, dataset_name = dataset_name)
-
-		if waveform_transform_debug is not None:
-			waveform_transform_debug(audio_path, self.frontend.sample_rate, signal)
-
-		features = self.frontend(signal)
-
-		if self.feature_transform is not None:
-			features = self.feature_transform(features, self.frontend.sample_rate, dataset_name = dataset_name)
-
-		return features
-
-	@property
-	def sample_rate(self):
-		return self.frontend.sample_rate
-
-	@property
-	def read_audio(self):
-		return 'SoxAug' not in self.waveform_transform.__class__.__name__
-
-
 class Wav2VecFrontend(nn.Module):
 	def __init__(
 		self, out_channels, sample_rate, preemphasis = 0.0, use_context_features = True, extra_args = None, **kwargs
@@ -590,9 +560,6 @@ class LogFilterBankFrontend(nn.Module):
 		log_mel_features = self.mel(power_spectrum).log()
 		return log_mel_features
 
-	@property
-	def read_audio(self):
-		return True
 
 @torch.jit.script
 def compute_output_lengths(x: shaping.BT, lengths_fraction: typing.Optional[shaping.B] = None):
