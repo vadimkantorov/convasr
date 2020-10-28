@@ -707,6 +707,7 @@ def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, op
 
 
 def distributed_data_parallel_and_autocast(model, local_rank, optimizer = None, opt_level = None, synchronize_bn = False, **kwargs):
+	model_training = model.training
 	if synchronize_bn:
 		model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 	model, optimizer = apex.amp.initialize(model, optimizer, opt_level=opt_level, **kwargs)
