@@ -101,7 +101,7 @@ def collect_speaker_names(transcript, speaker_names = [], num_speakers = 1, set_
 			assert speaker_missing not in speaker_names
 			speaker_names[speaker_missing] = speaker_name_missing
 			speaker_names = [speaker_names.get(speaker, speaker_name_missing) for speaker in range(1 + max(speaker_names.values()))]
-		
+
 		elif has_speaker_names:
 			speaker_names = [speaker_name_missing] + sorted(set(t['speaker_name'] for t in transcript))
 			speaker_names_index = {speaker_name_missing : speaker_missing, **{speaker_name : i for i, speaker_name in enumerate(speaker_names)}}
@@ -113,7 +113,7 @@ def collect_speaker_names(transcript, speaker_names = [], num_speakers = 1, set_
 	if set_speaker and (not has_speaker):
 		for t in transcript:
 			speaker_name = t.get('speaker_name') or default_channel_names[t.get('channel', channel_missing)]
-			t['speaker'] = speaker_names_index[speaker_name]
+			t['speaker'] = speaker_names_index.get(speaker_name, 0) ## bug with key error in speaker_names_index
 
 	if num_speakers is not None and len(speaker_names) < 1 + num_speakers:
 		speaker_names.extend(f'speaker{speaker}' for speaker in range(len(speaker_names), 1 + num_speakers))
