@@ -688,24 +688,11 @@ def summary(input_path, lang):
 def tabulate(
 	experiments_dir,
 	experiment_id,
-	entropy,
-	loss,
-	cer10,
-	cer15,
-	cer20,
-	cer30,
-	cer40,
-	cer50,
-	per,
-	wer,
+	metric_name,
+	show_ratio_below,
 	json_,
-	bpe,
-	der,
-	lang
+	labels_name
 ):
-	# TODO: bring back custom name to the filtration process, or remove filtration by labels_name entirely.
-	labels = datasets.Labels(lang=datasets.Language(lang), name='char')
-
 	res = collections.defaultdict(list)
 	experiment_dir = os.path.join(experiments_dir, experiment_id)
 	for f in sorted(glob.glob(os.path.join(experiment_dir, f'transcripts_*.json'))):
@@ -713,21 +700,19 @@ def tabulate(
 		iteration = f[eidx:].replace('.json', '')
 		val_dataset_name = f[f.find('transcripts_') + len('transcripts_'):eidx]
 		checkpoint = os.path.join(experiment_dir, 'checkpoint_' + f[eidx:].replace('.json', '.pt')) if not json_ else f
-		metric = 'wer' if wer else 'entropy' if entropy else 'loss' if loss else 'per' if per else 'der' if der else 'cer'
-		val = torch.tensor([j[metric] for j in json.load(open(f)) if j['labels_name'] == labels.name] or [0.0])
+		val = torch.tensor([j[metric_name] for j in json.load(open(f)) if j['labels_name'] == labels_name] or [0.0])
 		val = val[~(torch.isnan(val) | torch.isinf(val))]
 
-		if cer10 or cer20 or cer30 or cer40 or cer50:
-			val = (val < 0.1 * [False, cer10, cer20, cer30, cer40, cer50].index(True)).float()
-		if cer15:
-			val = (val < 0.15).float()
+		if show_ratio_below is not None:
+			val = (val < show_ratio_below).float()
+
 		res[iteration].append((val_dataset_name, float(val.mean()), checkpoint))
-	val_dataset_names = sorted(set(val_dataset_name for r in res.values() for val_dataset_name, cer, checkpoint in r))
+	val_dataset_names = sorted(set(val_dataset_name for r in res.values() for val_dataset_name, _, _ in r))
 	print('iteration\t' + '\t'.join(val_dataset_names))
 	for iteration, r in res.items():
-		cers = {val_dataset_name: f'{cer:.04f}' for val_dataset_name, cer, checkpoint in r}
+		metric_values = {val_dataset_name: f'{metric_value:.04f}' for val_dataset_name, metric_value, checkpoint in r}
 		print(
-			f'{iteration}\t' + '\t'.join(cers.get(val_dataset_name, '')
+			f'{iteration}\t' + '\t'.join(metric_values.get(val_dataset_name, '')
 											for val_dataset_name in val_dataset_names) + f'\t{r[-1][-1]}'
 		)
 
@@ -852,20 +837,10 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('tabulate')
 	cmd.add_argument('experiment_id')
 	cmd.add_argument('--experiments-dir', default = 'data/experiments')
-	cmd.add_argument('--entropy', action = 'store_true')
-	cmd.add_argument('--loss', action = 'store_true')
-	cmd.add_argument('--per', action = 'store_true')
-	cmd.add_argument('--wer', action = 'store_true')
-	cmd.add_argument('--cer10', action = 'store_true')
-	cmd.add_argument('--cer15', action = 'store_true')
-	cmd.add_argument('--cer20', action = 'store_true')
-	cmd.add_argument('--cer30', action = 'store_true')
-	cmd.add_argument('--cer40', action = 'store_true')
-	cmd.add_argument('--cer50', action = 'store_true')
+	cmd.add_argument('--metric-name', choices = ['cer', 'wer', 'loss', 'entropy'], default = 'cer')
+	cmd.add_argument('--show-ratio-below', type = float, help = 'if exist, method return ratio of examples where metric below this value')
 	cmd.add_argument('--json', dest = "json_", action = 'store_true')
-	cmd.add_argument('--bpe', default = 'char')
-	cmd.add_argument('--der', action = 'store_true')
-	cmd.add_argument('--lang', default = 'ru')
+	cmd.add_argument('--labels-name', default = 'char_legacy')
 	cmd.set_defaults(func = tabulate)
 
 	cmd = subparsers.add_parser('summary')
