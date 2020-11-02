@@ -1355,6 +1355,11 @@ class JasperNetSmallTrainableInstanceNorm(JasperNet):
 		)
 
 
+class JasperNetLarge(JasperNet):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, num_subblocks = 2, repeat = 5, temporal_mask = False, **kwargs)
+
+
 class JasperNetBig(JasperNet):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, num_subblocks = 2, temporal_mask = False, **kwargs)
