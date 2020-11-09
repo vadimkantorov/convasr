@@ -65,6 +65,11 @@ python scripts/spotty.py download_checkpoint CHECKPOINT_PATH
 spotty aws spot-prices -i p3.8xlarge -r us-east-1
 ```
 
+# Augment a dataset with SOX (online)
+
+Online augmentations removed in tagged commit:
+https://github.com/vadimkantorov/convasr/tree/remove_augmentations
+
 # Augment a dataset with SOX (offline)
 The passed command must read from stdin and write to stdout.
 

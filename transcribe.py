@@ -77,45 +77,43 @@ def main(args, ext_json = ['.json', '.json.gz']):
 	exclude = set(
 		[os.path.splitext(basename)[0]
 			for basename in os.listdir(args.output_path)
-			if basename.endswith('.json')] if args.skip_processed else []
-	)
-	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
+			if basename.endswith('.json')]) if args.skip_processed else None
+
+	data_paths = [path for path in data_paths if exclude is None or os.path.basename(path) not in exclude]
 
 	text_pipeline, frontend, model, generator = setup(args)
 	val_dataset = datasets.AudioTextDataset(
 		data_paths, [text_pipeline],
 		args.sample_rate,
 		frontend = frontend if not args.frontend_in_model else None,
-		segmented = True,
 		mono = args.mono,
 		time_padding_multiple = args.batch_time_padding_multiple,
 		audio_backend = args.audio_backend,
 		exclude = exclude,
 		max_duration = args.transcribe_first_n_sec,
-		join_transcript = args.join_transcript,
+		mode = 'batched_channels' if args.join_transcript else 'batched_transcript',
 		string_array_encoding = args.dataset_string_array_encoding,
 		debug_short_long_records_features_from_whole_normalized_signal = args.debug_short_long_records_features_from_whole_normalized_signal
 	)
-	num_examples = len(val_dataset)
-	print('Examples count: ', num_examples)
+	print('Examples count: ', len(val_dataset))
 	val_meta = val_dataset.pop_meta()
 	val_data_loader = torch.utils.data.DataLoader(
 		val_dataset, batch_size = None, collate_fn = val_dataset.collate_fn, num_workers = args.num_workers
 	)
 	csv_sep = dict(tab = '\t', comma = ',')[args.csv_sep]
-	output_lines = []  # only used if args.output_csv is True
+	csv_lines = []  # only used if args.output_csv is True
 
 	oom_handler = utils.OomHandler(max_retries = args.oom_retries)
 	for i, (meta, s, x, xlen, y, ylen) in enumerate(val_data_loader):
-		print(f'Processing: {i}/{num_examples}')
+		print(f'Processing: {i}/{len(val_dataset)}')
 		meta = [val_meta[t['example_id']] for t in meta]
 
 		audio_path = meta[0]['audio_path']
+		audio_name = transcripts.audio_name(audio_path)
 		begin_end = [dict(begin = t['begin'], end = t['end']) for t in meta]
 		begin = torch.tensor([t['begin'] for t in begin_end], dtype = torch.float)	
-		end = torch.tensor([t['end'] for t in begin_end], dtype = torch.float)	
-		audio_name = transcripts.audio_name(audio_path)
-		#TODO check logic
+		end = torch.tensor([t['end'] for t in begin_end], dtype = torch.float)
+		#TODO WARNING assumes frontend not in dataset
 		duration = x.shape[-1] / args.sample_rate
 		channel = [t['channel'] for t in meta]
 		speaker = [t.get('speaker', transcripts.speaker_missing) for t in meta]
@@ -137,7 +135,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				)
 			)
 
-			ts = duration * torch.linspace(0, 1, steps = log_probs.shape[-1], device = log_probs.device).unsqueeze(0).expand(x.shape[0], -1)
+			ts: shaping.Bt = duration * torch.linspace(0, 1, steps = log_probs.shape[-1], device = log_probs.device).unsqueeze(0).expand(x.shape[0], -1)
 
 			ref_segments = [[
 				dict(
@@ -148,24 +146,23 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				)
 			] for i in range(len(meta))]
 			hyp_segments = [alternatives[0] for alternatives in
-			                generator.generate(tokenizer = text_pipeline.tokenizer,
-			                                   log_probs = log_probs,
-			                                   begin = begin,
-			                                   end = end,
-			                                   output_lengths = olen,
-			                                   time_stamps = ts,
-			                                   segment_text_key = 'hyp',
-				                               segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
-			#TODO call text_pipeline.postprocess for hyp texts
+							generator.generate(tokenizer = text_pipeline.tokenizer,
+											   log_probs = log_probs,
+											   begin = begin,
+											   end = end,
+											   output_lengths = olen,
+											   time_stamps = ts,
+											   segment_text_key = 'hyp',
+											   segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
 			hyp, ref = '\n'.join(transcripts.join(hyp = h) for h in hyp_segments).strip(), '\n'.join(transcripts.join(ref = r) for r in ref_segments).strip()
-			hyp, ref = map(text_pipeline.postprocess, [hyp, ref])
+			hyp = text_pipeline.postprocess(hyp)
 			if args.verbose:
 				print('HYP:', hyp)
 			print('CER: {cer:.02%}'.format(cer = metrics.cer(hyp = hyp, ref = ref)))
 
 			tic_alignment = time.time()
 			if args.align and y.numel() > 0:
-				alignment = ctc.alignment(
+				alignment: shaping.BY = ctc.alignment(
 					log_probs.permute(2, 0, 1),
 					y[:,0,:], # assumed that 0 channel is char labels
 					olen,
@@ -176,18 +173,18 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				aligned_ts: shaping.Bt = ts.gather(1, alignment)
 				## TODO call text_pipeline.postprocess for ref texts
 				ref_segments = [alternatives[0] for alternatives in
-				                generator.generate(tokenizer = text_pipeline.tokenizer,
-				                                   log_probs = torch.nn.functional.one_hot(y[:, 0, :], num_classes = log_probs.shape[1]).permute(0, 2, 1),
-				                                   begin = begin,
-				                                   end = end,
-				                                   output_lengths = ylen,
-				                                   time_stamps = aligned_ts,
-			                                       segment_text_key = 'ref',
-				                                   segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
+								generator.generate(tokenizer = text_pipeline.tokenizer,
+												   log_probs = torch.nn.functional.one_hot(y[:, 0, :], num_classes = log_probs.shape[1]).permute(0, 2, 1),
+												   begin = begin,
+												   end = end,
+												   output_lengths = ylen,
+												   time_stamps = aligned_ts,
+												   segment_text_key = 'ref',
+												   segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
 			oom_handler.reset()
 		except:
 			if oom_handler.try_recover(model.parameters()):
-				print(f'Skipping {i} / {num_examples}')
+				print(f'Skipping {i} / {len(val_dataset)}')
 				continue
 			else:
 				raise
@@ -204,16 +201,19 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				hyp_segments = list(transcripts.segment_by_time(hyp_transcript, args.max_segment_duration))
 				ref_segments = [[] for _ in hyp_segments]
 
+		#### HACK for diarization
 		elif args.ref_transcript_path and args.join_transcript:
 			audio_name_hack = audio_name.split('.')[0]
 			#TODO: normalize ref field
 			ref_segments = [[t] for t in sorted(transcripts.load(os.path.join(args.ref_transcript_path, audio_name_hack + '.json')), key = transcripts.sort_key)]
 			hyp_segments = list(transcripts.segment_by_ref(hyp_transcript, ref_segments, set_speaker = True, soft = False))
+		#### END OF HACK
 
 		has_ref = bool(transcripts.join(ref = transcripts.flatten(ref_segments)))
 
 		transcript = []
 		for hyp_transcript, ref_transcript in zip(hyp_segments, ref_segments):
+			#TODO is postprocess required here?
 			hyp_transcript, ref_transcript = transcripts.map_text(text_pipeline.postprocess, hyp = hyp_transcript), transcripts.map_text(text_pipeline.postprocess, ref = ref_transcript)
 			hyp, ref = transcripts.join(hyp = hyp_transcript), transcripts.join(ref = ref_transcript)
 
@@ -233,7 +233,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				)
 			)
 
-		transcripts.collect_speaker_names(transcript, set_speaker = True, num_speakers = 2)
+		transcripts.collect_speaker_names(transcript, set_speaker_data = True, num_speakers = 2)
 
 		filtered_transcript = list(
 			transcripts.prune(
@@ -242,7 +242,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				cer = args.cer,
 				duration = args.duration,
 				gap = args.gap,
-				unk = args.unk,
+				allowed_unk_count = args.unk,
 				num_speakers = args.num_speakers
 			)
 		)
@@ -264,7 +264,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 			print(transcript_path)
 
 		if args.output_csv:
-		 	output_lines.extend(csv_sep.join([audio_path, h, str(meta[i]['begin']), str(meta[i]['end'])]) + '\n' for i, h in enumerate(hyp.split('\n')))
+			csv_lines.extend(csv_sep.join([audio_path, h, str(meta[i]['begin']), str(meta[i]['end'])]) + '\n' for i, h in enumerate(hyp.split('\n')))
 
 		if args.logits:
 			logits_file_path = os.path.join(args.output_path, audio_name + '.pt')
@@ -283,7 +283,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 	if args.output_csv:
 		transcript_path = os.path.join(args.output_path, 'transcripts.csv')
 		with open(transcript_path, 'w') as f:
-			f.writelines(output_lines)
+			f.writelines(csv_lines)
 		print(transcript_path)
 
 
