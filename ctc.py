@@ -47,11 +47,11 @@ def alignment(
 	for t in range(1, len(log_probs)):
 		prev = torch.stack([log_alpha[:, 2:], log_alpha[:, 1:-1], torch.where(diff_labels, log_alpha[:, :-2], zero)])
 		log_alpha[:, 2:] = log_probs[t].gather(-1, _t_a_r_g_e_t_s_) + prev.logsumexp(dim = 0)
+		backpointer[:, 2:(2 + prev.shape[-1])] = prev.argmax(dim = 0)
 		if pack_backpointers:
-			backpointer[:, 2:(2 + prev.shape[-1])] = prev.argmax(dim = 0)
 			torch.sum(backpointer.view(len(backpointer), -1, 4) << packshift, dim = -1, out = backpointers[t])
 		else:
-			backpointers[t, :, 2:] = prev.argmax(dim = 0)
+			backpointers[t] = backpointer
 
 	l1l2 = log_alpha.gather(
 		-1, torch.stack([zero_padding + target_lengths * 2 - 1, zero_padding + target_lengths * 2], dim = -1)
