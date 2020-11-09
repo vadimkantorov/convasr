@@ -1,13 +1,16 @@
 import os
 import json
-import torch
-import torch.nn.functional as F
+import typing
 import audio
 import utils
+import torch
+import shaping
+import itertools
 
 ref_missing = ''
 speaker_name_missing = ''
 speaker_missing = 0
+speaker_separator = ';'
 channel_missing = -1
 time_missing = -1
 _er_missing = -1.0
@@ -21,6 +24,7 @@ class Segment(dict):
 
 class Transcript(list):
 	pass
+
 
 def flatten(segments):
 	return utils.flatten(segments)
@@ -83,13 +87,13 @@ def remap_speaker(transcript, speaker_perm):
 		t['speaker'], t['speaker_name'] = speaker_, speaker_names[speaker_]
 
 
-def collect_speaker_names(transcript, speaker_names = [], num_speakers = 1, set_speaker = False):
+def collect_speaker_names(transcript, speaker_names = [], num_speakers = 1, set_speaker_data = False):
 	#TODO: convert channel to 0+
 
 	if not transcript:
 		return
 
-	has_speaker = has_speaker_names = has_channel = True
+	has_speaker = has_speaker_names = True
 	for t in transcript:
 		has_speaker &= t.get('speaker') is not None
 		has_speaker_names &= bool(t.get('speaker_name'))
@@ -97,23 +101,28 @@ def collect_speaker_names(transcript, speaker_names = [], num_speakers = 1, set_
 	# assumes that either all have speaker | all have speaker_name
 	if not speaker_names:
 		if has_speaker:
-			speaker_names = {t['speaker'] : default_speaker_names[t['speaker']] for t in transcript}
-			assert speaker_missing not in speaker_names
+			speaker_names = {}
+			for t in transcript:
+				speaker_names[t['speaker']] = default_speaker_names[t['speaker']]
+				if set_speaker_data:
+					t['speaker_name'] = default_speaker_names[t['speaker']]
 			speaker_names[speaker_missing] = speaker_name_missing
-			speaker_names = [speaker_names.get(speaker, speaker_name_missing) for speaker in range(1 + max(speaker_names.values()))]
+			speaker_names = [speaker_names.get(speaker, speaker_name_missing) for speaker in range(1 + max(speaker_names.keys()))]
 		
 		elif has_speaker_names:
 			speaker_names = [speaker_name_missing] + sorted(set(t['speaker_name'] for t in transcript))
 			speaker_names_index = {speaker_name_missing : speaker_missing, **{speaker_name : i for i, speaker_name in enumerate(speaker_names)}}
+			if set_speaker_data:
+				for t in transcript:
+					t['speaker'] = speaker_names_index[t['speaker_name']]
 
 		else:
 			speaker_names_index = {default_channel_names[speaker] : speaker for speaker in [channel_missing] + list(range(num_speakers))}
 			speaker_names = [default_channel_names[channel] for channel in range(num_speakers)]
-
-	if set_speaker and (not has_speaker):
-		for t in transcript:
-			speaker_name = t.get('speaker_name') or default_channel_names[t.get('channel', channel_missing)]
-			t['speaker'] = speaker_names_index[speaker_name]
+			if set_speaker_data:
+				for t in transcript:
+					t['speaker_name'] = default_channel_names[t.get('channel', channel_missing)]
+					t['speaker'] = speaker_names_index[t['speaker_name']]
 
 	if num_speakers is not None and len(speaker_names) < 1 + num_speakers:
 		speaker_names.extend(f'speaker{speaker}' for speaker in range(len(speaker_names), 1 + num_speakers))
@@ -140,7 +149,7 @@ def segment_by_time(transcript, max_segment_seconds, break_on_speaker_change = T
 def take_between(transcript, ind_last_taken, t, first, last, sort_by_time = True, soft = True, set_speaker = False):
 	if sort_by_time:
 		lt = lambda a, b: a['end'] < b['begin']
-		gt = lambda a, b: a['begin'] > b['begin']
+		gt = lambda a, b: a['end'] > b['begin']
 	else:
 		lt = lambda a, b: sort_key(a) < sort_key(b)
 		gt = lambda a, b: sort_key(a) > sort_key(b)
@@ -191,45 +200,79 @@ def sort(transcript):
 
 
 def sort_key(t):
-	return (t.get('audio_path'), t.get('begin'), t.get('end'), t.get('channel'))
+	return t.get('audio_path'), t.get('begin'), t.get('end'), t.get('channel')
 
 
 def group_key(t):
 	return t.get('audio_path')
 
 
+Interval = typing.NewType('Interval', typing.Tuple[typing.Union[float, int], typing.Union[float, int]])
+
+
 def prune(
-	transcript,
-	align_boundary_words = False,
-	cer = None,
-	wer = None,
-	mer = None,
-	duration = None,
-	gap = None,
-	num_speakers = None,
-	audio_name = None,
-	unk = None,
-	groups = None
+	transcript: Transcript,
+	align_boundary_words: bool = False,
+	cer: typing.Optional[Interval] = None,
+	wer: typing.Optional[Interval] = None,
+	mer: typing.Optional[Interval] = None,
+	duration: typing.Optional[Interval] = None,
+	gap: typing.Optional[Interval] = None,
+	num_speakers: typing.Optional[Interval] = None,
+	allowed_audio_names: typing.Set[str] = None,
+	allowed_unk_count: typing.Optional[Interval] = None,
+	max_audio_file_size: typing.Optional[int] = None
 ):
+	audio_file_size_cache = dict()
+	get_size = lambda audio_path: audio_file_size_cache[audio_path] if audio_path in audio_file_size_cache else audio_file_size_cache.setdefault(audio_name, os.path.getsize(audio_path))
+
+	audio_size_check = lambda t: max_audio_file_size is None or get_size(t['audio_path']) <= max_audio_file_size
+	# TODO is_aligned check and refactor
 	is_aligned = lambda w: (w.get('type') or w.get('error_tag')) == 'ok'
 	duration_check = lambda t: duration is None or duration[0] <= compute_duration(t) <= duration[1]
 	boundary_check = lambda t: ((not t.get('words')) or (not align_boundary_words) or
 								(is_aligned(t['words'][0]) and is_aligned(t['words'][-1])))
 	gap_check = lambda t, prev: prev is None or gap is None or gap[0] <= t['begin'] - prev['end'] <= gap[1]
-	unk_check = lambda t: unk is None or unk[0] <= t.get('ref', '').count('*') <= unk[1]
-	speakers_check = lambda t: num_speakers is None or num_speakers[0] <= (t.get('speaker') or ''
-																			).count(',') + 1 <= num_speakers[1]
+	unk_check = lambda t: allowed_unk_count is None or allowed_unk_count[0] <= t.get('ref', '').count('*') <= allowed_unk_count[1]
+	speakers_check = lambda t: num_speakers is None or num_speakers[0] <= (t.get('speaker_name') or '').count(',') + 1 <= num_speakers[1]
 	cer_check = lambda t: cer is None or t.get('cer') is None or cer[0] <= t['cer'] <= cer[1]
 	wer_check = lambda t: wer is None or t.get('wer') is None or wer[0] <= t['wer'] <= wer[1]
 	mer_check = lambda t: mer is None or t.get('mer') is None or mer[0] <= t['mer'] <= mer[1]
-	groups_check = lambda t: groups is None or t.get('group') is None or t['group'] in groups
+	name_check = lambda t: allowed_audio_names is None or audio_name(t) in allowed_audio_names
 
 	prev = None
 	for t in transcript:
-		if groups_check(t) and unk_check(t) and duration_check(t) and cer_check(t) and wer_check(t) and mer_check(
-			t) and boundary_check(t) and gap_check(t, prev) and speakers_check(t):
+		if audio_size_check(t) and unk_check(t) and duration_check(t) and cer_check(t) and wer_check(t) and mer_check(
+			t) and boundary_check(t) and gap_check(t, prev) and speakers_check(t) and name_check(t):
 			yield t
 		prev = t
+
+
+def join_transcript(transcript: Transcript, join_channels: bool = False):
+	joined_transcripts = []
+
+	if join_channels:
+		groupped_t = [(channel_missing, transcript)]
+	else:
+		channel_key = lambda t: t.get('channel', channel_missing)
+		groupped_t = itertools.groupby(sorted(transcript, key = channel_key), channel_key)
+
+	for channel, transcript in groupped_t:
+		transcript = list(transcript)
+		audio_path = transcript[0]['audio_path']
+		assert all(t['audio_path'] == audio_path for t in transcript)
+		ref = speaker_separator.join(t['ref'].strip() for t in transcript)
+		speaker = [t['speaker'] for t in transcript]
+		speaker_name = ','.join(collect_speaker_names(transcript))
+		duration = audio.compute_duration(transcript[0]['audio_path'])
+		joined_transcripts.append(dict(audio_path = audio_path,
+										ref = ref,
+										begin = 0.0,
+										end = duration,
+										speaker = speaker,
+										speaker_name = speaker_name,
+										channel = channel))
+	return joined_transcripts
 
 
 def compute_duration(t, hours = False):

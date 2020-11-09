@@ -28,7 +28,6 @@ import metrics
 import models
 import optimizers
 import torch
-import transforms
 import vis
 import utils
 import transcripts
@@ -351,11 +350,7 @@ def main(args):
 		lr = args.lr,
 		weight_decay = args.weight_decay,
 		time = time.strftime('%Y-%m-%d_%H-%M-%S'),
-		experiment_name = args.experiment_name,
-		train_waveform_transform = f'aug{args.train_waveform_transform[0]}{args.train_waveform_transform_prob or ""}'
-		if args.train_waveform_transform else '',
-		train_feature_transform = f'aug{args.train_feature_transform[0]}{args.train_feature_transform_prob or ""}'
-		if args.train_feature_transform else ''
+		experiment_name = args.experiment_name
 	).replace('e-0', 'e-').rstrip('_')
 	if checkpoint and 'experiment_id' in checkpoint['args'] and not args.experiment_name:
 		args.experiment_id = checkpoint['args']['experiment_id']
@@ -484,27 +479,12 @@ def main(args):
 	stemmer = language_processing.Stemmer(lang)
 	error_analyzer = metrics.ErrorAnalyzer(metrics.WordTagger(stemmer = stemmer, vocab = vocab, word_tags = word_tags), metrics.ErrorTagger(), val_config.get('error_analyzer', {}), validation_postprocessors)
 
-	make_transform = lambda name_args, prob: None if not name_args else getattr(transforms, name_args[0])(*name_args[1:]) if prob is None else getattr(transforms, name_args[0])(prob, *name_args[1:]) if prob > 0 else None
-	val_frontend = models.AugmentationFrontend(
-		frontend,
-		waveform_transform = make_transform(args.val_waveform_transform, args.val_waveform_transform_prob),
-		feature_transform = make_transform(args.val_feature_transform, args.val_feature_transform_prob)
-	)
-
-	if args.val_waveform_transform_debug_dir:
-		args.val_waveform_transform_debug_dir = os.path.join(
-			args.val_waveform_transform_debug_dir,
-			str(val_frontend.waveform_transform)
-			if isinstance(val_frontend.waveform_transform, transforms.RandomCompose) else
-			val_frontend.waveform_transform.__class__.__name__
-		)
-		os.makedirs(args.val_waveform_transform_debug_dir, exist_ok = True)
+	val_frontend = frontend
 
 	val_data_loaders = {}
 	for val_data_path in args.val_data_path:
 		val_dataset = datasets.AudioTextDataset(val_data_path, text_pipelines, args.sample_rate,
 												frontend = val_frontend if not args.frontend_in_model else None,
-												waveform_transform_debug_dir = args.val_waveform_transform_debug_dir,
 												min_duration = args.min_duration,
 												time_padding_multiple = args.batch_time_padding_multiple,
 												pop_meta = True,
@@ -544,11 +524,7 @@ def main(args):
 
 	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder, frontend = args.freeze_frontend)
 
-	train_frontend = models.AugmentationFrontend(
-		frontend,
-		waveform_transform = make_transform(args.train_waveform_transform, args.train_waveform_transform_prob),
-		feature_transform = make_transform(args.train_feature_transform, args.train_feature_transform_prob)
-	)
+	train_frontend = frontend
 	tic = time.time()
 	if args.local_rank == 0:
 		train_dataset = datasets.AudioTextDataset(
@@ -559,9 +535,9 @@ def main(args):
 			min_duration = args.min_duration,
 			max_duration = args.max_duration,
 			time_padding_multiple = args.batch_time_padding_multiple,
-			bucket = lambda example: int(
+			bucket_fn = lambda example: int(
 				math.ceil(
-					((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
+					((example[-1]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
 				)
 			),
 			pop_meta = True,
@@ -586,9 +562,9 @@ def main(args):
 			min_duration=args.min_duration,
 			max_duration=args.max_duration,
 			time_padding_multiple=args.batch_time_padding_multiple,
-			bucket=lambda example: int(
+			bucket_fn =lambda example: int(
 				math.ceil(
-					((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
+					((example[-1]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
 				)
 			),
 			pop_meta=True,
@@ -928,35 +904,12 @@ if __name__ == '__main__':
 	parser.add_argument(
 		'--experiment-id',
 		default =
-		'{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{train_waveform_transform}_{train_feature_transform}_{experiment_name}'
+		'{model}_{optimizer}_lr{lr:.0e}_wd{weight_decay:.0e}_bs{train_batch_size}_{experiment_name}'
 	)
 	parser.add_argument('--experiment-name', '--name', default = '')
 	parser.add_argument('--comment', default = '')
 	parser.add_argument('--dry', action = 'store_true')
-	parser.add_argument('--val-waveform-transform-debug-dir', help = 'debug dir for augmented audio at validation')
-	parser.add_argument(
-		'--val-waveform-transform',
-		nargs = '*',
-		default = [],
-		help = 'waveform transforms are applied before frontend to raw audio waveform'
-	)
-	parser.add_argument(
-		'--val-waveform-transform-prob', type = float, default = None, help = 'apply transform with given probability'
-	)
-	parser.add_argument(
-		'--val-feature-transform',
-		nargs = '*',
-		default = [],
-		help = 'feature aug transforms are applied after frontend'
-	)
-	parser.add_argument('--val-feature-transform-prob', type = float, default = None)
-	parser.add_argument('--train-waveform-transform', nargs = '*', default = [])
-	parser.add_argument('--train-waveform-transform-prob', type = float, default = None)
-	parser.add_argument('--train-feature-transform', nargs = '*', default = [])
-	parser.add_argument('--train-feature-transform-prob', type = float, default = None)
-	parser.add_argument(
-		'--train-batch-accumulate-iterations', type = int, default = 1, help = 'number of gradient accumulation steps'
-	)
+	parser.add_argument('--train-batch-accumulate-iterations', type = int, default = 1, help = 'number of gradient accumulation steps')
 	parser.add_argument('--val-iteration-interval', type = int, default = 2500)
 	parser.add_argument('--log-iteration-interval', type = int, default = 100)
 	parser.add_argument('--log-weight-distribution', action = 'store_true')

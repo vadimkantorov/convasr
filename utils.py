@@ -204,7 +204,7 @@ class TensorBackedStringArray:
 		self.encoding = encoding
 		self.multiplier = dict(ascii = 1, utf_16_le = 2, utf_32_le = 4)[encoding]
 		self.data = torch.ByteTensor(torch.ByteStorage.from_buffer(''.join(strings).encode(encoding))).to(device)
-		self.cumlen = torch.LongTensor(list(map(len, strings))).cumsum(dim = 0).to(device)
+		self.cumlen = torch.tensor(list(map(len, strings)), dtype = torch.int64, device = device).cumsum(dim = 0)
 		assert len(strings) == 0 or int(self.cumlen[-1]) * self.multiplier == len(self.data), f'[{encoding}] is not enough to hold characters, use a larger character class'
 
 	def __getitem__(self, i):

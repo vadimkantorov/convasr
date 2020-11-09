@@ -21,7 +21,7 @@ import utils
 import language_processing
 
 
-def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, duration, gap, unk, num_speakers):
+def subset(input_path, output_path, allowed_audio_names, align_boundary_words, cer, wer, duration, gap, unk, num_speakers):
 	cat = output_path.endswith('.json')
 	meta = dict(
 		align_boundary_words = align_boundary_words,
@@ -37,7 +37,7 @@ def subset(input_path, output_path, audio_name, align_boundary_words, cer, wer, 
 		if not transcript_name.endswith('.json'):
 			continue
 		transcript = json.load(open(os.path.join(input_path, transcript_name)))
-		transcript = [dict(meta = meta, **t) for t in transcripts.prune(transcript, audio_name = audio_name, **meta)]
+		transcript = [dict(meta = meta, **t) for t in transcripts.prune(transcript, allowed_audio_names = allowed_audio_names, **meta)]
 		transcript_cat.extend(transcript)
 
 		if not cat:
