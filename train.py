@@ -33,7 +33,7 @@ import utils
 import transcripts
 import perf
 import itertools
-import tokenizers
+import text_tokenizers
 import language_processing
 import torch.distributed as dist
 
@@ -412,7 +412,7 @@ def main(args):
 		num_input_features = args.num_input_features,
 		num_classes = [pipeline.tokenizer.vocab_size for pipeline in text_pipelines],
 		dropout = args.dropout,
-		decoder_type = 'bpe' if any(isinstance(pipeline.tokenizer, tokenizers.BPETokenizer) for pipeline in text_pipelines) else None,
+		decoder_type = 'bpe' if any(isinstance(pipeline.tokenizer, text_tokenizers.BPETokenizer) for pipeline in text_pipelines) else None,
 		frontend = frontend if args.onnx or args.frontend_in_model else None,
 		**(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx else {})
 	)

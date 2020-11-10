@@ -1,6 +1,6 @@
 import re
 import typing
-import tokenizers
+import text_tokenizers
 
 class Stemmer:
 	def __init__(self, lang: str = 'ru'):
@@ -19,7 +19,7 @@ class ProcessingPipeline:
 	def make(config, name):
 		pipeline_config = config['pipelines'][name]
 		tokenizer_config = config['tokenizers'][pipeline_config['tokenizer']].copy()
-		tokenizer = getattr(tokenizers, tokenizer_config.pop('class'))(**tokenizer_config)
+		tokenizer = getattr(text_tokenizers, tokenizer_config.pop('class'))(**tokenizer_config)
 		preprocessor_config = config['preprocess'][pipeline_config['preprocessor']]
 		preprocessor = TextPreprocessor(**preprocessor_config)
 		postprocessor_config = config['postprocess'][pipeline_config['postprocessor']]
@@ -52,19 +52,22 @@ class TextProcessor:
 				collapse_char_series: bool = True,
 				drop_substrings: typing.List[str] = tuple(),
 				replace_chars: typing.List[str] = tuple(),
+	            allowed_chars: typing.Optional[str] = None,
 				**kwargs):
 		self.drop_space_at_borders = drop_space_at_borders
 		self.to_lower_case = to_lower_case
 		self.collapse_char_series = collapse_char_series #collapse any amount of chars repeats to one
 		self.drop_substrings = drop_substrings #drop any substring in this list from text
 		self.replace_chars = replace_chars #list contain replace groups, replace group is string where first character is replacer and  other are replaceable
+		self.allowed_chars = allowed_chars.replace(' ', r'\s') #all chars not included in this string will be dropped
 
 		self.handlers = [
 			self.handle_strip,
 			self.handle_case,
 			self.handle_collapse,
 			self.handle_drop,
-			self.handle_replace
+			self.handle_replace,
+			self.handle_allowed
 		]
 
 	def __call__(self, text):
@@ -79,7 +82,8 @@ class TextProcessor:
 		return text.lower() if self.to_lower_case else text
 
 	def handle_collapse(self, text):
-		text = re.sub(rf'(.)\1+', rf'\g<1>', text)
+		if self.collapse_char_series:
+			text = re.sub(rf'(.)\1+', rf'\g<1>', text)
 		return text
 
 	def handle_drop(self, text):
@@ -95,6 +99,14 @@ class TextProcessor:
 			text = re.sub(f'[{replacable}]', replacer, text)
 		return text
 
+	def handle_allowed(self, text):
+		if self.allowed_chars is None:
+			return text
+		else:
+			text = re.sub(rf'[^{self.allowed_chars}]', '', text)
+			text = re.sub('\s+', ' ', text)
+			return text
+
 
 class TextPreprocessor(TextProcessor):
 	def __init__(self,
@@ -109,7 +121,8 @@ class TextPreprocessor(TextProcessor):
 			self.handle_repeat,
 			self.handle_collapse,
 			self.handle_drop,
-			self.handle_replace
+			self.handle_replace,
+			self.handle_allowed
 		]
 
 	def handle_repeat(self, text):
@@ -131,7 +144,8 @@ class TextPostprocessor(TextProcessor):
 			self.handle_collapse,
 			self.handle_drop,
 			self.handle_repeat,
-			self.handle_replace
+			self.handle_replace,
+			self.handle_allowed
 		]
 
 	def handle_repeat(self, text):
