@@ -18,7 +18,7 @@ import transcripts
 import vis
 import utils
 import shaping
-import language_processing
+import text_processing
 
 def setup(args):
 	torch.set_grad_enabled(False)
@@ -39,7 +39,7 @@ def setup(args):
 
 	# for legacy compat
 	text_config = json.load(open(checkpoint['args'].get('text_config', args.text_config)))
-	text_pipeline = language_processing.ProcessingPipeline.make(text_config, checkpoint['args'].get('text_pipelines', args.text_pipelines)[0])
+	text_pipeline = text_processing.ProcessingPipeline.make(text_config, checkpoint['args'].get('text_pipelines', args.text_pipelines)[0])
 
 	model = getattr(models, args.model or checkpoint['args']['model'])(
 		args.num_input_features, [text_pipeline.tokenizer.vocab_size],

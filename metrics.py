@@ -4,7 +4,7 @@ import collections
 import json
 import functools
 import typing
-import language_processing
+import text_processing
 import Levenshtein
 
 placeholder = '|'
@@ -614,11 +614,11 @@ class Needleman:
 
 
 def cmd_analyze(hyp, ref, val_config, text_config, text_pipeline_name, vocab, detailed):
-	import language_processing
+	import text_processing
 	assert os.path.exists(text_config)
 	text_config = json.load(open(args.text_config))
-	text_pipeline = language_processing.ProcessingPipeline.make(text_config, text_pipeline_name)
-	validation_postprocessors = {name: language_processing.TextPostprocessor(**config) for name, config in text_config['postprocess'].items()}
+	text_pipeline = text_processing.ProcessingPipeline.make(text_config, text_pipeline_name)
+	validation_postprocessors = {name: text_processing.TextPostprocessor(**config) for name, config in text_config['postprocess'].items()}
 
 	vocab = set(map(str.strip, open(vocab))) if os.path.exists(vocab) else set()
 	if os.path.exists(val_config):
@@ -637,11 +637,11 @@ def cmd_analyze(hyp, ref, val_config, text_config, text_pipeline_name, vocab, de
 
 
 def cmd_analyze_file(input_file, output_file, val_config, text_config, text_pipeline_name, vocab, detailed):
-	import language_processing
+	import text_processing
 	assert os.path.exists(text_config)
 	text_config = json.load(open(text_config))
-	text_pipeline = language_processing.ProcessingPipeline.make(text_config, text_pipeline_name)
-	validation_postprocessors = {name: language_processing.TextPostprocessor(**config) for name, config in
+	text_pipeline = text_processing.ProcessingPipeline.make(text_config, text_pipeline_name)
+	validation_postprocessors = {name: text_processing.TextPostprocessor(**config) for name, config in
 	                             text_config['postprocess'].items()}
 
 	vocab = set(map(str.strip, open(vocab))) if os.path.exists(vocab) else set()

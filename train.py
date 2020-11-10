@@ -34,7 +34,7 @@ import transcripts
 import perf
 import itertools
 import text_tokenizers
-import language_processing
+import text_processing
 import torch.distributed as dist
 
 class JsonlistSink:
@@ -393,9 +393,9 @@ def main(args):
 	lang = text_config['lang']
 	text_pipelines = []
 	for pipeline_name in args.text_pipelines:
-		text_pipelines.append(language_processing.ProcessingPipeline.make(text_config, pipeline_name))
+		text_pipelines.append(text_processing.ProcessingPipeline.make(text_config, pipeline_name))
 
-	validation_postprocessors = {name: language_processing.TextPostprocessor(**config) for name, config in text_config['postprocess'].items()}
+	validation_postprocessors = {name: text_processing.TextPostprocessor(**config) for name, config in text_config['postprocess'].items()}
 
 	frontend = getattr(models, args.frontend)(
 		out_channels = args.num_input_features,
@@ -476,7 +476,7 @@ def main(args):
 	for word_tag, words in val_config.get('word_tags', {}).items():
 		word_tags[word_tag] = word_tags.get(word_tag, []) + words
 	vocab = set(map(str.strip, open(args.vocab))) if os.path.exists(args.vocab) else set()
-	stemmer = language_processing.Stemmer(lang)
+	stemmer = text_processing.Stemmer(lang)
 	error_analyzer = metrics.ErrorAnalyzer(metrics.WordTagger(stemmer = stemmer, vocab = vocab, word_tags = word_tags), metrics.ErrorTagger(), val_config.get('error_analyzer', {}), validation_postprocessors)
 
 	val_frontend = frontend
