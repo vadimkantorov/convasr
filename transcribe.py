@@ -154,8 +154,8 @@ def main(args, ext_json = ['.json', '.json.gz']):
 											   time_stamps = ts,
 											   segment_text_key = 'hyp',
 											   segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
+			hyp_segments = [transcripts.map_text(text_pipeline.postprocess, hyp = hyp) for hyp in hyp_segments]
 			hyp, ref = '\n'.join(transcripts.join(hyp = h) for h in hyp_segments).strip(), '\n'.join(transcripts.join(ref = r) for r in ref_segments).strip()
-			hyp = text_pipeline.postprocess(hyp)
 			if args.verbose:
 				print('HYP:', hyp)
 			print('CER: {cer:.02%}'.format(cer = metrics.cer(hyp = hyp, ref = ref)))
@@ -171,7 +171,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 					pack_backpointers = args.pack_backpointers
 				)
 				aligned_ts: shaping.Bt = ts.gather(1, alignment)
-				## TODO call text_pipeline.postprocess for ref texts
+
 				ref_segments = [alternatives[0] for alternatives in
 								generator.generate(tokenizer = text_pipeline.tokenizer,
 												   log_probs = torch.nn.functional.one_hot(y[:, 0, :], num_classes = log_probs.shape[1]).permute(0, 2, 1),
@@ -181,6 +181,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 												   time_stamps = aligned_ts,
 												   segment_text_key = 'ref',
 												   segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
+				ref_segments = [transcripts.map_text(text_pipeline.postprocess, hyp = ref) for ref in ref_segments]
 			oom_handler.reset()
 		except:
 			if oom_handler.try_recover(model.parameters()):
@@ -213,8 +214,6 @@ def main(args, ext_json = ['.json', '.json.gz']):
 
 		transcript = []
 		for hyp_transcript, ref_transcript in zip(hyp_segments, ref_segments):
-			#TODO is postprocess required here?
-			hyp_transcript, ref_transcript = transcripts.map_text(text_pipeline.postprocess, hyp = hyp_transcript), transcripts.map_text(text_pipeline.postprocess, ref = ref_transcript)
 			hyp, ref = transcripts.join(hyp = hyp_transcript), transcripts.join(ref = ref_transcript)
 
 			transcript.append(
