@@ -217,8 +217,6 @@ def extract_meta(audio_path, backend = None):
 				'num_channels': nchannels,
 				'duration'    : duration
 			}
-	else:
-		raise RuntimeError(f'Backend {backend} is not supported now.')
 
 	return metadata
 
