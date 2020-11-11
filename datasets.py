@@ -3,7 +3,7 @@ import typing
 import math
 import time
 import itertools
-import language_processing
+import text_processing
 import importlib
 import torch.utils.data
 import sentencepiece
@@ -31,7 +31,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	? {"channel" : 0}
 	? {"speaker" : 1 | "speaker1"}
 	Returned from __getitem__:
-	{"audio_path" : "/path/to/audi.ext", "ref" : "ref text", "example_id" : "example_id"} 
+	{"audio_path" : "/path/to/audi.ext", "ref" : "ref text", "example_id" : "example_id"}
 	Returned from get_meta:
 	{"audio_path" : "/path/to/audio.ext", "example_id" : "example_id", "begin" : 0.0 | time_missing, "end" : 0.0 | time_misisng, "channel" : 0 | 1 | channel_missing, "speaker" : 1 | 15 | speaker_missing, "meta" : original_example, "ref" : 'ref or empty before normalization'}
 	Comments:
@@ -45,7 +45,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	def __init__(
 			self,
 			data_paths: typing.List[str],
-			text_pipelines: typing.List[language_processing.ProcessingPipeline],
+			text_pipelines: typing.List[text_processing.ProcessingPipeline],
 			sample_rate: int,
 			mode: str = DEFAULT_MODE,
 			frontend: typing.Optional[torch.nn.Module] = None,

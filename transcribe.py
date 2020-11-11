@@ -18,7 +18,7 @@ import transcripts
 import vis
 import utils
 import shaping
-import language_processing
+import text_processing
 
 def setup(args):
 	torch.set_grad_enabled(False)
@@ -39,7 +39,7 @@ def setup(args):
 
 	# for legacy compat
 	text_config = json.load(open(checkpoint['args'].get('text_config', args.text_config)))
-	text_pipeline = language_processing.ProcessingPipeline.make(text_config, checkpoint['args'].get('text_pipelines', args.text_pipelines)[0])
+	text_pipeline = text_processing.ProcessingPipeline.make(text_config, checkpoint['args'].get('text_pipelines', args.text_pipelines)[0])
 
 	model = getattr(models, args.model or checkpoint['args']['model'])(
 		args.num_input_features, [text_pipeline.tokenizer.vocab_size],
@@ -154,8 +154,8 @@ def main(args, ext_json = ['.json', '.json.gz']):
 											   time_stamps = ts,
 											   segment_text_key = 'hyp',
 											   segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
+			hyp_segments = [transcripts.map_text(text_pipeline.postprocess, hyp = hyp) for hyp in hyp_segments]
 			hyp, ref = '\n'.join(transcripts.join(hyp = h) for h in hyp_segments).strip(), '\n'.join(transcripts.join(ref = r) for r in ref_segments).strip()
-			hyp = text_pipeline.postprocess(hyp)
 			if args.verbose:
 				print('HYP:', hyp)
 			print('CER: {cer:.02%}'.format(cer = metrics.cer(hyp = hyp, ref = ref)))
@@ -171,7 +171,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 					pack_backpointers = args.pack_backpointers
 				)
 				aligned_ts: shaping.Bt = ts.gather(1, alignment)
-				## TODO call text_pipeline.postprocess for ref texts
+
 				ref_segments = [alternatives[0] for alternatives in
 								generator.generate(tokenizer = text_pipeline.tokenizer,
 												   log_probs = torch.nn.functional.one_hot(y[:, 0, :], num_classes = log_probs.shape[1]).permute(0, 2, 1),
@@ -181,6 +181,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 												   time_stamps = aligned_ts,
 												   segment_text_key = 'ref',
 												   segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
+				ref_segments = [transcripts.map_text(text_pipeline.postprocess, hyp = ref) for ref in ref_segments]
 			oom_handler.reset()
 		except:
 			if oom_handler.try_recover(model.parameters()):
@@ -213,8 +214,6 @@ def main(args, ext_json = ['.json', '.json.gz']):
 
 		transcript = []
 		for hyp_transcript, ref_transcript in zip(hyp_segments, ref_segments):
-			#TODO is postprocess required here?
-			hyp_transcript, ref_transcript = transcripts.map_text(text_pipeline.postprocess, hyp = hyp_transcript), transcripts.map_text(text_pipeline.postprocess, ref = ref_transcript)
 			hyp, ref = transcripts.join(hyp = hyp_transcript), transcripts.join(ref = ref_transcript)
 
 			transcript.append(

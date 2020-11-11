@@ -33,8 +33,8 @@ import utils
 import transcripts
 import perf
 import itertools
-import tokenizers
-import language_processing
+import text_tokenizers
+import text_processing
 import torch.distributed as dist
 
 class JsonlistSink:
@@ -393,9 +393,9 @@ def main(args):
 	lang = text_config['lang']
 	text_pipelines = []
 	for pipeline_name in args.text_pipelines:
-		text_pipelines.append(language_processing.ProcessingPipeline.make(text_config, pipeline_name))
+		text_pipelines.append(text_processing.ProcessingPipeline.make(text_config, pipeline_name))
 
-	validation_postprocessors = {name: language_processing.TextPostprocessor(**config) for name, config in text_config['postprocess'].items()}
+	validation_postprocessors = {name: text_processing.TextPostprocessor(**config) for name, config in text_config['postprocess'].items()}
 
 	frontend = getattr(models, args.frontend)(
 		out_channels = args.num_input_features,
@@ -412,7 +412,7 @@ def main(args):
 		num_input_features = args.num_input_features,
 		num_classes = [pipeline.tokenizer.vocab_size for pipeline in text_pipelines],
 		dropout = args.dropout,
-		decoder_type = 'bpe' if any(isinstance(pipeline.tokenizer, tokenizers.BPETokenizer) for pipeline in text_pipelines) else None,
+		decoder_type = 'bpe' if any(isinstance(pipeline.tokenizer, text_tokenizers.BPETokenizer) for pipeline in text_pipelines) else None,
 		frontend = frontend if args.onnx or args.frontend_in_model else None,
 		**(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx else {})
 	)
@@ -476,7 +476,7 @@ def main(args):
 	for word_tag, words in val_config.get('word_tags', {}).items():
 		word_tags[word_tag] = word_tags.get(word_tag, []) + words
 	vocab = set(map(str.strip, open(args.vocab))) if os.path.exists(args.vocab) else set()
-	stemmer = language_processing.Stemmer(lang)
+	stemmer = text_processing.Stemmer(lang)
 	error_analyzer = metrics.ErrorAnalyzer(metrics.WordTagger(stemmer = stemmer, vocab = vocab, word_tags = word_tags), metrics.ErrorTagger(), val_config.get('error_analyzer', {}), validation_postprocessors)
 
 	val_frontend = frontend
