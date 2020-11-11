@@ -7,46 +7,7 @@ import librosa
 import soundfile
 import scipy.io.wavfile
 
-AUDIO_FILE_EXTENSIONS = {
-	'3gp',
-	'aa',
-	'aac',
-	'aax',
-	'act',
-	'aiff',
-	'alac',
-	'amr',
-	'ape',
-	'au',
-	'awb',
-	'dct',
-	'dss',
-	'dvf',
-	'flac',
-	'gsm',
-	'm4a',
-	'm4b',
-	'mmf',
-	'mp3',
-	'mpc',
-	'msv',
-	'nmf',
-	'ogg',
-	'oga',
-	'mogg',
-	'opus',
-	'ra',
-	'raw',
-	'sln',
-	'tta',
-	'voc',
-	'vox',
-	'wav',
-	'wv',
-	'webm',
-	'8svx',
-	'cda'
-}
+AUDIO_FILE_EXTENSIONS = {'mp3', 'm4a', 'amr', 'gsm', 'wav', 'mp4', 'opus', 'ogg', 'webm', '3gp'}
 
 smax = torch.iinfo(torch.int16).max
 f2s_numpy = lambda signal, max = np.float32(smax): np.multiply(signal, max).astype('int16')
