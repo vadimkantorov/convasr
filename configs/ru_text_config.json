@@ -13,6 +13,7 @@
                 "drop_substrings" : ["|", "*"],
                 "replace_chars" :  [],
                 "repeat_character" : "2",
+                "normalize_text" : false,
                 "allowed_chars": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя2 "}
   },
   "postprocess" : {
