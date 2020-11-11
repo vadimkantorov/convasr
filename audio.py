@@ -1,3 +1,4 @@
+import os
 import subprocess
 import wave
 import json
@@ -158,7 +159,7 @@ def resample(signal, sample_rate_, sample_rate):
 	return signal, sample_rate
 
 def is_audio(audio_path):
-	extension = audio_path.splitext()[-1].lower()
+	extension = os.path.splitext(audio_path)[-1].lower()
 	return extension in AUDIO_FILE_EXTENSIONS
 
 def compute_duration(audio_path, backend = None):
@@ -202,24 +203,24 @@ def extract_meta(audio_path, backend = None):
 		process_output = subprocess.check_output(cmd + [audio_path])
 		try:
 			ffprobe_data = json.loads(process_output)
-			metadata = {
-				'num_channels': ffprobe_data['streams'][0]['channels'],
-				'duration'    : float(ffprobe_data['streams'][0]['duration'])
-			}
+			metadata = dict(
+				num_channels = ffprobe_data['streams'][0]['channels'],
+				duration     = float(ffprobe_data['streams'][0]['duration'])
+			)
 		except:
-			metadata = {
-				'num_channels': 0,
-				'duration'    : 0.0
-			}
+			metadata = dict(
+				num_channels = 0,
+				duration     = 0.0
+			)
 	elif backend == 'wave':
 		with wave.open(audio_path, 'r') as w:
 			nframes = w.getnframes()
 			nchannels = w.getnchannels()
 			duration = nframes / w.getframerate()
-			metadata = {
-				'num_channels': nchannels,
-				'duration'    : duration
-			}
+			metadata = dict(
+				num_channels = nchannels,
+				duration     = duration
+			)
 
 	return metadata
 
