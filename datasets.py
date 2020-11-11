@@ -36,6 +36,10 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	{"audio_path" : "/path/to/audio.ext", "example_id" : "example_id", "begin" : 0.0 | time_missing, "end" : 0.0 | time_misisng, "channel" : 0 | 1 | channel_missing, "speaker" : 1 | 15 | speaker_missing, "meta" : original_example, "ref" : 'ref or empty before normalization'}
 	Comments:
 	If speaker_names are not set and speakers are not set, uses channel indices as speakers
+
+	channels note:
+		for dataset files channel field will be filled from file or missing
+		for audio files channel field will be in range of max_num_channels or missing if mono is true
 	'''
 
 	DEFAULT_MODE = 'default'
@@ -82,9 +86,18 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 		tic = time.time()
 
-		segments = map(transcripts.load, data_paths)
-		segments = itertools.chain.from_iterable(segments)
-		segments = list(segments)
+		segments = []
+		for path in data_paths:
+			if audio.is_audio(path):
+				assert self.mode != AudioTextDataset.DEFAULT_MODE, 'Audio files not allowed as dataset input in default mode'
+				if self.mono:
+					transcript = [dict(audio_path = path, channel = transcripts.channel_missing)]
+				else:
+					transcript = [dict(audio_path = path, channel = c) for c in range(max_num_channels)]
+			else:
+				transcript = transcripts.load(path)
+			segments.extend(transcript)
+
 		_print('Dataset reading time: ', time.time() - tic)
 		tic = time.time()
 
@@ -98,7 +111,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			t['channel'] = get_or_else(t, 'channel', transcripts.channel_missing) if not self.mono else transcripts.channel_missing
 
 		transcripts.collect_speaker_names(segments, speaker_names = speaker_names or [], num_speakers = max_num_channels, set_speaker_data = True)
-
 
 		buckets = []
 		grouped_segments = []
@@ -231,6 +243,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		                                       backend = self.audio_backend, duration = self.max_duration,
 		                                       dtype = self.audio_dtype)
 
+		transcript = [t for t in transcript if t['channel'] < len(signal)]
+
 		features = []
 		# slicing code in time and channel dimension
 		for t in transcript:
@@ -265,7 +279,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 		# replace speaker separators from ref
 		for t in transcript:
-			t['ref'] = t['ref'].replace(transcripts.speaker_separator, ' ')
+			t['ref'] = t['ref'].replace(transcripts.speaker_phrase_separator, ' ')
 
 		# speaker generated for all text pipelines, but for backward compatibility, only first pipeline speakers will be used
 		speaker = speakers[0]
@@ -318,7 +332,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		for t in transcript:
 			tokens = []
 			speaker_labels = []
-			ref_by_speaker = t['ref'].split(transcripts.speaker_separator)
+			ref_by_speaker = t['ref'].split(transcripts.speaker_phrase_separator)
 			ref_by_speaker = [ref_by_speaker[0]] + [' ' + ref for ref in ref_by_speaker[1:]]
 			assert len(ref_by_speaker) == len(t['speaker'])
 			for speaker_ref, speaker_label in zip(ref_by_speaker, t['speaker']):

@@ -1,27 +1,31 @@
 import subprocess
+import wave
+import json
 import torch
 import numpy as np
 import librosa
 import soundfile
 import scipy.io.wavfile
 
+AUDIO_FILE_EXTENSIONS = {'.mp3', '.m4a', '.amr', '.gsm', '.wav', '.mp4', '.opus', '.ogg', '.webm', '.3gp'}
+
 smax = torch.iinfo(torch.int16).max
 f2s_numpy = lambda signal, max = np.float32(smax): np.multiply(signal, max).astype('int16')
 s2f_numpy = lambda signal, max = np.float32(smax): np.divide(signal, max, dtype = 'float32')
 
 def read_audio(
-        audio_path,
-        sample_rate,
-        offset=0,
-        duration=None,
-        mono=True,
-        raw_dtype='int16',
-        dtype='float32',
-        byte_order='little',
-        backend=None,
-        raw_bytes=None,
-        raw_sample_rate=None,
-        raw_num_channels=None,
+		audio_path,
+		sample_rate,
+		offset=0,
+		duration=None,
+		mono=True,
+		raw_dtype='int16',
+		dtype='float32',
+		byte_order='little',
+		backend=None,
+		raw_bytes=None,
+		raw_sample_rate=None,
+		raw_num_channels=None,
 ):
 	assert dtype in [None, 'int16', 'float32']
 	assert backend in [None, 'scipy', 'soundfile', 'ffmpeg', 'sox']
@@ -95,7 +99,6 @@ def read_audio(
 			sample_rate_, signal = sample_rate, np.frombuffer(subprocess.check_output(params), dtype = raw_dtype).reshape(-1, num_channels)
 
 	except:
-		raise
 		print(f'Error when reading [{audio_path}]')
 		sample_rate_, signal = sample_rate, np.array([[]], dtype = dtype)
 
@@ -154,6 +157,9 @@ def resample(signal, sample_rate_, sample_rate):
 		signal = signal.unsqueeze(0)
 	return signal, sample_rate
 
+def is_audio(audio_path):
+	extension = audio_path.splitext()[-1].lower()
+	return extension in AUDIO_FILE_EXTENSIONS
 
 def compute_duration(audio_path, backend = None):
 	assert backend in [None, 'scipy', 'ffmpeg', 'sox']
@@ -170,46 +176,86 @@ def compute_duration(audio_path, backend = None):
 
 	elif backend == 'ffmpeg':
 		cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of',
-		       'default=noprint_wrappers=1:nokey=1']
+			   'default=noprint_wrappers=1:nokey=1']
 		return float(subprocess.check_output(cmd + [audio_path]))
 
 	elif backend == 'sox':
 		cmd = ['soxi', '-D']
 		return float(subprocess.check_output(cmd + [audio_path]))
 
+def extract_meta(audio_path, backend = None):
+	'''
+	Exctact metadata from audio:
+		* num_channels
+		* duration
+	'''
+	assert backend in [None, 'ffmpeg', 'wave']
+
+	if backend is None:
+		if audio_path.endswith('.wav'):
+			backend = 'wave'
+		else:
+			backend = 'ffmpeg'
+
+	if backend == 'ffmpeg':
+		cmd = ['ffprobe', '-v', 'error', '-print_format', 'json', '-show_streams']
+		process_output = subprocess.check_output(cmd + [audio_path])
+		try:
+			ffprobe_data = json.loads(process_output)
+			metadata = {
+				'num_channels': ffprobe_data['streams'][0]['channels'],
+				'duration'    : float(ffprobe_data['streams'][0]['duration'])
+			}
+		except:
+			metadata = {
+				'num_channels': 0,
+				'duration'    : 0.0
+			}
+	elif backend == 'wave':
+		with wave.open(audio_path, 'r') as w:
+			nframes = w.getnframes()
+			nchannels = w.getnchannels()
+			duration = nframes / w.getframerate()
+			metadata = {
+				'num_channels': nchannels,
+				'duration'    : duration
+			}
+
+	return metadata
+
 if __name__ == '__main__':
-    import argparse
-    import time
-    import utils
+	import argparse
+	import time
+	import utils
 
-    parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers()
-    cmd = subparsers.add_parser('timeit')
+	parser = argparse.ArgumentParser()
+	subparsers = parser.add_subparsers()
+	cmd = subparsers.add_parser('timeit')
 
-    cmd.add_argument('--audio-path', type=str, required=True)
-    cmd.add_argument('--sample-rate', type=int, default=8000)
-    cmd.add_argument('--mono', action='store_true')
-    cmd.add_argument('--audio-backend', type=str, required=True)
-    cmd.add_argument('--number', type=int, default=100)
-    cmd.add_argument('--number-warmup', type=int, default=3)
-    cmd.add_argument('--scale', type=int, default=1000)
-    cmd.add_argument('--raw-dtype', default='int16', choices=['int16', 'float32'])
-    cmd.add_argument('--dtype', default='float32', choices=['int16', 'float32'])
-    cmd.set_defaults(func='timeit')
+	cmd.add_argument('--audio-path', type=str, required=True)
+	cmd.add_argument('--sample-rate', type=int, default=8000)
+	cmd.add_argument('--mono', action='store_true')
+	cmd.add_argument('--audio-backend', type=str, required=True)
+	cmd.add_argument('--number', type=int, default=100)
+	cmd.add_argument('--number-warmup', type=int, default=3)
+	cmd.add_argument('--scale', type=int, default=1000)
+	cmd.add_argument('--raw-dtype', default='int16', choices=['int16', 'float32'])
+	cmd.add_argument('--dtype', default='float32', choices=['int16', 'float32'])
+	cmd.set_defaults(func='timeit')
 
-    args = parser.parse_args()
+	args = parser.parse_args()
 
-    if args.func == 'timeit':
-        utils.reset_cpu_threads(1)
-        for i in range(args.number_warmup):
-            read_audio(args.audio_path, sample_rate=args.sample_rate, mono=args.mono, backend=args.audio_backend, dtype=args.dtype, raw_dtype=args.raw_dtype)
+	if args.func == 'timeit':
+		utils.reset_cpu_threads(1)
+		for i in range(args.number_warmup):
+			read_audio(args.audio_path, sample_rate=args.sample_rate, mono=args.mono, backend=args.audio_backend, dtype=args.dtype, raw_dtype=args.raw_dtype)
 
-        start_process_time = time.process_time_ns()
-        start_perf_counter = time.perf_counter_ns()
-        for i in range(args.number):
-            read_audio(args.audio_path, sample_rate=args.sample_rate, mono=args.mono, backend=args.audio_backend, dtype=args.dtype, raw_dtype=args.raw_dtype)
-        end_process_time = time.process_time_ns()
-        end_perf_counter = time.perf_counter_ns()
-        process_time = (end_process_time - start_process_time) / args.scale / args.number
-        perf_counter = (end_perf_counter - start_perf_counter) / args.scale / args.number
-        print(f'|{args.audio_path:>20}|{args.number:>5}|{args.audio_backend:>10}|{process_time:9.0f}|{perf_counter:9.0f}|')
+		start_process_time = time.process_time_ns()
+		start_perf_counter = time.perf_counter_ns()
+		for i in range(args.number):
+			read_audio(args.audio_path, sample_rate=args.sample_rate, mono=args.mono, backend=args.audio_backend, dtype=args.dtype, raw_dtype=args.raw_dtype)
+		end_process_time = time.process_time_ns()
+		end_perf_counter = time.perf_counter_ns()
+		process_time = (end_process_time - start_process_time) / args.scale / args.number
+		perf_counter = (end_perf_counter - start_perf_counter) / args.scale / args.number
+		print(f'|{args.audio_path:>20}|{args.number:>5}|{args.audio_backend:>10}|{process_time:9.0f}|{perf_counter:9.0f}|')

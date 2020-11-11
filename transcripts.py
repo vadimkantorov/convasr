@@ -7,10 +7,12 @@ import torch
 import shaping
 import itertools
 
+
 ref_missing = ''
 speaker_name_missing = ''
 speaker_missing = 0
-speaker_separator = ';'
+speaker_phrase_separator = ';'
+speaker_separator = ', '
 channel_missing = -1
 time_missing = -1
 _er_missing = -1.0
@@ -111,14 +113,14 @@ def collect_speaker_names(transcript, speaker_names = [], num_speakers = 1, set_
 		
 		elif has_speaker_names:
 			speaker_names = [speaker_name_missing] + sorted(set(t['speaker_name'] for t in transcript))
-			speaker_names_index = {speaker_name_missing : speaker_missing, **{speaker_name : i for i, speaker_name in enumerate(speaker_names)}}
+			speaker_names_index = {speaker_name : i for i, speaker_name in enumerate([name for name in speaker_names if speaker_separator not in name])}
 			if set_speaker_data:
 				for t in transcript:
-					t['speaker'] = speaker_names_index[t['speaker_name']]
+					t['speaker'] = speaker_names_index.get(t['speaker_name'], speaker_missing)
 
 		else:
-			speaker_names_index = {default_channel_names[speaker] : speaker for speaker in [channel_missing] + list(range(num_speakers))}
-			speaker_names = [default_channel_names[channel] for channel in range(num_speakers)]
+			speaker_names = [default_channel_names[channel_missing]] + [default_channel_names[channel] for channel in range(num_speakers)]
+			speaker_names_index = {default_channel_names[channel_missing] : speaker_missing, **{speaker_name : i for i, speaker_name in enumerate(speaker_names)}}
 			if set_speaker_data:
 				for t in transcript:
 					t['speaker_name'] = default_channel_names[t.get('channel', channel_missing)]
@@ -130,7 +132,7 @@ def collect_speaker_names(transcript, speaker_names = [], num_speakers = 1, set_
 	return speaker_names
 
 def speaker_name(ref = None, hyp = None):
-	return ', '.join(sorted(filter(bool, set(t.get('speaker_name') for t in ref + hyp)))) or None
+	return speaker_separator.join(sorted(filter(bool, set(t.get('speaker_name') for t in ref + hyp)))) or None
 
 def segment_by_time(transcript, max_segment_seconds, break_on_speaker_change = True, break_on_channel_change = True):
 	transcript = [t for t in transcript if t['begin'] != time_missing and t['end'] != time_missing]
@@ -261,7 +263,7 @@ def join_transcript(transcript: Transcript, join_channels: bool = False):
 		transcript = list(transcript)
 		audio_path = transcript[0]['audio_path']
 		assert all(t['audio_path'] == audio_path for t in transcript)
-		ref = speaker_separator.join(t['ref'].strip() for t in transcript)
+		ref = speaker_phrase_separator.join(t['ref'].strip() for t in transcript)
 		speaker = [t['speaker'] for t in transcript]
 		speaker_name = ','.join(collect_speaker_names(transcript))
 		duration = audio.compute_duration(transcript[0]['audio_path'])
