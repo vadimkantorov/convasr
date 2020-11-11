@@ -117,6 +117,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 		duration = x.shape[-1] / args.sample_rate
 		channel = [t['channel'] for t in meta]
 		speaker = [t.get('speaker', transcripts.speaker_missing) for t in meta]
+		speaker_name = [t.get('speaker_name') or transcripts.default_speaker_names[t.get('speaker', transcripts.speaker_missing)] for t in meta]
 
 		if x.numel() == 0:
 			print(f'Skipping empty [{audio_path}].')
@@ -153,7 +154,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 											   output_lengths = olen,
 											   time_stamps = ts,
 											   segment_text_key = 'hyp',
-											   segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
+											   segment_extra_info = [dict(speaker = s, speaker_name = sn, channel = c) for s, sn, c in zip(speaker, speaker_name, channel)])]
 			hyp_segments = [transcripts.map_text(text_pipeline.postprocess, hyp = hyp) for hyp in hyp_segments]
 			hyp, ref = '\n'.join(transcripts.join(hyp = h) for h in hyp_segments).strip(), '\n'.join(transcripts.join(ref = r) for r in ref_segments).strip()
 			if args.verbose:
@@ -180,7 +181,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 												   output_lengths = ylen,
 												   time_stamps = aligned_ts,
 												   segment_text_key = 'ref',
-												   segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
+												   segment_extra_info = [dict(speaker = s, speaker_name = sn, channel = c) for s, sn, c in zip(speaker, speaker_name, channel)])]
 				ref_segments = [transcripts.map_text(text_pipeline.postprocess, hyp = ref) for ref in ref_segments]
 			oom_handler.reset()
 		except:
@@ -317,7 +318,7 @@ if __name__ == '__main__':
 	parser.add_argument('--align-boundary-words', action = 'store_true')
 	parser.add_argument('--align-words', action = 'store_true')
 	parser.add_argument('--window-size-dilate', type = float, default = 1.0)
-	parser.add_argument('--max-segment-duration', type = float, default = 2)
+	parser.add_argument('--max-segment-duration', type = float, default = 2.0)
 	parser.add_argument('--cer', type = transcripts.number_tuple)
 	parser.add_argument('--duration', type = transcripts.number_tuple)
 	parser.add_argument('--num-speakers', type = transcripts.number_tuple)

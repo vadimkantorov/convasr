@@ -1,9 +1,52 @@
 import subprocess
+import wave
+import json
 import torch
 import numpy as np
 import librosa
 import soundfile
 import scipy.io.wavfile
+
+AUDIO_FILE_EXTENSIONS = {
+	'3gp',
+	'aa',
+	'aac',
+	'aax',
+	'act',
+	'aiff',
+	'alac',
+	'amr',
+	'ape',
+	'au',
+	'awb',
+	'dct',
+	'dss',
+	'dvf',
+	'flac',
+	'gsm',
+	'm4a',
+	'm4b',
+	'mmf',
+	'mp3',
+	'mpc',
+	'msv',
+	'nmf',
+	'ogg',
+	'oga',
+	'mogg',
+	'opus',
+	'ra',
+	'raw',
+	'sln',
+	'tta',
+	'voc',
+	'vox',
+	'wav',
+	'wv',
+	'webm',
+	'8svx',
+	'cda'
+}
 
 smax = torch.iinfo(torch.int16).max
 f2s_numpy = lambda signal, max = np.float32(smax): np.multiply(signal, max).astype('int16')
@@ -95,9 +138,8 @@ def read_audio(
 			sample_rate_, signal = sample_rate, np.frombuffer(subprocess.check_output(params), dtype = raw_dtype).reshape(-1, num_channels)
 
 	except:
-		raise
 		print(f'Error when reading [{audio_path}]')
-		sample_rate_, signal = sample_rate, np.array([[]], dtype = dtype)
+		raise
 
 	if offset or duration is not None:
 		signal = signal[
@@ -154,6 +196,9 @@ def resample(signal, sample_rate_, sample_rate):
 		signal = signal.unsqueeze(0)
 	return signal, sample_rate
 
+def is_audio(audio_path):
+	extension = audio_path.split('.')[-1].lower()
+	return extension in AUDIO_FILE_EXTENSIONS
 
 def compute_duration(audio_path, backend = None):
 	assert backend in [None, 'scipy', 'ffmpeg', 'sox']
@@ -176,6 +221,45 @@ def compute_duration(audio_path, backend = None):
 	elif backend == 'sox':
 		cmd = ['soxi', '-D']
 		return float(subprocess.check_output(cmd + [audio_path]))
+
+def extract_meta(audio_path, backend = None):
+	'''
+	Exctact metadata from audio:
+		* num_channels
+		* duration
+	'''
+	assert backend in [None, 'ffmpeg', 'wave']
+
+	if backend is None:
+		if audio_path.endswith('.wav'):
+			backend = 'wave'
+		else:
+			backend = 'ffmpeg'
+
+	if backend == 'ffmpeg':
+		cmd = ['ffprobe', '-v', 'error', '-print_format', 'json', '-show_streams']
+		process_output = subprocess.check_output(cmd + [audio_path])
+		try:
+			ffprobe_data = json.loads(process_output)
+		except:
+			raise RuntimeError(f'Cannot read metadata by ffprobe from file {audio_path}. ffprobe output: {process_output}')
+		metadata = {
+			'num_channels': ffprobe_data['streams'][0]['channels'],
+			'duration': float(ffprobe_data['streams'][0]['duration'])
+		}
+	elif backend == 'wave':
+		with wave.open(audio_path, 'r') as w:
+			nframes = w.getnframes()
+			nchannels = w.getnchannels()
+			duration = nframes / w.getframerate()
+			metadata = {
+				'num_channels': nchannels,
+				'duration'    : duration
+			}
+	else:
+		raise RuntimeError(f'Backend {backend} is not supported now.')
+
+	return metadata
 
 if __name__ == '__main__':
     import argparse
