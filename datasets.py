@@ -220,7 +220,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		transcript = []
 		for i in range(int(self.transcript_cumlen[index - 1]) if index > 0 else 0, int(self.transcript_cumlen[index])):
 			ref = self.ref[i]
-			speaker = self.speaker[i: i + self.speaker_len[i]]
+			speaker = self.speaker[i: i + self.speaker_len[i].item()]
 			transcript.append(
 				dict(
 					audio_path = self.audio_path[i],
@@ -334,7 +334,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			speaker_labels = []
 			ref_by_speaker = t['ref'].split(transcripts.speaker_phrase_separator)
 			ref_by_speaker = [ref_by_speaker[0]] + [' ' + ref for ref in ref_by_speaker[1:]]
-			assert len(ref_by_speaker) == len(t['speaker'])
+			assert len(ref_by_speaker) == len(t['speaker']), print(f'Speaker phrases: {ref_by_speaker}, speakers: {t["speaker"]}')
 			for speaker_ref, speaker_label in zip(ref_by_speaker, t['speaker']):
 				processed = pipeline.preprocess(speaker_ref)
 				speaker_tokens = torch.tensor(pipeline.encode([processed])[0], dtype = torch.int64)
