@@ -59,7 +59,7 @@ class TextProcessor:
 		self.collapse_char_series = collapse_char_series #collapse any amount of chars repeats to one
 		self.drop_substrings = drop_substrings #drop any substring in this list from text
 		self.replace_chars = replace_chars #list contain replace groups, replace group is string where first character is replacer and  other are replaceable
-		self.allowed_chars = allowed_chars.replace(' ', r'\s') #all chars not included in this string will be dropped
+		self.allowed_chars = allowed_chars.replace(' ', r'\s') if allowed_chars is not None else None#all chars not included in this string will be dropped
 
 		self.handlers = [
 			self.handle_strip,

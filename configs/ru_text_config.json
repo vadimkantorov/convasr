@@ -1,12 +1,21 @@
 {
   "lang": "ru",
   "pipelines": {
+    "no_repeat": {"tokenizer": "char_legacy", "preprocessor": "no_repeat", "postprocessor": "no_repeat"},
     "char_legacy": {"tokenizer": "char_legacy", "preprocessor": "default", "postprocessor": "default"}
   },
   "tokenizers": {
     "char_legacy": {"class": "CharTokenizerLegacy", "alphabet": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"}
   },
   "preprocess" : {
+    "no_repeat": {"drop_space_at_borders" : true,
+                "to_lower_case" : true,
+                "collapse_char_series" : false,
+                "drop_substrings" : ["|", "*"],
+                "replace_chars" :  [],
+                "repeat_character" : null,
+                "normalize_text" : false,
+                "allowed_chars": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя "},
 	"default": {"drop_space_at_borders" : true,
                 "to_lower_case" : true,
                 "collapse_char_series" : true,
@@ -17,6 +26,13 @@
                 "allowed_chars": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя2 "}
   },
   "postprocess" : {
+    "no_repeat": {"drop_space_at_borders" : true,
+                "to_lower_case" : true,
+                "collapse_char_series" : false,
+                "drop_substrings" : ["|", "*"],
+                "replace_chars" :  ["её"],
+                "repeat_character" : null,
+                "allowed_chars": "абвгдежзийклмнопрстуфхцчшщъыьэюя "},
 	"default": {"drop_space_at_borders" : true,
                 "to_lower_case" : true,
                 "collapse_char_series" : true,
