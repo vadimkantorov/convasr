@@ -117,7 +117,7 @@ class TextPreprocessor(TextProcessor):
 		super().__init__(**kwargs)
 		self.repeat_character = repeat_character #if not none all doubled chars will be replaced by single char and repeat char
 
-		self.handle_normalize = TextNormalizer().normalize if normalize_text else lambda text: text
+		self.text_normalizer = TextNormalizer() if normalize_text else None
 
 		self.handlers = [
 			self.handle_normalize,
@@ -129,6 +129,11 @@ class TextPreprocessor(TextProcessor):
 			self.handle_allowed,
 			self.handle_strip
 		]
+
+	def handle_normalize(self, text):
+		if self.text_normalizer is not None:
+			text = self.text_normalizer.normalize(text)
+		return text
 
 	def handle_repeat(self, text):
 		if self.repeat_character is not None:
