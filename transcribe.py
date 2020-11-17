@@ -260,11 +260,16 @@ def main(args, ext_json = ['.json', '.json.gz']):
 		if args.output_txt:
 			transcript_path = os.path.join(args.output_path, audio_name + '.txt')
 			with open(transcript_path, 'w') as f:
-				f.write(hyp)
+				f.write(' '.join([t['hyp'].strip() for t in filtered_transcript]))
 			print(transcript_path)
 
 		if args.output_csv:
-			csv_lines.extend(csv_sep.join([audio_path, h, str(meta[i]['begin']), str(meta[i]['end'])]) + '\n' for i, h in enumerate(hyp.split('\n')))
+			assert len({t['audio_path'] for t in filtered_transcript}) == 1
+			audio_path = filtered_transcript[0]['audio_path']
+			hyp = ' '.join([t['hyp'].strip() for t in filtered_transcript])
+			begin = min(t['begin'] for t in filtered_transcript)
+			end = max(t['end'] for t in filtered_transcript)
+			csv_lines.append(csv_sep.join([audio_path, hyp, str(begin), str(end)]))
 
 		if args.logits:
 			logits_file_path = os.path.join(args.output_path, audio_name + '.pt')
@@ -283,7 +288,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 	if args.output_csv:
 		transcript_path = os.path.join(args.output_path, 'transcripts.csv')
 		with open(transcript_path, 'w') as f:
-			f.writelines(csv_lines)
+			f.write('\n'.join(csv_lines))
 		print(transcript_path)
 
 
