@@ -114,10 +114,15 @@ def main(args, ext_json = ['.json', '.json.gz']):
 		begin = torch.tensor([t['begin'] for t in begin_end], dtype = torch.float)	
 		end = torch.tensor([t['end'] for t in begin_end], dtype = torch.float)
 		#TODO WARNING assumes frontend not in dataset
+		if not args.frontend_in_model:
+			print('\n' * 10 + 'WARNING\n' * 5)
+			print('transcribe.py assumes frontend in model, in other case time alignment was incorrect')
+			print('WARNING\n' * 5 + '\n')
+
 		duration = x.shape[-1] / args.sample_rate
 		channel = [t['channel'] for t in meta]
-		speaker = [t.get('speaker', transcripts.speaker_missing) for t in meta]
-		speaker_name = [t.get('speaker_name') or transcripts.default_speaker_names[t.get('speaker', transcripts.speaker_missing)] for t in meta]
+		speaker = [t['speaker'] for t in meta]
+		speaker_name = [t['speaker_name'] for t in meta]
 
 		if x.numel() == 0:
 			print(f'Skipping empty [{audio_path}].')
@@ -239,11 +244,11 @@ def main(args, ext_json = ['.json', '.json.gz']):
 			transcripts.prune(
 				transcript,
 				align_boundary_words = args.align_boundary_words,
-				cer = args.cer,
-				duration = args.duration,
-				gap = args.gap,
-				allowed_unk_count = args.unk,
-				num_speakers = args.num_speakers
+				cer = args.prune_cer,
+				duration = args.prune_duration,
+				gap = args.prune_gap,
+				allowed_unk_count = args.prune_unk,
+				num_speakers = args.prune_num_speakers
 			)
 		)
 
@@ -260,11 +265,16 @@ def main(args, ext_json = ['.json', '.json.gz']):
 		if args.output_txt:
 			transcript_path = os.path.join(args.output_path, audio_name + '.txt')
 			with open(transcript_path, 'w') as f:
-				f.write(hyp)
+				f.write(' '.join(t['hyp'].strip() for t in filtered_transcript))
 			print(transcript_path)
 
 		if args.output_csv:
-			csv_lines.extend(csv_sep.join([audio_path, h, str(meta[i]['begin']), str(meta[i]['end'])]) + '\n' for i, h in enumerate(hyp.split('\n')))
+			assert len({t['audio_path'] for t in filtered_transcript}) == 1
+			audio_path = filtered_transcript[0]['audio_path']
+			hyp = ' '.join(t['hyp'].strip() for t in filtered_transcript)
+			begin = min(t['begin'] for t in filtered_transcript)
+			end = max(t['end'] for t in filtered_transcript)
+			csv_lines.append(csv_sep.join([audio_path, hyp, str(begin), str(end)]))
 
 		if args.logits:
 			logits_file_path = os.path.join(args.output_path, audio_name + '.pt')
@@ -283,7 +293,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 	if args.output_csv:
 		transcript_path = os.path.join(args.output_path, 'transcripts.csv')
 		with open(transcript_path, 'w') as f:
-			f.writelines(csv_lines)
+			f.write('\n'.join(csv_lines))
 		print(transcript_path)
 
 
@@ -318,12 +328,12 @@ if __name__ == '__main__':
 	parser.add_argument('--align-boundary-words', action = 'store_true')
 	parser.add_argument('--align-words', action = 'store_true')
 	parser.add_argument('--window-size-dilate', type = float, default = 1.0)
-	parser.add_argument('--max-segment-duration', type = float, default = 2.0)
-	parser.add_argument('--cer', type = transcripts.number_tuple)
-	parser.add_argument('--duration', type = transcripts.number_tuple)
-	parser.add_argument('--num-speakers', type = transcripts.number_tuple)
-	parser.add_argument('--gap', type = transcripts.number_tuple)
-	parser.add_argument('--unk', type = transcripts.number_tuple)
+	parser.add_argument('--max-segment-duration', type = float, default = 0.0)
+	parser.add_argument('--prune-cer', type = transcripts.number_tuple)
+	parser.add_argument('--prune-duration', type = transcripts.number_tuple)
+	parser.add_argument('--prune-num-speakers', type = transcripts.number_tuple)
+	parser.add_argument('--prune-gap', type = transcripts.number_tuple)
+	parser.add_argument('--prune-unk', type = transcripts.number_tuple)
 	parser.add_argument('--speakers', nargs = '*')
 	parser.add_argument('--replace-blank-series', type = int, default = 8)
 	parser.add_argument('--transcribe-first-n-sec', type = int)
