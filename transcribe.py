@@ -114,10 +114,15 @@ def main(args, ext_json = ['.json', '.json.gz']):
 		begin = torch.tensor([t['begin'] for t in begin_end], dtype = torch.float)	
 		end = torch.tensor([t['end'] for t in begin_end], dtype = torch.float)
 		#TODO WARNING assumes frontend not in dataset
+		if not args.frontend_in_model:
+			print('\n' * 10 + 'WARNING\n' * 5)
+			print('transcribe.py assumes frontend in model, in other case time alignment was incorrect')
+			print('WARNING\n' * 5 + '\n')
+
 		duration = x.shape[-1] / args.sample_rate
 		channel = [t['channel'] for t in meta]
-		speaker = [t.get('speaker', transcripts.speaker_missing) for t in meta]
-		speaker_name = [t.get('speaker_name') or transcripts.default_speaker_names[t.get('speaker', transcripts.speaker_missing)] for t in meta]
+		speaker = [t['speaker'] for t in meta]
+		speaker_name = [t['speaker_name'] for t in meta]
 
 		if x.numel() == 0:
 			print(f'Skipping empty [{audio_path}].')
