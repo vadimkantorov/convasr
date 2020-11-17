@@ -239,11 +239,11 @@ def main(args, ext_json = ['.json', '.json.gz']):
 			transcripts.prune(
 				transcript,
 				align_boundary_words = args.align_boundary_words,
-				cer = args.cer,
-				duration = args.duration,
-				gap = args.gap,
-				allowed_unk_count = args.unk,
-				num_speakers = args.num_speakers
+				cer = args.prune_cer,
+				duration = args.prune_duration,
+				gap = args.prune_gap,
+				allowed_unk_count = args.prune_unk,
+				num_speakers = args.prune_num_speakers
 			)
 		)
 
@@ -323,12 +323,12 @@ if __name__ == '__main__':
 	parser.add_argument('--align-boundary-words', action = 'store_true')
 	parser.add_argument('--align-words', action = 'store_true')
 	parser.add_argument('--window-size-dilate', type = float, default = 1.0)
-	parser.add_argument('--max-segment-duration', type = float, default = 2.0)
-	parser.add_argument('--cer', type = transcripts.number_tuple)
-	parser.add_argument('--duration', type = transcripts.number_tuple)
-	parser.add_argument('--num-speakers', type = transcripts.number_tuple)
-	parser.add_argument('--gap', type = transcripts.number_tuple)
-	parser.add_argument('--unk', type = transcripts.number_tuple)
+	parser.add_argument('--max-segment-duration', type = float, default = 0.0)
+	parser.add_argument('--prune-cer', type = transcripts.number_tuple)
+	parser.add_argument('--prune-duration', type = transcripts.number_tuple)
+	parser.add_argument('--prune-num-speakers', type = transcripts.number_tuple)
+	parser.add_argument('--prune-gap', type = transcripts.number_tuple)
+	parser.add_argument('--prune-unk', type = transcripts.number_tuple)
 	parser.add_argument('--speakers', nargs = '*')
 	parser.add_argument('--replace-blank-series', type = int, default = 8)
 	parser.add_argument('--transcribe-first-n-sec', type = int)
