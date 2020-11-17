@@ -260,13 +260,13 @@ def main(args, ext_json = ['.json', '.json.gz']):
 		if args.output_txt:
 			transcript_path = os.path.join(args.output_path, audio_name + '.txt')
 			with open(transcript_path, 'w') as f:
-				f.write(' '.join([t['hyp'].strip() for t in filtered_transcript]))
+				f.write(' '.join(t['hyp'].strip() for t in filtered_transcript))
 			print(transcript_path)
 
 		if args.output_csv:
 			assert len({t['audio_path'] for t in filtered_transcript}) == 1
 			audio_path = filtered_transcript[0]['audio_path']
-			hyp = ' '.join([t['hyp'].strip() for t in filtered_transcript])
+			hyp = ' '.join(t['hyp'].strip() for t in filtered_transcript)
 			begin = min(t['begin'] for t in filtered_transcript)
 			end = max(t['end'] for t in filtered_transcript)
 			csv_lines.append(csv_sep.join([audio_path, hyp, str(begin), str(end)]))
