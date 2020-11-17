@@ -29,8 +29,8 @@ class CharTokenizerLegacy:
         return len(self.idx2char)
 
     @property
-    def silence_tokens(self):
-        return {self.eps_token, self.space_token}
+    def silence_tokens_ids(self):
+        return {self.eps_id, self.space_id}
 
     def is_start_word_token(self, idx):
         '''
@@ -62,7 +62,7 @@ class BPETokenizer:
         return self.bpe.get_piece_size()
 
     @property
-    def silence_tokens(self):
+    def silence_tokens_ids(self):
         return {self.pad_id}
 
     def is_start_word_token(self, idx):

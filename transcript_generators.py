@@ -1,6 +1,7 @@
 import shaping
 import typing
 import transcripts
+import torch.nn.functional as F
 
 class GreedyCTCGenerator:
 	def generate(self,
@@ -21,10 +22,13 @@ class GreedyCTCGenerator:
 			transcript = transcripts.Transcript()
 
 			t = 0
-			while sample_idx[t] in tokenizer.silence_tokens and t < len(sample_idx):
+			while t < len(sample_idx) and sample_idx[t].item() in tokenizer.silence_tokens_ids:
 				t += 1
+			if t >= len(sample_idx):
+				_transcripts.append([transcript])
+				continue
 			tokens = [tokenizer.eps_id]
-			time_begin = begin[i] + sample_ts[t] if sample_ts is not None else begin[i]
+			time_begin = F.relu_(begin[i]) + sample_ts[t] if sample_ts is not None else begin[i]
 			time_end = end[i]
 
 			for t in range(t, sample_len):
@@ -38,10 +42,10 @@ class GreedyCTCGenerator:
 						segment.update(segment_extra_info[i])
 					transcript.append(segment)
 					tokens = [tokenizer.eps_id, sample_idx[t]]
-					time_begin = begin[i] + sample_ts[t] if sample_ts is not None else begin[i]
+					time_begin = F.relu_(begin[i]) + sample_ts[t] if sample_ts is not None else begin[i]
 
 				tokens.append(sample_idx[t])
-				time_end = begin[i] + sample_ts[t] if sample_ts is not None else end[i]
+				time_end = F.relu_(begin[i]) + sample_ts[t] if sample_ts is not None else end[i]
 
 			if len(tokens) > 1:
 				segment = transcripts.Segment(begin = time_begin.item(),
