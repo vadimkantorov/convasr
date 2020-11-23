@@ -53,6 +53,7 @@ class TextProcessor:
 				drop_substrings: typing.List[str] = tuple(),
 				replace_chars: typing.List[str] = tuple(),
 	            allowed_chars: typing.Optional[str] = None,
+	            normalize_text: bool = False,
 				**kwargs):
 		self.drop_space_at_borders = drop_space_at_borders
 		self.to_lower_case = to_lower_case
@@ -61,7 +62,10 @@ class TextProcessor:
 		self.replace_chars = replace_chars #list contain replace groups, replace group is string where first character is replacer and  other are replaceable
 		self.allowed_chars = allowed_chars.replace(' ', r'\s') if allowed_chars is not None else None#all chars not included in this string will be dropped
 
+		self.text_normalizer = TextNormalizer() if normalize_text else None
+
 		self.handlers = [
+			self.handle_normalize,
 			self.handle_strip,
 			self.handle_case,
 			self.handle_collapse,
@@ -73,6 +77,11 @@ class TextProcessor:
 	def __call__(self, text):
 		for	handler in self.handlers:
 			text = handler(text)
+		return text
+
+	def handle_normalize(self, text):
+		if self.text_normalizer is not None:
+			text = self.text_normalizer.normalize(text)
 		return text
 
 	def handle_strip(self, text):
@@ -112,12 +121,9 @@ class TextProcessor:
 class TextPreprocessor(TextProcessor):
 	def __init__(self,
 				 repeat_character: str = None,
-	             normalize_text: bool = False,
 				 **kwargs):
 		super().__init__(**kwargs)
 		self.repeat_character = repeat_character #if not none all doubled chars will be replaced by single char and repeat char
-
-		self.text_normalizer = TextNormalizer() if normalize_text else None
 
 		self.handlers = [
 			self.handle_normalize,
@@ -129,11 +135,6 @@ class TextPreprocessor(TextProcessor):
 			self.handle_allowed,
 			self.handle_strip
 		]
-
-	def handle_normalize(self, text):
-		if self.text_normalizer is not None:
-			text = self.text_normalizer.normalize(text)
-		return text
 
 	def handle_repeat(self, text):
 		if self.repeat_character is not None:
@@ -149,6 +150,7 @@ class TextPostprocessor(TextProcessor):
 		self.repeat_character = repeat_character
 
 		self.handlers = [
+			self.handle_normalize,
 			self.handle_case,
 			self.handle_collapse,
 			self.handle_drop,

@@ -2,12 +2,21 @@
   "lang": "ru",
   "pipelines": {
     "no_repeat": {"tokenizer": "char_legacy", "preprocessor": "no_repeat", "postprocessor": "no_repeat"},
-    "char_legacy": {"tokenizer": "char_legacy", "preprocessor": "default", "postprocessor": "default"}
+    "char_legacy": {"tokenizer": "char_legacy", "preprocessor": "default", "postprocessor": "default"},
+    "external":  {"tokenizer": "char_legacy", "preprocessor": "external", "postprocessor": "external"}
   },
   "tokenizers": {
     "char_legacy": {"class": "CharTokenizerLegacy", "alphabet": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"}
   },
   "preprocess" : {
+    "external": {"drop_space_at_borders" : true,
+                "to_lower_case" : true,
+                "collapse_char_series" : false,
+                "drop_substrings" : ["|", "*"],
+                "replace_chars" :  [],
+                "repeat_character" : null,
+                "normalize_text" : true,
+                "allowed_chars": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя "},
     "no_repeat": {"drop_space_at_borders" : true,
                 "to_lower_case" : true,
                 "collapse_char_series" : false,
@@ -26,12 +35,21 @@
                 "allowed_chars": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя2 "}
   },
   "postprocess" : {
+    "external": {"drop_space_at_borders" : true,
+                "to_lower_case" : true,
+                "collapse_char_series" : false,
+                "drop_substrings" : ["|", "*"],
+                "replace_chars" :  ["её"],
+                "repeat_character" : null,
+                "normalize_text" : true,
+                "allowed_chars": "абвгдежзийклмнопрстуфхцчшщъыьэюя "},
     "no_repeat": {"drop_space_at_borders" : true,
                 "to_lower_case" : true,
                 "collapse_char_series" : false,
                 "drop_substrings" : ["|", "*"],
                 "replace_chars" :  ["её"],
                 "repeat_character" : null,
+                "normalize_text" : false,
                 "allowed_chars": "абвгдежзийклмнопрстуфхцчшщъыьэюя "},
 	"default": {"drop_space_at_borders" : true,
                 "to_lower_case" : true,
@@ -39,6 +57,7 @@
                 "drop_substrings" : ["|", "*"],
                 "replace_chars" :  ["её"],
                 "repeat_character" : "2",
+                "normalize_text" : false,
                 "allowed_chars": "абвгдежзийклмнопрстуфхцчшщъыьэюя "}
   }
 }
