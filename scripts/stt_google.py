@@ -38,7 +38,7 @@ for t in json.load(open(args.input_path)):
 	
 	pcm = io.BytesIO()
 	scipy.io.wavfile.write(pcm, sample_rate, signal)
-	res = client.recognize(dict(audio_channel_count = 1, encoding = args.format, sample_rate_hertz = sample_rate, language_code = args.lang, model = args.recognition_model), dict(content = pcm.getvalue()))
+	res = client.recognize(config=dict(audio_channel_count = 1, encoding = args.format, sample_rate_hertz = sample_rate, language_code = args.lang, model = args.recognition_model), audio=dict(content = pcm.getvalue()))
 	hyp = res.results[0].alternatives[0].transcript
 	transcript.append(dict(t, hyp = hyp))
 
