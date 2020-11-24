@@ -101,7 +101,7 @@ def read_audio(
 
 	except:
 		print(f'Error when reading [{audio_path}]')
-		sample_rate_, signal = sample_rate, np.array([[]], dtype = dtype)
+		sample_rate_, signal = sample_rate, np.empty(shape = (0, 1), dtype = dtype)
 
 	if offset or duration is not None:
 		signal = signal[
