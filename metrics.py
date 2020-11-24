@@ -636,7 +636,14 @@ def cmd_analyze(hyp, ref, val_config, text_config, text_pipeline_name, vocab, de
 	print(json.dumps(report, ensure_ascii = False, indent = 2, sort_keys = True))
 
 
-def cmd_analyze_file(input_file, output_file, val_config, text_config, text_pipeline_name, vocab, detailed):
+def cmd_analyze_file(input_file: str,
+                     output_file: str,
+                     val_config: str,
+                     text_config: str,
+                     text_pipeline_name: str,
+                     vocab: str,
+                     detailed: bool,
+                     aggregate_metrics: typing.List[str]):
 	import text_processing
 	assert os.path.exists(text_config)
 	text_config = json.load(open(text_config))
@@ -664,8 +671,14 @@ def cmd_analyze_file(input_file, output_file, val_config, text_config, text_pipe
 			hyp = hyp_ref_dict['hyp']
 			ref = hyp_ref_dict['ref']
 			reports.append(analyzer.analyze(hyp = hyp, ref = ref, postprocess_fn = text_pipeline.postprocess, detailed = detailed, extra = {'audio_path': hyp_ref_dict['audio_path']}))
-	json.dump(reports, open(output_file, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
-	print(output_file)
+	if output_file:
+		json.dump(reports, open(output_file, 'w'), ensure_ascii = False, indent = 2, sort_keys = True)
+		print(output_file)
+	if len(aggregate_metrics) > 0:
+		print('\nAggregated metrics:')
+		for metric_name in aggregate_metrics:
+			avg_metric = sum(t[metric_name] for t in reports)/len(reports)
+			print(f'{metric_name} {avg_metric}')
 
 
 def cmd_align(hyp, ref):
@@ -691,12 +704,13 @@ if __name__ == '__main__':
 
 	cmd = subparsers.add_parser('analyze-file')
 	cmd.add_argument('--input-file', required = True)
-	cmd.add_argument('--output-file', required = True)
+	cmd.add_argument('--output-file')
 	cmd.add_argument('--val-config', default = 'configs/ru_val_config.json')
 	cmd.add_argument('--text-config', default = 'configs/ru_text_config.json')
 	cmd.add_argument('--pipeline', dest = 'text_pipeline_name', help = 'text processing pipelines (names should be defined in text-config)', default = 'char_legacy')
 	cmd.add_argument('--vocab', default = 'data/vocab_word_list.txt')
 	cmd.add_argument('--detailed', action = 'store_true')
+	cmd.add_argument('--aggregate-metrics', nargs = '*', default = ['cer', 'wer'])
 	cmd.set_defaults(func = cmd_analyze_file)
 
 	cmd = subparsers.add_parser('align')
