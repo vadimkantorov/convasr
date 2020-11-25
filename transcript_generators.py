@@ -31,8 +31,12 @@ class GreedyCTCGenerator:
 			time_begin = F.relu_(begin[i]) + sample_ts[t] if sample_ts is not None else begin[i]
 			time_end = end[i]
 
+			allow_tokens_repeat = False
 			for t in range(t, sample_len):
-				if sample_idx[t] == tokenizer.eps_id or sample_idx[t] == tokens[-1]:
+				if sample_idx[t] == tokenizer.eps_id:
+					allow_tokens_repeat = True
+					continue
+				elif sample_idx[t] == tokens[-1] and not allow_tokens_repeat:
 					continue
 				if tokenizer.is_start_word_token(sample_idx[t]) and sample_ts is not None:
 					segment = transcripts.Segment(begin = time_begin.item(),
@@ -44,6 +48,7 @@ class GreedyCTCGenerator:
 					tokens = [tokenizer.eps_id, sample_idx[t]]
 					time_begin = F.relu_(begin[i]) + sample_ts[t] if sample_ts is not None else begin[i]
 
+				allow_tokens_repeat = False
 				tokens.append(sample_idx[t])
 				time_end = F.relu_(begin[i]) + sample_ts[t] if sample_ts is not None else end[i]
 
