@@ -1,7 +1,8 @@
-import shaping
 import typing
+import torch
+import shaping
 import transcripts
-import torch.nn.functional as F
+
 
 class GreedyCTCGenerator:
 	def generate(self,
@@ -15,12 +16,13 @@ class GreedyCTCGenerator:
 	             segment_extra_info: typing.List[dict] = None) -> typing.List[typing.List[transcripts.Transcript]]:
 		_transcripts = []
 		most_probable_idx = log_probs.argmax(dim = 1).cpu().tolist()
-		begin = F.relu(begin).cpu().tolist() if time_stamps is not None else begin.cpu().tolist()
+		time_stamps = time_stamps.cpu().tolist() if time_stamps is not None else None
+		begin = torch.clamp(begin, min = 0.0).cpu().tolist() if time_stamps is not None else begin.cpu().tolist()
 		end = end.cpu().tolist()
 		for i in range(len(most_probable_idx)):
 			sample_idx = most_probable_idx[i]
 			sample_len = output_lengths[i] if output_lengths is not None else len(most_probable_idx[i])
-			sample_ts = time_stamps[i].cpu().tolist() if time_stamps is not None else None
+			sample_ts = time_stamps[i] if time_stamps is not None else None
 			transcript = transcripts.Transcript()
 
 			t = 0
