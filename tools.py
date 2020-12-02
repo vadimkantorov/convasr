@@ -440,10 +440,10 @@ def filter_dataset(input_path,
 	random.seed(seed)
 	random.shuffle(dataset)
 
+	print('initial set hours: ', sum(transcripts.compute_duration(t, hours=True) for t in dataset), 'hours')
 	if cer:
 		dataset = [e for e in dataset if e['cer'] <= cer]
-
-	print('after cer filtering: ', sum(transcripts.compute_duration(t, hours=True) for t in dataset), 'hours')
+		print('after cer filtering hours: ', sum(transcripts.compute_duration(t, hours=True) for t in dataset), 'hours')
 
 	if duration_in_hours is not None:
 		s = []
@@ -452,26 +452,17 @@ def filter_dataset(input_path,
 			t = dataset.pop()
 			set_duration += transcripts.compute_duration(t, hours = True)
 			s.append(t)
+		dataset = s
 
-		print('final: ', sum(transcripts.compute_duration(t, hours = True) for t in s), 'hours')
-		print(output_path)
-		json.dump(
-			s,
-			open(output_path, 'w'),
-			ensure_ascii = False,
-			sort_keys = True,
-			indent = 2
-		)
-	else:
-		print('final: ', sum(transcripts.compute_duration(t, hours=True) for t in dataset), 'hours')
-		print(output_path)
-		json.dump(
-			dataset,
-			open(output_path, 'w'),
-			ensure_ascii = False,
-			sort_keys = True,
-			indent = 2
-		)
+	print('after duration filtering hours: ', sum(transcripts.compute_duration(t, hours=True) for t in dataset), 'hours')
+	print(output_path)
+	json.dump(
+		dataset,
+		open(output_path, 'w'),
+		ensure_ascii = False,
+		sort_keys = True,
+		indent = 2
+	)
 
 
 def split(
