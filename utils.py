@@ -213,8 +213,13 @@ class TensorBackedStringArray:
 	def __len__(self):
 		return len(self.cumlen)
 
-	def __list__(self):
-		return [self[i] for i in range(len(self))]
+	def tolist(self):
+		data = self.data.cpu().tolist()
+		cumlen = [0] + (self.cumlen * self.multiplier).cpu().tolist()
+		strings = []
+		for start, end in zip(cumlen[:-1], cumlen[1:]):
+			strings.append(bytes(data[start:end]).decode(self.encoding))
+		return strings
 
 	def to(self, device):
 		self.data = self.data.to(device)
