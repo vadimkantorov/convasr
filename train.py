@@ -35,6 +35,7 @@ import perf
 import itertools
 import text_tokenizers
 import text_processing
+import pandas as pd
 import torch.distributed as dist
 
 class JsonlistSink:
@@ -266,9 +267,11 @@ def evaluate_model(
 		transcripts_path = os.path.join(
 			args.experiment_dir,
 			args.train_transcripts_format
-			.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)
-		) if training else args.val_transcripts_format.format(
-			val_dataset_name = val_dataset_name, decoder = args.decoder
+			.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration, output_format = args.output_format)
+		) if training else os.path.join(
+			args.experiment_dir,
+			args.val_transcripts_format
+			.format(val_dataset_name = val_dataset_name, decoder = args.decoder, output_format = args.output_format)
 		)
 		for i, pipeline in enumerate(text_pipelines):
 			transcript_by_label = transcript[i:: len(text_pipelines)]
@@ -297,10 +300,27 @@ def evaluate_model(
 				)
 				tensorboard_sink.val_stats(iteration, val_dataset_name, pipeline.name, perf.default())
 
-		with open(transcripts_path, 'w') as f:
-			json.dump(transcript, f, ensure_ascii = False, indent = 2, sort_keys = True)
-		if analyze:
-			vis.errors([transcripts_path], debug_audio = args.vis_errors_audio)
+		if args.output_format == 'json':
+			with open(transcripts_path, 'w') as f:
+				json.dump(transcript, f, ensure_ascii = False, indent = 2, sort_keys = True)
+			if analyze:
+				vis.errors([transcripts_path], debug_audio = args.vis_errors_audio)
+		else:
+			columns = [
+				'labels_name',
+				'audio_path',
+				'audio_name',
+				'ref',
+				'hyp',
+				'ref_orig',
+				'hyp_orig',
+				'cer',
+				'wer',
+				'loss',
+				'entropy'
+			]
+			df = pd.DataFrame({column: [record[column] for record in transcript] for column in columns})
+			df.to_csv(transcripts_path, index=False, encoding='utf-8')
 
 	checkpoint_path = os.path.join(
 		args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)
@@ -506,7 +526,7 @@ def main(args):
 			timeout = args.timeout if args.num_workers > 0 else 0
 		)
 
-		val_data_loaders[os.path.basename(val_data_path)] = val_data_loader
+		val_data_loaders[os.path.basename(os.path.normpath(val_data_path))] = val_data_loader
 
 	generator = transcript_generators.GreedyCTCGenerator()
 	model.to(args.device)
@@ -871,13 +891,14 @@ if __name__ == '__main__':
 	parser.add_argument('--checkpoint-format', default = 'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')
 	parser.add_argument(
 		'--val-transcripts-format',
-		default = 'data/transcripts_{val_dataset_name}_{decoder}.json',
+		default = 'transcripts_{val_dataset_name}_{decoder}.{output_format}',
 		help = 'save transcripts at validation'
 	)
 	parser.add_argument(
 		'--train-transcripts-format',
-		default = 'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.json'
+		default = 'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.{output_format}'
 	)
+	parser.add_argument('--output-format', default='json', choices=['json', 'csv'])
 	parser.add_argument(
 		'--logits', nargs = '?', const = 'data/logits_{val_dataset_name}.pt', help = 'save logits at validation'
 	)

@@ -84,16 +84,19 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 		data_paths = data_paths if isinstance(data_paths, list) else [data_paths]
 
+		if os.path.isdir(data_paths[0]):
+			data_paths = [os.path.join(data_paths[0], filename) for filename in filter(audio.is_audio, os.listdir(data_paths[0]))]
+
 		tic = time.time()
 
 		segments = []
 		for path in data_paths:
 			if audio.is_audio(path):
-				assert self.mode != AudioTextDataset.DEFAULT_MODE, 'Audio files not allowed as dataset input in default mode'
+				assert self.mono or self.mode != AudioTextDataset.DEFAULT_MODE
 				if self.mono:
-					transcript = [dict(audio_path = path, channel = transcripts.channel_missing)]
+					transcript = [dict(audio_path = path, begin = 0, end = audio.compute_duration(path), channel = transcripts.channel_missing)]
 				else:
-					transcript = [dict(audio_path = path, channel = c) for c in range(max_num_channels)]
+					transcript = [dict(audio_path = path, begin = 0, end = audio.compute_duration(path), channel = c) for c in range(max_num_channels)]
 			else:
 				transcript = transcripts.load(path)
 			segments.extend(transcript)
