@@ -199,7 +199,7 @@ def evaluate_model(
 			def sync_string_list(str_list):
 				string_storage = utils.TensorBackedStringArray(str_list, device = args.device)
 				string_storage.synchronize(args.world_size)
-				return list(string_storage.to('cpu'))
+				return string_storage.tolist()
 			_print(f"Synchronize validation results started")
 			sync_tic = time.time()
 			loss_ = sync_float_list(loss_)
