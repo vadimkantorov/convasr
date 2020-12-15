@@ -3,7 +3,8 @@
   "pipelines": {
     "no_repeat": {"tokenizer": "char_legacy", "preprocessor": "no_repeat", "postprocessor": "no_repeat"},
     "char_legacy": {"tokenizer": "char_legacy", "preprocessor": "default", "postprocessor": "default"},
-    "external":  {"tokenizer": "char_legacy", "preprocessor": "external", "postprocessor": "external"}
+    "external":  {"tokenizer": "char_legacy", "preprocessor": "external", "postprocessor": "external"},
+    "keep_yo":  {"tokenizer": "char_legacy", "preprocessor": "keep_yo", "postprocessor": "keep_yo"}
   },
   "tokenizers": {
     "char_legacy": {"class": "CharTokenizerLegacy", "alphabet": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"}
@@ -25,9 +26,17 @@
                 "repeat_character" : null,
                 "normalize_text" : false,
                 "allowed_chars": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя "},
-	"default": {"drop_space_at_borders" : true,
+    "default": {"drop_space_at_borders" : true,
                 "to_lower_case" : true,
                 "collapse_char_series" : true,
+                "drop_substrings" : ["|", "*"],
+                "replace_chars" :  [],
+                "repeat_character" : "2",
+                "normalize_text" : false,
+                "allowed_chars": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя2 "},
+    "keep_yo": {"drop_space_at_borders" : true,
+                "to_lower_case" : true,
+                "collapse_char_series" : false,
                 "drop_substrings" : ["|", "*"],
                 "replace_chars" :  [],
                 "repeat_character" : "2",
@@ -51,13 +60,21 @@
                 "repeat_character" : null,
                 "normalize_text" : false,
                 "allowed_chars": "абвгдежзийклмнопрстуфхцчшщъыьэюя "},
-	"default": {"drop_space_at_borders" : true,
+    "default": {"drop_space_at_borders" : true,
                 "to_lower_case" : true,
                 "collapse_char_series" : true,
                 "drop_substrings" : ["|", "*"],
                 "replace_chars" :  ["её"],
                 "repeat_character" : "2",
                 "normalize_text" : false,
-                "allowed_chars": "абвгдежзийклмнопрстуфхцчшщъыьэюя "}
+                "allowed_chars": "абвгдежзийклмнопрстуфхцчшщъыьэюя "},
+    "keep_yo": {"drop_space_at_borders" : true,
+                "to_lower_case" : true,
+                "collapse_char_series" : false,
+                "drop_substrings" : ["|", "*"],
+                "replace_chars" :  [],
+                "repeat_character" : "2",
+                "normalize_text" : false,
+                "allowed_chars": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя "}
   }
 }
