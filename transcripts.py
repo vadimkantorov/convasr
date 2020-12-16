@@ -231,7 +231,7 @@ def prune(
 	audio_size_check = lambda t: max_audio_file_size is None or get_size(t['audio_path']) <= max_audio_file_size
 	# TODO is_aligned check and refactor
 	is_aligned = lambda w: (w.get('type') or w.get('error_tag')) == 'ok'
-	duration_check = lambda t: duration is None or duration[0] <= compute_duration(t) <= duration[1]
+	duration_check = lambda t: duration is None or compute_duration(t) == time_missing or duration[0] <= compute_duration(t) <= duration[1]
 	boundary_check = lambda t: ((not t.get('words')) or (not align_boundary_words) or
 								(is_aligned(t['words'][0]) and is_aligned(t['words'][-1])))
 	gap_check = lambda t, prev: prev is None or gap is None or gap[0] <= t['begin'] - prev['end'] <= gap[1]
@@ -281,7 +281,7 @@ def compute_duration(t, hours = False):
 	seconds = None
 
 	if 'begin' in t or 'end' in t:
-		seconds = t.get('end', 0) - t.get('begin', 0)
+		seconds = t.get('end', 0) - t.get('begin', 0) if t.get('end') != time_missing else time_missing
 	elif 'hyp' in t or 'ref' in t:
 		seconds = max(t_['end'] for k in ['hyp', 'ref'] for t_ in t.get(k, []))
 	elif 'audio_path' in t:
