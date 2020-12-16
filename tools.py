@@ -435,7 +435,7 @@ def filter_dataset(input_path,
 		duration_in_hours,
 		cer,
 		seed):
-	dataset = json.load(open(input_path))
+	dataset = transcripts.load(input_path)
 
 	random.seed(seed)
 	random.shuffle(dataset)
@@ -456,13 +456,7 @@ def filter_dataset(input_path,
 
 	print('after duration filtering hours: ', sum(transcripts.compute_duration(t, hours=True) for t in dataset), 'hours')
 	print(output_path)
-	json.dump(
-		dataset,
-		open(output_path, 'w'),
-		ensure_ascii = False,
-		sort_keys = True,
-		indent = 2
-	)
+	transcripts.save(output_path, dataset)
 
 
 def split(
