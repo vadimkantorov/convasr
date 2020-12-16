@@ -430,6 +430,35 @@ def processcomments(input_path, output_path, comment_path):
 	#print('\n'.join('{w},{be},{be_}'.format(w = w, be = not_word_stats[w]['be'], be_ = not_word_stats[w]['b'] + not_word_stats[w]['e']) for w in not_word))
 
 
+def filter_dataset(input_path,
+		output_path,
+		duration_in_hours,
+		cer,
+		seed):
+	dataset = transcripts.load(input_path)
+
+	random.seed(seed)
+	random.shuffle(dataset)
+
+	print('initial set hours: ', sum(transcripts.compute_duration(t, hours=True) for t in dataset), 'hours')
+	if cer:
+		dataset = [e for e in dataset if e['cer'] <= cer]
+		print('after cer filtering hours: ', sum(transcripts.compute_duration(t, hours=True) for t in dataset), 'hours')
+
+	if duration_in_hours is not None:
+		s = []
+		set_duration = 0
+		while set_duration <= duration_in_hours and len(dataset) > 0:
+			t = dataset.pop()
+			set_duration += transcripts.compute_duration(t, hours = True)
+			s.append(t)
+		dataset = s
+
+	print('after duration filtering hours: ', sum(transcripts.compute_duration(t, hours=True) for t in dataset), 'hours')
+	print(output_path)
+	transcripts.save(output_path, dataset)
+
+
 def split(
 	input_path,
 	output_path,
@@ -589,6 +618,14 @@ if __name__ == '__main__':
 	cmd.add_argument('--microval-duration-in-hours', required = True, type = float)
 	cmd.add_argument('--seed', required = True, type = int, default = 42)
 	cmd.set_defaults(func = split)
+
+	cmd = subparsers.add_parser('filter_dataset')
+	cmd.add_argument('--input-path', '-i', required = True)
+	cmd.add_argument('--output-path', '-o', required = True)
+	cmd.add_argument('--duration-in-hours', required = False, type = float)
+	cmd.add_argument('--cer', required = False, type = float)
+	cmd.add_argument('--seed', required = False, type = int, default = 42)
+	cmd.set_defaults(func = filter_dataset)
 
 	cmd = subparsers.add_parser('processcomments')
 	cmd.add_argument('--input-path', '-i', required = True)

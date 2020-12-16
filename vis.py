@@ -698,6 +698,7 @@ def tabulate(
 	for f in sorted(glob.glob(os.path.join(experiment_dir, f'transcripts_*.json'))):
 		eidx = f.find('epoch')
 		iteration = f[eidx:].replace('.json', '')
+		iteration = iteration.split('_')[1]
 		val_dataset_name = f[f.find('transcripts_') + len('transcripts_'):eidx]
 		checkpoint = os.path.join(experiment_dir, 'checkpoint_' + f[eidx:].replace('.json', '.pt')) if not json_ else f
 		val = torch.tensor([j[metric_name] for j in json.load(open(f)) if j['labels_name'] == labels_name] or [0.0])
@@ -709,7 +710,7 @@ def tabulate(
 		res[iteration].append((val_dataset_name, float(val.mean()), checkpoint))
 	val_dataset_names = sorted(set(val_dataset_name for r in res.values() for val_dataset_name, _, _ in r))
 	print('iteration\t' + '\t'.join(val_dataset_names))
-	for iteration, r in res.items():
+	for iteration, r in sorted(res.items(), key=lambda x: x[0]):
 		metric_values = {val_dataset_name: f'{metric_value:.04f}' for val_dataset_name, metric_value, checkpoint in r}
 		print(
 			f'{iteration}\t' + '\t'.join(metric_values.get(val_dataset_name, '')
