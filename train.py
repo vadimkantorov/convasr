@@ -35,6 +35,7 @@ import perf
 import itertools
 import text_tokenizers
 import text_processing
+import pandas as pd
 import torch.distributed as dist
 
 class JsonlistSink:
@@ -178,101 +179,102 @@ def evaluate_model(
 				pass
 		model.eval()
 
+		tic = time.time()
+		ref_, hyp_, audio_path_, loss_, entropy_ = [], [], [], [], []
+		for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(val_data_loader, model, generator, text_pipelines, args.device, oom_handler)):
+			loss_.extend(loss.tolist())
+			entropy_.extend(entropy.tolist())
+			audio_path_.extend(m['audio_path'] for m in meta)
+			ref_.extend([pipeline.preprocess(m['ref']) for pipeline in text_pipelines] for m in meta)
+			hyp_.extend(zip(*hyp))
+		toc_apply_model = time.time()
+		time_sec_val_apply_model = toc_apply_model - tic
+		perf.update(dict(time_sec_val_apply_model = time_sec_val_apply_model), prefix = f'datasets_{val_dataset_name}')
+		_print(f"Apply model {time_sec_val_apply_model:.1f} sec")
+
+		if args.world_size > 1:
+			def sync_float_list(float_list):
+				sync = utils.gather_tensors(torch.tensor(float_list, dtype=torch.float32, device=args.device), world_size=args.world_size)
+				return list(itertools.chain.from_iterable([x.cpu().tolist() for x in sync]))
+
+			def sync_string_list(str_list):
+				string_storage = utils.TensorBackedStringArray(str_list, device = args.device)
+				string_storage.synchronize(args.world_size)
+				return list(string_storage.to('cpu'))
+			_print(f"Synchronize validation results started")
+			sync_tic = time.time()
+			loss_ = sync_float_list(loss_)
+			_print(f'loss sync time {time.time() - sync_tic:.1f} sec');sync_tic = time.time()
+			entropy_ = sync_float_list(entropy_)
+			_print(f'entropy sync time {time.time() - sync_tic:.1f} sec');sync_tic = time.time()
+			audio_path_ = sync_string_list(audio_path_)
+			_print(f'audio_path sync time {time.time()  - sync_tic:.1f} sec');sync_tic = time.time()
+			ref_by_pipelines = list(map(list, zip(*ref_)))
+			for i in range(len(ref_by_pipelines)):
+				ref_by_pipelines[i] = sync_string_list(ref_by_pipelines[i])
+			ref_ = list(map(list, zip(*ref_by_pipelines)))
+			_print(f'ref sync time {time.time() - sync_tic:.1f} sec');sync_tic = time.time()
+			hyps_by_pipelines = list(map(list, zip(*hyp_)))
+			for i in range(len(hyps_by_pipelines)):
+				hyps_by_pipelines[i] = sync_string_list(hyps_by_pipelines[i])
+			hyp_ = list(map(list, zip(*hyps_by_pipelines)))
+			_print(f'hyp sync time {time.time()- sync_tic:.1f} sec')
+			time_sec_val_sync_results = time.time() - toc_apply_model
+			perf.update(dict(time_sec_val_sync_results=time_sec_val_sync_results), prefix=f'datasets_{val_dataset_name}')
+			_print(f"Synchronize validation results {time_sec_val_sync_results:.1f} sec")
+			if args.rank != 0:
+				continue
+
+		#TODO add duration to extra info dict
+		analyze_args_gen = (
+			(
+				hyp,
+				ref,
+				pipeline.postprocess,
+				analyze,
+				dict(
+					labels_name=pipeline.name,
+					audio_path=audio_path,
+					audio_name=transcripts.audio_name(audio_path),
+					loss=loss,
+					entropy=entropy
+				),
+			)
+			for ref_tuple, hyp_tuple, audio_path, loss, entropy in zip(ref_, hyp_, audio_path_, loss_, entropy_)
+			for pipeline, ref, hyp in zip(text_pipelines, ref_tuple, hyp_tuple)
+		)
+
+		if args.analyze_num_workers <= 0:
+			transcript = [error_analyzer.analyze(*args) for args in analyze_args_gen]
+		else:
+			with multiprocessing.pool.Pool(processes = args.analyze_num_workers) as pool:
+				transcript = pool.starmap(error_analyzer.analyze, analyze_args_gen)
+
+		toc_analyze = time.time()
+		time_sec_val_analyze = toc_analyze - toc_apply_model
+		time_sec_val_total = toc_analyze - tic
+		perf.update(dict(time_sec_val_analyze = time_sec_val_analyze, time_sec_val_total = time_sec_val_total), prefix = f'datasets_{val_dataset_name}')
+		_print(f"Analyze {time_sec_val_analyze:.1f} sec, Total {time_sec_val_total:.1f} sec")
+		
+		for i, t in enumerate(transcript if args.verbose else []):		
+			_print(f'{val_dataset_name}@{iteration}: {i // len(text_pipelines)} / {len(audio_path_)} | {args.experiment_id}')
+			# TODO: don't forget to fix aligned hyp & ref output!
+			_print('{labels_name} AUDIO_NAME: {audio_name}'.format(**t))
+			_print('{labels_name} REF: "{ref}"'.format(**t))
+			_print('{labels_name} HYP: "{hyp}"'.format(**t))
+			_print('{labels_name} WER: {wer:.02%} | CER: {cer:.02%}\n'.format(**t))
+
 		transcripts_path = os.path.join(
 			args.experiment_dir,
 			args.train_transcripts_format
-				.format(val_dataset_name=val_dataset_name, epoch=epoch, iteration=iteration)
+			.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration, output_format = args.output_format)
 		) if training else os.path.join(
 			args.experiment_dir,
 			args.val_transcripts_format
-				.format(val_dataset_name=val_dataset_name, decoder=args.decoder)
+			.format(val_dataset_name = val_dataset_name, decoder = args.decoder, output_format = args.output_format)
 		)
-
-		transcript_full = []
-		for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(val_data_loader, model, generator, text_pipelines, args.device, oom_handler)):
-			loss_ = loss.tolist()
-			entropy_ = entropy.tolist()
-			audio_path_ = [m['audio_path'] for m in meta]
-			ref_ = [[pipeline.preprocess(m['ref']) for pipeline in text_pipelines] for m in meta]
-			hyp_ = list(zip(*hyp))
-
-			if args.world_size > 1:
-				def sync_float_list(float_list):
-					sync = utils.gather_tensors(torch.tensor(float_list, dtype=torch.float32, device=args.device), world_size=args.world_size)
-					return list(itertools.chain.from_iterable([x.cpu().tolist() for x in sync]))
-
-				def sync_string_list(str_list):
-					string_storage = utils.TensorBackedStringArray(str_list, device = args.device)
-					string_storage.synchronize(args.world_size)
-					return list(string_storage.to('cpu'))
-				loss_ = sync_float_list(loss_)
-				entropy_ = sync_float_list(entropy_)
-				audio_path_ = sync_string_list(audio_path_)
-				ref_by_pipelines = list(map(list, zip(*ref_)))
-				for i in range(len(ref_by_pipelines)):
-					ref_by_pipelines[i] = sync_string_list(ref_by_pipelines[i])
-				ref_ = list(map(list, zip(*ref_by_pipelines)))
-				hyps_by_pipelines = list(map(list, zip(*hyp_)))
-				for i in range(len(hyps_by_pipelines)):
-					hyps_by_pipelines[i] = sync_string_list(hyps_by_pipelines[i])
-				hyp_ = list(map(list, zip(*hyps_by_pipelines)))
-				if args.rank != 0:
-					continue
-
-			# TODO add duration to extra info dict
-			analyze_args_gen = (
-				(
-					hyp,
-					ref,
-					pipeline.postprocess,
-					analyze,
-					dict(
-						labels_name=pipeline.name,
-						audio_path=audio_path,
-						audio_name=transcripts.audio_name(audio_path),
-						loss=loss,
-						entropy=entropy
-					),
-				)
-				for ref_tuple, hyp_tuple, audio_path, loss, entropy in zip(ref_, hyp_, audio_path_, loss_, entropy_)
-				for pipeline, ref, hyp in zip(text_pipelines, ref_tuple, hyp_tuple)
-			)
-
-			if args.analyze_num_workers <= 0:
-				transcript = [error_analyzer.analyze(*args) for args in analyze_args_gen]
-			else:
-				with multiprocessing.pool.Pool(processes = args.analyze_num_workers) as pool:
-					transcript = pool.starmap(error_analyzer.analyze, analyze_args_gen)
-
-			for i, t in enumerate(transcript if args.verbose else []):
-				_print(f'{val_dataset_name}@{iteration}: {len(transcript_full) + i // len(text_pipelines)} / {len(val_data_loader.dataset)} | {args.experiment_id}')
-				# TODO: don't forget to fix aligned hyp & ref output!
-				_print('{labels_name} AUDIO_NAME: {audio_name}'.format(**t))
-				_print('{labels_name} REF: "{ref}"'.format(**t))
-				_print('{labels_name} HYP: "{hyp}"'.format(**t))
-				_print('{labels_name} WER: {wer:.02%} | CER: {cer:.02%}\n'.format(**t))
-
-			if args.output_csv:
-				columns = [
-					'labels_name',
-					'audio_path',
-					'audio_name',
-					'ref',
-					'hyp',
-					'ref_orig',
-					'hyp_orig',
-					'cer',
-					'wer',
-					'loss',
-					'entropy'
-				]
-				with open(transcripts_path + '.csv', 'a') as f:
-					f.writelines(args.csv_sep.join(str(record[column]) for column in columns) + '\n' for record in transcript)
-
-			transcript_full.extend(transcript)
-
 		for i, pipeline in enumerate(text_pipelines):
-			transcript_by_label = transcript_full[i:: len(text_pipelines)]
+			transcript_by_label = transcript[i:: len(text_pipelines)]
 			aggregated = error_analyzer.aggregate(transcript_by_label, sep = '__', defaults = dict(words_easy_errors_easy__cer_pseudo = -1, mer_wordwise = -1, hyp_vocabness = -1, ref_vocabness = -1))
 			if analyze:
 				with open(f'{transcripts_path}.errors.csv', 'w') as f:
@@ -282,10 +284,9 @@ def evaluate_model(
 			_print('cer', metrics.quantiles(t['cer'] for t in transcript_by_label))
 			_print('loss', metrics.quantiles(t['loss'] for t in transcript_by_label))
 			_print(
-				f'{args.experiment_id} {val_dataset_name} {pipeline.name} |',
-				f'epoch {epoch} iter {iteration} |' if training else '',
-				f'{transcripts_path}.json |' if args.output_json else '',
-				f'{transcripts_path}.csv |' if args.output_csv else '',
+				f'{args.experiment_id} {val_dataset_name} {pipeline.name}',
+				f'| epoch {epoch} iter {iteration}' if training else '',
+				f'| {transcripts_path} |',
 				('Entropy: {entropy:.02f} Loss: {loss:.02f} | WER:  {wer:.02%} CER: {cer:.02%} [{words_easy_errors_easy__cer_pseudo:.02%}],  MER: {mer_wordwise:.02%} V: {hyp_vocabness:.02%}/{ref_vocabness:.02%}\n')
 				.format(**aggregated)
 			)
@@ -299,11 +300,27 @@ def evaluate_model(
 				)
 				tensorboard_sink.val_stats(iteration, val_dataset_name, pipeline.name, perf.default())
 
-		if args.output_json:
-			with open(transcripts_path + '.json', 'w') as f:
-				json.dump(transcript_full, f, ensure_ascii = False, indent = 2, sort_keys = True)
+		if args.output_format == 'json':
+			with open(transcripts_path, 'w') as f:
+				json.dump(transcript, f, ensure_ascii = False, indent = 2, sort_keys = True)
 			if analyze:
-				vis.errors([transcripts_path + '.json'], debug_audio = args.vis_errors_audio)
+				vis.errors([transcripts_path], debug_audio = args.vis_errors_audio)
+		else:
+			columns = [
+				'labels_name',
+				'audio_path',
+				'audio_name',
+				'ref',
+				'hyp',
+				'ref_orig',
+				'hyp_orig',
+				'cer',
+				'wer',
+				'loss',
+				'entropy'
+			]
+			df = pd.DataFrame({column: [record[column] for record in transcript] for column in columns})
+			df.to_csv(transcripts_path, index=False, encoding='utf-8')
 
 	checkpoint_path = os.path.join(
 		args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)
@@ -486,40 +503,10 @@ def main(args):
 
 	val_data_loaders = {}
 	for val_data_path in args.val_data_path:
-		val_dataset_name = os.path.basename(os.path.normpath(val_data_path))
-
-		exclude = None
-
-		if args.recovery:
-			val_transcripts_path = os.path.join(
-				args.experiment_dir,
-				args.val_transcripts_format
-					.format(val_dataset_name=val_dataset_name, decoder=args.decoder) + '.csv'
-			)
-
-			if os.path.exists(val_transcripts_path):
-				columns = [
-					'labels_name',
-					'audio_path',
-					'audio_name',
-					'ref',
-					'hyp',
-					'ref_orig',
-					'hyp_orig',
-					'cer',
-					'wer',
-					'loss',
-					'entropy'
-				]
-				with open(val_transcripts_path) as f:
-					transcript = [dict(zip(columns, line.split(args.csv_sep))) for line in f.read().splitlines()]
-				exclude = set(record['audio_name'] for record in transcript)
-
 		val_dataset = datasets.AudioTextDataset(val_data_path, text_pipelines, args.sample_rate,
 												frontend = val_frontend if not args.frontend_in_model else None,
 												min_duration = args.min_duration,
 												time_padding_multiple = args.batch_time_padding_multiple,
-												exclude=exclude,
 												pop_meta = True,
 												_print = _print)
 		if args.world_size > 1:
@@ -539,7 +526,7 @@ def main(args):
 			timeout = args.timeout if args.num_workers > 0 else 0
 		)
 
-		val_data_loaders[val_dataset_name] = val_data_loader
+		val_data_loaders[os.path.basename(os.path.normpath(val_data_path))] = val_data_loader
 
 	generator = transcript_generators.GreedyCTCGenerator()
 	model.to(args.device)
@@ -904,17 +891,14 @@ if __name__ == '__main__':
 	parser.add_argument('--checkpoint-format', default = 'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')
 	parser.add_argument(
 		'--val-transcripts-format',
-		default = 'transcripts_{val_dataset_name}_{decoder}',
+		default = 'transcripts_{val_dataset_name}_{decoder}.{output_format}',
 		help = 'save transcripts at validation'
 	)
 	parser.add_argument(
 		'--train-transcripts-format',
-		default = 'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}'
+		default = 'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.{output_format}'
 	)
-	parser.add_argument('--output-json', action='store_true')
-	parser.add_argument('--output-csv', action='store_true')
-	parser.add_argument('--csv-sep', default=',')
-	parser.add_argument('--recovery', action='store_true')
+	parser.add_argument('--output-format', default='json', choices=['json', 'csv'])
 	parser.add_argument(
 		'--logits', nargs = '?', const = 'data/logits_{val_dataset_name}.pt', help = 'save logits at validation'
 	)
