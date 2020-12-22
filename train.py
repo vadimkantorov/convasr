@@ -35,7 +35,6 @@ import perf
 import itertools
 import text_tokenizers
 import text_processing
-import pandas as pd
 import torch.distributed as dist
 
 class JsonlistSink:
@@ -267,11 +266,11 @@ def evaluate_model(
 		transcripts_path = os.path.join(
 			args.experiment_dir,
 			args.train_transcripts_format
-			.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration, output_format = args.output_format)
+			.format(val_dataset_name = val_dataset_name, epoch = epoch, iteration = iteration)
 		) if training else os.path.join(
 			args.experiment_dir,
 			args.val_transcripts_format
-			.format(val_dataset_name = val_dataset_name, decoder = args.decoder, output_format = args.output_format)
+			.format(val_dataset_name = val_dataset_name, decoder = args.decoder)
 		)
 		for i, pipeline in enumerate(text_pipelines):
 			transcript_by_label = transcript[i:: len(text_pipelines)]
@@ -284,9 +283,10 @@ def evaluate_model(
 			_print('cer', metrics.quantiles(t['cer'] for t in transcript_by_label))
 			_print('loss', metrics.quantiles(t['loss'] for t in transcript_by_label))
 			_print(
-				f'{args.experiment_id} {val_dataset_name} {pipeline.name}',
-				f'| epoch {epoch} iter {iteration}' if training else '',
-				f'| {transcripts_path} |',
+				f'{args.experiment_id} {val_dataset_name} {pipeline.name} |',
+				f'epoch {epoch} iter {iteration} |' if training else '',
+				f'{transcripts_path}.json |' if args.output_json else '',
+				f'{transcripts_path}.csv |' if args.output_csv else '',
 				('Entropy: {entropy:.02f} Loss: {loss:.02f} | WER:  {wer:.02%} CER: {cer:.02%} [{words_easy_errors_easy__cer_pseudo:.02%}],  MER: {mer_wordwise:.02%} V: {hyp_vocabness:.02%}/{ref_vocabness:.02%}\n')
 				.format(**aggregated)
 			)
@@ -300,27 +300,16 @@ def evaluate_model(
 				)
 				tensorboard_sink.val_stats(iteration, val_dataset_name, pipeline.name, perf.default())
 
-		if args.output_format == 'json':
-			with open(transcripts_path, 'w') as f:
+		if args.output_json:
+			with open(transcripts_path + '.json', 'w') as f:
 				json.dump(transcript, f, ensure_ascii = False, indent = 2, sort_keys = True)
 			if analyze:
-				vis.errors([transcripts_path], debug_audio = args.vis_errors_audio)
-		else:
-			columns = [
-				'labels_name',
-				'audio_path',
-				'audio_name',
-				'ref',
-				'hyp',
-				'ref_orig',
-				'hyp_orig',
-				'cer',
-				'wer',
-				'loss',
-				'entropy'
-			]
-			df = pd.DataFrame({column: [record[column] for record in transcript] for column in columns})
-			df.to_csv(transcripts_path, index=False, encoding='utf-8')
+				vis.errors([transcripts_path + '.json'], debug_audio = args.vis_errors_audio)
+
+		if args.output_csv:
+			with open(transcripts_path + '.csv', 'w') as f:
+				f.write(args.csv_sep.join(args.csv_columns) + '\n')
+				f.writelines(args.csv_sep.join(str(t[column]) for column in args.csv_columns) + '\n' for t in transcript)
 
 	checkpoint_path = os.path.join(
 		args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)
@@ -891,14 +880,19 @@ if __name__ == '__main__':
 	parser.add_argument('--checkpoint-format', default = 'checkpoint_epoch{epoch:02d}_iter{iteration:07d}.pt')
 	parser.add_argument(
 		'--val-transcripts-format',
-		default = 'transcripts_{val_dataset_name}_{decoder}.{output_format}',
+		default = 'transcripts_{val_dataset_name}_{decoder}',
 		help = 'save transcripts at validation'
 	)
 	parser.add_argument(
 		'--train-transcripts-format',
-		default = 'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}.{output_format}'
+		default = 'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}'
 	)
-	parser.add_argument('--output-format', default='json', choices=['json', 'csv'])
+	parser.add_argument('--output-json', action='store_true')
+	parser.add_argument('--output-csv', action='store_true')
+	parser.add_argument('--csv-sep', default=',')
+	parser.add_argument(
+		'--csv-columns', nargs='+', default=['labels_name', 'audio_path', 'audio_name', 'ref', 'hyp', 'ref_orig', 'hyp_orig', 'cer', 'wer', 'loss', 'entropy']
+	)
 	parser.add_argument(
 		'--logits', nargs = '?', const = 'data/logits_{val_dataset_name}.pt', help = 'save logits at validation'
 	)
