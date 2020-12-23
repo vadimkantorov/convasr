@@ -258,7 +258,7 @@ def quantiles(vals):
 	return {k: '{:.2f}'.format(float(vals[int(len(vals) * k / 100)])) for k in range(0, 100, 10)}
 
 
-def align_words(_hyp_ : str, _ref_: str, word_tagger : WordTagger = WordTagger(), error_tagger : ErrorTagger = ErrorTagger(), postproc : bool = True, compute_cer : bool = False) -> typing.Tuple[str, str, typing.List[dict]]:
+def align_words(_hyp_ : str, _ref_: str, word_tagger : WordTagger = WordTagger(), error_tagger : ErrorTagger = ErrorTagger(), postproc : bool = False, compute_cer : bool = False) -> typing.Tuple[str, str, typing.List[dict]]:
 	# _hyp_, _ref_ below stand for a pair of aligned strings
 	assert len(_hyp_) == len(_ref_)
 
@@ -362,17 +362,49 @@ def align_words(_hyp_ : str, _ref_: str, word_tagger : WordTagger = WordTagger()
 	return word_alignment
 
 
-def align_strings(*, hyp : str, ref : str, score_sub : int = -2, score_del : int = -4, score_ins : int = -3) -> typing.Tuple[str, str]:
+def align_strings(*, hyp : str, ref : str, char_align_coefs : typing.Tuple[int] = (5, -2, -4, -3,), word_align_coefs : typing.Tuple[int] = (100, -2, -8, -6,)) -> typing.Tuple[str, str]:
 	aligner = Needleman()
 	aligner.separator = placeholder
-	aligner.score_sub = score_sub
-	aligner.score_del = score_del
-	aligner.score_ins = score_ins
-	#TODO: are conversions to list needed?
-	ref, hyp = aligner.align(list(ref), list(hyp))
-	assert len(ref) == len(hyp)
+	aligner.score_null, aligner.score_sub, aligner.score_del, aligner.score_sub = word_align_coefs
 
-	return ''.join(hyp), ''.join(ref)
+	hyp_words, ref_words = aligner.align(hyp.split(), ref.split())
+
+	aligner.score_null, aligner.score_sub, aligner.score_del, aligner.score_sub = char_align_coefs
+
+	hyp_buffer = []
+	ref_buffer = []
+	_hyp_ = []
+	_ref_ = []
+	for h, r in zip(hyp_words, ref_words):
+		if h == r:
+			if len(hyp_buffer) != 0 or len(ref_buffer) != 0:
+				hyp_alignment, ref_alignment = aligner.align(list(' '.join(hyp_buffer)), list(' '.join(ref_buffer)))
+				_hyp_.append(''.join(hyp_alignment))
+				_ref_.append(''.join(ref_alignment))
+				hyp_buffer = []
+				ref_buffer = []
+			_hyp_.append(h)
+			_ref_.append(r)
+		else:
+			if '|' in h: # h is placeholder
+				ref_buffer.append(r)
+			elif '|' in r: # r is placeholder
+				hyp_buffer.append(h)
+			else:
+				ref_buffer.append(r)
+				hyp_buffer.append(h)
+
+	if len(hyp_buffer) != 0 or len(ref_buffer) != 0:
+		hyp_alignment, ref_alignment = aligner.align(list(' '.join(hyp_buffer)), list(' '.join(ref_buffer)))
+		_hyp_.append(''.join(hyp_alignment))
+		_ref_.append(''.join(ref_alignment))
+
+	_hyp_ = ' '.join(_hyp_)
+	_ref_ = ' '.join(_ref_)
+
+	assert len(_ref_) == len(_hyp_)
+
+	return _hyp_, _ref_
 
 def cer(*, hyp, ref, edit_distance = Levenshtein.distance):
 	cer_ref_len = len(ref.replace(' ', '')) or 1
