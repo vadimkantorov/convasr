@@ -378,7 +378,7 @@ def align_strings(*, hyp : str, ref : str, char_align_coefs : typing.Tuple[int] 
 	for h, r in zip(hyp_words, ref_words):
 		if h == r:
 			if len(hyp_buffer) != 0 or len(ref_buffer) != 0:
-				hyp_alignment, ref_alignment = aligner.align(list(' '.join(hyp_buffer)), list(' '.join(ref_buffer)))
+				hyp_alignment, ref_alignment = aligner.align(list(space.join(hyp_buffer)), list(space.join(ref_buffer)))
 				_hyp_.append(''.join(hyp_alignment))
 				_ref_.append(''.join(ref_alignment))
 				hyp_buffer = []
@@ -386,21 +386,21 @@ def align_strings(*, hyp : str, ref : str, char_align_coefs : typing.Tuple[int] 
 			_hyp_.append(h)
 			_ref_.append(r)
 		else:
-			if '|' in h: # h is placeholder
+			if placeholder in h: # h is word placeholder
 				ref_buffer.append(r)
-			elif '|' in r: # r is placeholder
+			elif placeholder in r: # r is word placeholder
 				hyp_buffer.append(h)
 			else:
 				ref_buffer.append(r)
 				hyp_buffer.append(h)
 
 	if len(hyp_buffer) != 0 or len(ref_buffer) != 0:
-		hyp_alignment, ref_alignment = aligner.align(list(' '.join(hyp_buffer)), list(' '.join(ref_buffer)))
+		hyp_alignment, ref_alignment = aligner.align(list(space.join(hyp_buffer)), list(space.join(ref_buffer)))
 		_hyp_.append(''.join(hyp_alignment))
 		_ref_.append(''.join(ref_alignment))
 
-	_hyp_ = ' '.join(_hyp_)
-	_ref_ = ' '.join(_ref_)
+	_hyp_ = space.join(_hyp_)
+	_ref_ = space.join(_ref_)
 
 	assert len(_ref_) == len(_hyp_)
 
