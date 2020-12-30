@@ -887,7 +887,7 @@ if __name__ == '__main__':
 		'--train-transcripts-format',
 		default = 'transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}'
 	)
-	parser.add_argument('--output-json', action='store_true')
+	parser.add_argument('--output-json', type = utils.str2bool, nargs = '?', const = True, default = True)
 	parser.add_argument('--output-csv', action='store_true')
 	parser.add_argument('--csv-sep', default=',')
 	parser.add_argument(
