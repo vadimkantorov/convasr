@@ -345,7 +345,7 @@ if __name__ == '__main__':
 	parser.add_argument('--debug-short-long-records-normalize-signal-multiplier', action = 'store_true')
 	parser.add_argument('--debug-short-long-records-features-from-whole-normalized-signal', action = 'store_true')
 	parser.add_argument('--frontend', type=str, default='LogFilterBankFrontend')
-	parser.add_argument('--frontend-in-model', type=lambda x: bool(int(x or 0)), nargs='?', const=True, default=True)
+	parser.add_argument('--frontend-in-model', type = utils.str2bool, nargs = '?', const = True, default = True)
 	parser.add_argument('--logits-crop', type = int, nargs = 2, default = [])
 	parser.add_argument('--text-config', default = 'configs/ru_text_config.json')
 	parser.add_argument('--text-pipelines', nargs = '+', help = 'text processing pipelines (names should be defined in text-config)', default = ['char_legacy'])
