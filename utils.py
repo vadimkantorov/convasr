@@ -14,6 +14,8 @@ import torch.distributed
 import psutil
 import torch
 
+str2bool = lambda x: bool(int((1 if x.lower() == 'true' else 0 if x.lower() == 'false' else x) if x else 0))
+
 def flatten(lists):
 	return functools.reduce(lambda acc, l: acc.extend(l) or acc, lists, [])
 
