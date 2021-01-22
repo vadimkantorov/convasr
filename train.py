@@ -130,7 +130,7 @@ def apply_model(data_loader, model, generator, text_pipelines, device, oom_handl
 					raise
 
 		entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, olen))
-		# TODO: use tokenizer.eps_id as the value for models.weighted_mean_entropy epsilon_ind argument
+		# TODO: use tokenizer.eps_id as the value for models.weighted_mean_entropy eps_id argument
 		uncertainty_char, *uncertainty_bpe = list(map(models.weighted_mean_entropy, log_probs, olen))
 		hyp = []
 		for pipeline, lp, o in zip(text_pipelines, log_probs, olen):

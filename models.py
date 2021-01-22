@@ -611,7 +611,7 @@ def entropy(log_probs, lengths = None, dim = 1, eps = 1e-9, sum = True, keepdim 
 		return e.sum(dim = -1) / (eps + lengths.type_as(log_probs))
 
 
-def weighted_mean_entropy(log_probs, lengths = None, dim = -2, eps = 1e-9, epsilon_ind = -1):
+def weighted_mean_entropy(log_probs, lengths = None, dim = -2, eps = 1e-9, eps_id = -1):
 	""" Calculate the entropy of probabilities, using log of probabilities, and then take the weighted average of those
 		values, using (1 - silence_probability) as weight, where silence_probability is silence token (epsilon)
 		probability. This way, non-silent timeframes have larger weights, and silent timeframes have lower weights.
@@ -620,7 +620,7 @@ def weighted_mean_entropy(log_probs, lengths = None, dim = -2, eps = 1e-9, epsil
 	"""
 	prob = log_probs.exp()
 	e = -(prob * log_probs).sum(dim = dim)
-	silence_prob = prob.select(dim, epsilon_ind)
+	silence_prob = prob.select(dim, eps_id)
 	weights = 1 - silence_prob
 	if lengths is not None:
 		weights *= temporal_mask(e, lengths)
