@@ -599,8 +599,6 @@ def apply_dither(x: shaping.BT, dither: float):
 def entropy(log_probs, lengths = None, dim = 1, eps = 1e-9, sum = True, keepdim = False):
 	""" Calculate the entropy of probabilities, using log of probabilities, and applying the formula:
 			Entropy(p) = -SUM(pj * log pj).
-		This formula is equivalent to the classic entropy formula:
-			Entropy(p) = SUM(pj * log(1 / pj))
 	"""
 	e = -(log_probs.exp() * log_probs).sum(dim = dim, keepdim = keepdim)
 	if lengths is not None:
