@@ -130,6 +130,8 @@ def apply_model(data_loader, model, generator, text_pipelines, device, oom_handl
 					raise
 
 		entropy_char, *entropy_bpe = list(map(models.entropy, log_probs, olen))
+		# TODO: use tokenizer.eps_id as the value for models.weighted_mean_entropy eps_id argument
+		uncertainty_char, *uncertainty_bpe = list(map(models.weighted_mean_entropy, log_probs, olen))
 		hyp = []
 		for pipeline, lp, o in zip(text_pipelines, log_probs, olen):
 			generated_transcripts = generator.generate(tokenizer = pipeline.tokenizer,
@@ -143,7 +145,7 @@ def apply_model(data_loader, model, generator, text_pipelines, device, oom_handl
 
 		logits = list(map(models.unpad, logits, olen))
 		y = list(map(models.unpad, y, ylen))
-		yield meta, loss.cpu(), entropy_char.cpu(), hyp, logits, y
+		yield meta, loss.cpu(), entropy_char.cpu(), uncertainty_char.cpu(), hyp, logits, y
 
 
 def evaluate_model(
@@ -179,10 +181,12 @@ def evaluate_model(
 		model.eval()
 
 		tic = time.time()
-		ref_, hyp_, audio_path_, loss_, entropy_ = [], [], [], [], []
-		for batch_idx, (meta, loss, entropy, hyp, logits, y) in enumerate(apply_model(val_data_loader, model, generator, text_pipelines, args.device, oom_handler)):
+		ref_, hyp_, audio_path_, loss_, entropy_, uncertainty_ = [], [], [], [], [], []
+		for batch_idx, (meta, loss, entropy, uncertainty, hyp, logits, y) \
+			in enumerate(apply_model(val_data_loader, model, generator, text_pipelines, args.device, oom_handler)):
 			loss_.extend(loss.tolist())
 			entropy_.extend(entropy.tolist())
+			uncertainty_.extend(uncertainty.tolist())
 			audio_path_.extend(m['audio_path'] for m in meta)
 			ref_.extend([pipeline.preprocess(m['ref']) for pipeline in text_pipelines] for m in meta)
 			hyp_.extend(zip(*hyp))
@@ -236,10 +240,12 @@ def evaluate_model(
 					audio_path=audio_path,
 					audio_name=transcripts.audio_name(audio_path),
 					loss=loss,
-					entropy=entropy
+					entropy=entropy,
+					uncertainty=uncertainty,
 				),
 			)
-			for ref_tuple, hyp_tuple, audio_path, loss, entropy in zip(ref_, hyp_, audio_path_, loss_, entropy_)
+			for ref_tuple, hyp_tuple, audio_path, loss, entropy, uncertainty
+			in zip(ref_, hyp_, audio_path_, loss_, entropy_, uncertainty_)
 			for pipeline, ref, hyp in zip(text_pipelines, ref_tuple, hyp_tuple)
 		)
 
@@ -261,7 +267,7 @@ def evaluate_model(
 			_print('{labels_name} AUDIO_NAME: {audio_name}'.format(**t))
 			_print('{labels_name} REF: "{ref}"'.format(**t))
 			_print('{labels_name} HYP: "{hyp}"'.format(**t))
-			_print('{labels_name} WER: {wer:.02%} | CER: {cer:.02%}\n'.format(**t))
+			_print('{labels_name} WER: {wer:.02%} | CER: {cer:.02%} | UNCERTAINTY: {uncertainty:.6f}\n'.format(**t))
 
 		transcripts_path = os.path.join(
 			args.experiment_dir,
