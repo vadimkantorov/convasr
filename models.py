@@ -595,17 +595,45 @@ def apply_dither(x: shaping.BT, dither: float):
 	else:
 		return x
 
+
 def entropy(log_probs, lengths = None, dim = 1, eps = 1e-9, sum = True, keepdim = False):
+	""" Calculate the entropy of probabilities, using log of probabilities, and applying the formula:
+			Entropy(p) = -SUM(pj * log pj).
+		This formula is equivalent to the classic entropy formula:
+			Entropy(p) = SUM(pj * log(1 / pj))
+	"""
 	e = -(log_probs.exp() * log_probs).sum(dim = dim, keepdim = keepdim)
 	if lengths is not None:
 		e = e * temporal_mask(e, lengths)
-	return (
-		e.sum(dim = -1) / (eps + lengths.type_as(log_probs)) if lengths is not None else e.mean(dim = -1)
-	) if sum else e
+	if not sum:
+		return e
+	elif lengths is None:
+		return e.mean(dim = -1)
+	else:
+		return e.sum(dim = -1) / (eps + lengths.type_as(log_probs))
+
+
+def weighted_mean_entropy(log_probs, lengths = None, dim = 1, eps = 1e-9):
+	""" Calculate the entropy of probabilities, using log of probabilities, and then take the weighted average of those
+		values, using (1 - silence_probability) as weight, where silence_probability is silence token (epsilon)
+		probability. This way, non-silent timeframes have larger weights, and silent timeframes have lower weights.
+		weighted_mean_entropy is a good measure for char-level model uncertainty, and correlates well with cer.
+	"""
+	prob = log_probs.exp()
+	e = -(prob * log_probs).sum(dim = dim)
+	silence_prob = prob[:, -1] if dim else prob[-1]
+	weights = 1 - silence_prob
+	if lengths is not None:
+		mask = temporal_mask(e, lengths)
+		e *= mask
+		weights *= mask
+	res = (e * weights).sum(dim = -1) / (eps + weights.sum(dim = -1))
+	return res
 
 
 def margin(log_probs, dim = 1):
 	return torch.sub(*log_probs.exp().topk(2, dim = dim).values)
+
 
 def compute_capacity(model, scale = 1):
 	return sum(map(torch.numel, model.parameters())) / scale
