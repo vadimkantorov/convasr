@@ -650,9 +650,13 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 			if self.legacy:
 				assert self.track_running_stats is False
 				# BUG: https://github.com/pytorch/pytorch/issues/44636
-				# std, mean = torch.std_mean(x, dim = -1, keepdim = True)
+				#std, mean = torch.std_mean(x, dim = -1, keepdim = True)
 				# replaced with new version for .onnx export fix!
-				std, mean = torch.std(x, dim=-1, keepdim=True), torch.mean(x, dim=-1, keepdim=True)
+				# BUG failed:Type Error: Type parameter (T) bound to different types (tensor(float16) and tensor(float) in node (Mul_88). Mul_88 node located in torch.std function.
+				#std = torch.std(x, dim=-1, keepdim=True)
+				mean = torch.mean(x, dim=-1, keepdim=True)
+				xlen = x.size(dim=-1)
+				std = ((x - mean).pow(2).sum(dim=-1, keepdim=True) / xlen).sqrt()
 				return (x - mean) / (std + self.eps)
 			else:
 				return super().forward(x)
