@@ -652,11 +652,18 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 				# BUG: https://github.com/pytorch/pytorch/issues/44636
 				#std, mean = torch.std_mean(x, dim = -1, keepdim = True)
 				# replaced with new version for .onnx export fix!
+
 				# BUG failed:Type Error: Type parameter (T) bound to different types (tensor(float16) and tensor(float) in node (Mul_88). Mul_88 node located in torch.std function.
+				# torch.std uses Bessel unbiased estimate by default, code below performs biased estimation.
 				#std = torch.std(x, dim=-1, keepdim=True)
 				mean = torch.mean(x, dim=-1, keepdim=True)
-				xlen = x.size(dim=-1)
+
+				# torch.std uses Bessel unbiased estimate by default, code below performs biased estimation.
+				index_tensor = torch.tensor([-1]).to(device = x.device)
+				last_dim = torch.ones_like(x).sum(dim = -1).take(index_tensor) - 1
+				xlen = torch.clamp_min(last_dim, min=1)
 				std = ((x - mean).pow(2).sum(dim=-1, keepdim=True) / xlen).sqrt()
+
 				return (x - mean) / (std + self.eps)
 			else:
 				return super().forward(x)
