@@ -656,7 +656,7 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 				# BUG failed:Type Error: Type parameter (T) bound to different types (tensor(float16) and tensor(float) in node (Mul_88). Mul_88 node located in torch.std function.
 				#std = torch.std(x, dim=-1, keepdim=True)
 				mean = torch.mean(x, dim=-1, keepdim=True)
-				# None: Also took a measurement CER WER on a validation set and did not notice the difference between torch.std(x, dim=-1, keepdim=True) and bottom std setup.
+				# NOTE: Also took a CER WER measurement on a validation set and did not notice the difference between torch.std(x, dim=-1, keepdim=True) and bottom std setup.
 				# torch.std uses Bessel unbiased estimate by default, code below performs biased estimation.
 				std = ((x - mean).pow(2).sum(dim=-1, keepdim=True).mean(dim=-1, keepdim=True)).sqrt()
 				return (x - mean) / (std + self.eps)
