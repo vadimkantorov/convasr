@@ -476,6 +476,8 @@ def split(
 	for t in transcripts_train:
 		t.pop('alignment')
 		t.pop('words')
+		t['meta'].pop('words_hyp')
+		t['meta'].pop('words_ref')
 
 	if old_microval_path:
 		old_microval = json.load(open(os.path.join(output_path, old_microval_path)))
@@ -532,7 +534,7 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('subset')
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o')
-	cmd.add_argument('--audio-name')
+	cmd.add_argument('--allowed-audio-names')
 	cmd.add_argument('--wer', type = transcripts.number_tuple)
 	cmd.add_argument('--cer', type = transcripts.number_tuple)
 	cmd.add_argument('--duration', type = transcripts.number_tuple)

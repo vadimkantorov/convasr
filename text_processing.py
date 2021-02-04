@@ -223,7 +223,7 @@ class TextNormalizer:
 			16        : ('шестнадцать', 'шестнадцатый'),
 			17        : ('семнадцать', 'семнадцатый'),
 			18        : ('восемнадцать', 'восемнадцатый'),
-			19        : ('девятнадцать', 'девятнадцатsq'),
+			19        : ('девятнадцать', 'девятнадцатый'),
 			20        : ('двадцать', 'двадцатый'),
 			30        : ('тридцать', 'тридцатый'),
 			40        : ('сорок', 'сороковой'),
@@ -247,6 +247,7 @@ class TextNormalizer:
 		}
 
 	def normalize(self, text):
+		initial_text_start_with_space = text.startswith(' ')# bug in transcribe py when some references in y stick together
 		# superscripts
 		superscripts = '⁰¹²³⁴⁵⁶⁷⁸⁹'
 		text = re.sub(f'[{superscripts}]', ' ', text)
@@ -258,6 +259,7 @@ class TextNormalizer:
 		# extract words, numbers, ordinal numbers
 		words = re.findall(r'-?\d+-\w+|-?\d+\.?\d*|[\w*]+', text)
 		text = ' '.join(map(self.preprocess_word, words))
+		text = ' ' + text if initial_text_start_with_space else text
 		return text
 
 	def preprocess_word(self, word):

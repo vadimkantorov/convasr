@@ -67,7 +67,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			pop_meta: bool = False,
 			string_array_encoding: str = 'utf_16_le',
 			_print: typing.Callable = print,
-			debug_short_long_records_features_from_whole_normalized_signal: bool = False
+			debug_short_long_records_features_from_whole_normalized_signal: bool = False,
+			duration_from_transcripts: bool = False,
 	):
 		self.debug_short_long_records_features_from_whole_normalized_signal = debug_short_long_records_features_from_whole_normalized_signal
 		self.mode = mode
@@ -132,7 +133,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		for group_key, transcript in groupped_transcripts:
 			transcript = sorted(transcript, key = transcripts.sort_key)
 			if self.mode == AudioTextDataset.BATCHED_CHANNELS_MODE:
-				transcript = transcripts.join_transcript(transcript, self.mono)
+				transcript = transcripts.join_transcript(transcript, self.mono, duration_from_transcripts=duration_from_transcripts)
 
 			if exclude is not None:
 				allowed_audio_names = set(transcripts.audio_name(t) for t in transcript if transcripts.audio_name(t) not in exclude)
