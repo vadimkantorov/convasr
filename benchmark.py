@@ -76,7 +76,7 @@ else:
 		model.eval()
 		model.fuse_conv_bn_eval()
 
-	model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16) if args.data_parallel else (model, )
+	model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, data_parallel = args.data_parallel)
 	load_batch = lambda x: x.to(args.device, non_blocking = True)
 
 tictoc = lambda: (use_cuda and torch.cuda.synchronize()) or time.time()
