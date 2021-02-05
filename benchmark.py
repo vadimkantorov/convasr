@@ -69,7 +69,7 @@ else:
 		**kwargs: logits[0]
 	)
 	if checkpoint:
-		model.load_state_dict(checkpoint['model_state_dict'])
+		model.load_state_dict(checkpoint['model_state_dict'], strict=False)
 	model.to(args.device)
 
 	if not args.backward:
@@ -144,14 +144,15 @@ print()
 if args.profile_autograd:
 	autograd_profiler.__exit__(None, None, None)
 	autograd_profiler.export_chrome_trace(args.profile_autograd)
-
+print(f'B: {args.B}, T: {args.T}')
 print(
-	'load+fwd {:.02f} msec | bwd {:.02f} msec | cudamemreserved {:.02f} mb | cudamemallocated {:.02f} mb | cudamemutilization: {:.02f}'
+	'load+fwd {:.02f} msec | bwd {:.02f} msec | cudamemreserved {:.02f} mb | cudamemallocated {:.02f} mb | cudamemutilization: {:.02f}| rtf: {:.02f}'
 	.format(
 		float(times_fwd.mean()) * 1e3,
 		float(times_bwd.mean()) * 1e3,
 		mem_reserved * 1e-6,
 		mem_allocated * 1e-6,
-		float(fragmentation.mean())
+		float(fragmentation.mean()),
+		float(args.B * example_time * args.iterations / times_fwd.sum())
 	)
 )
