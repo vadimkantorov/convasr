@@ -471,6 +471,9 @@ def main(args):
 			})
 		)
 		onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
+		print('onnxruntime execution providers:', onnxruntime_session.get_providers())
+		onnxruntime_session.set_providers(['CUDAExecutionProvider', 'CPUExecutionProvider'] if 'cuda' in args.device else ['CPUExecutionProvider'])
+
 		if args.verbose:
 			onnxruntime.set_default_logger_severity(0)
 		(logits_, ) = onnxruntime_session.run(None, dict(x = waveform_input.cpu().numpy()))
