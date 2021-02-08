@@ -21,6 +21,8 @@ import multiprocessing
 import torch.utils.data
 import torch.utils.tensorboard
 import onnxruntime
+import onnx
+import onnx.tools.net_drawer
 import apex
 import datasets
 import transcript_generators
@@ -477,14 +479,28 @@ def main(args):
 		if args.verbose:
 			onnxruntime.set_default_logger_severity(0)
 		(logits_, ) = onnxruntime_session.run(None, dict(x = waveform_input.cpu().numpy()))
-		assert torch.allclose(logits.cpu(), torch.from_numpy(logits_), rtol = 1e-02, atol = 1e-03)
-		
-		#model_def = onnx.load(args.onnx)
-		#import onnx.tools.net_drawer # import GetPydotGraph, GetOpNodeProducer
-		#pydot_graph = GetPydotGraph(model_def.graph, name=model_def.graph.name, rankdir="TB", node_producer=GetOpNodeProducer("docstring", color="yellow", fillcolor="yellow", style="filled"))
-		#pydot_graph.write_dot("pipeline_transpose2x.dot")
-		#os.system('dot -O -Gdpi=300 -Tpng pipeline_transpose2x.dot')
-		# add metadata to model
+
+		assert torch.allclose(
+				logits.cpu(),
+				torch.from_numpy(logits_),
+				**{'rtol': 1e-01, 'atol': 1e-02} if args.fp16 else {'rtol': 1e-02, 'atol': 1e-03}
+		)
+
+		if args.onnx_dot_file:
+			# Previosly install graphvis with: sudo apt-get install graphviz; pip install onnx onnxruntime-gpu pydot
+			model_def = onnx.load(args.onnx)
+
+			pydot_graph = onnx.tools.net_drawer.GetPydotGraph(
+					model_def.graph,
+					name=model_def.graph.name,
+					rankdir="TB",
+					node_producer=onnx.tools.net_drawer.GetOpNodeProducer(
+							"docstring",
+							color="yellow",
+							fillcolor="yellow",
+							style="filled"))
+			pydot_graph.write_dot(args.onnx_dot_file)
+			os.system(f'dot -O -Gdpi=300 -Tpng {args.onnx_dot_file}')
 		return
 
 	perf.init_default(loss=dict(K=50, max=1000), memory_cuda_allocated=dict(K=50), entropy=dict(K=4), time_ms_iteration=dict(K=50, max=10_000), lr=dict(K=50, max=1))
@@ -990,9 +1006,10 @@ if __name__ == '__main__':
 		'--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'], help = 'for frontend'
 	)
 	parser.add_argument('--onnx')
+	parser.add_argument('--onnx-dot-file', type=str)
 	parser.add_argument('--onnx-sample-batch-size', type = int, default = 16)
 	parser.add_argument('--onnx-sample-time', type = int, default = 1024)
-	parser.add_argument('--onnx-opset', type = int, default = 12, choices = [9, 10, 11, 12])
+	parser.add_argument('--onnx-opset', type = int, default = 12, choices = [9, 10, 11, 12, 13])
 	parser.add_argument('--onnx-export-params', type = bool, default = True)
 	parser.add_argument('--dropout', type = float, default = 0.2)
 	parser.add_argument('--githttp')
