@@ -36,7 +36,18 @@ wget https://nlp.h-its.org/bpemb/ru/ru.wiki.bpe.vs5000.model -P data
 python3 train.py --onnx data/model.onnx --onnx-export-params=
 
 # upload data/model.onnx to https://lutzroeder.github.io/netron/
+
+# In case you want to export onnx to .dot format, please previosly install graphviz with: 
+sudo apt-get install graphviz 
+pip install onnx onnxruntime-gpu pydot
+
+# then add --onnx-dot-file path to export.sh
 ```
+
+```
+df
+```
+
 
 # Format code
 ```shell

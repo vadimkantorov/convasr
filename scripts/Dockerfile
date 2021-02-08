@@ -36,6 +36,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
   wget \
   gdb strace parallel \
   libboost-all-dev zlib1g-dev libbz2-dev liblzma-dev \
+  graphviz \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN  echo "    IdentityFile /root/.ssh/id_rsa" >> /etc/ssh/ssh_config
@@ -67,6 +68,7 @@ RUN pip install awscli --ignore-installed PyYAML
 RUN pip install sentencepiece
 RUN pip install webrtcvad
 RUN pip install onnxruntime
+RUN pip install onnx onnxruntime-gpu pydot
 RUN pip install yapf
 
 RUN git clone https://github.com/parlance/ctcdecode --recursive && sed -i 's/11/14/g' ctcdecode/build.py && pip install ./ctcdecode
