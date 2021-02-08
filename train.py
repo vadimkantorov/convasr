@@ -16,6 +16,7 @@ import collections
 import random
 import shutil
 import datetime
+import subprocess
 import time
 import multiprocessing
 import torch.utils.data
@@ -487,7 +488,6 @@ def main(args):
 		)
 
 		if args.onnx_dot_file:
-			# Previosly install graphvis with: sudo apt-get install graphviz; pip install onnx onnxruntime-gpu pydot
 			model_def = onnx.load(args.onnx)
 
 			pydot_graph = onnx.tools.net_drawer.GetPydotGraph(
@@ -500,7 +500,7 @@ def main(args):
 							fillcolor="yellow",
 							style="filled"))
 			pydot_graph.write_dot(args.onnx_dot_file)
-			os.system(f'dot -O -Gdpi=300 -Tpng {args.onnx_dot_file}')
+			subprocess.run(f'dot -O -Gdpi=300 -Tpng {args.onnx_dot_file}'.split())
 		return
 
 	perf.init_default(loss=dict(K=50, max=1000), memory_cuda_allocated=dict(K=50), entropy=dict(K=4), time_ms_iteration=dict(K=50, max=10_000), lr=dict(K=50, max=1))
