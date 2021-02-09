@@ -270,7 +270,7 @@ def join_transcript(transcript: Transcript, join_channels: bool = False, duratio
 		speaker_name = ','.join(collect_speaker_names(transcript))
 
 		if duration_from_transcripts:
-			duration = max(t['end'] for t in transcript)
+			duration = summary(transcript)['end']
 		else:
 			duration = audio.compute_duration(transcript[0]['audio_path'])
 

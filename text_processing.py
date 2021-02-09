@@ -249,8 +249,8 @@ class TextNormalizer:
 	def normalize(self, text):
 		initial_text_start_with_space = text.startswith(' ')# bug in transcribe py when some references in y stick together
 		# superscripts
-		superscripts = '⁰¹²³⁴⁵⁶⁷⁸⁹'
-		text = re.sub(f'[{superscripts}]', ' ', text)
+		scripts = '⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉⓪①②③④⑤⑥⑦⑧⑨'
+		text = re.sub(f'[{scripts}]', ' ', text)
 
 		# percent isnt preserved
 		text = text.replace('%', f' {self._percent}*')

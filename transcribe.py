@@ -132,13 +132,12 @@ def main(args, ext_json = ['.json', '.json.gz']):
 		try:
 			tic = time.time()
 			y, ylen = y.to(args.device), ylen.to(args.device)
-			print('Input:', audio_name)
-			print('Xlen:', x.shape[-1] / args.sample_rate)
-			print('ylen:', y.shape[-1])
+			print('Input path:', meta[0]['audio_path'])
+			print('Input len: {length:.02f} sec'.format(length = x[-1] / args.sample_rate if args.frontend else x[-1] * args.window_stride))
+			print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
 
 			log_probs, logits, olen = model(x.squeeze(1).to(args.device), xlen.to(args.device))
 
-			print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
 			print(
 				'Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(
 					audio = sum(map(transcripts.compute_duration, meta)), processing = time.time() - tic
@@ -343,7 +342,7 @@ if __name__ == '__main__':
 	parser.add_argument('--transcribe-first-n-sec', type = int)
 	parser.add_argument('--join-transcript', action = 'store_true')
 	parser.add_argument('--pack-backpointers', action = 'store_true')
-	parser.add_argument('--oom-retries', type = int, default = 5)
+	parser.add_argument('--oom-retries', type = int, default = 100)
 	parser.add_argument('--dataset-string-array-encoding', default = 'utf_32_le', choices = ['utf_16_le', 'utf_32_le'])
 	parser.add_argument('--normalize-signal', action = 'store_true')
 	parser.add_argument('--debug-short-long-records-normalize-signal-multiplier', action = 'store_true')
