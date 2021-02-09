@@ -133,11 +133,11 @@ def main(args, ext_json = ['.json', '.json.gz']):
 			tic = time.time()
 			y, ylen = y.to(args.device), ylen.to(args.device)
 			print('Input path:', meta[0]['audio_path'])
-			print('Input len: {length:.02f} sec'.format(length = x[-1] / args.sample_rate if args.frontend else x[-1] * args.window_stride))
-			print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
+			print('Input len: {length:.02f} sec'.format(length = x.shape[-1] / args.sample_rate if args.frontend else x.shape[-1] * args.window_stride))
 
 			log_probs, logits, olen = model(x.squeeze(1).to(args.device), xlen.to(args.device))
 
+			print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
 			print(
 				'Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(
 					audio = sum(map(transcripts.compute_duration, meta)), processing = time.time() - tic
