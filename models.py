@@ -555,11 +555,13 @@ class LogFilterBankFrontend(nn.Module):
 			padded_signal, (0, pad), mode = 'constant', value = 0
 		)  # TODO: avoid this second copy by doing pad manually
 
+		# INFO: pow(2) cause onnxruntime warnings like "CUDA kernel not found in registries for Op type: Pow node name: Pow_76" To avoid this pow replaced by x*x
 		if self.stft is not None:
 			stft_res = self.stft(padded_signal.unsqueeze(dim = 1))
 			real_squared, imag_squared = (stft_res * stft_res).split(self.freq_cutoff, dim = 1)
 		else:
-			real_squared, imag_squared = padded_signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = False).pow(2).unbind(dim = -1)
+			stft_res = padded_signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = False)
+			real_squared, imag_squared = (stft_res * stft_res).unbind(dim = -1)
 
 		power_spectrum = real_squared + imag_squared
 		log_mel_features = self.mel(power_spectrum).log()
@@ -664,6 +666,7 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 				# NOTE: Also took a CER WER measurement on a validation set and did not notice the difference between torch.std(x, dim=-1, keepdim=True) and bottom std setup.
 				# torch.std uses Bessel unbiased estimate by default, code below performs biased estimation.
 				x_minus_mean = x - mean
+				# INFO: pow(2) cause onnxruntime warnings like "CUDA kernel not found in registries for Op type: Pow node name: Pow_76" To avoid this pow replaced by x*x
 				std = ((x_minus_mean * x_minus_mean).sum(dim=-1, keepdim=True).mean(dim=-1, keepdim=True)).sqrt()
 				return (x - mean) / (std + self.eps)
 			else:
