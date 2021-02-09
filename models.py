@@ -286,7 +286,7 @@ class JasperNet(nn.Module):
 		if self.frontend is not None:
 			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
 			x = self.frontend(x.squeeze(1), mask = mask)
-			# INFO: squeeze(1) cause onnxruntime warnings like "Force fallback to CPU execution for node: Gather_3 Force fallback to CPU execution for node: Equal_5".
+			# NOTE: squeeze(1) cause onnxruntime warnings like "Force fallback to CPU execution for node: Gather_3 Force fallback to CPU execution for node: Equal_5".
 
 		assert x.ndim == 3
 
@@ -550,12 +550,12 @@ class LogFilterBankFrontend(nn.Module):
 
 		pad = self.freq_cutoff - 1
 		padded_signal = F.pad(signal.unsqueeze(1), (pad, 0), mode = 'reflect').squeeze(1)  # TODO: remove un/squeeze when https://github.com/pytorch/pytorch/issues/29863 is fixed
-		# INFO: squeeze(1) cause onnxruntime warnings like "Force fallback to CPU execution for node: Gather_52 Force fallback to CPU execution for node: Equal_54". To avoid this try to replace squeeze(1) by [:,0,:]
+		# NOTE: squeeze(1) cause onnxruntime warnings like "Force fallback to CPU execution for node: Gather_52 Force fallback to CPU execution for node: Equal_54". To avoid this try to replace squeeze(1) by [:,0,:]
 		padded_signal = F.pad(
 			padded_signal, (0, pad), mode = 'constant', value = 0
 		)  # TODO: avoid this second copy by doing pad manually
 
-		# INFO: pow(2) cause onnxruntime warnings like "CUDA kernel not found in registries for Op type: Pow node name: Pow_76" To avoid this pow replaced by x*x
+		# NOTE: pow(2) cause onnxruntime warnings like "CUDA kernel not found in registries for Op type: Pow node name: Pow_76" To avoid this pow replaced by x*x
 		if self.stft is not None:
 			stft_res = self.stft(padded_signal.unsqueeze(dim = 1))
 			real_squared, imag_squared = (stft_res * stft_res).split(self.freq_cutoff, dim = 1)
@@ -666,7 +666,7 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 				# NOTE: Also took a CER WER measurement on a validation set and did not notice the difference between torch.std(x, dim=-1, keepdim=True) and bottom std setup.
 				# torch.std uses Bessel unbiased estimate by default, code below performs biased estimation.
 				x_minus_mean = x - mean
-				# INFO: pow(2) cause onnxruntime warnings like "CUDA kernel not found in registries for Op type: Pow node name: Pow_76" To avoid this pow replaced by x*x
+				# NOTE: pow(2) cause onnxruntime warnings like "CUDA kernel not found in registries for Op type: Pow node name: Pow_76" To avoid this pow replaced by x*x
 				std = ((x_minus_mean * x_minus_mean).sum(dim=-1, keepdim=True).mean(dim=-1, keepdim=True)).sqrt()
 				return (x - mean) / (std + self.eps)
 			else:
