@@ -59,7 +59,7 @@
                 "replace_chars" :  [],
                 "repeat_character" : "2",
                 "normalize_text" : false,
-                "allowed_chars": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя2 "},
+                "allowed_chars": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя "},
     "no_repeat": {"drop_space_at_borders" : true,
                 "to_lower_case" : true,
                 "collapse_char_series" : false,
