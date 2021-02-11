@@ -223,7 +223,9 @@ def prune(
 	num_speakers: typing.Optional[Interval] = None,
 	allowed_audio_names: typing.Set[str] = None,
 	allowed_unk_count: typing.Optional[Interval] = None,
-	max_audio_file_size: typing.Optional[int] = None
+	max_audio_file_size: typing.Optional[int] = None,
+	*nargs,
+	**kwargs
 ):
 	audio_file_size_cache = dict()
 	get_size = lambda audio_path: audio_file_size_cache[audio_path] if audio_path in audio_file_size_cache else audio_file_size_cache.setdefault(audio_name, os.path.getsize(audio_path))
@@ -250,7 +252,7 @@ def prune(
 		prev = t
 
 
-def join_transcript(transcript: Transcript, join_channels: bool = False):
+def join_transcript(transcript: Transcript, join_channels: bool = False, duration_from_transcripts: bool = False):
 	joined_transcripts = []
 
 	if join_channels:
@@ -266,7 +268,12 @@ def join_transcript(transcript: Transcript, join_channels: bool = False):
 		ref = speaker_phrase_separator.join(t['ref'].strip() for t in transcript)
 		speaker = [t['speaker'] for t in transcript]
 		speaker_name = ','.join(collect_speaker_names(transcript))
-		duration = audio.compute_duration(transcript[0]['audio_path'])
+
+		if duration_from_transcripts:
+			duration = summary(transcript)['end']
+		else:
+			duration = audio.compute_duration(transcript[0]['audio_path'])
+
 		joined_transcripts.append(dict(audio_path = audio_path,
 										ref = ref,
 										begin = 0.0,

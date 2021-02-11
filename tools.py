@@ -476,6 +476,8 @@ def split(
 	for t in transcripts_train:
 		t.pop('alignment')
 		t.pop('words')
+		t['meta'].pop('words_hyp')
+		t['meta'].pop('words_ref')
 
 	if old_microval_path:
 		old_microval = json.load(open(os.path.join(output_path, old_microval_path)))
@@ -532,7 +534,7 @@ if __name__ == '__main__':
 	cmd = subparsers.add_parser('subset')
 	cmd.add_argument('--input-path', '-i', required = True)
 	cmd.add_argument('--output-path', '-o')
-	cmd.add_argument('--audio-name')
+	cmd.add_argument('--allowed-audio-names')
 	cmd.add_argument('--wer', type = transcripts.number_tuple)
 	cmd.add_argument('--cer', type = transcripts.number_tuple)
 	cmd.add_argument('--duration', type = transcripts.number_tuple)
@@ -552,7 +554,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--strip-prefix', type = str, default = '')
 	cmd.add_argument('--audio-backend', default = 'ffmpeg', choices = ['sox', 'ffmpeg'])
 	cmd.add_argument('--add-sub-paths', action = 'store_true')
-	cmd.add_argument('--num-workers', type = int, default = 32)
+	cmd.add_argument('--num-workers', type = int, default = 20)
 	cmd.set_defaults(func = cut)
 
 	cmd = subparsers.add_parser('cat')
@@ -616,7 +618,7 @@ if __name__ == '__main__':
 	cmd.add_argument('--test-duration-in-hours', required = True, type = float)
 	cmd.add_argument('--val-duration-in-hours', required = True, type = float)
 	cmd.add_argument('--microval-duration-in-hours', required = True, type = float)
-	cmd.add_argument('--seed', required = True, type = int, default = 42)
+	cmd.add_argument('--seed', type = int, default = 42)
 	cmd.set_defaults(func = split)
 
 	cmd = subparsers.add_parser('filter_dataset')

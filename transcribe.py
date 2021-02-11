@@ -93,7 +93,8 @@ def main(args, ext_json = ['.json', '.json.gz']):
 		max_duration = args.transcribe_first_n_sec,
 		mode = 'batched_channels' if args.join_transcript else 'batched_transcript',
 		string_array_encoding = args.dataset_string_array_encoding,
-		debug_short_long_records_features_from_whole_normalized_signal = args.debug_short_long_records_features_from_whole_normalized_signal
+		debug_short_long_records_features_from_whole_normalized_signal = args.debug_short_long_records_features_from_whole_normalized_signal,
+		duration_from_transcripts=args.join_transcript
 	)
 	print('Examples count: ', len(val_dataset))
 	val_meta = val_dataset.pop_meta()
@@ -130,10 +131,13 @@ def main(args, ext_json = ['.json', '.json.gz']):
 
 		try:
 			tic = time.time()
+			print('Input path:', meta[0]['audio_path'])
+			print('Input len: {length:.02f} sec'.format(
+					length=x.shape[-1] / args.sample_rate if args.frontend else x.shape[-1] * args.window_stride))
+
 			y, ylen = y.to(args.device), ylen.to(args.device)
 			log_probs, logits, olen = model(x.squeeze(1).to(args.device), xlen.to(args.device))
 
-			print('Input:', audio_name)
 			print('Input time steps:', log_probs.shape[-1], '| target time steps:', y.shape[-1])
 			print(
 				'Time: audio {audio:.02f} sec | processing {processing:.02f} sec'.format(
@@ -187,7 +191,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 												   time_stamps = aligned_ts,
 												   segment_text_key = 'ref',
 												   segment_extra_info = [dict(speaker = s, speaker_name = sn, channel = c) for s, sn, c in zip(speaker, speaker_name, channel)])]
-				ref_segments = [transcripts.map_text(text_pipeline.postprocess, hyp = ref) for ref in ref_segments]
+				ref_segments = [transcripts.map_text(text_pipeline.postprocess, ref = ref) for ref in ref_segments]
 			oom_handler.reset()
 		except:
 			if oom_handler.try_recover(model.parameters()):
@@ -230,8 +234,8 @@ def main(args, ext_json = ['.json', '.json.gz']):
 					speaker_name = transcripts.speaker_name(ref = ref_transcript, hyp = hyp_transcript),
 
 					words = metrics.align_words(*metrics.align_strings(hyp = hyp, ref = ref)) if args.align_words else [],
-					words_ref = ref_transcript,
-					words_hyp = hyp_transcript,
+					words_ref = ref_transcript if args.align_words else [],
+					words_hyp = hyp_transcript if args.align_words else [],
 
 					**transcripts.summary(hyp_transcript),
 					**(dict(cer = metrics.cer(hyp = hyp, ref = ref)) if has_ref else {})
@@ -339,7 +343,7 @@ if __name__ == '__main__':
 	parser.add_argument('--transcribe-first-n-sec', type = int)
 	parser.add_argument('--join-transcript', action = 'store_true')
 	parser.add_argument('--pack-backpointers', action = 'store_true')
-	parser.add_argument('--oom-retries', type = int, default = 3)
+	parser.add_argument('--oom-retries', type = int, default = 100)
 	parser.add_argument('--dataset-string-array-encoding', default = 'utf_32_le', choices = ['utf_16_le', 'utf_32_le'])
 	parser.add_argument('--normalize-signal', action = 'store_true')
 	parser.add_argument('--debug-short-long-records-normalize-signal-multiplier', action = 'store_true')

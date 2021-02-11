@@ -1,6 +1,7 @@
 # Data
 data/
 asr_experiments/
+asr_base_dataset_scripts/
 asr_tests/
 scripts/experiments
 youtube/
