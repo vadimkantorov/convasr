@@ -4,7 +4,9 @@ import argparse
 import glob
 
 def clean_up_transcript_ref(ref):
-	return ref.replace(';', '')
+	# NOTE: If a semicolon is encountered in the reference transcription, the asert in encode_transcript func stops working. assert len(ref_by_speaker) == len(t['speaker'])
+	speaker_phrase_separator = ';'
+	return ref.replace(speaker_phrase_separator, '')
 
 def main(args):
 	transcripts = []
