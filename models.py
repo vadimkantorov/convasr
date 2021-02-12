@@ -549,7 +549,7 @@ class LogFilterBankFrontend(nn.Module):
 		signal = signal * mask if mask is not None else signal
 
 		pad = self.freq_cutoff - 1
-		padded_signal = F.pad(signal.unsqueeze(1), (pad, 0), mode = 'reflect').squeeze(1)  # TODO: remove un/squeeze when https://github.com/pytorch/pytorch/issues/29863 is fixed
+		padded_signal = F.pad(signal.unsqueeze(1), (pad, 0), mode = 'reflect' if pad < signal.size(1) else 'constant').squeeze(1)  # TODO: remove un/squeeze when https://github.com/pytorch/pytorch/issues/29863 is fixed
 		# NOTE: squeeze(1) cause onnxruntime warnings like "Force fallback to CPU execution for node: Gather_52 Force fallback to CPU execution for node: Equal_54". To avoid this try to replace squeeze(1) by [:,0,:]
 		padded_signal = F.pad(
 			padded_signal, (0, pad), mode = 'constant', value = 0
