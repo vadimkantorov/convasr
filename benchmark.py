@@ -4,7 +4,6 @@ import argparse
 import time
 import torch
 import torch.cuda.profiler
-import apex
 import onnxruntime
 import models
 import datasets
@@ -33,6 +32,7 @@ parser.add_argument('--stft-mode', choices = ['conv', ''], default = '')
 parser.add_argument('-B', type = int, default = 256)
 parser.add_argument('-T', type = int, default = 5.12)
 parser.add_argument('--profile-cuda', action = 'store_true')
+parser.add_argument('--profile-pyprof', action = 'store_true')
 parser.add_argument('--profile-autograd')
 parser.add_argument('--data-parallel', action = 'store_true')
 parser.add_argument('--backward', action = 'store_true')
@@ -113,8 +113,11 @@ for i in range(args.iterations_warmup):
 print('Warmup done in {:.02f} wall clock seconds'.format(tictoc() - tic_wall))
 print()
 
+if args.profile_pyprof:
+	import pyprof
+	pyprof.init()
+	
 if args.profile_cuda:
-	apex.pyprof.nvtx.init()
 	torch.autograd.profiler.emit_nvtx()
 	torch.cuda.profiler.start()
 if args.profile_autograd:
