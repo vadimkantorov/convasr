@@ -74,3 +74,5 @@ RUN pip install yapf
 RUN git clone https://github.com/parlance/ctcdecode --recursive && sed -i 's/11/14/g' ctcdecode/build.py && pip install ./ctcdecode
 RUN pip install cxxfilt && pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" git+https://github.com/NVIDIA/apex
 RUN pip install psutil
+
+RUN pip install git+https://github.com/NVIDIA/PyProf.git
