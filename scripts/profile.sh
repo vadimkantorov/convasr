@@ -10,13 +10,14 @@ nvprof -s -f -o $TRACEFILE --profile-from-start off -- python3 benchmark.py --pr
 # then open it with chrome://tracing
 python3 scripts/nvprof2json.py $TRACEFILE > $TRACEFILE.json
 
-#python3 -m apex.pyprof.parse $TRACEFILE > $TRACEFILE.dict
+# pip install git+https://github.com/NVIDIA/PyProf.git
 
-#python3 -m apex.pyprof.prof -w 170 -c kernel,op,sil,tc,flops,bytes,device,stream,block,grid $TRACEFILE.dict > $TRACEPYPROFLOG
+#python3 -m pyprof.parse $TRACEFILE > $TRACEFILE.dict
+#python3 -m pyprof.prof -w 170 -c kernel,op,sil,tc,flops,bytes,device,stream,block,grid $TRACEFILE.dict > $TRACEPYPROFLOG
 
 
 echo nvprof sqlite dump in $TRACEFILE, text trace in $TRACELOG
-echo apex.pyprof dict dump in $TRACEFILE.dict, text trace in $TRACEPYPROFLOG
+echo pyprof dict dump in $TRACEFILE.dict, text trace in $TRACEPYPROFLOG
 echo open nvvp visual profiler as:
 echo nvvp $TRACEFILE
 
