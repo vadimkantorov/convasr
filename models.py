@@ -153,6 +153,67 @@ class ConvBn1d(nn.Module):
 			self.bn[i] = nn.Identity()
 
 
+class ProfilableModel(nn.Module):
+	def __init__(self,
+			num_input_features = 64,
+			kernel_size_prologue = 11,
+			base_width = 128,
+			out_width_factors = [2, 3, 4, 5, 6],
+			dropout_prologue = 0.2,
+			stride1 = 2,
+			temporal_mask = True,
+			nonlinearity = ('relu',),
+			inplace = False,
+			dict = dict,
+			*nargs,
+			**kwargs):
+		super().__init__()
+
+		in_width_factor = out_width_factors[0]
+		self.backbone = nn.ModuleList([
+			ConvBn1d(
+					kernel_size=kernel_size_prologue,
+					num_channels=(num_input_features, in_width_factor * base_width),
+					dropout=dropout_prologue,
+					stride=stride1,
+					temporal_mask=temporal_mask,
+					nonlinearity=nonlinearity,
+					inplace=inplace
+			)
+		])
+		self.dict = dict
+		self.num_epilogue_modules = 0
+
+	def forward(
+			self, x: typing.Union[shaping.BCT, shaping.BT], xlen: typing.Optional[shaping.B] = None,
+			y: typing.Optional[shaping.BLY] = None, ylen: typing.Optional[shaping.B] = None
+	) -> shaping.BCt:
+		assert x.ndim == 3
+
+		residual = []
+		for i, subblock in enumerate(self.backbone):
+			x = subblock(x, residual=residual, lengths_fraction=xlen)
+			if i >= len(self.backbone) - self.num_epilogue_modules - 1:  # HACK: drop residual connections for epilogue
+				residual = []
+			elif self.residual == 'dense':
+				residual.append(x)
+			elif self.residual:
+				residual = [x]
+			else:
+				residual = []
+
+		aux = {}
+		olen = None
+		logits = x
+		log_probs = x
+
+		return self.dict(logits=logits, log_probs=log_probs, olen=olen, **aux)
+
+	def fuse_conv_bn_eval(self, K = None):
+		for subblock in self.backbone[:K]:
+			subblock.fuse_conv_bn_eval()
+
+
 #TODO: figure out perfect same padding
 # Jasper 5x3: 5 blocks, each has 1 sub-blocks, each sub-block has 3 ConvBnRelu
 # Jasper 10x5: 5 blocks, each has 2 sub-blocks, each sub-block has 5 ConvBnRelu
