@@ -44,7 +44,7 @@ if checkpoint:
 
 use_cuda = 'cuda' in args.device
 
-labels = datasets.Labels(datasets.Language(args.lang))
+#labels = datasets.Labels(datasets.Language(args.lang))
 
 if args.onnx:
 	onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
@@ -61,7 +61,7 @@ else:
 		stft_mode = args.stft_mode
 	) if args.frontend else None
 	model = getattr(models, args.model)(
-		args.num_input_features, [len(labels)],
+		num_input_features = args.num_input_features, num_classes=[38],
 		frontend = frontend,
 		dict = lambda logits,
 		log_probs,
@@ -125,6 +125,9 @@ print('Starting benchmark for', args.iterations, 'iterations:', 'fwd', '+ bwd' i
 tic_wall = tictoc()
 times_fwd, times_bwd, fragmentation = torch.zeros(args.iterations), torch.zeros(args.iterations), torch.zeros(args.iterations)
 for i in range(args.iterations):
+	batch = torch.rand(*batch_shape)
+	batch = batch.pin_memory()
+
 	tic = tictoc()
 	y = model(load_batch(batch))
 	toc = tictoc()
