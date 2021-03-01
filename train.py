@@ -120,12 +120,18 @@ class TensorboardSink:
 				self.summary_writer.add_histogram(tag + '/grad', param.grad, iteration)
 	
 
-def apply_model(data_loader, model, generator, text_pipelines, device, oom_handler):
+def apply_model(data_loader, model, generator, text_pipelines, device, oom_handler, onnx_wrapper=None, forward_x_only=False):
 	for meta, s, x, xlen, y, ylen in data_loader:
 		x, xlen, y, ylen = x.to(device, non_blocking = True), xlen.to(device, non_blocking = True), y.to(device, non_blocking = True), ylen.to(device, non_blocking = True)
 		with torch.no_grad():
 			try:
-				logits, log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['logits', 'log_probs', 'olen', 'loss'])
+				model_to_infer = onnx_wrapper if onnx_wrapper is not None else model
+				infer_kwargs = {'x': x} if forward_x_only else {'x': x, 'xlen': xlen, 'y': y, 'ylen': ylen}
+				logits, log_probs, olen, loss = map(model_to_infer(**infer_kwargs).get, ['logits', 'log_probs', 'olen', 'loss'])
+
+				if loss is None:
+					loss = torch.tensor([1.0])
+
 				oom_handler.reset()
 			except:
 				## TODO remove args.world_size > 1 after OOM recover fix for DDP
@@ -163,7 +169,9 @@ def evaluate_model(
 	tensorboard_sink = None,
 	logfile_sink = None,
 	epoch = None,
-	iteration = None
+	iteration = None,
+	onnx_wrapper = None,
+	forward_x_only=False,
 ):
 	_print = utils.get_root_logger_print()
 
@@ -186,7 +194,7 @@ def evaluate_model(
 		tic = time.time()
 		ref_, hyp_, audio_path_, loss_, entropy_, uncertainty_ = [], [], [], [], [], []
 		for batch_idx, (meta, loss, entropy, uncertainty, hyp, logits, y) \
-			in enumerate(apply_model(val_data_loader, model, generator, text_pipelines, args.device, oom_handler)):
+			in enumerate(apply_model(val_data_loader, model, generator, text_pipelines, args.device, oom_handler, onnx_wrapper=onnx_wrapper, forward_x_only=forward_x_only)):
 			loss_.extend(loss.tolist())
 			entropy_.extend(entropy.tolist())
 			uncertainty_.extend(uncertainty.tolist())
@@ -423,7 +431,7 @@ def main(args):
 		window = args.window,
 		dither = args.dither,
 		dither0 = args.dither0,
-		stft_mode = 'conv' if args.onnx else None,
+		stft_mode = 'conv' if args.onnx and not args.validate_onnx else None,
 		extra_args = frontend_extra_args
 	)
 	model = getattr(models, args.model)(
@@ -432,7 +440,7 @@ def main(args):
 		dropout = args.dropout,
 		decoder_type = 'bpe' if any(isinstance(pipeline.tokenizer, text_tokenizers.BPETokenizer) for pipeline in text_pipelines) else None,
 		frontend = frontend if args.onnx or args.frontend_in_model else None,
-		**(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx else {})
+		**(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx and not args.validate_onnx else {})
 	)
 
 	_print('Model capacity:', int(models.compute_capacity(model, scale = 1e6)), 'million parameters\n')
@@ -447,7 +455,7 @@ def main(args):
 		}  ##TODO remove after save checkpoint naming fix
 		frontend.load_state_dict(frontend_checkpoint)
 
-	if args.onnx:
+	if args.onnx and not args.validate_onnx:
 		torch.set_grad_enabled(False)
 		model.eval()
 		model.to(args.device)
@@ -473,6 +481,7 @@ def main(args):
 				0: 'B', 2: 't'
 			})
 		)
+
 		onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
 		print('onnxruntime execution providers:', onnxruntime_session.get_providers())
 		onnxruntime_session.set_providers(['CUDAExecutionProvider', 'CPUExecutionProvider'] if 'cuda' in args.device else ['CPUExecutionProvider'])
@@ -481,11 +490,34 @@ def main(args):
 			onnxruntime.set_default_logger_severity(0)
 		(logits_, ) = onnxruntime_session.run(None, dict(x = waveform_input.cpu().numpy()))
 
-		assert torch.allclose(
+		wraper = models.OnnxWrapper(args.onnx)
+		wraper_logits = wraper(waveform_input)['logits'][0]
+
+		pytorch_with_onnx = torch.allclose(
 				logits.cpu(),
 				torch.from_numpy(logits_),
 				**{'rtol': 1e-01, 'atol': 1e-02} if args.fp16 else {'rtol': 1e-02, 'atol': 1e-03}
 		)
+
+		wrapper_with_onnx = torch.allclose(
+				wraper_logits.cpu(),
+				torch.from_numpy(logits_),
+				**{'rtol': 1e-01, 'atol': 1e-02} if args.fp16 else {'rtol': 1e-02, 'atol': 1e-03}
+		)
+
+		wrapper_with_pytorch = torch.allclose(
+				logits.cpu(),
+				wraper_logits.cpu(),
+				**{'rtol': 1e-01, 'atol': 1e-02} if args.fp16 else {'rtol': 1e-02, 'atol': 1e-03}
+		)
+
+		if not (pytorch_with_onnx and wrapper_with_onnx and wrapper_with_pytorch):
+			print(
+					'\npytorch_with_onnx: ', pytorch_with_onnx,
+					'\nwrapper_with_onnx: ', wrapper_with_onnx,
+					'\nwrapper_with_pytorch: ', wrapper_with_pytorch,
+			)
+			raise Exception
 
 		if args.onnx_dot_file:
 			model_def = onnx.load(args.onnx)
@@ -553,7 +585,9 @@ def main(args):
 			model, *_ = models.distributed_data_parallel_and_autocast(model, args.local_rank, opt_level = args.fp16, synchronize_bn = args.synchronize_bn, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 		elif args.device != 'cpu':
 			model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
-		evaluate_model(args, val_data_loaders, model, generator, text_pipelines, error_analyzer)
+
+		onnx_wrapper = models.OnnxWrapper(args.onnx) if args.onnx else None
+		evaluate_model(args, val_data_loaders, model, generator, text_pipelines, error_analyzer, onnx_wrapper=onnx_wrapper, forward_x_only=args.forward_x_only)
 		return
 
 	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder, frontend = args.freeze_frontend)
@@ -1006,6 +1040,8 @@ if __name__ == '__main__':
 		'--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'], help = 'for frontend'
 	)
 	parser.add_argument('--onnx')
+	parser.add_argument('--validate-onnx', action = 'store_true', help = 'flag is need to set if you validate onnx model with OnnxWrapper without export from pytorch',)
+	parser.add_argument('--forward-x-only', action = 'store_true', help = 'flag for validation mode with inference without xlen model(x) instead of model(x, xlen ...), needed to debug masking',)
 	parser.add_argument('--onnx-dot-file', type=str)
 	parser.add_argument('--onnx-sample-batch-size', type = int, default = 16)
 	parser.add_argument('--onnx-sample-time', type = int, default = 1024)

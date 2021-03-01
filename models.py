@@ -2,6 +2,7 @@ import os
 import math
 import collections
 import functools
+import onnxruntime
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -284,8 +285,10 @@ class JasperNet(nn.Module):
 	) -> shaping.BCt:
 
 		if self.frontend is not None:
-			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
-			x = self.frontend(x.squeeze(1), mask = mask)
+			ol = compute_output_lengths(x, xlen)
+			x = x.squeeze(1)
+			mask = temporal_mask(x, ol) if xlen is not None else None
+			x = self.frontend(x, mask = mask)
 			# NOTE: squeeze(1) cause onnxruntime warnings like "Force fallback to CPU execution for node: Gather_3 Force fallback to CPU execution for node: Equal_5".
 
 		assert x.ndim == 3
@@ -1401,3 +1404,40 @@ class JasperNetBigInplace(JasperNet):
 			nonlinearity = ('leaky_relu', 0.01),
 			**kwargs
 		)
+
+
+class OnnxWrapper():
+	def __init__(self, onnx_model_path, providers=['CUDAExecutionProvider', 'CPUExecutionProvider']):
+		self.dict = dict
+		self.bpe_only = False
+		self.onnxruntime_session = onnxruntime.InferenceSession(onnx_model_path)
+
+		if providers:
+			self.onnxruntime_session.set_providers(list(providers))
+
+	def __call__(self,  x, xlen=None, y=None, ylen=None):
+		return self.forward(x, xlen, y, ylen)
+
+	def forward(
+			self, x: typing.Union[shaping.BCT, shaping.BT],
+			xlen: typing.Optional[shaping.B] = None,
+			y: typing.Optional[shaping.BLY] = None,
+			ylen: typing.Optional[shaping.B] = None
+	) -> shaping.BCt:
+
+		logits = self.onnxruntime_session.run(None, dict(x=x.squeeze(1).cpu().numpy()))
+		logits = [torch.as_tensor(l, device=x.device) for l in logits]
+		log_probs = [F.log_softmax(l, dim=1) for l in logits]
+		aux = {}
+
+		if xlen is None:
+			return self.dict(logits=logits, log_probs=log_probs, olen=None, **aux)
+
+		olen = [compute_output_lengths(l, xlen.to(torch.float32) if xlen is not None else None) for l in logits]
+		if y is not None and ylen is not None:
+			loss = []
+			for i, l in enumerate(log_probs):
+				loss.append(F.ctc_loss(l.permute(2, 0, 1), y[:, i], olen[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') / ylen[:, 0])
+			aux = dict(loss = sum(loss) if not self.bpe_only else sum(loss[1:]))
+
+		return self.dict(logits=logits, log_probs=log_probs, olen=olen, **aux)
