@@ -464,7 +464,11 @@ def main(args):
 		if args.fp16:
 			model = models.InputOutputTypeCast(model.to(torch.float16), dtype = torch.float16)
 
-		waveform_input = torch.rand(args.onnx_sample_batch_size, args.onnx_sample_time, device = args.device)
+		if args.onnx_waveform_input:
+			waveform_input = torch.load(args.onnx_waveform_input).to(device = args.device).squeeze(1)
+		else:
+			waveform_input = torch.rand(args.onnx_sample_batch_size, args.onnx_sample_time, device = args.device)
+
 		logits = model(waveform_input)
 
 		torch.onnx.export(
@@ -492,6 +496,8 @@ def main(args):
 
 		wraper = models.OnnxWrapper(args.onnx)
 		wraper_logits = wraper(waveform_input)['logits'][0]
+
+		print('pytorch with wrapper max difference: ', (logits - wraper_logits).abs().max())
 
 		pytorch_with_onnx = torch.allclose(
 				logits.cpu(),
@@ -1042,6 +1048,7 @@ if __name__ == '__main__':
 	parser.add_argument('--onnx')
 	parser.add_argument('--validate-onnx', action = 'store_true', help = 'flag is need to set if you validate onnx model with OnnxWrapper without export from pytorch',)
 	parser.add_argument('--forward-x-only', action = 'store_true', help = 'flag for validation mode with inference without xlen model(x) instead of model(x, xlen ...), needed to debug masking',)
+	parser.add_argument('--onnx-waveform-input', type=str)
 	parser.add_argument('--onnx-dot-file', type=str)
 	parser.add_argument('--onnx-sample-batch-size', type = int, default = 16)
 	parser.add_argument('--onnx-sample-time', type = int, default = 1024)
