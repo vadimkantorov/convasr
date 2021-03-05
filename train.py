@@ -459,31 +459,36 @@ def main(args):
 		if args.fp16:
 			model = models.InputOutputTypeCast(model.to(torch.float16), dtype = torch.float16)
 
+		xlen = None
 		if args.onnx_waveform_input:
 			waveform_input = torch.load(args.onnx_waveform_input, map_location=args.device).squeeze(1)
 			# NOTE about squeeze(1). If the waveform was exported with tree dimensions shape [B,1,T] and center shape does not contains any data.
 		else:
+			xlen = torch.rand(args.onnx_sample_batch_size, device = args.device)
 			waveform_input = torch.rand(args.onnx_sample_batch_size, args.onnx_sample_time, device = args.device)
 
-		torch_logits = model(waveform_input)
+		torch_logits = model(waveform_input, xlen)
 
 		torch.onnx.export(
-			model, (waveform_input, ),
+			model, (waveform_input, xlen, ),
 			args.onnx,
+			verbose = False,
 			opset_version = args.onnx_opset,
 			export_params = args.onnx_export_params,
 			do_constant_folding = True,
-			input_names = ['x'],
+			input_names = ['x', 'xlen'],
 			output_names = ['logits'],
 			dynamic_axes = dict(x = {
 				0: 'B', 1: 'T'
 			}, logits = {
 				0: 'B', 2: 't'
+			}, xlen = {
+				0: 'B'
 			})
 		)
 
 		wrapper = models.OnnxWrapper(args.onnx, severity = 0 if args.verbose else None)
-		wrapper_logits = wrapper(waveform_input)['logits'][0]
+		wrapper_logits = wrapper(waveform_input, xlen)['logits'][0]
 
 		print('pytorch with wrapper max difference: ', (torch_logits - wrapper_logits).abs().max())
 

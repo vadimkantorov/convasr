@@ -282,14 +282,13 @@ class JasperNet(nn.Module):
 
 		if self.frontend is not None:
 			x = x.squeeze(1)
-			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
+			mask = temporal_mask_no_jit(x, compute_output_lengths_no_jit(x, xlen)) if xlen is not None else None
 			x = self.frontend(x, mask = mask)
 			# NOTE: squeeze(1) cause onnxruntime warnings like "Force fallback to CPU execution for node: Gather_3 Force fallback to CPU execution for node: Equal_5".
-
 		assert x.ndim == 3
 
 		if self.normalize_features is not None:
-			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
+			mask = temporal_mask_no_jit(x, compute_output_lengths_no_jit(x, xlen)) if xlen is not None else None
 			x = self.normalize_features(x, mask = mask)
 
 		residual = []
@@ -572,8 +571,17 @@ def compute_output_lengths(x: shaping.BT, lengths_fraction: typing.Optional[shap
 		return torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.long)
 	return (lengths_fraction * x.shape[-1]).ceil().long()
 
+def compute_output_lengths_no_jit(x: shaping.BT, lengths_fraction: typing.Optional[shaping.B] = None):
+	if lengths_fraction is None:
+		return torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.long)
+	return (lengths_fraction * x.shape[-1]).ceil().long()
+
 @torch.jit.script
 def temporal_mask(x: shaping.BT, lengths: shaping.B):
+	return (torch.arange(x.shape[-1], device = x.device, dtype = lengths.dtype).unsqueeze(0) <
+			lengths.unsqueeze(1)).view(x.shape[:1] + (1, ) * (len(x.shape) - 2) + x.shape[-1:])
+
+def temporal_mask_no_jit(x: shaping.BT, lengths: shaping.B):
 	return (torch.arange(x.shape[-1], device = x.device, dtype = lengths.dtype).unsqueeze(0) <
 			lengths.unsqueeze(1)).view(x.shape[:1] + (1, ) * (len(x.shape) - 2) + x.shape[-1:])
 
@@ -1422,7 +1430,7 @@ class OnnxWrapper(nn.Module):
 			ylen: typing.Optional[shaping.B] = None
 	) -> shaping.BCt:
 
-		logits = self.onnxruntime_session.run(None, dict(x=x.squeeze(1).cpu().numpy()))
+		logits = self.onnxruntime_session.run(None, dict(x=x.squeeze(1).cpu().numpy(), xlen=xlen.cpu().numpy()))
 		logits = [torch.as_tensor(l, device=x.device) for l in logits]
 		log_probs = [F.log_softmax(l, dim=1) for l in logits]
 		aux = {}
