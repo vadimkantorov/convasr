@@ -13,15 +13,12 @@ import json
 import math
 import os
 import collections
-import random
-import shutil
 import datetime
 import subprocess
 import time
 import multiprocessing
 import torch.utils.data
 import torch.utils.tensorboard
-import onnxruntime
 import onnx
 import onnx.tools.net_drawer
 import apex
@@ -120,17 +117,16 @@ class TensorboardSink:
 				self.summary_writer.add_histogram(tag + '/grad', param.grad, iteration)
 	
 
-def apply_model(data_loader, model, generator, text_pipelines, device, oom_handler, onnx_wrapper=None, forward_x_only=False):
+def apply_model(data_loader, model, generator, text_pipelines, device, oom_handler, forward_x_only=False):
 	for meta, s, x, xlen, y, ylen in data_loader:
 		x, xlen, y, ylen = x.to(device, non_blocking = True), xlen.to(device, non_blocking = True), y.to(device, non_blocking = True), ylen.to(device, non_blocking = True)
 		with torch.no_grad():
 			try:
-				model_to_infer = onnx_wrapper if onnx_wrapper is not None else model
-				infer_kwargs = {'x': x} if forward_x_only else {'x': x, 'xlen': xlen, 'y': y, 'ylen': ylen}
-				logits, log_probs, olen, loss = map(model_to_infer(**infer_kwargs).get, ['logits', 'log_probs', 'olen', 'loss'])
+				infer_kwargs = dict(x = x) if forward_x_only else dict(x = x, xlen = xlen, y = y, ylen = ylen)
+				logits, log_probs, olen, loss = map(model(**infer_kwargs).get, ['logits', 'log_probs', 'olen', 'loss'])
 
 				if loss is None:
-					loss = torch.tensor([1.0])
+					loss = torch.tensor([float.inf] * x.shape[0])
 
 				oom_handler.reset()
 			except:
@@ -170,7 +166,6 @@ def evaluate_model(
 	logfile_sink = None,
 	epoch = None,
 	iteration = None,
-	onnx_wrapper = None,
 	forward_x_only=False,
 ):
 	_print = utils.get_root_logger_print()
@@ -194,7 +189,7 @@ def evaluate_model(
 		tic = time.time()
 		ref_, hyp_, audio_path_, loss_, entropy_, uncertainty_ = [], [], [], [], [], []
 		for batch_idx, (meta, loss, entropy, uncertainty, hyp, logits, y) \
-			in enumerate(apply_model(val_data_loader, model, generator, text_pipelines, args.device, oom_handler, onnx_wrapper=onnx_wrapper, forward_x_only=forward_x_only)):
+			in enumerate(apply_model(val_data_loader, model, generator, text_pipelines, args.device, oom_handler, forward_x_only=forward_x_only)):
 			loss_.extend(loss.tolist())
 			entropy_.extend(entropy.tolist())
 			uncertainty_.extend(uncertainty.tolist())
@@ -465,11 +460,11 @@ def main(args):
 			model = models.InputOutputTypeCast(model.to(torch.float16), dtype = torch.float16)
 
 		if args.onnx_waveform_input:
-			waveform_input = torch.load(args.onnx_waveform_input).to(device = args.device).squeeze(1)
+			waveform_input = torch.load(args.onnx_waveform_input, map_location=args.device).squeeze(1)
 		else:
 			waveform_input = torch.rand(args.onnx_sample_batch_size, args.onnx_sample_time, device = args.device)
 
-		logits = model(waveform_input)
+		torch_logits = model(waveform_input)
 
 		torch.onnx.export(
 			model, (waveform_input, ),
@@ -486,44 +481,16 @@ def main(args):
 			})
 		)
 
-		onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
-		print('onnxruntime execution providers:', onnxruntime_session.get_providers())
-		onnxruntime_session.set_providers(['CUDAExecutionProvider', 'CPUExecutionProvider'] if 'cuda' in args.device else ['CPUExecutionProvider'])
+		wrapper = models.OnnxWrapper(args.onnx, severity = 0 if args.verbose else None)
+		wrapper_logits = wrapper(waveform_input)['logits'][0]
 
-		if args.verbose:
-			onnxruntime.set_default_logger_severity(0)
-		(logits_, ) = onnxruntime_session.run(None, dict(x = waveform_input.cpu().numpy()))
+		print('pytorch with wrapper max difference: ', (torch_logits - wrapper_logits).abs().max())
 
-		wraper = models.OnnxWrapper(args.onnx)
-		wraper_logits = wraper(waveform_input)['logits'][0]
-
-		print('pytorch with wrapper max difference: ', (logits - wraper_logits).abs().max())
-
-		pytorch_with_onnx = torch.allclose(
-				logits.cpu(),
-				torch.from_numpy(logits_),
+		assert torch.allclose(
+				torch_logits.cpu(),
+				wrapper_logits.cpu(),
 				**{'rtol': 1e-01, 'atol': 1e-02} if args.fp16 else {'rtol': 1e-02, 'atol': 1e-03}
 		)
-
-		wrapper_with_onnx = torch.allclose(
-				wraper_logits.cpu(),
-				torch.from_numpy(logits_),
-				**{'rtol': 1e-01, 'atol': 1e-02} if args.fp16 else {'rtol': 1e-02, 'atol': 1e-03}
-		)
-
-		wrapper_with_pytorch = torch.allclose(
-				logits.cpu(),
-				wraper_logits.cpu(),
-				**{'rtol': 1e-01, 'atol': 1e-02} if args.fp16 else {'rtol': 1e-02, 'atol': 1e-03}
-		)
-
-		if not (pytorch_with_onnx and wrapper_with_onnx and wrapper_with_pytorch):
-			print(
-					'\npytorch_with_onnx: ', pytorch_with_onnx,
-					'\nwrapper_with_onnx: ', wrapper_with_onnx,
-					'\nwrapper_with_pytorch: ', wrapper_with_pytorch,
-			)
-			raise Exception
 
 		if args.onnx_dot_file:
 			model_def = onnx.load(args.onnx)
@@ -592,8 +559,9 @@ def main(args):
 		elif args.device != 'cpu':
 			model, *_ = models.data_parallel_and_autocast(model, opt_level = args.fp16, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 
-		onnx_wrapper = models.OnnxWrapper(args.onnx) if args.onnx else None
-		evaluate_model(args, val_data_loaders, model, generator, text_pipelines, error_analyzer, onnx_wrapper=onnx_wrapper, forward_x_only=args.forward_x_only)
+		model = models.OnnxWrapper(args.onnx) if args.onnx else model
+
+		evaluate_model(args, val_data_loaders, model, generator, text_pipelines, error_analyzer, forward_x_only=args.forward_x_only)
 		return
 
 	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder, frontend = args.freeze_frontend)

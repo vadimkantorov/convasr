@@ -1,10 +1,6 @@
-import os
 import math
-import collections
-import functools
 import onnxruntime
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import apex
@@ -285,9 +281,8 @@ class JasperNet(nn.Module):
 	) -> shaping.BCt:
 
 		if self.frontend is not None:
-			ol = compute_output_lengths(x, xlen)
 			x = x.squeeze(1)
-			mask = temporal_mask(x, ol) if xlen is not None else None
+			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
 			x = self.frontend(x, mask = mask)
 			# NOTE: squeeze(1) cause onnxruntime warnings like "Force fallback to CPU execution for node: Gather_3 Force fallback to CPU execution for node: Equal_5".
 
@@ -1406,17 +1401,19 @@ class JasperNetBigInplace(JasperNet):
 		)
 
 
-class OnnxWrapper():
-	def __init__(self, onnx_model_path, providers=['CUDAExecutionProvider', 'CPUExecutionProvider']):
+class OnnxWrapper(nn.Module):
+	def __init__(self, onnx_model_path, providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'], severity=None):
+		super().__init__()
+
 		self.dict = dict
 		self.bpe_only = False
 		self.onnxruntime_session = onnxruntime.InferenceSession(onnx_model_path)
 
-		if providers:
-			self.onnxruntime_session.set_providers(list(providers))
+		if severity:
+			onnxruntime.set_default_logger_severity(severity)
 
-	def __call__(self,  x, xlen=None, y=None, ylen=None):
-		return self.forward(x, xlen, y, ylen)
+		if providers:
+			self.onnxruntime_session.set_providers(providers)
 
 	def forward(
 			self, x: typing.Union[shaping.BCT, shaping.BT],
