@@ -1409,7 +1409,7 @@ class OnnxWrapper(nn.Module):
 		self.bpe_only = False
 		self.onnxruntime_session = onnxruntime.InferenceSession(onnx_model_path)
 
-		if severity:
+		if severity is not None:
 			onnxruntime.set_default_logger_severity(severity)
 
 		if providers:

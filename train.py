@@ -426,7 +426,7 @@ def main(args):
 		window = args.window,
 		dither = args.dither,
 		dither0 = args.dither0,
-		stft_mode = 'conv' if args.onnx and not args.validate_onnx else None,
+		stft_mode = 'conv' if args.onnx and not args.onnx_validate else None,
 		extra_args = frontend_extra_args
 	)
 	model = getattr(models, args.model)(
@@ -435,7 +435,7 @@ def main(args):
 		dropout = args.dropout,
 		decoder_type = 'bpe' if any(isinstance(pipeline.tokenizer, text_tokenizers.BPETokenizer) for pipeline in text_pipelines) else None,
 		frontend = frontend if args.onnx or args.frontend_in_model else None,
-		**(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx and not args.validate_onnx else {})
+		**(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx and not args.onnx_validate else {})
 	)
 
 	_print('Model capacity:', int(models.compute_capacity(model, scale = 1e6)), 'million parameters\n')
@@ -450,7 +450,7 @@ def main(args):
 		}  ##TODO remove after save checkpoint naming fix
 		frontend.load_state_dict(frontend_checkpoint)
 
-	if args.onnx and not args.validate_onnx:
+	if args.onnx and not args.onnx_validate:
 		torch.set_grad_enabled(False)
 		model.eval()
 		model.to(args.device)
@@ -461,6 +461,7 @@ def main(args):
 
 		if args.onnx_waveform_input:
 			waveform_input = torch.load(args.onnx_waveform_input, map_location=args.device).squeeze(1)
+			# NOTE about squeeze(1). If the waveform was exported with tree dimensions shape [B,1,T] and center shape does not contains any data.
 		else:
 			waveform_input = torch.rand(args.onnx_sample_batch_size, args.onnx_sample_time, device = args.device)
 
@@ -1014,7 +1015,7 @@ if __name__ == '__main__':
 		'--window', default = 'hann_window', choices = ['hann_window', 'hamming_window'], help = 'for frontend'
 	)
 	parser.add_argument('--onnx')
-	parser.add_argument('--validate-onnx', action = 'store_true', help = 'flag is need to set if you validate onnx model with OnnxWrapper without export from pytorch',)
+	parser.add_argument('--onnx-validate', action = 'store_true', help = 'flag is need to set if you validate onnx model with OnnxWrapper without export from pytorch',)
 	parser.add_argument('--forward-x-only', action = 'store_true', help = 'flag for validation mode with inference without xlen model(x) instead of model(x, xlen ...), needed to debug masking',)
 	parser.add_argument('--onnx-waveform-input', type=str)
 	parser.add_argument('--onnx-dot-file', type=str)
