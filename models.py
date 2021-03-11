@@ -188,7 +188,8 @@ class JasperNet(nn.Module):
 		normalize_features_eps = torch.finfo(torch.float16).tiny,
 		normalize_features_track_running_stats = False,
 		normalize_features_legacy = True,
-		normalize_features_temporal_mask = True
+		normalize_features_temporal_mask = True,
+		use_jited_function = True# NOTE: needed because onnx export of masked version model cause Segmentation fault
 	):
 		super().__init__()
 		self.init_params = {name: repr(value) for name, value in locals().items()}
@@ -275,6 +276,7 @@ class JasperNet(nn.Module):
 		self.residual = residual
 		self.dict = dict
 		self.bpe_only = bpe_only
+		self.use_jited_function = use_jited_function
 
 	def forward(
 		self, x: typing.Union[shaping.BCT, shaping.BT], xlen: typing.Optional[shaping.B] = None, y: typing.Optional[shaping.BLY] = None, ylen: typing.Optional[shaping.B] = None
@@ -282,13 +284,19 @@ class JasperNet(nn.Module):
 
 		if self.frontend is not None:
 			x = x.squeeze(1)
-			mask = temporal_mask_no_jit(x, compute_output_lengths_no_jit(x, xlen)) if xlen is not None else None
+			if self.use_jited_function:
+				mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
+			else:
+				mask = temporal_mask_no_jit(x, compute_output_lengths_no_jit(x, xlen)) if xlen is not None else None
 			x = self.frontend(x, mask = mask)
 			# NOTE: squeeze(1) cause onnxruntime warnings like "Force fallback to CPU execution for node: Gather_3 Force fallback to CPU execution for node: Equal_5".
 		assert x.ndim == 3
 
 		if self.normalize_features is not None:
-			mask = temporal_mask_no_jit(x, compute_output_lengths_no_jit(x, xlen)) if xlen is not None else None
+			if self.use_jited_function:
+				mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
+			else:
+				mask = temporal_mask_no_jit(x, compute_output_lengths_no_jit(x, xlen)) if xlen is not None else None
 			x = self.normalize_features(x, mask = mask)
 
 		residual = []
@@ -564,6 +572,11 @@ class LogFilterBankFrontend(nn.Module):
 		log_mel_features = self.mel(power_spectrum).log()
 		return log_mel_features
 
+
+# NOTE A decorator @torch.jit.script is needed in TorchScript tracing for the following:
+# 1) See apply_dither
+# 2) Functions like torch.arange and torch.randn_like worked correctly depending on the input, and did not fix the dtype and device during tracing
+# 3) So that calculations based on the shape of the tensor (`compute_output_lengths`) work correctly
 
 @torch.jit.script
 def compute_output_lengths(x: shaping.BT, lengths_fraction: typing.Optional[shaping.B] = None):

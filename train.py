@@ -435,6 +435,7 @@ def main(args):
 		dropout = args.dropout,
 		decoder_type = 'bpe' if any(isinstance(pipeline.tokenizer, text_tokenizers.BPETokenizer) for pipeline in text_pipelines) else None,
 		frontend = frontend if args.onnx or args.frontend_in_model else None,
+		use_jited_function = args.onnx is None,
 		**(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx and not args.onnx_validate else {})
 	)
 
