@@ -285,7 +285,6 @@ class JasperNet(nn.Module):
 			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
 			x = self.frontend(x, mask = mask)
 			# NOTE: squeeze(1) cause onnxruntime warnings like "Force fallback to CPU execution for node: Gather_3 Force fallback to CPU execution for node: Equal_5".
-
 		assert x.ndim == 3
 
 		if self.normalize_features is not None:
@@ -566,13 +565,17 @@ class LogFilterBankFrontend(nn.Module):
 		return log_mel_features
 
 
-@torch.jit.script
+# NOTE A decorator @torch.jit.script is needed in TorchScript tracing for the following:
+# 1) See apply_dither
+# 2) Functions like torch.arange and torch.randn_like worked correctly depending on the input, and did not fix the dtype and device during tracing
+# 3) So that calculations based on the shape of the tensor (`compute_output_lengths`) work correctly
+# @torch.jit.script
 def compute_output_lengths(x: shaping.BT, lengths_fraction: typing.Optional[shaping.B] = None):
 	if lengths_fraction is None:
 		return torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.long)
 	return (lengths_fraction * x.shape[-1]).ceil().long()
 
-@torch.jit.script
+# @torch.jit.script
 def temporal_mask(x: shaping.BT, lengths: shaping.B):
 	return (torch.arange(x.shape[-1], device = x.device, dtype = lengths.dtype).unsqueeze(0) <
 			lengths.unsqueeze(1)).view(x.shape[:1] + (1, ) * (len(x.shape) - 2) + x.shape[-1:])
@@ -1422,7 +1425,7 @@ class OnnxWrapper(nn.Module):
 			ylen: typing.Optional[shaping.B] = None
 	) -> shaping.BCt:
 
-		logits = self.onnxruntime_session.run(None, dict(x=x.squeeze(1).cpu().numpy()))
+		logits = self.onnxruntime_session.run(None, dict(x=x.squeeze(1).cpu().numpy(), xlen=xlen.cpu().numpy()))
 		logits = [torch.as_tensor(l, device=x.device) for l in logits]
 		log_probs = [F.log_softmax(l, dim=1) for l in logits]
 		aux = {}
