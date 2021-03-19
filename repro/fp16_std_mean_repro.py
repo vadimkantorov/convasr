@@ -23,13 +23,7 @@ torch.onnx.export(
 		opset_version=12,
 		export_params=None,
 		do_constant_folding=True,
-		input_names=['x'],
-		output_names=['o'],
-		dynamic_axes=dict(x={
-			0: 'B',
-		}, o={
-			0: 'B',
-		})
+		input_names=['x']
 )
 
 '''
