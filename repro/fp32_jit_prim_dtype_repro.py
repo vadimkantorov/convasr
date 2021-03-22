@@ -49,7 +49,7 @@ print(runtime.run(None, dict(x=x.cpu().numpy(), xlen=xlen.cpu().numpy())))
          0.0000]], device='cuda:0')}
 Traceback (most recent call last):
   File "fp32_jit_prim_dtype_repro.py", line 41, in <module>
-    runtime = onnxruntime.InferenceSession('test_output.onnx')
+    runtime = onnxruntime.InferenceSession('fp32_jit_prim_dtype_repro.onnx')
   File "/opt/conda/lib/python3.8/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 206, in __init__
     self._create_inference_session(providers, provider_options)
   File "/opt/conda/lib/python3.8/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 231, in _create_inference_session

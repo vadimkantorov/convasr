@@ -60,7 +60,7 @@ Process finished with exit code 139 (interrupted by signal 11: SIGSEGV)
          0.0000]], device='cuda:0', dtype=torch.float16)}
 Traceback (most recent call last):
   File "fp16_jit_repro.py", line 43, in <module>
-    runtime = onnxruntime.InferenceSession('test_output.onnx')
+    runtime = onnxruntime.InferenceSession('fp16_jit_repro.onnx')
   File "/opt/conda/lib/python3.8/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 206, in __init__
     self._create_inference_session(providers, provider_options)
   File "/opt/conda/lib/python3.8/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 231, in _create_inference_session

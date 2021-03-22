@@ -35,12 +35,12 @@ print(runtime.run(None, dict(x=x.cpu().numpy())))
 {'o': tensor(0.2084, device='cuda:0', dtype=torch.float16)}
 Traceback (most recent call last):
   File "/home/*/work/convasr/repro/fp16_std_repro_cuda.py", line 36, in <module>
-    runtime = onnxruntime.InferenceSession('test_output.onnx')
+    runtime = onnxruntime.InferenceSession('fp16_std_repro_cuda.onnx')
   File "/opt/conda/lib/python3.8/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 206, in __init__
     self._create_inference_session(providers, provider_options)
   File "/opt/conda/lib/python3.8/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 226, in _create_inference_session
     sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
-onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Load model from test_output.onnx failed:Type Error: Type parameter (T) bound to different types (tensor(float16) and tensor(float) in node (Mul_7).
+onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Load model from fp16_std_repro_cuda.onnx failed:Type Error: Type parameter (T) bound to different types (tensor(float16) and tensor(float) in node (Mul_7).
 
 
 python fp16_std_repro_cuda.py
