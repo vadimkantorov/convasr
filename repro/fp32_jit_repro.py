@@ -25,7 +25,7 @@ print(model(x, l))
 
 torch.onnx.export(
 		model, (x, l),
-		'test_output.onnx',
+		'fp32_jit_repro.onnx',
 		verbose=False,
 		opset_version=12,
 		export_params=None,
@@ -33,7 +33,7 @@ torch.onnx.export(
 		input_names=['x', 'l']
 )
 
-runtime = onnxruntime.InferenceSession('test_output.onnx')
+runtime = onnxruntime.InferenceSession('fp32_jit_repro.onnx')
 print(runtime.run(None, dict(x=x.cpu().numpy(), l=l.cpu().numpy())))
 
 '''

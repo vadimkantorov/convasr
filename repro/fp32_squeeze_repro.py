@@ -20,7 +20,7 @@ print(model(x))
 
 torch.onnx.export(
 		model, (x,),
-		'model.onnx',
+		'fp32_squeeze_repro.onnx',
 		verbose=False,
 		opset_version=12,
 		export_params=None,
@@ -29,7 +29,7 @@ torch.onnx.export(
 		output_names = ['o']
 )
 
-runtime = onnxruntime.InferenceSession('model.onnx')
+runtime = onnxruntime.InferenceSession('fp32_squeeze_repro.onnx')
 print(runtime.run(None, dict(x=x.cpu().numpy())))
 
 '''

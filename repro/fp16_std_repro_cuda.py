@@ -19,7 +19,7 @@ print(model(x))
 
 torch.onnx.export(
 		model, (x,),
-		'test_output.onnx',
+		'fp16_std_repro_cuda.onnx',
 		verbose=False,
 		opset_version=12,
 		export_params=None,
@@ -27,7 +27,7 @@ torch.onnx.export(
 		input_names=['x']
 )
 
-runtime = onnxruntime.InferenceSession('test_output.onnx')
+runtime = onnxruntime.InferenceSession('fp16_std_repro_cuda.onnx')
 print(runtime.run(None, dict(x=x.cpu().numpy())))
 
 '''
