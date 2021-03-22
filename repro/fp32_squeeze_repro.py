@@ -40,11 +40,25 @@ torch.Size([1, 10])
 2021-03-19 22:33:08.805984358 [W:onnxruntime:Default, fallback_cpu_capability.h:140 GetCpuPreferedNodes] Force fallback to CPU execution for node: Gather_17
 2021-03-19 22:33:08.806113942 [W:onnxruntime:Default, fallback_cpu_capability.h:140 GetCpuPreferedNodes] Force fallback to CPU execution for node: Equal_19
 Traceback (most recent call last):
-  File "/home/yuborovskikh/work/convasr/repro/fp32_squeeze_repro.py", line 33, in <module>
+  File "/home/*/work/convasr/repro/fp32_squeeze_repro.py", line 33, in <module>
     print(runtime.run(None, dict(x=x.cpu().numpy())))
   File "/opt/conda/lib/python3.8/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 120, in run
     raise ValueError("Model requires {} inputs. Input Feed contains {}".format(num_required_inputs, num_inputs))
 ValueError: Model requires 3 inputs. Input Feed contains 1
 
 Process finished with exit code 1
+
+
+1.8.0
+torch.Size([1, 10])
+{'o': tensor([[0.0000, 0.7245, 0.8421, 0.7092, 0.6501, 0.6383, 0.4523, 0.5001, 0.9790,
+         0.5590, 0.3269, 0.0000]], device='cuda:0')}
+2021-03-22 15:08:07.537204469 [W:onnxruntime:Default, fallback_cpu_capability.h:140 GetCpuPreferedNodes] Force fallback to CPU execution for node: Gather_17
+2021-03-22 15:08:07.537347425 [W:onnxruntime:Default, fallback_cpu_capability.h:140 GetCpuPreferedNodes] Force fallback to CPU execution for node: Equal_19
+Traceback (most recent call last):
+  File "fp32_squeeze_repro.py", line 33, in <module>
+    print(runtime.run(None, dict(x=x.cpu().numpy())))
+  File "/opt/conda/lib/python3.8/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 120, in run
+    raise ValueError("Model requires {} inputs. Input Feed contains {}".format(num_required_inputs, num_inputs))
+ValueError: Model requires 3 inputs. Input Feed contains 1
 '''

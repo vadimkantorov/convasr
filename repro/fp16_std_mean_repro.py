@@ -1,16 +1,17 @@
+import onnxruntime
 from torch import nn
 import torch
 
 print(torch.__version__)
 
 
-class StdMeanForExport(nn.Module):
+class Model(nn.Module):
 	def forward(self, x):
 		std, mean = torch.std_mean(x)
 		return dict(o=std)
 
 
-model = StdMeanForExport()
+model = Model()
 model.to(torch.float16)
 x = torch.rand(10).to(torch.float16)
 
@@ -25,6 +26,9 @@ torch.onnx.export(
 		do_constant_folding=True,
 		input_names=['x']
 )
+
+runtime = onnxruntime.InferenceSession('test_output.onnx')
+print(runtime.run(None, dict(x=x.cpu().numpy())))
 
 '''
 1.7.1
@@ -53,4 +57,7 @@ Traceback (most recent call last):
 RuntimeError: Exporting the operator std_mean to ONNX opset version 12 is not supported. Please open a bug to request ONNX export support for the missing operator.
 
 Process finished with exit code 1
+
+1.8.0
+{'o': tensor(0.2969, dtype=torch.float16)}
 '''

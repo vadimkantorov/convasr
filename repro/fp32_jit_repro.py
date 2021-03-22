@@ -10,12 +10,12 @@ def compute_output_lengths(x, lengths_fraction):
 		return torch.full(x.shape[:1], x.shape[-1], device = x.device, dtype = torch.long)
 	return (lengths_fraction * x.shape[-1]).ceil().long()
 
-class StdMeanForExport(nn.Module):
+class Model(nn.Module):
 	def forward(self, x, l):
 		l = compute_output_lengths(x, l)
 		return dict(o=l)
 
-model = StdMeanForExport()
+model = Model()
 model.to(device='cuda')
 
 x = torch.rand(1, 10).to(device='cuda')
@@ -34,11 +34,17 @@ torch.onnx.export(
 )
 
 runtime = onnxruntime.InferenceSession('test_output.onnx')
+print(runtime.run(None, dict(x=x.cpu().numpy(), l=l.cpu().numpy())))
 
 '''
 1.7.1
-{'o': tensor([8, 4, 5, 2, 7, 7, 7, 5, 9, 7], device='cuda:0')}
+{'o': tensor([8], device='cuda:0')}
 Warning: ONNX Scalar Type Analysis - Scalar types mismatch for tensor inputs of operator onnx::Mul. Please report a bug to PyTorch. The scalar type Float of the first tensor is chosen.
+[array([8], dtype=int64)]
 
 Process finished with exit code 0
+
+1.8.0
+{'o': tensor([2], device='cuda:0')}
+[array([2], dtype=int64)]
 '''

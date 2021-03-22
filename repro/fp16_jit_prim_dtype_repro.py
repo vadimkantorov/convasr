@@ -15,14 +15,14 @@ def temporal_mask(x, lengths):
 	return (torch.arange(x.shape[-1], device = x.device, dtype = lengths.dtype).unsqueeze(0) <
 			lengths.unsqueeze(1)).view(x.shape[:1] + (1, ) * (len(x.shape) - 2) + x.shape[-1:])
 
-class StdMeanForExport(nn.Module):
+class Model(nn.Module):
 	def forward(self, x, xlen):
 		l = compute_output_lengths(x, xlen)
 		tm = temporal_mask(x, l)
 		x = x * tm
 		return dict(o=x)
 
-model = StdMeanForExport()
+model = Model()
 model.to(dtype=torch.float16, device='cuda')
 
 x = torch.rand(2, 10).to(dtype=torch.float16, device='cuda')
@@ -50,7 +50,7 @@ print(runtime.run(None, dict(x=x.cpu().numpy(), xlen=xlen.cpy().numpy())))
         [0.1528, 0.4634, 0.4460, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
          0.0000]], device='cuda:0', dtype=torch.float16)}
 Traceback (most recent call last):
-  File "/home/yuborovskikh/work/convasr/repro/fp16_jit_prim_dtype_repro.py", line 33, in <module>
+  File "/home/*/work/convasr/repro/fp16_jit_prim_dtype_repro.py", line 33, in <module>
     torch.onnx.export(
   File "/opt/conda/lib/python3.8/site-packages/torch/onnx/__init__.py", line 225, in export
     return utils.export(model, args, f, export_params, verbose, training,
@@ -73,4 +73,18 @@ Traceback (most recent call last):
 RuntimeError: Exporting the operator prim_dtype to ONNX opset version 12 is not supported. Please open a bug to request ONNX export support for the missing operator.
 
 Process finished with exit code 1
+
+1.8.0
+{'o': tensor([[0.7837, 0.4578, 0.3262, 0.0865, 0.5513, 0.9019, 0.1149, 0.0186, 0.0906,
+         0.9175],
+        [0.2485, 0.8965, 0.8389, 0.2585, 0.0453, 0.4497, 0.7578, 0.9561, 0.0000,
+         0.0000]], device='cuda:0', dtype=torch.float16)}
+Traceback (most recent call last):
+  File "fp16_jit_prim_dtype_repro.py", line 43, in <module>
+    runtime = onnxruntime.InferenceSession('test_output.onnx')
+  File "/opt/conda/lib/python3.8/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 206, in __init__
+    self._create_inference_session(providers, provider_options)
+  File "/opt/conda/lib/python3.8/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 231, in _create_inference_session
+    sess.initialize_session(providers or [], provider_options or [])
+onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (Mul_48) Op (Mul) [ShapeInferenceError] Incompatible dimensions
 '''

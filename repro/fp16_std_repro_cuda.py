@@ -5,12 +5,12 @@ import torch
 print(torch.__version__)
 
 
-class StdMeanForExport(nn.Module):
+class Model(nn.Module):
 	def forward(self, x):
 		std = torch.std(x)
 		return dict(o=std)
 
-model = StdMeanForExport()
+model = Model()
 model.to(dtype=torch.float16, device='cuda')
 
 x = torch.rand(10).to(dtype=torch.float16, device='cuda')
@@ -41,4 +41,11 @@ Traceback (most recent call last):
   File "/opt/conda/lib/python3.8/site-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 226, in _create_inference_session
     sess = C.InferenceSession(session_options, self._model_path, True, self._read_config_from_model)
 onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Load model from test_output.onnx failed:Type Error: Type parameter (T) bound to different types (tensor(float16) and tensor(float) in node (Mul_7).
+
+
+python fp16_std_repro_cuda.py
+1.8.0
+{'o': tensor(0.2202, device='cuda:0', dtype=torch.float16)}
+[array(0.22020227, dtype=float32)]
+
 '''

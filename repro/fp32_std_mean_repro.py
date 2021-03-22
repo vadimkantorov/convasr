@@ -1,16 +1,17 @@
+import onnxruntime
 from torch import nn
 import torch
 
 print(torch.__version__)
 
 
-class StdMeanForExport(nn.Module):
+class Model(nn.Module):
 	def forward(self, x):
 		std, mean = torch.std_mean(x)
 		return std
 
 
-model = StdMeanForExport()
+model = Model()
 
 x = torch.rand(10)
 print(model(x))
@@ -24,6 +25,9 @@ torch.onnx.export(
 		do_constant_folding=True,
 		input_names=['x'],
 )
+
+runtime = onnxruntime.InferenceSession('test_output.onnx')
+print(runtime.run(None, dict(x=x.cpu().numpy())))
 
 '''
 1.7.1
@@ -50,4 +54,8 @@ Traceback (most recent call last):
   File "/opt/conda/lib/python3.8/site-packages/torch/onnx/symbolic_registry.py", line 111, in get_registered_op
     raise RuntimeError(msg)
 RuntimeError: Exporting the operator std_mean to ONNX opset version 12 is not supported. Please open a bug to request ONNX export support for the missing operator.
+
+1.8.0
+tensor(0.2658)
+[array(0.26578405, dtype=float32)]
 '''

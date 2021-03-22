@@ -5,13 +5,13 @@ import torch
 print(torch.__version__)
 
 
-class StdMeanForExport(nn.Module):
+class Model(nn.Module):
 	def forward(self, x):
 		x = x.pow(2)
 		return dict(o=x)
 
 
-model = StdMeanForExport()
+model = Model()
 model.to(dtype=torch.float16, device='cuda')
 x = torch.rand(10).to(dtype=torch.float16, device='cuda')
 
@@ -40,4 +40,13 @@ print(runtime.run(None, dict(x=x.cpu().numpy())))
        2.185e-02, 7.529e-01, 6.689e-01, 1.461e-01], dtype=float16)]
 
 Process finished with exit code 0
+
+1.8.0
+{'o': tensor([2.1899e-01, 9.2920e-01, 4.8280e-05, 7.2607e-01, 1.1436e-02, 7.0605e-01,
+        4.9622e-02, 1.7566e-01, 6.3867e-01, 4.8755e-01], device='cuda:0',
+       dtype=torch.float16)}
+2021-03-22 14:44:36.656817045 [W:onnxruntime:Default, cuda_execution_provider.cc:1885 GetCapability] CUDA kernel not found in registries for Op type: Pow node name: Pow_1
+[array([2.190e-01, 9.292e-01, 4.828e-05, 7.261e-01, 1.144e-02, 7.061e-01,
+       4.962e-02, 1.757e-01, 6.387e-01, 4.875e-01], dtype=float16)]
+
 '''
