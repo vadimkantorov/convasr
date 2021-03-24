@@ -3,6 +3,7 @@ import onnxruntime
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.fft as fft
 import apex
 import librosa
 import shaping
@@ -518,7 +519,7 @@ class LogFilterBankFrontend(nn.Module):
 		self.mel.bias.fill_(eps)
 
 		if stft_mode == 'conv':
-			fourier_basis = torch.rfft(torch.eye(self.nfft), signal_ndim = 1, onesided = False)
+			fourier_basis = torch.view_as_real(fft.fft(torch.eye(self.nfft), dim=1))
 			forward_basis = fourier_basis[:self.freq_cutoff].permute(2, 0, 1).reshape(-1, 1, fourier_basis.shape[1])
 			forward_basis = forward_basis * torch.as_tensor(
 				librosa.util.pad_center(self.window, self.nfft), dtype = forward_basis.dtype
