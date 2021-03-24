@@ -40,6 +40,7 @@ torch.onnx.export(
 		input_names=['x', 'xlen']
 )
 
+print('runtime...')
 runtime = onnxruntime.InferenceSession('fp16_jit_repro.onnx')
 print(runtime.run(None, dict(x=x.cpu().numpy(), xlen=xlen.cpy().numpy())))
 
