@@ -289,7 +289,10 @@ class JasperNet(nn.Module):
 
 		if self.normalize_features is not None:
 			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
-			x = self.normalize_features(x, mask = mask)
+			xdtype = x.dtype
+			# NOTE: xdtype and x.to(dtype=torch.float32) need in case of long audio with fp16 inference. Long xlen cause float16 overflow to -inf.
+			x = self.normalize_features(x.to(dtype=torch.float32), mask = mask)
+			x = x.to(dtype=xdtype)
 
 		residual = []
 		for i, subblock in enumerate(self.backbone):
