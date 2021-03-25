@@ -3,6 +3,7 @@ import onnxruntime
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.fft as fft
 import apex
 import librosa
 import shaping
@@ -517,8 +518,28 @@ class LogFilterBankFrontend(nn.Module):
 		self.mel.weight.copy_(mel_basis.unsqueeze(-1))
 		self.mel.bias.fill_(eps)
 
+		'''
+		NOTE: Comparison of new and old fourier bases. 
+		Caused by deprecation of torch.rfft in version 1.8 and above https://pytorch.org/docs/1.7.1/generated/torch.rfft.html?highlight=rfft#torch.rfft
+		https://github.com/pytorch/pytorch/issues/49637#issuecomment-806532068
+		
+		nfft = 512
+		fcutoff = 257
+		
+		fourier_basis = torch.rfft(torch.eye(nfft), signal_ndim=1, onesided=False)
+		forward_basis = fourier_basis[:fcutoff].permute(2, 0, 1).reshape(-1, 1, fourier_basis.shape[1])
+		
+		fourier_basis_new = torch.view_as_real(fft.fft(torch.eye(nfft), dim=1))
+		forward_basis_new = fourier_basis_new[:fcutoff].permute(2, 0, 1).reshape(-1, 1, fourier_basis_new.shape[1])
+		
+		diff = forward_basis-forward_basis_new
+		print('basis diff', diff.mean())
+		
+		assert torch.allclose(forward_basis, forward_basis_new)
+		
+		'''
 		if stft_mode == 'conv':
-			fourier_basis = torch.rfft(torch.eye(self.nfft), signal_ndim = 1, onesided = False)
+			fourier_basis = torch.view_as_real(fft.fft(torch.eye(self.nfft), dim=1))
 			forward_basis = fourier_basis[:self.freq_cutoff].permute(2, 0, 1).reshape(-1, 1, fourier_basis.shape[1])
 			forward_basis = forward_basis * torch.as_tensor(
 				librosa.util.pad_center(self.window, self.nfft), dtype = forward_basis.dtype
