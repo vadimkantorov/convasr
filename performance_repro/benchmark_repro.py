@@ -50,15 +50,11 @@ def export_onnx(onnx_path, dtype = torch.float16):
 parser = argparse.ArgumentParser()
 parser.add_argument('--iterations', type=int, default=16)
 parser.add_argument('--iterations-warmup', type=int, default=16)
-parser.add_argument('--fp16', default='O2')
 parser.add_argument('--num-input-features', default=64)
-parser.add_argument('--sample-rate', type=int, default=8_000, help='for frontend')
-parser.add_argument('--window-stride', type=float, default=0.01, help='for frontend, in seconds')
 parser.add_argument('--onnx')
 parser.add_argument('-B', type=int)
 parser.add_argument('-T', type=int)
 parser.add_argument('--profile-cuda', action='store_true')
-parser.add_argument('--profile-autograd')
 args = parser.parse_args()
 
 print(args)
@@ -80,12 +76,10 @@ else:
 
 tictoc = lambda: (use_cuda and torch.cuda.synchronize()) or time.time()
 
-batch_shape = [args.B, args.num_input_features, int(args.T / args.window_stride)]
+batch_shape = [args.B, args.num_input_features, args.T]
 # check shape division by 128
 if batch_shape[-1] % 128 != 0:
 	batch_shape[-1] = int(math.ceil(batch_shape[-1] / 128) * 128)
-
-example_time = batch_shape[-1] * args.window_stride
 
 batch = torch.rand(*batch_shape, dtype=torch.float16)
 batch = batch.pin_memory()
@@ -115,5 +109,5 @@ for i in range(args.iterations):
 	y = None
 
 print('Batch shape', batch_shape)
-print('load+fwd {:.02f} msec | rtf: {:.02f}'.format(float(times_fwd.mean()) * 1e3,
-		float(args.B * example_time * args.iterations / times_fwd.sum())))
+print('load+fwd {:.02f} msec | speed metric: {:.02f}'.format(float(times_fwd.mean()) * 1e3,
+		float(args.B * args.T * 0.01 * args.iterations / times_fwd.sum())))
