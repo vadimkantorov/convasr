@@ -1,7 +1,7 @@
 import onnxruntime
 import torch
 
-from model import OneConvModel
+from models import OneConvModel
 
 model = OneConvModel()
 
