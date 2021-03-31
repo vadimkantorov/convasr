@@ -1,6 +1,6 @@
 set -e
 
-python3 benchmark_repro.py \
+CUDA_VISIBLE_DEVICES=0 python3 benchmark_repro.py \
   --fp16 O2 \
   --model OneConvModel \
   --onnx conv_fp16.onnx \

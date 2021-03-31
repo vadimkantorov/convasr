@@ -8,11 +8,8 @@ import onnxruntime
 import models
 
 
-class OneConvModel(torch.nn.Module):
-	def __init__(self, 	*args, **kwargs):
-		super().__init__()
-
-		self.conv = torch.nn.Conv1d(
+def get_model():
+	return torch.nn.Conv1d(
 					in_channels=64,
 					out_channels=256,
 					kernel_size=11,
@@ -23,16 +20,8 @@ class OneConvModel(torch.nn.Module):
 			)
 
 
-	def forward(self, x):
-		assert len(x.shape) == 3
-		x = self.conv(x)
-		return dict(out=x)
-
-	def fuse_conv_bn_eval(self, K = None):
-		pass
-
 def export_onnx(onnx_path):
-	model = OneConvModel()
+	model = get_model()
 
 	torch.set_grad_enabled(False)
 	model.eval()
@@ -49,22 +38,18 @@ def export_onnx(onnx_path):
 			opset_version=12,
 			export_params=True,
 			do_constant_folding=True,
-			input_names=['x'],
-			output_names=['out'],
-			dynamic_axes=dict(x={
+			input_names=['input'],
+			dynamic_axes=dict(input={
 				0: 'B',
 				2: 'T'
-			}, out={
-				0: 'B',
-				2: 't'
 			})
 	)
 
 	onnxruntime_session = onnxruntime.InferenceSession(onnx_path)
-	(logits_,) = onnxruntime_session.run(None, dict(x=waveform_input.cpu().to(dtype=dtype).numpy()))
+	(logits_,) = onnxruntime_session.run(None, dict(input=waveform_input.cpu().to(dtype=dtype).numpy()))
 
 	assert torch.allclose(
-			logits['out'].cpu(),
+			logits.cpu(),
 			torch.from_numpy(logits_),
 			**{
 				'rtol': 1e-01,
@@ -106,22 +91,15 @@ if args.onnx:
 	export_onnx(args.onnx)
 
 	onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
-	model = lambda x: onnxruntime_session.run(None, dict(x=x))
+	model = lambda x: onnxruntime_session.run(None, dict(input=x))
 	load_batch = lambda x: x.numpy()
 
 else:
-	model = getattr(models, args.model)(
-			num_input_features=args.num_input_features, num_classes=[38],
-			dict=lambda logits,
-					log_probs,
-					olen,
-					**kwargs: logits[0]
-	)
+	model = get_model()
 	model.to(args.device)
 
 	if not args.backward:
 		model.eval()
-		model.fuse_conv_bn_eval()
 
 	model, *_ = models.data_parallel_and_autocast(model, opt_level=args.fp16, data_parallel=args.data_parallel)
 	load_batch = lambda x: x.to(args.device, non_blocking=True)
@@ -160,8 +138,7 @@ if args.profile_cuda:
 	torch.autograd.profiler.emit_nvtx()
 	torch.cuda.profiler.start()
 if args.profile_autograd:
-	autograd_profiler = torch.autograd.profiler.profile(use_cuda=use_cuda, enabled=True, profile_memory=True,
-			record_shapes=True)
+	autograd_profiler = torch.autograd.profiler.profile(use_cuda=use_cuda, enabled=True, profile_memory=True, 			record_shapes=True)
 	autograd_profiler.__enter__()
 
 print('Starting benchmark for', args.iterations, 'iterations:', 'fwd', '+ bwd' if args.backward else '')
