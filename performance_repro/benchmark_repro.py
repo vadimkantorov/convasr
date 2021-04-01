@@ -1,9 +1,7 @@
-import math
 import argparse
 import time
 import torch
 import torch.cuda.profiler
-import apex
 import onnxruntime
 
 
@@ -72,14 +70,11 @@ else:
 	model.to('cuda')
 	model.eval()
 	model.to(dtype=dtype)
-	load_batch = lambda x: x.to('cuda', non_blocking=True)
+	load_batch = lambda x: x.to('cuda', non_blocking=True)  # to('cuda') as equivalent with onnx.numpy().
 
 tictoc = lambda: (use_cuda and torch.cuda.synchronize()) or time.time()
 
 batch_shape = [args.B, args.num_input_features, args.T]
-# check shape division by 128
-if batch_shape[-1] % 128 != 0:
-	batch_shape[-1] = int(math.ceil(batch_shape[-1] / 128) * 128)
 
 batch = torch.rand(*batch_shape, dtype=torch.float16)
 batch = batch.pin_memory()
@@ -93,8 +88,6 @@ print('Warmup done in {:.02f} wall clock seconds'.format(tictoc() - tic_wall))
 print()
 
 if args.profile_cuda:
-	apex.pyprof.nvtx.init()
-	torch.autograd.profiler.emit_nvtx()
 	torch.cuda.profiler.start()
 
 print('Starting benchmark for', args.iterations, 'iterations:', 'fwd')
@@ -109,5 +102,5 @@ for i in range(args.iterations):
 	y = None
 
 print('Batch shape', batch_shape)
-print('load+fwd {:.02f} msec | speed metric: {:.02f}'.format(float(times_fwd.mean()) * 1e3,
-		float(args.B * args.T * 0.01 * args.iterations / times_fwd.sum())))
+print('average load+fwd {:.02f} msec'.format(float(times_fwd.mean()) * 1e3))
+
