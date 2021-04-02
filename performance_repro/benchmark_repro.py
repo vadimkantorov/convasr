@@ -3,6 +3,13 @@ import time
 import torch
 import torch.cuda.profiler
 import onnxruntime
+import numpy as np
+
+
+def infer_ort(onnxruntime_session, io_binding):
+	onnxruntime_session.run_with_iobinding(io_binding)
+	ort_output_vals = io_binding.copy_outputs_to_cpu()[0]
+	return ort_output_vals
 
 
 def get_model():
@@ -82,20 +89,23 @@ batch = torch.rand(*batch_shape, dtype=torch.float16)
 
 if args.onnx:
 	io_binding = onnxruntime_session.io_binding()
-	io_binding.bind_cpu_input('input', batch.numpy())
-	io_binding.bind_output('3')
+	X_ortvalue = onnxruntime.OrtValue.ortvalue_from_numpy(batch.numpy(), 'cuda', 0)
+	io_binding.bind_input(name='input', device_type=X_ortvalue.device_name(), device_id=0, element_type=np.float16,
+			shape=X_ortvalue.shape(), buffer_ptr=X_ortvalue.data_ptr())
+	io_binding.bind_output('3', 'cuda')
 	batch = io_binding
-	#onnxruntime_session.run_with_iobinding(io_binding)
-	#Y = io_binding.copy_outputs_to_cpu()[0]
+	model = onnxruntime_session
+	infer = lambda model, batch: infer_ort(model, batch)
 else:
 	batch = batch.pin_memory()
 	batch = batch.to(device='cuda')
+	infer = lambda model, batch: model(batch).cpu()
 
 print('Warming up for', args.iterations_warmup, 'iterations')
 tic_wall = tictoc()
 torch.backends.cudnn.benchmark = True
 for i in range(args.iterations_warmup):
-	y = model(batch)
+	y = infer(model, batch)
 print('Warmup done in {:.02f} wall clock seconds'.format(tictoc() - tic_wall))
 print()
 
@@ -108,18 +118,21 @@ batch = torch.rand(*batch_shape, dtype=torch.float16)
 
 if args.onnx:
 	io_binding = onnxruntime_session.io_binding()
-	io_binding.bind_cpu_input('input', batch.numpy())
-	io_binding.bind_output('3')
+	X_ortvalue = onnxruntime.OrtValue.ortvalue_from_numpy(batch.numpy(), 'cuda', 0)
+	io_binding.bind_input(name='input', device_type=X_ortvalue.device_name(), device_id=0, element_type=np.float16,
+			shape=X_ortvalue.shape(), buffer_ptr=X_ortvalue.data_ptr())
+	io_binding.bind_output('3', 'cuda')
 	batch = io_binding
-	#onnxruntime_session.run_with_iobinding(io_binding)
-	#Y = io_binding.copy_outputs_to_cpu()[0]
+	model = onnxruntime_session
+	infer = lambda model, batch: infer_ort(model, batch)
 else:
 	batch = batch.pin_memory()
 	batch = batch.to(device='cuda')
+	infer = lambda model, batch: model(batch).cpu()
 
 for i in range(args.iterations):
 	tic = tictoc()
-	y = model(batch)
+	y = infer(model, batch)
 	times_fwd[i] = tictoc() - tic
 	y = None
 
