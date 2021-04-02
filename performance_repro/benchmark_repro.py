@@ -97,7 +97,6 @@ if args.onnx:
 	model = onnxruntime_session
 	infer = lambda model, batch: infer_ort(model, batch)
 else:
-	batch = batch.pin_memory()
 	batch = batch.to(device='cuda')
 	infer = lambda model, batch: model(batch).cpu()
 
@@ -126,7 +125,6 @@ if args.onnx:
 	model = onnxruntime_session
 	infer = lambda model, batch: infer_ort(model, batch)
 else:
-	batch = batch.pin_memory()
 	batch = batch.to(device='cuda')
 	infer = lambda model, batch: model(batch).cpu()
 
