@@ -14,7 +14,7 @@ def infer_ort(onnxruntime_session, io_binding):
 
 def get_model(channels):
 	return torch.nn.Conv1d(in_channels=channels, out_channels=channels*2, kernel_size=19,
-			stride=2, padding=(1 * 11 // 2), dilation=1, groups=1)
+			stride=2, padding=(1 * 19 // 2), dilation=1, groups=1)
 
 
 def export_onnx(onnx_path, channels, dtype = torch.float16):

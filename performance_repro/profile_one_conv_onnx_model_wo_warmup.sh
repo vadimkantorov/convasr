@@ -11,7 +11,9 @@ CUDA_VISIBLE_DEVICES=0 CUDNN_LOGINFO_DBG=1 CUDNN_LOGDEST_DBG=$CUDNN_LOGDEST CUBL
   --iterations 1 \
   --iterations-warmup 0 \
   --profile-cuda \
+  --channels 896 \
+  --run-with-io-binding \
   -B 32 \
-  -T 1664 &> $TRACELOG
+  -T 832 &> $TRACELOG
 
 python3 nvprof2json.py $TRACEFILE > $TRACEFILE.json
