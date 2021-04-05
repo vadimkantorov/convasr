@@ -8,8 +8,6 @@ import numpy as np
 
 def infer_ort(onnxruntime_session, io_binding):
 	onnxruntime_session.run_with_iobinding(io_binding)
-	ort_output_vals = io_binding.copy_outputs_to_cpu()[0]
-	return ort_output_vals
 
 
 def get_model(channels):
@@ -127,7 +125,7 @@ if args.onnx:
 	infer = lambda model, batch: infer_ort(model, batch)
 else:
 	batch = batch.to(device='cuda')
-	infer = lambda model, batch: model(batch).cpu()
+	infer = lambda model, batch: model(batch)
 
 for i in range(args.iterations):
 	tic = tictoc()
