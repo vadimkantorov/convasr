@@ -2,6 +2,7 @@ import argparse
 import os
 import math
 import time
+import json
 
 import torch
 import torch.cuda.profiler
@@ -9,12 +10,13 @@ import onnxruntime
 import numpy as np
 
 import models
-import datasets
 import utils
+import text_processing
 
 
 def main(args):
 	use_cuda = 'cuda' in args.device
+	print('initializing model...')
 
 	if args.onnx:
 		onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
@@ -28,7 +30,12 @@ def main(args):
 			checkpoint['args'].get(key) for key in
 			['model', 'lang', 'sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features']
 		)
-		labels = datasets.Labels(datasets.Language(args.lang))
+
+		text_config = json.load(open(args.text_config))
+		text_pipelines = []
+		for pipeline_name in args.text_pipelines:
+			text_pipelines.append(text_processing.ProcessingPipeline.make(text_config, pipeline_name))
+
 		frontend = models.LogFilterBankFrontend(
 			args.num_input_features,
 			args.sample_rate,
@@ -38,7 +45,8 @@ def main(args):
 			stft_mode=args.stft_mode
 		)
 		model = getattr(models, args.model)(
-			args.num_input_features, [len(labels)],
+			num_input_features=args.num_input_features,
+			num_classes=[pipeline.tokenizer.vocab_size for pipeline in text_pipelines],
 			frontend=frontend,
 			dict=lambda logits, log_probs, olen, **kwargs: logits[0]
 		)
@@ -59,14 +67,16 @@ def main(args):
 	print(f'batch {batch_shape} | audio {args.B * example_time:.2f} sec\n')
 
 	def tictoc():
-		return torch.cuda.synchronize() if use_cuda else time.time()
+		if use_cuda:
+			torch.cuda.synchronize()
+		return time.time()
 
-	print(f'Warming up for {args.iterations_warmup} iterations')
+	print(f'Warming up for {args.warmup_iterations} iterations')
 	tic_wall = tictoc()
 	if use_cuda:
 		torch.backends.cudnn.benchmark = True
 	torch.set_grad_enabled(False)  # no back-prop - no gradients
-	for i in range(args.iterations_warmup):
+	for i in range(args.warmup_iterations):
 		model(load_batch(batch))
 	print(f'Warmup done in {tictoc() - tic_wall:.2f} sec\n')
 
@@ -95,12 +105,15 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--onnx')
 	parser.add_argument('--checkpoint')
-	parser.add_argument('--device', default='cuda', choices=['conv', 'cpu'])
+	parser.add_argument('--text-config', default='configs/ru_text_config.json')
+	parser.add_argument('--text-pipelines', nargs='+', default=['char_legacy'],
+		help='text processing pipelines (names should be defined in text-config)')
+	parser.add_argument('--device', default='cuda', choices=['cuda', 'cpu'])
 	parser.add_argument('--warmup-iterations', type=int, default=16)
 	parser.add_argument('--iterations', type=int, default=16)
 	# parser.add_argument('--benchmark-duration', type=int, default=300, help='benchmark duration in seconds')
 	parser.add_argument('--fp16', choices=['', 'O0', 'O1', 'O2', 'O3'], default='O2')
 	parser.add_argument('--stft-mode', choices=['conv', ''], default='')
 	parser.add_argument('-B', type=int, default=1)
-	parser.add_argument('-T', type=int, default=6.0)
+	parser.add_argument('-T', type=float, default=6.0)
 	main(parser.parse_args())
