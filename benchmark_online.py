@@ -1,3 +1,28 @@
+""" This script is used to benchmark online-transcription speed and efficiency.
+In online regime audio samples are shorter on average, but requests are unpredictable,
+and two requests can occur at approximately the same time. To simulate this, uniformly random requests schedule
+is generated in advance, and each response latency is recorded.
+
+EXAMPLE:
+export CUDA_VISIBLE_DEVICES=1
+python benchmark_online.py \
+--checkpoint best_checkpoints/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs512___ \
+finetune_after_self_train_on_2020_11_27_clean_valset_epoch144_iter0335000.pt \
+--device cuda -T 6.0 --benchmark-duration 60 --rps 5.0
+
+OUT:
+initializing model...
+batch [1, 48000] | audio 6.00 sec
+Warming up for 100 iterations...
+Warmup done in 2.7 sec
+Starting 60 second benchmark (300 requests, rps 5.0)...
+avg gap between requests: 195.0 ms
+Latency mean: 33.6 ms, median: 33.1 ms, 90-th percentile: 36.9 ms, 95-th percentile: 46.2 ms,
+99-th percentile: 60.7 ms, max: 73.0 ms | service idle time fraction: 81.7%
+
+Tests show, that current model on 1 GPU can handle RPS=50 (x100 of our production), with peak latency < 500ms.
+"""
+
 import argparse
 import os
 import math
