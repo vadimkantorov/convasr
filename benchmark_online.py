@@ -55,7 +55,8 @@ def main(args):
 		model.to(args.device)
 		model.eval()
 		model.fuse_conv_bn_eval()
-		model, *_ = models.data_parallel_and_autocast(model, opt_level=args.fp16, data_parallel=False)
+		if use_cuda:
+			model, *_ = models.data_parallel_and_autocast(model, opt_level=args.fp16, data_parallel=False)
 		load_batch = lambda x: x.to(args.device, non_blocking=True)
 
 	batch_width = int(math.ceil(args.T * args.sample_rate / 128) * 128)
