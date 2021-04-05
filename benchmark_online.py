@@ -10,12 +10,13 @@ import onnxruntime
 import numpy as np
 
 import models
-import utils
 import text_processing
 
 
 def main(args):
 	use_cuda = 'cuda' in args.device
+	if use_cuda:
+		print(f'CUDA_VISIBLE_DEVICES: {os.environ.get("CUDA_VISIBLE_DEVICES")!r}')
 	print('initializing model...')
 
 	if args.onnx:
@@ -59,45 +60,53 @@ def main(args):
 
 	batch_width = int(math.ceil(args.T * args.sample_rate / 128) * 128)
 	example_time = batch_width / args.sample_rate
-	batch_shape = [args.B, batch_width]
-	batch = torch.rand(*batch_shape)
+	batch = torch.rand(args.B, batch_width)
 	batch = batch.pin_memory()
 
 	print(args, end='\n\n')
-	print(f'batch {batch_shape} | audio {args.B * example_time:.2f} sec\n')
+	print(f'batch [{args.B}, {batch_width}] | audio {args.B * example_time:.2f} sec\n')
 
 	def tictoc():
 		if use_cuda:
 			torch.cuda.synchronize()
 		return time.time()
 
-	print(f'Warming up for {args.warmup_iterations} iterations')
+	print(f'Warming up for {args.warmup_iterations} iterations...')
 	tic_wall = tictoc()
 	if use_cuda:
 		torch.backends.cudnn.benchmark = True
 	torch.set_grad_enabled(False)  # no back-prop - no gradients
 	for i in range(args.warmup_iterations):
 		model(load_batch(batch))
-	print(f'Warmup done in {tictoc() - tic_wall:.2f} sec\n')
+	print(f'Warmup done in {tictoc() - tic_wall:.1f} sec\n')
 
-	print(f'Starting benchmark for {args.iterations} iterations')
-	tic_wall = tictoc()
-	times_fwd, fragmentation = [], []
-	for i in range(args.iterations):
+	n_requests = int(round(args.benchmark_duration * args.rps))
+	print(f'Starting {args.benchmark_duration} second benchmark ({n_requests} requests, rps {args.rps:.1f})...')
+	schedule = np.random.random(n_requests) * args.benchmark_duration  # uniform random distribution of requests
+	schedule = np.sort(schedule) + tictoc()
+	print(f'avg gap between requests: {np.diff(schedule).mean() * 1e3:.1f} ms')
+	latency_times, idle_times = [], []
+	slow_warning = False
+	for t_request in schedule:
 		tic = tictoc()
+		if tic < t_request:  # no requests yet. at this point prod would wait for the next request
+			sleep_time = t_request - tic
+			idle_times.append(sleep_time)
+			time.sleep(sleep_time)
+		elif tic > t_request + 0.5 and not slow_warning:
+			print(f'model is too slow and can\'t handle {args.rps} requests per second!')
+			slow_warning = True
 		model(load_batch(batch))
-		times_fwd.append(tictoc() - tic)
-		fragmentation.append(utils.compute_memory_fragmentation())
-	mem_reserved = torch.cuda.max_memory_reserved(args.device) if use_cuda else 0
-	mem_allocated = torch.cuda.max_memory_allocated(args.device) if use_cuda else 0
-	print(f'Benchmark done in {tictoc() - tic_wall:.2f} sec\n')
-
+		latency_times.append(tictoc() - t_request)
+	latency_times = np.array(latency_times) * 1e3  # convert to ms
 	print(
-		f'load+fwd {np.mean(times_fwd) * 1e3:.2f} ms | ' +
-		f'cudamemreserved {mem_reserved * 1e-6:.2f} MB | ' +
-		f'cudamemallocated {mem_allocated * 1e-6:.2f} MB | ' +
-		f'cudamemutilization: {np.mean(fragmentation):.2f} | ' +
-		f'rtf: {args.B * example_time * args.iterations / sum(times_fwd):.2f}'
+		f'Latency mean: {latency_times.mean():.1f} ms, ' +
+		f'median: {np.quantile(latency_times, .50):.1f} ms, ' +
+		f'90-th percentile: {np.quantile(latency_times, .90):.1f} ms, ' +
+		f'95-th percentile: {np.quantile(latency_times, .95):.1f} ms, ' +
+		f'99-th percentile: {np.quantile(latency_times, .99):.1f} ms, ' +
+		f'max: {latency_times.max():.1f} ms | ' +
+		f'service idle time fraction: {sum(idle_times) / args.benchmark_duration:.1%}'
 	)
 
 
@@ -109,9 +118,9 @@ if __name__ == '__main__':
 	parser.add_argument('--text-pipelines', nargs='+', default=['char_legacy'],
 		help='text processing pipelines (names should be defined in text-config)')
 	parser.add_argument('--device', default='cuda', choices=['cuda', 'cpu'])
-	parser.add_argument('--warmup-iterations', type=int, default=16)
-	parser.add_argument('--iterations', type=int, default=16)
-	# parser.add_argument('--benchmark-duration', type=int, default=300, help='benchmark duration in seconds')
+	parser.add_argument('--warmup-iterations', type=int, default=100)
+	parser.add_argument('--benchmark-duration', type=int, default=30, help='benchmark duration in seconds')
+	parser.add_argument('--rps', type=float, default=60, help='requests per second')
 	parser.add_argument('--fp16', choices=['', 'O0', 'O1', 'O2', 'O3'], default='O2')
 	parser.add_argument('--stft-mode', choices=['conv', ''], default='')
 	parser.add_argument('-B', type=int, default=1)
