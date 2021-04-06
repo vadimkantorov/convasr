@@ -122,7 +122,7 @@ def main(args):
 		elif tic > t_request + 0.5 and not slow_warning:
 			print(f'model is too slow and can\'t handle {args.rps} requests per second!')
 			slow_warning = True
-		model(load_batch(batch))
+		model(load_batch(batch)).cpu()
 		latency_times.append(tictoc() - t_request)
 	latency_times = np.array(latency_times) * 1e3  # convert to ms
 	print(
