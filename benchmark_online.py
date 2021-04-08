@@ -83,12 +83,12 @@ def main(args):
 			text_pipelines.append(text_processing.ProcessingPipeline.make(text_config, pipeline_name))
 
 		frontend = models.LogFilterBankFrontend(
-			args.num_input_features,
-			args.sample_rate,
-			args.window_size,
-			args.window_stride,
-			args.window,
-			stft_mode=args.stft_mode
+			out_channels=args.num_input_features,
+			sample_rate=args.sample_rate,
+			window_size=args.window_size,
+			window_stride=args.window_stride,
+			window=args.window,
+			stft_mode=args.stft_mode,
 		)
 		model = getattr(models, args.model)(
 			num_input_features=args.num_input_features,
