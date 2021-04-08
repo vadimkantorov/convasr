@@ -70,7 +70,6 @@ def main(args):
 			onnxruntime_session.set_providers(['CPUExecutionProvider'])
 		model = lambda x: onnxruntime_session.run(None, dict(x=x, xlen=[1.0] * len(x)))
 		load_batch = lambda x: x.numpy()
-		args.sample_rate = 8000
 	else:
 		assert args.checkpoint is not None and os.path.isfile(args.checkpoint)
 		checkpoint = torch.load(args.checkpoint, map_location='cpu')
@@ -172,6 +171,7 @@ if __name__ == '__main__':
 	parser.add_argument('--rps', type=float, default=60, help='requests per second')
 	parser.add_argument('--fp16', choices=['', 'O0', 'O1', 'O2', 'O3'], default='O2')
 	parser.add_argument('--stft-mode', choices=['conv', ''], default='')
+	parser.add_argument('--sample-rate', type=int, default=8000, help='audio sample rate, only used with onnx model')
 	parser.add_argument('-B', type=int, default=1)
 	parser.add_argument('-T', type=float, default=6.0)
 	main(parser.parse_args())
