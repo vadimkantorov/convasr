@@ -6,7 +6,7 @@ is generated in advance, and each response latency is recorded.
 EXAMPLE:
 export CUDA_VISIBLE_DEVICES=1
 python benchmark_online.py \
---checkpoint best_checkpoints/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs512___ \
+--checkpoint best_checkpoints/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs512___\
 finetune_after_self_train_on_2020_11_27_clean_valset_epoch144_iter0335000.pt \
 --device cuda -T 6.0 --benchmark-duration 60 --rps 5.0
 
@@ -19,6 +19,25 @@ Starting 60 second benchmark (300 requests, rps 5.0)...
 avg gap between requests: 195.0 ms
 Latency mean: 33.6 ms, median: 33.1 ms, 90-th percentile: 36.9 ms, 95-th percentile: 46.2 ms,
 99-th percentile: 60.7 ms, max: 73.0 ms | service idle time fraction: 81.7%
+
+ONNX EXAMPLE:
+export CUDA_VISIBLE_DEVICES=1
+python benchmark_online.py \
+--onnx best_checkpoints/JasperNetBig_NovoGrad_lr1e-4_wd1e-3_bs512____\
+rerun_finetune_after_self_train_epoch183_iter0290000.pt.12.fp16_masking_1.7.1.onnx \
+--device cuda -T 6.0 --benchmark-duration 60 --rps 5.0
+
+OUT:
+initializing model...
+initial providers: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+changed providers: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+batch [1, 48000] | audio 6.00 sec
+Warming up for 100 iterations...
+Warmup done in 2.5 sec
+Starting 60 second benchmark (300 requests, rps 5.0)...
+avg gap between requests: 199.1 ms
+Latency mean: 22.7 ms, median: 21.7 ms, 90-th percentile: 23.8 ms, 95-th percentile: 32.3 ms,
+99-th percentile: 42.5 ms, max: 61.2 ms | service idle time fraction: 88.9%
 
 Tests show, that current model on 1 GPU can handle RPS=50 (x100 of our production), with peak latency < 500ms.
 """
@@ -92,7 +111,6 @@ def main(args):
 	batch = torch.rand(args.B, batch_width)
 	batch = batch.pin_memory()
 
-	print(args, end='\n\n')
 	print(f'batch [{args.B}, {batch_width}] | audio {args.B * example_time:.2f} sec\n')
 
 	def tictoc():
