@@ -51,7 +51,6 @@ import json
 import torch
 import torch.cuda.profiler
 import onnxruntime
-import numpy as np
 
 import models
 import text_processing
@@ -128,12 +127,14 @@ def main(args):
 
 	n_requests = int(round(args.benchmark_duration * args.rps))
 	print(f'Starting {args.benchmark_duration} second benchmark ({n_requests} requests, rps {args.rps:.1f})...')
-	schedule = np.random.random(n_requests) * args.benchmark_duration  # uniform random distribution of requests
-	schedule = np.sort(schedule) + tictoc()
-	print(f'avg gap between requests: {np.diff(schedule).mean() * 1e3:.1f} ms')
+	schedule = torch.rand(n_requests, dtype=torch.float64)  # uniform random distribution of requests
+	schedule = schedule.sort()[0] * args.benchmark_duration + tictoc()
+	gaps = schedule[1:] - schedule[:-1]
+	print(f'avg gap between requests: {gaps.mean() * 1e3:.1f} ms')
 	latency_times, idle_times = [], []
 	slow_warning = False
 	for t_request in schedule:
+		t_request = t_request.item()
 		tic = tictoc()
 		if tic < t_request:  # no requests yet. at this point prod would wait for the next request
 			sleep_time = t_request - tic
@@ -146,13 +147,14 @@ def main(args):
 		if not args.onnx:
 			logits.cpu()
 		latency_times.append(tictoc() - t_request)
-	latency_times = np.array(latency_times) * 1e3  # convert to ms
+	latency_times = torch.FloatTensor(latency_times)
+	latency_times *= 1e3  # convert to ms
 	print(
-		f'Latency mean: {latency_times.mean():.1f} ms, ' +
-		f'median: {np.quantile(latency_times, .50):.1f} ms, ' +
-		f'90-th percentile: {np.quantile(latency_times, .90):.1f} ms, ' +
-		f'95-th percentile: {np.quantile(latency_times, .95):.1f} ms, ' +
-		f'99-th percentile: {np.quantile(latency_times, .99):.1f} ms, ' +
+		f'Latency mean: {torch.mean(latency_times):.1f} ms, ' +
+		f'median: {latency_times.quantile(.50):.1f} ms, ' +
+		f'90-th percentile: {latency_times.quantile(.90):.1f} ms, ' +
+		f'95-th percentile: {latency_times.quantile(.95):.1f} ms, ' +
+		f'99-th percentile: {latency_times.quantile(.99):.1f} ms, ' +
 		f'max: {latency_times.max():.1f} ms | ' +
 		f'service idle time fraction: {sum(idle_times) / args.benchmark_duration:.1%}'
 	)
