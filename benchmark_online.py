@@ -66,6 +66,8 @@ def main(args):
 	if args.onnx:
 		# todo: pass dict with provider setting when we will migrate to onnxruntime>=1.7
 		onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
+		if args.device == 'cpu':
+			onnxruntime_session.set_providers(['CPUExecutionProvider'])
 		model = lambda x: onnxruntime_session.run(None, dict(x=x, xlen=[1.0] * len(x)))
 		load_batch = lambda x: x.numpy()
 		args.sample_rate = 8000
@@ -138,7 +140,7 @@ def main(args):
 			sleep_time = t_request - tic
 			idle_times.append(sleep_time)
 			time.sleep(sleep_time)
-		elif tic > t_request + 0.5 and not slow_warning:
+		elif tic > t_request + 1.0 and not slow_warning:
 			print(f'model is too slow and can\'t handle {args.rps} requests per second!')
 			slow_warning = True
 		logits = model(load_batch(batch))
