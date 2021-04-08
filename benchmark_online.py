@@ -64,10 +64,8 @@ def main(args):
 	print('initializing model...')
 
 	if args.onnx:
+		# todo: pass dict with provider setting when we will migrate to onnxruntime>=1.7
 		onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
-		print(f'initial providers: {onnxruntime_session.get_providers()}')
-		onnxruntime_session.set_providers(['CUDAExecutionProvider', 'CPUExecutionProvider'])
-		print(f'changed providers: {onnxruntime_session.get_providers()}')
 		model = lambda x: onnxruntime_session.run(None, dict(x=x, xlen=[1.0] * len(x)))
 		load_batch = lambda x: x.numpy()
 		args.sample_rate = 8000
