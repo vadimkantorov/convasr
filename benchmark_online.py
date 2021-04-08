@@ -140,13 +140,14 @@ def main(args):
 			sleep_time = t_request - tic
 			idle_times.append(sleep_time)
 			time.sleep(sleep_time)
-		elif tic > t_request + 1.0 and not slow_warning:
-			print(f'model is too slow and can\'t handle {args.rps} requests per second!')
-			slow_warning = True
 		logits = model(load_batch(batch))
 		if not args.onnx:
 			logits.cpu()
-		latency_times.append(tictoc() - t_request)
+		toc = tictoc()
+		if toc > t_request + args.max_latency and not slow_warning:
+			print(f'model is too slow and can\'t handle {args.rps} requests per second!')
+			slow_warning = True
+		latency_times.append(toc - t_request)
 	latency_times = torch.FloatTensor(latency_times)
 	latency_times *= 1e3  # convert to ms
 	print(
@@ -176,4 +177,6 @@ if __name__ == '__main__':
 	parser.add_argument('--sample-rate', type=int, default=8000, help='audio sample rate, only used with onnx model')
 	parser.add_argument('-B', type=int, default=1)
 	parser.add_argument('-T', type=float, default=6.0)
+	parser.add_argument('--max-latency', type=float, default=1.0,
+		help='maximum latency in seconds, exceeding which, the model is considered to be too slow')
 	main(parser.parse_args())
