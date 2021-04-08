@@ -46,7 +46,10 @@ def main(args):
 
 	if args.onnx:
 		onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
-		model = lambda x: onnxruntime_session.run(None, dict(x=x))
+		print(f'initial providers: {onnxruntime_session.get_providers()}')
+		onnxruntime_session.set_providers(['CUDAExecutionProvider', 'CPUExecutionProvider'])
+		print(f'changed providers: {onnxruntime_session.get_providers()}')
+		model = lambda x: onnxruntime_session.run(None, dict(x=x, xlen=[1.0] * len(x)))
 		load_batch = lambda x: x.numpy()
 		args.sample_rate = 8000
 	else:
@@ -122,7 +125,9 @@ def main(args):
 		elif tic > t_request + 0.5 and not slow_warning:
 			print(f'model is too slow and can\'t handle {args.rps} requests per second!')
 			slow_warning = True
-		model(load_batch(batch)).cpu()
+		logits = model(load_batch(batch))
+		if not args.onnx:
+			logits.cpu()
 		latency_times.append(tictoc() - t_request)
 	latency_times = np.array(latency_times) * 1e3  # convert to ms
 	print(
