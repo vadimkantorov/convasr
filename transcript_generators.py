@@ -66,8 +66,8 @@ class GreedyCTCGenerator:
 					continue
 
 				if tokenizer.is_start_word_token(sample_idx[t]) and sample_ts is not None:
-					segment = transcripts.Segment(begin=time_begin,
-												  end=time_end,
+					segment = transcripts.Segment(begin = time_begin,
+												  end = time_end,
 												  **{segment_text_key: tokenizer.decode([tokens[1:]])[0]})
 
 					if segment_extra_info is not None:
@@ -83,8 +83,8 @@ class GreedyCTCGenerator:
 				count_eps_id = 0
 
 			if len(tokens) > 1:
-				segment = transcripts.Segment(begin=time_begin,
-											  end=time_end,
+				segment = transcripts.Segment(begin = time_begin,
+											  end = time_end,
 											  **{segment_text_key: tokenizer.decode([tokens[1:]])[0]})
 				if segment_extra_info is not None:
 					segment.update(segment_extra_info[i])
