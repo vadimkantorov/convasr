@@ -1,5 +1,6 @@
-import typing
 import torch
+import typing
+
 import shaping
 import transcripts
 
