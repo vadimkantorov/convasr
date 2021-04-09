@@ -6,14 +6,12 @@ import transcripts
 
 
 class GreedyCTCGenerator:
-	def __init__(self, blank_amount_to_space: int = 10, blank_amount_to_new_line: int = 50) -> None:
+	def __init__(self, blank_amount_to_space: int = 10) -> None:
 		"""
-		Args:пш
+		Args:
 			blank_amount_to_space: how many blank symbols to transform to single space
-			blank_amount_to_new_line: how many blank symbols to transform to new line symbol
 		"""
 		self.blank_amount_to_space = blank_amount_to_space
-		self.blank_amount_to_new_line = blank_amount_to_new_line
 
 	def generate(
 			self,
@@ -30,14 +28,6 @@ class GreedyCTCGenerator:
 		time_stamps = time_stamps.cpu().tolist() if time_stamps is not None else None
 		begin = torch.clamp(begin, min=0.0).cpu().tolist() if time_stamps is not None else begin.cpu().tolist()
 		end = end.cpu().tolist()
-
-		# add to tokenizer \n symbol
-		new_line_char = '\n'
-		tokenizer.idx2char += [new_line_char]
-		tokenizer.char2idx = {char: idx for idx, char in
-							  enumerate(tokenizer.idx2char)}  # TODO may be it's better to move it to (see new line)
-		# class CharTokenizerLegacy. Now it's complicated because of already fitted CONVASR checkpoints
-		new_line_token_id = tokenizer.encode([new_line_char])[0][0]
 
 		for i in range(len(most_probable_idx)):
 			sample_idx = most_probable_idx[i]
@@ -69,11 +59,6 @@ class GreedyCTCGenerator:
 					if count_eps_id >= self.blank_amount_to_space:
 						if not tokenizer.is_start_word_token(tokens[-1]):
 							tokens.append(tokenizer.space_id)
-
-					# try to add \n
-					if count_eps_id >= self.blank_amount_to_new_line:
-						if tokens[-1] != new_line_token_id:
-							tokens.append(new_line_token_id)
 
 					continue
 
