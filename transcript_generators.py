@@ -6,7 +6,7 @@ import transcripts
 
 
 class GreedyCTCGenerator:
-	def __init__(self, blank_amount_to_space: int = 10) -> None:
+	def __init__(self, blank_amount_to_space: int = 10):
 		"""
 		Args:
 			blank_amount_to_space: how many blank symbols to transform to single space
