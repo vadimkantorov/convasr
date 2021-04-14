@@ -1,3 +1,4 @@
+import math
 import os
 import re
 import json
@@ -11,6 +12,7 @@ import torch
 import sentencepiece
 import tqdm
 import audio
+import models
 import transcripts
 import datasets
 import metrics
@@ -509,16 +511,57 @@ def split(
 		indent = 2
 	)
 
-#transcript = json.load(open('data/transcripts_valset_16082020.csv.json_GreedyDecoder.json'))
+# transcript = json.load(open('data/transcripts_valset_16082020.csv.json_GreedyDecoder.json'))
 #
-#cer = float(torch.FloatTensor([t['cer'] for t in transcript if t['num_words'] > 0]).mean())
-#wer = float(torch.FloatTensor([t['wer'] for t in transcript if t['num_words'] > 0]).mean())
-#print('base', cer, wer)
+# cer = float(torch.FloatTensor([t['cer'] for t in transcript if t['num_words'] > 0]).mean())
+# wer = float(torch.FloatTensor([t['wer'] for t in transcript if t['num_words'] > 0]).mean())
+# print('base', cer, wer)
 #
-#for k in ['words_only_proper', 'words_only_number']:
+# for k in ['words_only_proper', 'words_only_number']:
 #	cer = float(torch.FloatTensor([t[k]['cer'] for t in transcript if t[k]['num_words'] > 0]).mean())
 #	wer = float(torch.FloatTensor([t[k]['wer'] for t in transcript if t[k]['num_words'] > 0]).mean())
 #	print(k, cer, wer)
+
+
+'''
+This script helps to find solution for input and output shapes of signal with frontend divisibility restrictions
+
+example:
+python tools.py find_solution_for_frontend_input_output_shapes_divisibility --start 119 --end 121 --input-shape-restriction 16 --output-shape-restriction 32
+'''
+
+def find_solution_for_frontend_input_output_shapes_divisibility(
+		window_size,
+		window_stride,
+		sample_rate,
+		start,
+		end,
+		input_shape_restriction,
+		output_shape_restriction
+):
+
+	win_length = int(window_size * sample_rate)
+	hop_length = int(window_stride * sample_rate)
+	nfft = 2 ** math.ceil(math.log2(win_length))
+	freq_cutoff = nfft // 2 + 1
+	additional_padding = freq_cutoff - 1  # additional_padding uses in fronted, two times for mirror and constant pad
+
+	for i in range(start * sample_rate, end * sample_rate):
+		if i % input_shape_restriction == 0:
+			l_out = models.LogFilterBankFrontend.get_out_shape(
+					l_in=i,
+					kernel_size=nfft,
+					stride=hop_length,
+					additional_padding=additional_padding,
+					padding=0,
+					dilation=1)
+
+			if l_out % output_shape_restriction == 0:
+				print(f'Solution found: {i / sample_rate} in sec, '
+				      f'input shape: {i}, output shape after frontend: {l_out}.')
+
+	print('Finished!')
+
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -640,8 +683,17 @@ if __name__ == '__main__':
 	cmd.add_argument('--comment-path', '-c')
 	cmd.add_argument('--map-tag', action = type('', (argparse.Action, ), dict(__call__ = lambda a, p, n, v, o: getattr(n, a.dest).update(dict([v.split('=')])))), default = dict())
 	cmd.add_argument('--stop-tag', action = 'append', default = [])
-	
 	cmd.set_defaults(func = wordtags)
+
+	cmd = subparsers.add_parser('find_solution_for_frontend_input_output_shapes_divisibility')
+	cmd.add_argument('--sample-rate', type=int, default=8_000, help='for frontend')
+	cmd.add_argument('--window-size', type=float, default=0.02, help='for frontend, in seconds')
+	cmd.add_argument('--window-stride', type=float, default=0.01, help='for frontend, in seconds')
+	cmd.add_argument('--input-shape-restriction', type=int, default=16)
+	cmd.add_argument('--output-shape-restriction', type=int, default=32)
+	cmd.add_argument('--start', type=int, default=118, help='time is seconds for solution search')
+	cmd.add_argument('--end', type=int, default=122, help='time is seconds for solution search')
+	cmd.set_defaults(func=find_solution_for_frontend_input_output_shapes_divisibility)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')
