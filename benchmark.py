@@ -1,3 +1,4 @@
+import os
 import gc
 import math
 import argparse
@@ -8,6 +9,7 @@ import onnxruntime
 import models
 import datasets
 import utils
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--checkpoint')
@@ -48,6 +50,10 @@ if checkpoint:
 use_cuda = 'cuda' in args.device
 
 labels = datasets.Labels(datasets.Language(args.lang))
+
+if args.profile_cuda:
+	os.environ["CUDNN_LOGINFO_DBG"] = '1'
+	os.environ["CUBLAS_LOGINFO_DBG"] = '1'
 
 if args.onnx:
 	onnxruntime_session = onnxruntime.InferenceSession(args.onnx)

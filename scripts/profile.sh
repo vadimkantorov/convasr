@@ -5,7 +5,7 @@ TRACELOG=data/profile.txt
 TRACEPYPROFLOG=data/profile.pyprof.txt
 LOGDEST=cudnn_log.txt
 CUBLAS_LOGDEST=cublas_log.txt
-CUDNN_LOGINFO_DBG=1 CUDNN_LOGDEST_DBG=$LOGDEST CUBLAS_LOGINFO_DBG=1 CUBLAS_LOGDEST_DBG=$CUBLAS_LOGDEST nvprof -s -f -o $TRACEFILE --profile-from-start off -- python3 benchmark.py --profile-cuda $@ &> $TRACELOG
+CUDNN_LOGDEST_DBG=$LOGDEST CUBLAS_LOGDEST_DBG=$CUBLAS_LOGDEST nvprof -s -f -o $TRACEFILE --profile-from-start off -- python3 benchmark.py --profile-cuda $@ &> $TRACELOG
 
 # https://github.com/ezyang/nvprof2json
 # then open it with chrome://tracing
