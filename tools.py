@@ -527,7 +527,7 @@ def split(
 This script helps to find solution for input and output shapes of signal with frontend divisibility restrictions
 
 example:
-python tools.py find_solution_for_frontend_input_output_shapes_divisibility --start 119 --end 121 --input-shape-restriction 16 --output-shape-restriction 32
+python tools.py find_solution_for_frontend_input_output_shapes_divisibility --start 119 --end 121 --input-time-dim-multiple 16 --output-time-dim-multiple 32
 '''
 
 def find_solution_for_frontend_input_output_shapes_divisibility(
@@ -536,8 +536,8 @@ def find_solution_for_frontend_input_output_shapes_divisibility(
 		sample_rate,
 		start,
 		end,
-		input_shape_restriction,
-		output_shape_restriction
+		input_time_dim_multiple,
+		output_time_dim_multiple
 ):
 
 	win_length = int(window_size * sample_rate)
@@ -547,7 +547,7 @@ def find_solution_for_frontend_input_output_shapes_divisibility(
 	additional_padding = freq_cutoff - 1  # additional_padding uses in fronted, two times for mirror and constant pad
 
 	for i in range(start * sample_rate, end * sample_rate):
-		if i % input_shape_restriction == 0:
+		if i % input_time_dim_multiple == 0:
 			l_out = models.LogFilterBankFrontend.get_out_shape(
 					l_in=i,
 					kernel_size=nfft,
@@ -556,7 +556,7 @@ def find_solution_for_frontend_input_output_shapes_divisibility(
 					padding=0,
 					dilation=1)
 
-			if l_out % output_shape_restriction == 0:
+			if l_out % output_time_dim_multiple == 0:
 				print(f'Solution found: {i / sample_rate} in sec, '
 				      f'input shape: {i}, output shape after frontend: {l_out}.')
 
@@ -689,8 +689,8 @@ if __name__ == '__main__':
 	cmd.add_argument('--sample-rate', type=int, default=8_000, help='for frontend')
 	cmd.add_argument('--window-size', type=float, default=0.02, help='for frontend, in seconds')
 	cmd.add_argument('--window-stride', type=float, default=0.01, help='for frontend, in seconds')
-	cmd.add_argument('--input-shape-restriction', type=int, default=16)
-	cmd.add_argument('--output-shape-restriction', type=int, default=32)
+	cmd.add_argument('--input-time-dim-multiple', type=int, default=16)
+	cmd.add_argument('--output-time-dim-multiple', type=int, default=32)
 	cmd.add_argument('--start', type=int, default=118, help='time is seconds for solution search')
 	cmd.add_argument('--end', type=int, default=122, help='time is seconds for solution search')
 	cmd.set_defaults(func=find_solution_for_frontend_input_output_shapes_divisibility)
