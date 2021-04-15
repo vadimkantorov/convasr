@@ -28,6 +28,7 @@ parser.add_argument(
 )
 parser.add_argument('--model', default = 'JasperNetBig')
 parser.add_argument('--onnx')
+parser.add_argument('--onnx-output-node-name', type = str, default = 'logits')
 parser.add_argument('--stft-mode', choices = ['conv', ''], default = '')
 parser.add_argument('-B', type = int, default = 256)
 parser.add_argument('-T', type = int, default = 5.12)
@@ -40,7 +41,9 @@ args = parser.parse_args()
 
 checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoint else None
 if checkpoint:
-	args.model, args.lang, args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(checkpoint['args'].get, ['model', 'lang', 'sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
+	args.model, args.lang, args.sample_rate, args.window_size, args.window_stride, args.window, args.num_input_features = map(
+		checkpoint['args'].get,
+		['model', 'lang', 'sample_rate', 'window_size', 'window_stride', 'window', 'num_input_features'])
 
 use_cuda = 'cuda' in args.device
 
@@ -48,8 +51,24 @@ labels = datasets.Labels(datasets.Language(args.lang))
 
 if args.onnx:
 	onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
-	model = lambda x: onnxruntime_session.run(None, dict(x = x))
-	load_batch = lambda x: x.numpy()
+
+	def load_batch_to_device(batch, device):
+		batch = batch.numpy()
+		io_binding = onnxruntime_session.io_binding()
+		batch_ortvalue = onnxruntime.OrtValue.ortvalue_from_numpy(batch, device, 0)
+		io_binding.bind_input(
+			name = 'x',
+			device_type = batch_ortvalue.device_name(),
+			device_id = 0,
+			element_type = batch.dtype,
+			shape = batch_ortvalue.shape(),
+			buffer_ptr = batch_ortvalue.data_ptr()
+		)
+		io_binding.bind_output(args.onnx_output_node_name, device)
+		return io_binding
+
+	load_batch = lambda batch: load_batch_to_device(batch, args.device)
+	model = lambda io_binding: onnxruntime_session.run_with_iobinding(io_binding)
 
 else:
 	frontend = models.LogFilterBankFrontend(
@@ -69,7 +88,7 @@ else:
 		**kwargs: logits[0]
 	)
 	if checkpoint:
-		model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+		model.load_state_dict(checkpoint['model_state_dict'], strict = False)
 	model.to(args.device)
 
 	if not args.backward:
@@ -116,20 +135,23 @@ print()
 if args.profile_pyprof:
 	import pyprof
 	pyprof.init()
-	
 if args.profile_cuda:
 	torch.autograd.profiler.emit_nvtx()
 	torch.cuda.profiler.start()
 if args.profile_autograd:
-	autograd_profiler = torch.autograd.profiler.profile(use_cuda = use_cuda, enabled = True, profile_memory = True, record_shapes = True)
+	autograd_profiler = torch.autograd.profiler.profile(
+		use_cuda = use_cuda, enabled = True, profile_memory = True, record_shapes = True
+	)
 	autograd_profiler.__enter__()
 
 print('Starting benchmark for', args.iterations, 'iterations:', 'fwd', '+ bwd' if args.backward else '')
 tic_wall = tictoc()
-times_fwd, times_bwd, fragmentation = torch.zeros(args.iterations), torch.zeros(args.iterations), torch.zeros(args.iterations)
+times_fwd, times_bwd, fragmentation = torch.zeros(args.iterations), torch.zeros(args.iterations), torch.zeros(
+	args.iterations)
 for i in range(args.iterations):
+	loaded_batch = load_batch(batch)
 	tic = tictoc()
-	y = model(load_batch(batch))
+	y = model(loaded_batch)
 	toc = tictoc()
 	fragmentation[i] = utils.compute_memory_fragmentation()
 	if args.backward:
