@@ -492,11 +492,13 @@ class LogFilterBankFrontend(nn.Module):
 		debug_short_long_records_normalize_signal_multiplier = 1.0,
 		stft_mode = None,
 		window_periodic = True,
+		satisfy_features_divisibility_by_32 = False,
 		normalize_features = False,
 		**kwargs
 	):
 		super().__init__()
 		self.debug_short_long_records_normalize_signal_multiplier = debug_short_long_records_normalize_signal_multiplier
+		self.satisfy_features_divisibility_by_32 = satisfy_features_divisibility_by_32
 		self.stft_mode = stft_mode
 		self.dither = dither
 		self.dither0 = dither0
@@ -570,9 +572,26 @@ class LogFilterBankFrontend(nn.Module):
 		pad = self.freq_cutoff - 1
 		padded_signal = F.pad(signal.unsqueeze(1), (pad, 0), mode = 'reflect' if pad < signal.size(1) else 'constant').squeeze(1)  # TODO: remove un/squeeze when https://github.com/pytorch/pytorch/issues/29863 is fixed
 		# NOTE: squeeze(1) cause onnxruntime warnings like "Force fallback to CPU execution for node: Gather_52 Force fallback to CPU execution for node: Equal_54". To avoid this try to replace squeeze(1) by [:,0,:]
+
+		# alternative padding. was chosen on int T.
+		#if self.satisfy_features_divisibility_by_32:
+		#	pad = pad + int(pad / 2) + int(math.ceil(padded_signal.shape[-1] / (32 * 80)) * (32 * 80)) - padded_signal.shape[-1]
+
 		padded_signal = F.pad(
 			padded_signal, (0, pad), mode = 'constant', value = 0
 		)  # TODO: avoid this second copy by doing pad manually
+
+		'''
+		# out signal time shape
+		l_in = signal.shape[-1]
+		dilation = 1
+		kernel_size = self.nfft
+		stride = self.hop_length
+		padding = 0
+		import numpy as np
+		l_out = int(np.floor(((l_in + 2 * pad) + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1))
+		print('res: ', l_in, l_out)
+		'''
 
 		# NOTE: pow(2) cause onnxruntime warnings like "CUDA kernel not found in registries for Op type: Pow node name: Pow_76" To avoid this pow replaced by x*x
 		if self.stft is not None:
@@ -583,6 +602,13 @@ class LogFilterBankFrontend(nn.Module):
 			real_squared, imag_squared = (stft_res * stft_res).unbind(dim = -1)
 
 		power_spectrum = real_squared + imag_squared
+
+		'''
+		if self.satisfy_features_divisibility_by_32 and log_mel_features.shape[-1] % 32 != 0:
+			pad = int(math.ceil(log_mel_features.shape[-1] / 32) * 32) - log_mel_features.shape[-1]
+			log_mel_features = F.pad(log_mel_features, (0, pad), mode='constant', value = 0)
+		'''
+
 		log_mel_features = self.mel(power_spectrum).log()
 		return log_mel_features
 
