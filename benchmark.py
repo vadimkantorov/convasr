@@ -30,12 +30,14 @@ parser.add_argument('--model', default = 'JasperNetBig')
 parser.add_argument('--onnx')
 parser.add_argument('--stft-mode', choices = ['conv', ''], default = '')
 parser.add_argument('-B', type = int, default = 256)
-parser.add_argument('-T', type = int, default = 5.12)
+parser.add_argument('-T', type = float, default = 5.12)
 parser.add_argument('--profile-cuda', action = 'store_true')
 parser.add_argument('--profile-pyprof', action = 'store_true')
 parser.add_argument('--profile-autograd')
 parser.add_argument('--data-parallel', action = 'store_true')
 parser.add_argument('--backward', action = 'store_true')
+parser.add_argument('--satisfy-features-divisibility-by-32', action = 'store_true')
+parser.add_argument('--satisfy-t-shape-divisibility-by-128', action = 'store_true')
 args = parser.parse_args()
 
 checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoint else None
@@ -58,7 +60,8 @@ else:
 		args.window_size,
 		args.window_stride,
 		args.window,
-		stft_mode = args.stft_mode
+		stft_mode = args.stft_mode,
+		satisfy_features_divisibility_by_32 = args.satisfy_features_divisibility_by_32
 	) if args.frontend else None
 	model = getattr(models, args.model)(
 		args.num_input_features, [len(labels)],
@@ -81,10 +84,12 @@ else:
 
 tictoc = lambda: (use_cuda and torch.cuda.synchronize()) or time.time()
 
-batch_shape = [args.B, args.T * args.sample_rate
+batch_shape = [args.B, int(args.T * args.sample_rate)
 				] if args.frontend else [args.B, args.num_input_features, int(args.T / args.window_stride)]
-if batch_shape[-1] % 128 != 0:
+
+if args.satisfy_t_shape_divisibility_by_128 and batch_shape[-1] % 128 != 0:
 	batch_shape[-1] = int(math.ceil(batch_shape[-1] / 128) * 128)
+
 example_time = batch_shape[-1] / args.sample_rate if args.frontend else batch_shape[-1] * args.window_stride
 
 batch = torch.rand(*batch_shape)
