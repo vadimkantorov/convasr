@@ -36,8 +36,7 @@ parser.add_argument('--profile-pyprof', action = 'store_true')
 parser.add_argument('--profile-autograd')
 parser.add_argument('--data-parallel', action = 'store_true')
 parser.add_argument('--backward', action = 'store_true')
-parser.add_argument('--satisfy-features-divisibility-by-32', action = 'store_true')
-parser.add_argument('--satisfy-t-shape-divisibility-by-128', action = 'store_true')
+parser.add_argument('--input-time-dim-multiple', type = int, default = 128)
 args = parser.parse_args()
 
 checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoint else None
@@ -61,7 +60,6 @@ else:
 		args.window_stride,
 		args.window,
 		stft_mode = args.stft_mode,
-		satisfy_features_divisibility_by_32 = args.satisfy_features_divisibility_by_32
 	) if args.frontend else None
 	model = getattr(models, args.model)(
 		args.num_input_features, [len(labels)],
@@ -87,8 +85,8 @@ tictoc = lambda: (use_cuda and torch.cuda.synchronize()) or time.time()
 batch_shape = [args.B, int(args.T * args.sample_rate)
 				] if args.frontend else [args.B, args.num_input_features, int(args.T / args.window_stride)]
 
-if args.satisfy_t_shape_divisibility_by_128 and batch_shape[-1] % 128 != 0:
-	batch_shape[-1] = int(math.ceil(batch_shape[-1] / 128) * 128)
+if args.input_time_dim_multiple and batch_shape[-1] % args.input_time_dim_multiple != 0:
+	batch_shape[-1] = int(math.ceil(batch_shape[-1] / args.input_time_dim_multiple) * args.input_time_dim_multiple)
 
 example_time = batch_shape[-1] / args.sample_rate if args.frontend else batch_shape[-1] * args.window_stride
 
