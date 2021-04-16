@@ -494,11 +494,9 @@ class LogFilterBankFrontend(nn.Module):
 		stft_mode = None,
 		window_periodic = True,
 		normalize_features = False,
-		check_features_divisibility_by_32 = True,
 		**kwargs
 	):
 		super().__init__()
-		self.check_features_divisibility_by_32 = check_features_divisibility_by_32
 		self.debug_short_long_records_normalize_signal_multiplier = debug_short_long_records_normalize_signal_multiplier
 		self.stft_mode = stft_mode
 		self.dither = dither
@@ -587,13 +585,6 @@ class LogFilterBankFrontend(nn.Module):
 
 		power_spectrum = real_squared + imag_squared
 		log_mel_features = self.mel(power_spectrum).log()
-
-		if self.check_features_divisibility_by_32:
-			if signal.shape[-1] % (32 / 2) != 0:
-				warnings.warn('Shape of input signal not divisible by 16')
-
-			if log_mel_features.shape[-1] % 32 != 0:
-				warnings.warn('Shape of frontend output signal not divisible by 32')
 
 		return log_mel_features
 
