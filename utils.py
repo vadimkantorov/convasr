@@ -89,11 +89,16 @@ def compute_ram_memory_stats(byte_scaler =1024 ** 3):
 
 
 def compute_memory_fragmentation():
-    lib = ctypes.cdll.LoadLibrary(None)
-    free_mem = ctypes.c_long()
-    total_mem = ctypes.c_long()
-    lib.cudaMemGetInfo(ctypes.byref(free_mem), ctypes.byref(total_mem))
-    return (total_mem.value - free_mem.value) / (1024 ** 3)
+	snapshot = torch.cuda.memory_snapshot()
+	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
+
+
+def compute_memory_fragmentation_ctypes():
+	lib = ctypes.cdll.LoadLibrary(None)
+	free_mem = ctypes.c_long()
+	total_mem = ctypes.c_long()
+	lib.cudaMemGetInfo(ctypes.byref(free_mem), ctypes.byref(total_mem))
+	return (total_mem.value - free_mem.value) / total_mem.value
 
 
 def open_maybe_gz(data_path, mode = 'r'):

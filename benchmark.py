@@ -165,7 +165,7 @@ for i in range(args.iterations):
 	tic = tictoc()
 	y = model(loaded_batch)
 	toc = tictoc()
-	fragmentation[i] = utils.compute_memory_fragmentation()
+	fragmentation[i] = utils.compute_memory_fragmentation_ctypes() if args.onnx else utils.compute_memory_fragmentation()
 	if args.backward:
 		y.sum().backward()
 	tac = tictoc()
