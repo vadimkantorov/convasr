@@ -544,16 +544,15 @@ def find_solution_for_frontend_input_output_shapes_divisibility(
 	hop_length = int(window_stride * sample_rate)
 	nfft = 2 ** math.ceil(math.log2(win_length))
 	freq_cutoff = nfft // 2 + 1
-	additional_padding = freq_cutoff - 1  # additional_padding uses in fronted, two times for mirror and constant pad
+	padding = freq_cutoff - 1  # additional_padding uses in fronted, two times for mirror and constant pad
 
 	for i in range(start * sample_rate, end * sample_rate):
 		if i % input_time_dim_multiple == 0:
-			l_out = models.LogFilterBankFrontend.get_out_shape(
+			l_out = models.LogFilterBankFrontend.compute_output_shape(
 					l_in=i,
 					kernel_size=nfft,
 					stride=hop_length,
-					additional_padding=additional_padding,
-					padding=0,
+					padding=padding,
 					dilation=1)
 
 			if l_out % output_time_dim_multiple == 0:
