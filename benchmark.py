@@ -136,8 +136,9 @@ if use_cuda:
 	torch.backends.cudnn.benchmark = True
 
 torch.set_grad_enabled(args.backward)
+loaded_batch = load_batch(batch)
 for i in range(args.iterations_warmup):
-	y = model(load_batch(batch))
+	y = model(loaded_batch)
 	if args.backward:
 		y.sum().backward()
 
@@ -160,8 +161,9 @@ print('Starting benchmark for', args.iterations, 'iterations:', 'fwd', '+ bwd' i
 tic_wall = tictoc()
 times_fwd, times_bwd, fragmentation = torch.zeros(args.iterations), torch.zeros(args.iterations), torch.zeros(
 	args.iterations)
+
+loaded_batch = load_batch(batch)
 for i in range(args.iterations):
-	loaded_batch = load_batch(batch)
 	tic = tictoc()
 	y = model(loaded_batch)
 	toc = tictoc()
