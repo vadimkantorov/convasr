@@ -35,6 +35,10 @@ parser.add_argument('--stft-mode', choices = ['conv', ''], default = '')
 parser.add_argument('-B', type = int, default = 256)
 parser.add_argument('-T', type = int, default = 5.12)
 parser.add_argument('--profile-cuda', action = 'store_true')
+parser.add_argument('--save-cudnn-cublas-logs', action = 'store_true', help='Save CUDNN CUBLAS logs')
+parser.add_argument('--cudnn-logdest', type=str, default = 'cudnn_log.txt', help='Destination path to CUDNN logs')
+parser.add_argument('--cublas-logdest', type=str, default = 'cublas_log.txt', help='Destination path to CUBLAS logs')
+
 parser.add_argument('--profile-pyprof', action = 'store_true')
 parser.add_argument('--profile-autograd')
 parser.add_argument('--data-parallel', action = 'store_true')
@@ -51,9 +55,11 @@ use_cuda = 'cuda' in args.device
 
 labels = datasets.Labels(datasets.Language(args.lang))
 
-if args.profile_cuda:
+if args.save_cudnn_cublas_logs:
 	os.environ["CUDNN_LOGINFO_DBG"] = '1'
 	os.environ["CUBLAS_LOGINFO_DBG"] = '1'
+	os.environ["CUDNN_LOGDEST_DBG"] = args.cudnn_logdest
+	os.environ["CUBLAS_LOGDEST_DBG"] = args.cublas_logdest
 
 if args.onnx:
 	onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
