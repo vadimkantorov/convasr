@@ -90,10 +90,11 @@ def compute_ram_memory_stats(byte_scaler =1024 ** 3):
 
 def compute_memory_fragmentation():
 	snapshot = torch.cuda.memory_snapshot()
-	return sum(b['allocated_size'] for b in snapshot) / sum(b['total_size'] for b in snapshot)
+	total_size = sum(b['total_size'] for b in snapshot)
+	return (sum(b['allocated_size'] for b in snapshot) / total_size) if total_size != 0.0 else 0.0
 
 
-def compute_memory_fragmentation_ctypes():
+def compute_global_device_memory_utilisation():
 	lib = ctypes.cdll.LoadLibrary(None)
 	free_mem = ctypes.c_long()
 	total_mem = ctypes.c_long()

@@ -119,7 +119,6 @@ if batch_shape[-1] % 128 != 0:
 example_time = batch_shape[-1] / args.sample_rate if args.frontend else batch_shape[-1] * args.window_stride
 
 batch = torch.rand(*batch_shape)
-batch = batch.pin_memory()
 
 print(args)
 print()
@@ -159,15 +158,17 @@ if args.profile_autograd:
 
 print('Starting benchmark for', args.iterations, 'iterations:', 'fwd', '+ bwd' if args.backward else '')
 tic_wall = tictoc()
-times_fwd, times_bwd, fragmentation = torch.zeros(args.iterations), torch.zeros(args.iterations), torch.zeros(
-	args.iterations)
+times_fwd, times_bwd, fragmentation, global_device_memory_utilisation = \
+	torch.zeros(args.iterations), torch.zeros(args.iterations), \
+		torch.zeros(args.iterations), torch.zeros(args.iterations)
 
 loaded_batch = load_batch(batch)
 for i in range(args.iterations):
 	tic = tictoc()
 	y = model(loaded_batch)
 	toc = tictoc()
-	fragmentation[i] = utils.compute_memory_fragmentation_ctypes() if args.onnx else utils.compute_memory_fragmentation()
+	global_device_memory_utilisation[i] = utils.compute_global_device_memory_utilisation()
+	fragmentation[i] = utils.compute_memory_fragmentation()
 	if args.backward:
 		y.sum().backward()
 	tac = tictoc()
@@ -185,13 +186,15 @@ if args.profile_autograd:
 	autograd_profiler.export_chrome_trace(args.profile_autograd)
 print(f'B: {args.B}, T: {args.T}')
 print(
-	'load+fwd {:.02f} msec | bwd {:.02f} msec | cudamemreserved {:.02f} mb | cudamemallocated {:.02f} mb | cudamemutilization: {:.02f}| rtf: {:.02f}'
+	'load+fwd {:.02f} msec | bwd {:.02f} msec | cudamemreserved {:.02f} mb | cudamemallocated {:.02f} mb | '
+	'cudamemutilization: {:.02f} | global_dev_memutilization: {:.02f} | rtf: {:.02f}'
 	.format(
 		float(times_fwd.mean()) * 1e3,
 		float(times_bwd.mean()) * 1e3,
 		mem_reserved * 1e-6,
 		mem_allocated * 1e-6,
 		float(fragmentation.mean()),
+		float(global_device_memory_utilisation.mean()),
 		float(args.B * example_time * args.iterations / times_fwd.sum())
 	)
 )
