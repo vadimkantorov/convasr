@@ -3,8 +3,7 @@ set -e
 TRACEFILE=data/profile.sqlite
 TRACELOG=data/profile.txt
 TRACEPYPROFLOG=data/profile.pyprof.txt
-
-nvprof -s -f -o $TRACEFILE --profile-from-start off -- python3 benchmark.py --profile-cuda $@ &> $TRACELOG
+nvprof -s -f -o $TRACEFILE --profile-from-start off -- python3 benchmark.py --profile-cuda --save-cudnn-cublas-logs $@ &> $TRACELOG
 
 # https://github.com/ezyang/nvprof2json
 # then open it with chrome://tracing
