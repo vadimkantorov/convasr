@@ -1,4 +1,5 @@
 import math
+import warnings
 import onnxruntime
 import torch
 import torch.nn as nn
@@ -584,7 +585,14 @@ class LogFilterBankFrontend(nn.Module):
 
 		power_spectrum = real_squared + imag_squared
 		log_mel_features = self.mel(power_spectrum).log()
+
 		return log_mel_features
+
+	@staticmethod
+	# used formula from https://pytorch.org/docs/stable/generated/torch.nn.Conv1d.html
+	def compute_output_shape(time_dim_length, kernel_size, stride, padding, dilation=1):
+		# additional_padding uses in fronted, two times for mirror and constant pad
+		return int(math.floor((time_dim_length + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1))
 
 
 # NOTE A decorator @torch.jit.script is needed in TorchScript tracing for the following:
