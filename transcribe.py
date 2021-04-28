@@ -44,6 +44,7 @@ def setup(args):
 	model = getattr(models, args.model or checkpoint['args']['model'])(
 		args.num_input_features, [text_pipeline.tokenizer.vocab_size],
 		frontend = frontend if args.frontend_in_model else None,
+		check_time_dim_padded=False,
 		dict = lambda logits,
 		log_probs,
 		olen,

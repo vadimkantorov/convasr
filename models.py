@@ -190,7 +190,7 @@ class JasperNet(nn.Module):
 		normalize_features_track_running_stats = False,
 		normalize_features_legacy = True,
 		normalize_features_temporal_mask = True,
-		check_time_dim_padded = False,
+		check_time_dim_padded = True,
 	):
 		super().__init__()
 		self.init_params = {name: repr(value) for name, value in locals().items()}
