@@ -283,17 +283,15 @@ class JasperNet(nn.Module):
 		self, x: typing.Union[shaping.BCT, shaping.BT], xlen: typing.Optional[shaping.B] = None, y: typing.Optional[shaping.BLY] = None, ylen: typing.Optional[shaping.B] = None
 	) -> shaping.BCt:
 
-		if self.check_time_dim_padded:
-			assert x.shape[-1] % (32 / 2) != 0, 'Shape of input signal is not divisible by 16'
-
 		if self.frontend is not None:
+			assert (not self.check_time_dim_padded) or (x.shape[-1] % (32 / 2) == 0), 'Shape of input signal is not divisible by 16 '
+
 			x = x.squeeze(1)
 			mask = temporal_mask(x, compute_output_lengths(x, xlen)) if xlen is not None else None
 			x = self.frontend(x, mask = mask)
 			# NOTE: squeeze(1) cause onnxruntime warnings like "Force fallback to CPU execution for node: Gather_3 Force fallback to CPU execution for node: Equal_5".
 
-			if self.check_time_dim_padded:
-				assert x.shape[-1] % 32 != 0, 'Shape of frontend output signal is not divisible by 32'
+		assert (not self.check_time_dim_padded) or (x.shape[-1] % 32 == 0), 'Shape of features after frontend is not divisible by 32'
 
 		assert x.ndim == 3
 
