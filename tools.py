@@ -129,7 +129,7 @@ def cut(
 
 	json.dump(
 		transcripts.strip(transcript_cat, strip),
-		open(os.path.join(output_path, os.path.basename(output_path) + '2.json'), 'w'),
+		open(os.path.join(output_path, os.path.basename(output_path) + '.json'), 'w'),
 		ensure_ascii = False,
 		sort_keys = True,
 		indent = 2
@@ -431,6 +431,7 @@ def processcomments(input_path, output_path, comment_path):
 	#				not_word_stats[w_][k] += 1
 	#print('\n'.join('{w},{be},{be_}'.format(w = w, be = not_word_stats[w]['be'], be_ = not_word_stats[w]['b'] + not_word_stats[w]['e']) for w in not_word))
 
+# python tools.py filter_dataset --input-path dataset/cut/cut_train.json --output-path dataset/cut/cut_train_cer_25_1000h.json --duration-in-hours 1000 --cer 0.25
 
 def filter_dataset(input_path,
 		output_path,
@@ -438,6 +439,9 @@ def filter_dataset(input_path,
 		cer,
 		seed):
 	dataset = transcripts.load(input_path)
+
+	if cer:
+		assert cer < 1.0, 'CER should be set in number less than 1.0'
 
 	random.seed(seed)
 	random.shuffle(dataset)
@@ -476,10 +480,10 @@ def split(
 	random.shuffle(transcripts_train)
 
 	for t in transcripts_train:
-		t.pop('alignment')
-		t.pop('words')
-		t['meta'].pop('words_hyp')
-		t['meta'].pop('words_ref')
+		t.pop('alignment', None)
+		t.pop('words', None)
+		t['meta'].pop('words_hyp', None)
+		t['meta'].pop('words_ref', None)
 
 	if old_microval_path:
 		old_microval = json.load(open(os.path.join(output_path, old_microval_path)))
@@ -510,6 +514,31 @@ def split(
 		sort_keys = True,
 		indent = 2
 	)
+
+
+def cleanup_transcripts_with_empty_ref(input_path, emptiness):
+	transcript_array = json.load(open(input_path))
+
+	filtered = []
+	for transcript in transcript_array:
+		if len(transcript.get('ref', "")) <= emptiness:
+			continue
+		else:
+			filtered.append(transcript)
+
+	output_path = os.path.join(os.path.dirname(input_path), os.path.basename(input_path) + '_cleaned.json')
+
+	json.dump(
+		filtered,
+		open(output_path, 'w'),
+		ensure_ascii = False,
+		sort_keys = True,
+		indent = 2
+	)
+
+	print(output_path)
+
+
 
 # transcript = json.load(open('data/transcripts_valset_16082020.csv.json_GreedyDecoder.json'))
 #
@@ -549,7 +578,7 @@ def find_solution_for_frontend_input_output_shapes_divisibility(
 	for i in range(start * sample_rate, end * sample_rate):
 		if i % input_time_dim_multiple == 0:
 			l_out = models.LogFilterBankFrontend.compute_output_shape(
-					l_in=i,
+					time_dim_length=i,
 					kernel_size=nfft,
 					stride=hop_length,
 					padding=padding,
@@ -676,6 +705,11 @@ if __name__ == '__main__':
 	cmd.add_argument('--output-path', '-o', default = 'data')
 	cmd.add_argument('--comment-path', '-c')
 	cmd.set_defaults(func = processcomments)
+
+	cmd = subparsers.add_parser('cleanup_transcripts_with_empty_ref')
+	cmd.add_argument('--input-path', '-i', required = True)
+	cmd.add_argument('--emptiness', default = 1)
+	cmd.set_defaults(func = cleanup_transcripts_with_empty_ref)
 	
 	cmd = subparsers.add_parser('wordtags')
 	cmd.add_argument('--output-path', '-o', default = 'data/word_tags.json')

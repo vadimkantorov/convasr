@@ -683,9 +683,8 @@ def main(args):
 		epoch, iteration = checkpoint['epoch'], checkpoint['iteration']
 		if args.train_data_path == checkpoint['args']['train_data_path']:
 			sampler.load_state_dict(checkpoint['sampler_state_dict'])
-			if args.iterations_per_epoch and iteration and iteration % args.iterations_per_epoch == 0:
-				sampler.batch_idx = 0
-				epoch += 1
+			sampler.batch_idx = 0
+			epoch += 1
 		else:
 			epoch += 1
 	if args.iterations_per_epoch:
