@@ -218,6 +218,8 @@ def evaluate_model(
 			_print(f'entropy sync time {time.time() - sync_tic:.1f} sec');sync_tic = time.time()
 			audio_path_ = sync_string_list(audio_path_)
 			_print(f'audio_path sync time {time.time()  - sync_tic:.1f} sec');sync_tic = time.time()
+			uncertainty_ = sync_float_list(uncertainty_)
+			_print(f'uncertainty sync time {time.time() - sync_tic:.1f} sec');sync_tic = time.time()
 			ref_by_pipelines = list(map(list, zip(*ref_)))
 			for i in range(len(ref_by_pipelines)):
 				ref_by_pipelines[i] = sync_string_list(ref_by_pipelines[i])
@@ -235,31 +237,28 @@ def evaluate_model(
 				continue
 
 		#TODO add duration to extra info dict
-		analyze_args_gen = (
-			(
-				hyp,
-				ref,
-				pipeline.postprocess,
-				analyze,
-				dict(
-					labels_name=pipeline.name,
-					audio_path=audio_path,
-					audio_name=transcripts.audio_name(audio_path),
-					loss=loss,
-					entropy=entropy,
-					uncertainty=uncertainty,
-				),
-			)
-			for ref_tuple, hyp_tuple, audio_path, loss, entropy, uncertainty
-			in zip(ref_, hyp_, audio_path_, loss_, entropy_, uncertainty_)
-			for pipeline, ref, hyp in zip(text_pipelines, ref_tuple, hyp_tuple)
-		)
+		analyze_args_list = []
+		for ref_tuple, hyp_tuple, audio_path, loss, entropy, uncertainty in zip(ref_, hyp_, audio_path_, loss_, entropy_, uncertainty_):
+			for pipeline, ref, hyp in zip(text_pipelines, ref_tuple, hyp_tuple):
+				analyze_args_list.append((
+					hyp,
+					ref,
+					pipeline.postprocess,
+					analyze,
+					dict(
+						labels_name=pipeline.name,
+						audio_path=audio_path,
+						audio_name=transcripts.audio_name(audio_path),
+						loss=loss,
+						entropy=entropy,
+						uncertainty=uncertainty,
+					),))
 
 		if args.analyze_num_workers <= 0:
-			transcript = [error_analyzer.analyze(*args) for args in analyze_args_gen]
+			transcript = [error_analyzer.analyze(*args) for args in analyze_args_list]
 		else:
 			with multiprocessing.pool.Pool(processes = args.analyze_num_workers) as pool:
-				transcript = pool.starmap(error_analyzer.analyze, analyze_args_gen)
+				transcript = pool.starmap(error_analyzer.analyze, analyze_args_list)
 
 		toc_analyze = time.time()
 		time_sec_val_analyze = toc_analyze - toc_apply_model
