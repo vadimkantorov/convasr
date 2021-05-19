@@ -440,8 +440,7 @@ def filter_dataset(input_path,
 		seed):
 	dataset = transcripts.load(input_path)
 
-	if cer:
-		assert cer < 1.0, 'CER should be set in number less than 1.0'
+	assert not cer or 0 <= cer < 1.0, 'CER should be unset or in range [0.0, 1)'
 
 	random.seed(seed)
 	random.shuffle(dataset)
@@ -516,12 +515,12 @@ def split(
 	)
 
 
-def cleanup_transcripts_with_empty_ref(input_path, emptiness):
+def cleanup_transcripts_with_empty_ref(input_path, min_ref_length):
 	transcript_array = json.load(open(input_path))
 
 	filtered = []
 	for transcript in transcript_array:
-		if len(transcript.get('ref', "")) <= emptiness:
+		if len(transcript.get('ref', "")) <= min_ref_length:
 			continue
 		else:
 			filtered.append(transcript)
@@ -708,7 +707,7 @@ if __name__ == '__main__':
 
 	cmd = subparsers.add_parser('cleanup_transcripts_with_empty_ref')
 	cmd.add_argument('--input-path', '-i', required = True)
-	cmd.add_argument('--emptiness', default = 1)
+	cmd.add_argument('--min-ref-length', default = 2)
 	cmd.set_defaults(func = cleanup_transcripts_with_empty_ref)
 	
 	cmd = subparsers.add_parser('wordtags')
