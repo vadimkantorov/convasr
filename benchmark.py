@@ -1,15 +1,7 @@
 import os
-import gc
-import math
 import argparse
-import time
-import torch
-import torch.cuda.profiler
-import onnxruntime
-import models
-import datasets
-import utils
 
+import apex
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--checkpoint')
@@ -44,7 +36,26 @@ parser.add_argument('--profile-autograd')
 parser.add_argument('--data-parallel', action = 'store_true')
 parser.add_argument('--backward', action = 'store_true')
 parser.add_argument('--input-time-dim-multiple', type = int, default = 128)
+
+parser.add_argument('--output', type=str)
+
 args = parser.parse_args()
+
+if args.save_cudnn_cublas_logs:
+	os.environ["CUDNN_LOGINFO_DBG"] = '1'
+	os.environ["CUBLAS_LOGINFO_DBG"] = '1'
+	os.environ["CUDNN_LOGDEST_DBG"] = args.cudnn_logdest
+	os.environ["CUBLAS_LOGDEST_DBG"] = args.cublas_logdest
+
+import gc
+import math
+import time
+import torch
+import torch.cuda.profiler
+import onnxruntime
+import models
+import datasets
+import utils
 
 checkpoint = torch.load(args.checkpoint, map_location = 'cpu') if args.checkpoint else None
 if checkpoint:
@@ -54,13 +65,6 @@ if checkpoint:
 
 use_cuda = 'cuda' in args.device
 
-labels = datasets.Labels(datasets.Language(args.lang))
-
-if args.save_cudnn_cublas_logs:
-	os.environ["CUDNN_LOGINFO_DBG"] = '1'
-	os.environ["CUBLAS_LOGINFO_DBG"] = '1'
-	os.environ["CUDNN_LOGDEST_DBG"] = args.cudnn_logdest
-	os.environ["CUBLAS_LOGDEST_DBG"] = args.cublas_logdest
 
 if args.onnx:
 	onnxruntime_session = onnxruntime.InferenceSession(args.onnx)
@@ -151,6 +155,7 @@ if args.profile_pyprof:
 	import pyprof
 	pyprof.init()
 if args.profile_cuda:
+	apex.pyprof.nvtx.init()
 	torch.autograd.profiler.emit_nvtx()
 	torch.cuda.profiler.start()
 if args.profile_autograd:
@@ -201,3 +206,17 @@ print(
 		float(args.B * example_time * args.iterations / times_fwd.sum())
 	)
 )
+
+if args.output:
+	with open(args.output, 'a+') as f:
+		template = f'{args.B}\t' \
+		           f'{args.T}\t' \
+		           f'{times_fwd.mean()}\t' \
+		           f'{times_fwd.sum()}\t' \
+		           f'{fragmentation.mean()}\t' \
+		           f'{args.B * example_time * args.iterations / 3600.0}\t' \
+		           f'{args.B * example_time * args.iterations / times_fwd.sum()}\t' \
+		           f'{args.checkpoint}\t' \
+		           f'{args.onnx}\t' \
+		           f'\n'
+		f.write(template)
