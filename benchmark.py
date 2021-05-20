@@ -152,7 +152,7 @@ print()
 if args.profile_pyprof or args.profile_cuda:
 	import pyprof
 	pyprof.nvtx.nvmarker.patch_apex_module = lambda modstr, old = pyprof.nvtx.nvmarker.patch_apex_module: old(
-			modstr) if modstr != 'apex.contrib.multihead_attn' else None  # coused by this bug https://github.com/NVIDIA/apex/issues/958
+			modstr) if modstr != 'apex.contrib.multihead_attn' else None  # coused by this bug https://github.com/NVIDIA/apex/issues/958 https://github.com/NVIDIA/PyProf/issues/167
 	pyprof.nvtx.init()
 if args.profile_cuda:
 	torch.autograd.profiler.emit_nvtx()
