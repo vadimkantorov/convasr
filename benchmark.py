@@ -1,8 +1,6 @@
 import os
 import argparse
 
-import apex
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--checkpoint')
 parser.add_argument('--device', default = 'cuda', help = 'TODO: proper device choosing')
@@ -155,7 +153,8 @@ if args.profile_pyprof:
 	import pyprof
 	pyprof.init()
 if args.profile_cuda:
-	apex.pyprof.nvtx.init()
+	import pyprof
+	pyprof.nvtx.init()
 	torch.autograd.profiler.emit_nvtx()
 	torch.cuda.profiler.start()
 if args.profile_autograd:
