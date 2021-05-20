@@ -35,7 +35,7 @@ parser.add_argument('--data-parallel', action = 'store_true')
 parser.add_argument('--backward', action = 'store_true')
 parser.add_argument('--input-time-dim-multiple', type = int, default = 128)
 
-parser.add_argument('--output', type=str)
+parser.add_argument('--output-path', '-o')
 
 args = parser.parse_args()
 
@@ -208,7 +208,7 @@ print(
 
 if args.output:
 	with open(args.output, 'a+') as f:
-		template = f'{args.B}\t' \
+		message = f'{args.B}\t' \
 		           f'{args.T}\t' \
 		           f'{times_fwd.mean()}\t' \
 		           f'{times_fwd.sum()}\t' \
@@ -218,4 +218,4 @@ if args.output:
 		           f'{args.checkpoint}\t' \
 		           f'{args.onnx}\t' \
 		           f'\n'
-		f.write(template)
+		f.write(message)
