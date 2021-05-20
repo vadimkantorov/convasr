@@ -149,12 +149,12 @@ for i in range(args.iterations_warmup):
 print('Warmup done in {:.02f} wall clock seconds'.format(tictoc() - tic_wall))
 print()
 
-if args.profile_pyprof:
+if args.profile_pyprof or args.profile_cuda:
 	import pyprof
-	pyprof.init()
-if args.profile_cuda:
-	import pyprof
+	pyprof.nvtx.nvmarker.patch_apex_module = lambda modstr, old = pyprof.nvtx.nvmarker.patch_apex_module: old(
+			modstr) if modstr != 'apex.contrib.multihead_attn' else None  # coused by this bug https://github.com/NVIDIA/apex/issues/958
 	pyprof.nvtx.init()
+if args.profile_cuda:
 	torch.autograd.profiler.emit_nvtx()
 	torch.cuda.profiler.start()
 if args.profile_autograd:
