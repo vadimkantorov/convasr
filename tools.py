@@ -520,7 +520,7 @@ def cleanup_transcripts_with_empty_ref(input_path, min_ref_length):
 
 	filtered = []
 	for transcript in transcript_array:
-		if len(transcript.get('ref', "")) <= min_ref_length:
+		if len(transcript.get('ref', "")) < min_ref_length:
 			continue
 		else:
 			filtered.append(transcript)
