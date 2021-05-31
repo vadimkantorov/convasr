@@ -221,8 +221,6 @@ def main(args, ext_json = ['.json', '.json.gz']):
 			hyp_segments = list(transcripts.segment_by_ref(hyp_transcript, ref_segments, set_speaker = True, soft = False))
 		#### END OF HACK
 
-		has_ref = bool(transcripts.join(ref = transcripts.flatten(ref_segments)))
-
 		transcript = []
 		for hyp_transcript, ref_transcript in zip(hyp_segments, ref_segments):
 			hyp, ref = transcripts.join(hyp = hyp_transcript), transcripts.join(ref = ref_transcript)
@@ -239,7 +237,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 					words_hyp = hyp_transcript if args.align_words else [],
 
 					**transcripts.summary(hyp_transcript),
-					**(dict(cer = metrics.cer(hyp = hyp, ref = ref)) if has_ref else {})
+					**(dict(cer = metrics.cer(hyp = hyp, ref = ref)))
 				)
 			)
 
