@@ -4,7 +4,6 @@ import onnxruntime
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.fft as fft
 import apex
 import librosa
 import shaping
@@ -547,7 +546,7 @@ class LogFilterBankFrontend(nn.Module):
 		
 		'''
 		if stft_mode == 'conv':
-			fourier_basis = torch.view_as_real(fft.fft(torch.eye(self.nfft), dim=1))
+			fourier_basis = torch.view_as_real(torch.fft.fft(torch.eye(self.nfft), dim=1))
 			forward_basis = fourier_basis[:self.freq_cutoff].permute(2, 0, 1).reshape(-1, 1, fourier_basis.shape[1])
 			forward_basis = forward_basis * torch.as_tensor(
 				librosa.util.pad_center(self.window, self.nfft), dtype = forward_basis.dtype
@@ -587,7 +586,9 @@ class LogFilterBankFrontend(nn.Module):
 			stft_res = self.stft(padded_signal.unsqueeze(dim = 1))
 			real_squared, imag_squared = (stft_res * stft_res).split(self.freq_cutoff, dim = 1)
 		else:
-			stft_res = padded_signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = False)
+			# return_complex=False is deprecated after PyTorch 1.8.1
+			stft_res = padded_signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length, window = self.window, center = False, return_complex=True)
+			stft_res = torch.view_as_real(stft_res)
 			real_squared, imag_squared = (stft_res * stft_res).unbind(dim = -1)
 
 		power_spectrum = real_squared + imag_squared
@@ -759,7 +760,7 @@ def distributed_data_parallel_and_autocast(model, local_rank, optimizer = None, 
 		model, optimizer = apex.amp.initialize(model, optimizer, opt_level=opt_level, **kwargs)
 	else:
 		model = apex.amp.initialize(model, None, opt_level = opt_level, **kwargs)
-	model = torch.nn.parallel.DistributedDataParallel(model, device_ids = [local_rank], output_device = local_rank, find_unused_parameters = True)
+	model = torch.nn.parallel.DistributedDataParallel(model, device_ids = [local_rank], output_device = local_rank)
 	model.train(model_training)
 	return model, optimizer
 
