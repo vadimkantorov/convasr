@@ -538,11 +538,12 @@ def main(args):
 		else:
 			sampler = None
 
+		#TODO set pin_memory = True, after https://github.com/pytorch/pytorch/issues/57273 fix
 		val_data_loader = torch.utils.data.DataLoader(
 			val_dataset,
 			num_workers = args.num_workers,
 			collate_fn = val_dataset.collate_fn,
-			pin_memory = True,
+			pin_memory = False,
 			shuffle = False,
 			batch_size = args.val_batch_size,
 			worker_init_fn = datasets.worker_init_fn,
@@ -631,11 +632,12 @@ def main(args):
 		sampler = datasets.DistributedSamplerWrapper(sampler, num_replicas=args.world_size, rank=args.rank)
 	_print('Time train sampler created:', time.time() - tic, 'sec')
 
+	# TODO set pin_memory = True, after https://github.com/pytorch/pytorch/issues/57273 fix
 	train_data_loader = torch.utils.data.DataLoader(
 		train_dataset,
 		num_workers = args.num_workers,
 		collate_fn = train_dataset.collate_fn,
-		pin_memory = True,
+		pin_memory = False,
 		batch_sampler = sampler,
 		worker_init_fn = datasets.worker_init_fn,
 		timeout = args.timeout if args.num_workers > 0 else 0
@@ -762,7 +764,7 @@ def main(args):
 
 				if iteration % args.train_batch_accumulate_iterations == 0:
 					torch.nn.utils.clip_grad_norm_(
-						apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm
+						apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm, error_if_nonfinite = False
 					)
 					optimizer.step()
 					optimizer.zero_grad()
