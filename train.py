@@ -920,7 +920,10 @@ if __name__ == '__main__':
 	parser.add_argument(
 		'--val-transcripts-format',
 		default = 'transcripts_{val_dataset_name}_{decoder}',
-		help = 'save transcripts at validation'
+		help = (
+			'transcripts filename for validation. if you want to rewrite train transcripts json, please pass: ' +
+			'--val-transcripts-format transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}'
+		)
 	)
 	parser.add_argument(
 		'--train-transcripts-format',
