@@ -166,11 +166,10 @@ def evaluate_model(
 	logfile_sink = None,
 	epoch = None,
 	iteration = None,
-	forward_x_only=False,
+	forward_x_only = False,
+	training = False,
 ):
 	_print = utils.get_root_logger_print()
-
-	training = epoch is not None and iteration is not None
 	oom_handler = utils.OomHandler(max_retries=args.oom_retries)
 	for val_dataset_name, val_data_loader in val_data_loaders.items():
 		if args.world_size > 1:
@@ -281,7 +280,7 @@ def evaluate_model(
 		) if training else os.path.join(
 			args.experiment_dir,
 			args.val_transcripts_format
-			.format(val_dataset_name = val_dataset_name, decoder = args.decoder)
+			.format(val_dataset_name = val_dataset_name, decoder = args.decoder, epoch = epoch, iteration = iteration)
 		)
 		for i, pipeline in enumerate(text_pipelines):
 			transcript_by_label = transcript[i:: len(text_pipelines)]
@@ -322,11 +321,10 @@ def evaluate_model(
 				f.write(args.csv_sep.join(args.csv_columns) + '\n')
 				f.writelines(args.csv_sep.join(str(t[column]) for column in args.csv_columns) + '\n' for t in transcript)
 
-	checkpoint_path = os.path.join(
-		args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)
-	) if training and not args.checkpoint_skip else None
-
 	if training and not args.checkpoint_skip:
+		checkpoint_path = os.path.join(
+			args.experiment_dir, args.checkpoint_format.format(epoch=epoch, iteration=iteration)
+		)
 		torch.save(
 			dict(
 				model_state_dict = models.master_module(model).state_dict(),
@@ -567,7 +565,21 @@ def main(args):
 
 		model = models.OnnxWrapper(args.onnx) if args.onnx else model
 
-		evaluate_model(args, val_data_loaders, model, generator, text_pipelines, error_analyzer, forward_x_only=args.forward_x_only)
+		epoch, iteration = 0, 0
+		if checkpoint:
+			epoch, iteration = checkpoint['epoch'], checkpoint['iteration']
+		evaluate_model(
+			args,
+			val_data_loaders,
+			model,
+			generator,
+			text_pipelines,
+			error_analyzer,
+			epoch = epoch,
+			iteration = iteration,
+			forward_x_only = args.forward_x_only,
+			training = False,
+		)
 		return
 
 	model.freeze(backbone = args.freeze_backbone, decoder0 = args.freeze_decoder, frontend = args.freeze_frontend)
@@ -808,8 +820,9 @@ def main(args):
 					sampler,
 					tensorboard_sink,
 					logfile_sink,
-					epoch,
-					iteration
+					epoch = epoch,
+					iteration = iteration,
+					training = True,
 				)
 
 			if iteration and args.iterations and iteration >= args.iterations:
@@ -831,8 +844,9 @@ def main(args):
 				sampler,
 				tensorboard_sink,
 				logfile_sink,
-				epoch + 1,
-				iteration
+				epoch = epoch + 1,
+				iteration = iteration,
+				training = True,
 			)
 
 
@@ -906,7 +920,10 @@ if __name__ == '__main__':
 	parser.add_argument(
 		'--val-transcripts-format',
 		default = 'transcripts_{val_dataset_name}_{decoder}',
-		help = 'save transcripts at validation'
+		help = (
+			'transcripts filename for validation. if you want to rewrite train transcripts json, please pass: ' +
+			'--val-transcripts-format transcripts_{val_dataset_name}_epoch{epoch:02d}_iter{iteration:07d}'
+		)
 	)
 	parser.add_argument(
 		'--train-transcripts-format',
