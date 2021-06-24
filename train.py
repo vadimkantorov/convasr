@@ -387,12 +387,11 @@ def main(args):
 		log_level = logging.ERROR
 
 	log_path = os.path.join(args.experiment_dir, 'log.txt')
-	log_mode = 'w'
+	log_mode = 'a'
 
 	if checkpoint:
-		args.model, args.num_input_features, args.sample_rate, args.window, args.window_size, args.window_stride = map(checkpoint['args'].get, ['model', 'num_input_features', 'sample_rate', 'window', 'window_size', 'window_stride'])
-		if len(args.train_data_path) > 0:
-			log_mode = 'a'
+		args.model, args.num_input_features, args.sample_rate, args.window, args.window_size, args.window_stride = \
+			map(checkpoint['args'].get, ['model', 'num_input_features', 'sample_rate', 'window', 'window_size', 'window_stride'])
 	utils.set_up_root_logger(log_path, mode = log_mode, level = log_level)
 	logfile_sink = JsonlistSink(args.log_json, mode = log_mode)
 
