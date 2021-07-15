@@ -265,13 +265,21 @@ class JasperNet(nn.Module):
 
 		self.num_epilogue_modules = len(epilogue)
 		self.frontend = frontend
-		self.normalize_features = MaskedInstanceNorm1d(
+		# self.normalize_features = MaskedInstanceNorm1d(
+		# 	num_input_features,
+		# 	affine = False,
+		# 	eps = normalize_features_eps,
+		# 	track_running_stats = normalize_features_track_running_stats,
+		# 	temporal_mask = normalize_features_temporal_mask,
+		# 	legacy = normalize_features_legacy
+		# ) if normalize_features else None
+		self.normalize_features = MaskedInstanceLocalNorm1d(
 			num_input_features,
-			affine = False,
-			eps = normalize_features_eps,
-			track_running_stats = normalize_features_track_running_stats,
-			temporal_mask = normalize_features_temporal_mask,
-			legacy = normalize_features_legacy
+			affine=False,
+			eps=normalize_features_eps,
+			track_running_stats=normalize_features_track_running_stats,
+			temporal_mask=normalize_features_temporal_mask,
+			legacy=normalize_features_legacy
 		) if normalize_features else None
 		self.decoder = Decoder(out_width_factors_large[1] * base_width, num_classes, type = decoder_type)
 		self.residual = residual
@@ -567,7 +575,8 @@ class LogFilterBankFrontend(nn.Module):
 
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
 
-		signal = normalize_signal(signal, denom_multiplier=self.debug_short_long_records_normalize_signal_multiplier) if self.normalize_signal else signal
+		#signal = normalize_signal(signal, denom_multiplier=self.debug_short_long_records_normalize_signal_multiplier) if self.normalize_signal else signal
+		signal = normalize_signal_local(signal, denom_multiplier=self.debug_short_long_records_normalize_signal_multiplier) if self.normalize_signal else signal
 		#signal = apply_dither(signal, self.dither0)
 		signal = torch.cat([signal[..., :1], signal[..., 1:] -
 							self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
@@ -681,9 +690,27 @@ def margin(log_probs, dim = 1):
 def compute_capacity(model, scale = 1):
 	return sum(map(torch.numel, model.parameters())) / scale
 
-def normalize_signal(signal, dim = -1, eps = 1e-5, denom_multiplier  = 1.0):
+
+def normalize_signal(signal: shaping.BT, dim = -1, eps = 1e-5, denom_multiplier  = 1.0):
 	signal_max = signal.abs().max(dim = dim, keepdim = True).values + eps
 	return signal / (signal_max * denom_multiplier) if signal.numel() > 0 else signal
+
+
+def normalize_signal_local(signal: shaping.BT, eps = 1e-5, denom_multiplier = 1.0, window_size = 5*8000):
+	window_size = min(window_size, signal.shape[-1])
+	stride = window_size // 2
+	local_signal_max = F.max_pool1d(signal, kernel_size = window_size, stride =stride, dilation = 1)
+	if signal.shape[-1] - window_size > 0:
+		local_signal_max = F.interpolate(local_signal_max[:, None, :], scale_factor=stride)[:, 0, :]
+	left_padding_size = (signal.shape[-1] - local_signal_max.shape[-1]) // 2
+	right_padding_size = (signal.shape[-1] - local_signal_max.shape[-1]) // 2
+	if local_signal_max.shape[-1] + left_padding_size + right_padding_size != signal.shape[-1]:
+		right_padding_size += 1
+	local_signal_max = F.pad(local_signal_max[:, None, :], pad=(left_padding_size, right_padding_size), mode='replicate')[:, 0, :]
+	assert local_signal_max.shape == signal.shape
+	normalized_signal = signal / (local_signal_max * denom_multiplier + eps)
+	return normalized_signal
+
 
 class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 	def __init__(self, *args, temporal_mask = False, legacy = True, **kwargs):
@@ -717,6 +744,64 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 			zero_mean_masked = mask * (x - mean)
 			std = ((zero_mean_masked * zero_mean_masked).sum(dim = -1, keepdim = True) / xlen).sqrt()
 			return zero_mean_masked / (std + self.eps)
+
+
+class MaskedInstanceLocalNorm1d(nn.InstanceNorm1d):
+	def __init__(self, *args, temporal_mask = False, legacy = True, kernel_size = 500, stride = 250, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.temporal_mask = temporal_mask
+		self.kernel_size = kernel_size
+		self.stride = stride
+
+	def forward(self, x: shaping.BCT, mask = None):
+		if not self.temporal_mask or mask is None:
+			raise NotImplemented
+		else:
+			kernel_size = min(self.kernel_size, x.shape[-1])
+
+			local_mask = F.unfold(mask[..., None, :].float(), kernel_size=[1, kernel_size], stride=[1, self.stride]).permute(0,2,1)
+			local_values_amount = local_mask.sum(-1)
+			x_sliding_window = F.unfold(x[..., None, :], kernel_size=[1, kernel_size], stride=[1, self.stride])
+			x_sliding_window = x_sliding_window.view([x.shape[0], x.shape[1], x_sliding_window.shape[-1], kernel_size])
+
+			x_local_mean = x_sliding_window.sum(-1) / (local_values_amount[:, None, :] + self.eps)
+			x_local_std = (((x_sliding_window - x_local_mean[..., None]) * local_mask[:, None, ...]) ** 2).sum(-1)
+			x_local_std = (x_local_std / (local_values_amount[:, None, :] + self.eps)).sqrt()
+
+			if x.shape[-1] - kernel_size > 0:
+				x_local_mean = F.interpolate(x_local_mean, scale_factor=self.stride)
+				x_local_std = F.interpolate(x_local_std, scale_factor=self.stride)
+
+			left_padding_size = (x.shape[-1] - x_local_mean.shape[-1]) // 2
+			right_padding_size = (x.shape[-1] - x_local_mean.shape[-1]) // 2
+			if x_local_mean.shape[-1] + left_padding_size + right_padding_size != x.shape[-1]:
+				right_padding_size += 1
+
+			x_local_mean = F.pad(x_local_mean, pad=(left_padding_size, right_padding_size), mode='replicate')
+			x_local_std = F.pad(x_local_std, pad=(left_padding_size, right_padding_size), mode='replicate')
+
+			return (x - x_local_mean) * mask / (x_local_std + self.eps)
+
+
+class MeanStdPool1d(nn.Module):
+	def __init__(self, kernel_size=None, stride=None, interpolation_mode='nearest'):
+		super().__init__()
+		self.kernel_size = kernel_size
+		self.stride = stride
+		self.interpolation_mode = interpolation_mode
+
+	def forward(self, x):
+		if self.kernel_size is not None:
+			kwargs = dict(kernel_size=self.kernel_size, padding=self.kernel_size // 2, stride=self.stride or 1)
+			mean = F.avg_pool1d(x, **kwargs)
+			mean_interpolated = F.interpolate(mean, x.shape[-1], mode=self.interpolation_mode) if kwargs and kwargs['stride'] != 1 else mean
+			zero_mean_squared = (x - mean_interpolated) ** 2
+			std_squared = F.avg_pool1d(zero_mean_squared, **kwargs)
+			std = std_squared.sqrt()
+		else:
+			std, mean = torch.std_mean(x, dim=2, keepdim=True)
+
+		return torch.cat((mean, std), dim=1)
 
 
 def unpad(x, lens):
