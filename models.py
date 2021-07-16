@@ -696,18 +696,33 @@ def normalize_signal(signal: shaping.BT, dim = -1, eps = 1e-5, denom_multiplier 
 	return signal / (signal_max * denom_multiplier) if signal.numel() > 0 else signal
 
 
-def normalize_signal_local(signal: shaping.BT, eps = 1e-5, denom_multiplier = 1.0, window_size = 5*8000):
-	window_size = min(window_size, signal.shape[-1])
-	stride = window_size // 2
-	local_signal_max = F.max_pool1d(signal, kernel_size = window_size, stride =stride, dilation = 1)
-	if signal.shape[-1] - window_size > 0:
-		local_signal_max = F.interpolate(local_signal_max[:, None, :], scale_factor=stride)[:, 0, :]
+def normalize_signal_local(signal: shaping.BT, eps = 1e-5, denom_multiplier = 1.0, kernel_size = 5 * 8000, stride = 25 * 800):
+	'''
+	The idea to normalize signal value by maximum which calculated in some local window.
+	Normalized value will be in center of the window. Default window size equal 5s of signal with sample rate 8000.
+	'''
+	# reduce kernel size for short signal
+	kernel_size = min(kernel_size, signal.shape[-1])
+
+	# to explain code below I will use sample with size of 5, kernel size 3 and stride 2
+	# signal [[1, 2, 3, 4, 5]]
+	# estimate local maximums
+	# [[1, 2, 3, 4, 5]]  --> [[3, 5]]
+	local_signal_max = F.max_pool1d(signal, kernel_size = kernel_size, stride =stride, dilation = 1)
+	# if we have more than one local maximum, interpolate values between their centers
+	if signal.shape[-1] - kernel_size > 0:
+		# [[3, 5]] --> [[3, 3, 5]]
+		local_signal_max = F.interpolate(local_signal_max[:, None, :], size=signal.shape[-1]-kernel_size if kernel_size % 2 == 0 else signal.shape[-1]-kernel_size + 1)[:, 0, :]
+	# estimate required padding size to extend mean and std to original signal size
 	left_padding_size = (signal.shape[-1] - local_signal_max.shape[-1]) // 2
 	right_padding_size = (signal.shape[-1] - local_signal_max.shape[-1]) // 2
 	if local_signal_max.shape[-1] + left_padding_size + right_padding_size != signal.shape[-1]:
 		right_padding_size += 1
+	# extend first and last value of local max to match with original signal size
+	# [[3, 3, 5]] --> [[3, 3, 3, 5, 5]]
 	local_signal_max = F.pad(local_signal_max[:, None, :], pad=(left_padding_size, right_padding_size), mode='replicate')[:, 0, :]
 	assert local_signal_max.shape == signal.shape
+	# normalize signal
 	normalized_signal = signal / (local_signal_max * denom_multiplier + eps)
 	return normalized_signal
 
@@ -748,6 +763,12 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 
 class MaskedInstanceLocalNorm1d(nn.InstanceNorm1d):
 	def __init__(self, *args, temporal_mask = False, legacy = True, kernel_size = 500, stride = 250, **kwargs):
+		'''
+		The idea to normalize signal value by mean and std which calculated in some local window.
+		Normalized value will be in center of the window.
+		P.S. current LogFilterBank frontend reduce signal size by factor of ~80,
+		so kernel_size default value of 500 equal to 5 seconds of audio with sample rate 8000
+		'''
 		super().__init__(*args, **kwargs)
 		self.temporal_mask = temporal_mask
 		self.kernel_size = kernel_size
@@ -757,29 +778,53 @@ class MaskedInstanceLocalNorm1d(nn.InstanceNorm1d):
 		if not self.temporal_mask or mask is None:
 			raise NotImplemented
 		else:
+			# reduce kernel size for short signal
 			kernel_size = min(self.kernel_size, x.shape[-1])
 
-			local_mask = F.unfold(mask[..., None, :].float(), kernel_size=[1, kernel_size], stride=[1, self.stride]).permute(0,2,1)
-			local_values_amount = local_mask.sum(-1)
-			x_sliding_window = F.unfold(x[..., None, :], kernel_size=[1, kernel_size], stride=[1, self.stride])
-			x_sliding_window = x_sliding_window.view([x.shape[0], x.shape[1], x_sliding_window.shape[-1], kernel_size])
+			# convert masked features values to 0
+			# signal [[[1, 2, 3, 4, 5], [-1,-2,-3,-4,-5]]]
+			# mask [[[1, 1, 1], [1, 0, 0]]]
+			# result [[[1, 2, 3, 0, 0], [-1,-2,-3, 0, 0]]]
+			x = x * mask
 
+			# to explain code below I will use sample with size of 5, kernel size 3 and stride 2
+			# convert mask from flat shape to set of local masks
+			# [[[1, 1, 1, 0, 0]]] --> [[[1, 1, 1], [1, 0, 0]]]
+			local_mask = F.unfold(mask[..., None, :].float(), kernel_size=[1, kernel_size], stride=[1, self.stride]).permute(0,2,1)
+			# estimate amount of non masked values in local windows
+			# [[[1, 1, 1], [1, 0, 0]]] --> [[3, 1]]
+			local_values_amount = local_mask.sum(-1)
+			# do same thing for signal
+			# [[[1, 2, 3, 0, 0], [-1,-2,-3, 0, 0]]] --> [[[[ 1, 2, 3], [ 3, 0, 0]], [[-1,-2,-3], [-3, 0, 0]]]]
+			x_sliding_window = F.unfold(x[..., None, :], kernel_size=[1, kernel_size], stride=[1, self.stride])
+			x_sliding_window = x_sliding_window.view([x.shape[0], x.shape[1], kernel_size, x_sliding_window.shape[-1]]).permute(0, 1, 3, 2)
+
+			# compute mean value of each feature in local windows
+			# [[[[ 1, 2, 3], [ 3, 0, 0]], [[-1,-2,-3], [-3, 0, 0]]]] --> [[[2, -2], [3, -3]]]
 			x_local_mean = x_sliding_window.sum(-1) / (local_values_amount[:, None, :] + self.eps)
+			# compute std value of each feature in local windows
+			# [[[[ 1, 2, 3], [ 3, 0, 0]], [[-1,-2,-3], [-3, 0, 0]]]] --> [[[0.8165, 0.0000], [0.8165, 0.0000]]]
 			x_local_std = (((x_sliding_window - x_local_mean[..., None]) * local_mask[:, None, ...]) ** 2).sum(-1)
 			x_local_std = (x_local_std / (local_values_amount[:, None, :] + self.eps)).sqrt()
 
+			# if we have more than one local window, interpolate values between their centers
 			if x.shape[-1] - kernel_size > 0:
-				x_local_mean = F.interpolate(x_local_mean, scale_factor=self.stride)
-				x_local_std = F.interpolate(x_local_std, scale_factor=self.stride)
+				# [[[2, -2], [3, -3]]]                   --> [[[ 2,  2,  3], [-2, -2, -3]]]
+				x_local_mean = F.interpolate(x_local_mean, size=x.shape[-1]-kernel_size if kernel_size % 2 == 0 else x.shape[-1]-kernel_size + 1)
+				# [[[0.8165, 0.0000], [0.8165, 0.0000]]] --> [[[0.8165, 0.8165, 0.0000], [0.8165, 0.8165, 0.0000]]]
+				x_local_std = F.interpolate(x_local_std, size=x.shape[-1]-kernel_size if kernel_size % 2 == 0 else x.shape[-1]-kernel_size + 1)
 
-			left_padding_size = (x.shape[-1] - x_local_mean.shape[-1]) // 2
-			right_padding_size = (x.shape[-1] - x_local_mean.shape[-1]) // 2
+			# estimate required padding size to extend mean and std to original signal size
+			left_padding_size = (x.shape[-1] - x_local_mean.shape[-1]) // 2 # =1
+			right_padding_size = (x.shape[-1] - x_local_mean.shape[-1]) // 2 # =1
 			if x_local_mean.shape[-1] + left_padding_size + right_padding_size != x.shape[-1]:
 				right_padding_size += 1
 
+			# extend first and last value of mean and std to match with original signal size
 			x_local_mean = F.pad(x_local_mean, pad=(left_padding_size, right_padding_size), mode='replicate')
 			x_local_std = F.pad(x_local_std, pad=(left_padding_size, right_padding_size), mode='replicate')
 
+			# normalize values
 			return (x - x_local_mean) * mask / (x_local_std + self.eps)
 
 
