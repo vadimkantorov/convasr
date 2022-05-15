@@ -654,6 +654,9 @@ def main(args):
 		timeout = args.timeout if args.num_workers > 0 else 0
 	)
 
+	# torch.save(train_data_loader, 'train_dataloader.pt')
+	# raise Exception
+
 	if args.optimizer == 'SGD':
 		optimizer = torch.optim.SGD(model.parameters(),
 									lr = args.lr,
@@ -738,20 +741,42 @@ def main(args):
 			if batch_idx == 0:
 				time_ms_launch_data_loader = (toc_data - tic) * 1000
 				_print('Time data loader launch @ ', epoch, ':', time_ms_launch_data_loader / 1000, 'sec')
-			
+
 			lr = optimizer.param_groups[0]['lr']
-			perf.update(dict(lr = lr))
+			perf.update(dict(lr=lr))
+
+			print('FORWARD:', x.shape)
+
+			check_x = torch.load(f'/work/pipelines_over_speech_brain/x_frontend_{batch_idx + 1}.pt')
+			check_xlen = torch.load(f'/work/pipelines_over_speech_brain/xlen_{batch_idx + 1}.pt')
+			check_y = torch.load(f'/work/pipelines_over_speech_brain/y_{batch_idx + 1}.pt').unsqueeze(1)
+			check_ylen = torch.load(f'/work/pipelines_over_speech_brain/ylen_{batch_idx + 1}.pt').unsqueeze(1)
+
+			assert torch.equal(xlen.detach().cpu(), check_xlen.detach().cpu()), 'xlens failed'
+			assert torch.equal(y.detach().cpu(), check_y.detach().cpu()), 'y failed'
+			assert torch.equal(ylen.detach().cpu(), check_ylen.detach().cpu()), 'ylen failed'
+
+			equal_mask = torch.logical_not(torch.isclose(x.cpu(), check_x.cpu(), 1e-5)).nonzero()
+
+			assert torch.allclose(x.detach().cpu(), check_x.detach().cpu(), atol=5e-5), \
+				f'x failed, MASKS: {torch.count_nonzero(x, dim=2)[:, 0]} ///' \
+				f'{torch.count_nonzero(check_x, dim=2)[:, 0]} \n' \
+				f'MAX_DIF: {torch.max(torch.abs(x.cpu() - check_x.cpu()))}\n' \
+				f'VALUES: {len(equal_mask)}\n'
 
 			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
 			try:
 				#TODO check nan values in tensors, they can break running_stats in bn
-				log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen).get, ['log_probs', 'olen', 'loss'])
+				log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen, step=(batch_idx + 1)).get, ['log_probs', 'olen', 'loss'])
+				print(f"olen - {olen}, loss - {loss}")
+
 				oom_handler.reset()
 			except:
 				## TODO remove args.world_size > 1 after OOM recover fix for DDP
 				if args.world_size > 1 or not oom_handler.try_recover(model.parameters(), _print=utils.get_root_logger_print(level=logging.ERROR)):
 					raise
 			example_weights = ylen[:, 0]
+			print('scaled losses -', (loss * example_weights))
 			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, loss.mean()
 			entropy = models.entropy(log_probs[0], olen[0], dim=1).mean()
 
@@ -771,15 +796,56 @@ def main(args):
 					with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
 						scaled_loss.backward()
 				else:
+					print(f"Loss({loss.item()})")
 					loss.backward()
 
+					right_loss = torch.load(f'/work/pipelines_over_speech_brain/loss_{batch_idx + 1}.pt')
+					assert torch.allclose(loss, right_loss, atol=1e-5), f'loss_dif - {torch.abs(loss - right_loss).max()}'
+
 				if iteration % args.train_batch_accumulate_iterations == 0:
-					torch.nn.utils.clip_grad_norm_(
-						apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm, error_if_nonfinite = False
-					)
+					# grads = torch.load('/work/pipelines_over_speech_brain/grads.pt')
+					# for name, param in model.named_parameters():
+					# 	if param.requires_grad:
+					# 		right_param = grads[name]
+					# 		param_grad = param.grad.clone()
+					#
+					# 		assert torch.all(torch.isclose(param_grad, right_param, atol=1e-2)), \
+					# 			(f'grads - [{name}] - {param_grad.shape}, {right_param.shape}: '
+					# 			  f'{torch.max(torch.abs(param_grad - right_param))}')\
+
+					# torch.nn.utils.clip_grad_norm_(
+					# 	apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm, error_if_nonfinite = False
+					# )
+
+					right_optimizer = torch.load(f'/work/pipelines_over_speech_brain/optimizer_{batch_idx + 1}.pt')
+
+					print('OPTIMIZER CHECK')
+
+					for i in range(len(right_optimizer.param_groups[0]['params'])):
+						if i < len(optimizer.param_groups[0]['params']):
+							convasr_optim = optimizer.param_groups[0]['params'][i].shape
+						else:
+							convasr_optim = 'not_found'
+
+						speech_optim = right_optimizer.param_groups[0]['params'][i].shape
+
+						assert convasr_optim == speech_optim, \
+							f'optim shapes failed - {i} - {convasr_optim} / {speech_optim}'
+
 					optimizer.step()
 					optimizer.zero_grad()
 					scheduler.step(iteration)
+
+					print('STEP_WEIGHTS CHECK')
+
+					weights = torch.load(f'/work/pipelines_over_speech_brain/step_params_{batch_idx + 1}.pt')
+					for name, param in model.named_parameters():
+						if param.requires_grad:
+							right_param = weights[name]
+							param_grad = param.data
+							assert torch.all(torch.isclose(param_grad, right_param, atol=1e-5)), (
+								f'[{name}] - {param_grad.shape}, {right_param.shape}: '
+								f'{torch.max(torch.abs(param_grad - right_param))}')
 
 				if iteration > 0 and iteration % args.log_iteration_interval == 0:
 					if args.world_size > 1:
@@ -797,6 +863,8 @@ def main(args):
 				if (torch.isinf(loss) or torch.isnan(loss)):
 					logging.getLogger().error(f'Loss value is corrupted! {args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] | Rank: {args.rank} | Loss: {loss.item()}')
 			toc_bwd = time.time()
+
+			assert batch_idx < 3, '3 STEPS ENDED'
 
 			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = map(lambda sec: sec * 1000, [toc_data - tic, toc_fwd - toc_data, toc_bwd - toc_fwd, toc_bwd - toc_data])
 			perf.update(dict(time_ms_data = time_ms_data, time_ms_fwd = time_ms_fwd, time_ms_bwd = time_ms_bwd, time_ms_iteration = time_ms_data + time_ms_model), prefix = 'performance')
@@ -828,6 +896,7 @@ def main(args):
 				return
 
 			tic = time.time()
+		raise Exception
 
 		sampler.batch_idx = 0
 		_print('Epoch time', (time.time() - time_epoch_start) / 60, 'minutes')

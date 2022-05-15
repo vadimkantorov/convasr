@@ -274,7 +274,12 @@ class AudioTextDataset(torch.utils.data.Dataset):
 					segment_features = segment_features[:, :, time_slice.start // hop_length:time_slice.stop // hop_length]
 					features.append(segment_features.squeeze(0))
 				else:
+					# max_len = int(math.ceil(segment.shape[1] / 128)) * 128
+					# padded_segment = torch.zeros(1, max_len)
+					# padded_segment[0, :segment.shape[1]] = segment[0, :]
 					features.append(self.frontend(segment).squeeze(0))
+
+					# print(f'PADDED segment from {segment.shape} to {padded_segment.shape}')
 			else:
 				features.append(segment)
 
@@ -321,6 +326,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		xlen: shaping.B = torch.zeros(len(batch), dtype = torch.float32)
 		ylen: shaping.B = torch.zeros(len(batch), len(sample_y), dtype = torch.int64)
 
+		print(f'PADDED frontend from {[sample_x.shape for meta_s, sample_s, sample_x, *sample_y in batch]} '
+			  f'to {x.shape}')
+
 		for k, (meta_s, sample_s, sample_x, *sample_y) in enumerate(batch):
 			xlen[k] = sample_x.shape[-1] / x.shape[-1] if x.shape[-1] > 0 else 1.0
 			x[k, ..., :sample_x.shape[-1]] = sample_x
@@ -354,13 +362,15 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			aligned_speakers.append(torch.cat(speaker_labels))
 		return encoded_refs, aligned_speakers
 
+
 class BucketingBatchSampler(torch.utils.data.Sampler):
 	def __init__(self, dataset, batch_size = 1, world_size = 1):
 		super().__init__(dataset)
 		self.world_size = world_size  # this value ensure that `world_size` consecutive batches will be constructed from same bucket
 		self.dataset = dataset
 		self.batch_size = batch_size
-		self.buckets = {k: (self.dataset.bucket == k).nonzero(as_tuple = True)[0] for k in self.dataset.bucket.unique()}
+		self.buckets = {k: (self.dataset.bucket == k).nonzero(as_tuple = True)[0]
+						for k in self.dataset.bucket.unique()}
 		self.batch_idx = 0
 		self.set_epoch(epoch = 0)
 
@@ -393,6 +403,10 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 		else:
 			shuffled_batch_indices = batch_indices[shuffled_indices]
 		self.shuffled = batches[shuffled_batch_indices]
+
+		right_batches = torch.load(f'/work/pipelines_over_speech_brain/batches_{epoch}.pt')
+		assert torch.equal(self.shuffled, right_batches), f'sampling problem {self.shuffled[0][0], right_batches[0][0]}'
+		print(f'BATCH PASSED - {self.shuffled[0][0]}')
 
 	def state_dict(self):
 		return dict(batch_idx = self.batch_idx)
