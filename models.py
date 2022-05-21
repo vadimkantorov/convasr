@@ -132,11 +132,11 @@ class ConvBn1d(nn.Module):
 		self.temporal_mask = temporal_mask
 
 	def forward(self, x, lengths_fraction = None, residual: typing.List = [], j=0, step=0):
-		print(x.dtype)
-		print(x.shape)
+		# print(x.dtype)
+		# print(x.shape)
 		right_x = torch.load(f'/work/pipelines_over_speech_brain/input_{j}_{step}.pt')
-
-		print(f'input_{j}_{step}.pt - {torch.max(torch.abs(right_x - x))}')
+		print(x.shape, right_x.shape)
+		print(f'input_{j}_{step}.pt - {torch.max(torch.abs(right_x.detach().cpu() - x.detach().cpu()))}')
 
 		for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
 			if i == len(self.conv) - 1:
@@ -145,24 +145,17 @@ class ConvBn1d(nn.Module):
 			else:
 				residual_inputs = []
 
-			right_bn_conv = torch.load(f'/work/pipelines_over_speech_brain/bn_conv_{i}_{j}_{step}.pt')
-			bn_conv = conv(x)
+			# right_bn_conv = torch.load(f'/work/pipelines_over_speech_brain/bn_conv_{i}_{j}_{step}.pt')
+			# bn_conv = conv(x)
 
-			# if i == 0 and j == 9:
-			# 	speech_conv = torch.load('/work/pipelines_over_speech_brain/conv_speechbrain_{step}.pt').half()
-			# 	for layer in speech_conv.modules():
-			# 		if isinstance(layer, nn.BatchNorm2d):
-			# 			layer.float()
-			#
-			# 	right_bn_conv = speech_conv(x)
-
-			assert torch.allclose(bn_conv, right_bn_conv, atol=1e-3), \
-				f'bn_conv_{i}_{j}_{step}.pt - {torch.max(torch.abs(bn_conv - right_bn_conv))}'
+			# assert torch.allclose(bn_conv.detach().cpu(), right_bn_conv.detach().cpu(), atol=1e-2), \
+			# 	f'bn_conv_{i}_{j}_{step}.pt - {torch.max(torch.abs(bn_conv.detach().cpu() - right_bn_conv.detach().cpu()))}'
 
 			x = self.activation(bn(conv(x)), residual=residual_inputs)
-			right_x = torch.load(f'/work/pipelines_over_speech_brain/activation_{i}_{j}_{step}.pt')
+			# right_x = torch.load(f'/work/pipelines_over_speech_brain/activation_{i}_{j}_{step}.pt')
 
-			assert torch.allclose(x, right_x, atol=1e-2), f'activation_{i}_{j}_{step}.pt - {torch.max(torch.abs(x - right_x))}'
+			# assert torch.allclose(x.detach().cpu(), right_x.detach().cpu(), atol=1e-2), f'activation_{i}_{j}_{step}.pt - {torch.max(torch.abs(x - right_x))}'
+			# print(f'activation_{i}_{j}_{step}.pt - {torch.max(torch.abs(x.detach().cpu() - right_x.detach().cpu()))}')
 
 			if self.temporal_mask and lengths_fraction is not None:
 				lengths = compute_output_lengths(x, lengths_fraction)
@@ -318,6 +311,9 @@ class JasperNet(nn.Module):
 			step=0
 	) -> shaping.BCt:
 
+		# right_x = torch.load(f'/work/pipelines_over_speech_brain/main_forward_{step}.pt')
+		# print('MAIN FORWARD DIF:', torch.abs(right_x - x).max())
+
 		if self.frontend is not None:
 			assert (not self.check_time_dim_padded) or (x.shape[-1] % (32 / 2) == 0), 'Shape of input signal is not divisible by 16 '
 
@@ -335,14 +331,16 @@ class JasperNet(nn.Module):
 			# NOTE: x.to(dtype=torch.float32) need in case of long audio with fp16 inference. Long xlen cause float16 overflow to -inf.
 			x = self.normalize_features(x.to(dtype=torch.float32), mask = mask).to(dtype=x.dtype)
 
+		# right_x = torch.load(f'/work/pipelines_over_speech_brain/normalize_features_{step}.pt')
+		# print('MAIN FORWARD DIF:', torch.abs(right_x.detach().cpu() - x.detach().cpu()).max())
+
 		residual = []
 		for i, subblock in enumerate(self.backbone):
-			torch.save(x, f'input_{i}_{step}.pt')
 			x = subblock(x, residual=residual, lengths_fraction=xlen, j=i, step=step)
 
 			right_x = torch.load(f'/work/pipelines_over_speech_brain/x_sublock_{i}_{step}.pt')
 
-			print(f'x_sublock_{i}_{step}.pt - {torch.max(torch.abs(x - right_x))}')
+			print(f'x_sublock_{i}_{step}.pt - {torch.max(torch.abs(x.detach().cpu() - right_x.detach().cpu()))}')
 
 			if i >= len(self.backbone) - self.num_epilogue_modules - 1:  # HACK: drop residual connections for epilogue
 				residual = []
@@ -357,18 +355,18 @@ class JasperNet(nn.Module):
 
 		right_logits = torch.load(f'/work/pipelines_over_speech_brain/logits_{step}.pt')
 
-		print('logits dif:', torch.max(torch.abs(logits[0] - right_logits)))
+		print('logits dif:', torch.max(torch.abs(logits[0].detach().cpu() - right_logits.detach().cpu())))
 
 		log_probs = [F.log_softmax(l, dim = 1).to(torch.float32) for l in logits]
 		olen = [compute_output_lengths(l, xlen.to(torch.float32) if xlen is not None else None) for l in logits]
 		aux = {}
 
 		right_olen = torch.load(f'/work/pipelines_over_speech_brain/olen_{step}.pt')
-		print('olens dif: ', torch.max(torch.abs(olen[0] - right_olen)))
+		print('olens dif: ', torch.max(torch.abs(olen[0].detach().cpu() - right_olen.detach().cpu())))
 
 		if y is not None and ylen is not None:
 			loss = []
-			print(len(log_probs))
+			# print(len(log_probs))
 			for i, l in enumerate(log_probs):
 				loss.append(F.ctc_loss(l.permute(2, 0, 1), y[:, i], olen[i], ylen[:, i], blank = l.shape[1] - 1, reduction = 'none') / ylen[:, 0])
 			aux = dict(loss = sum(loss) if not self.bpe_only else sum(loss[1:]))
@@ -631,12 +629,12 @@ class LogFilterBankFrontend(nn.Module):
 			padded_signal, (0, pad), mode = 'constant', value = 0
 		)  # TODO: avoid this second copy by doing pad manually
 
-		if os.path.exists(f'/work/pipelines_over_speech_brain/frontend_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt'):
-			right_signal = torch.load(f'/work/pipelines_over_speech_brain/frontend_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt').cpu()
-			assert torch.allclose(padded_signal, right_signal, atol=1e-5), f'padded signal {signal.shape[-1]}_{torch.abs(signal).sum()}, ' \
-															 f'{torch.abs(padded_signal - right_signal).max()}'
-		else:
-			raise Exception(signal.shape[-1], torch.abs(signal).sum())
+		# if os.path.exists(f'/work/pipelines_over_speech_brain/frontend_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt'):
+		# 	right_signal = torch.load(f'/work/pipelines_over_speech_brain/frontend_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt').cpu()
+		# 	assert torch.allclose(padded_signal, right_signal, atol=1e-5), f'padded signal {signal.shape[-1]}_{torch.abs(signal).sum()}, ' \
+		# 													 f'{torch.abs(padded_signal - right_signal).max()}'
+		# else:
+		# 	raise Exception(signal.shape[-1], torch.abs(signal).sum())
 
 		# NOTE: pow(2) cause onnxruntime warnings like "CUDA kernel not found in registries for Op type: Pow node name: Pow_76" To avoid this pow replaced by x*x
 		if self.stft is not None:
@@ -646,33 +644,33 @@ class LogFilterBankFrontend(nn.Module):
 			# return_complex=False is deprecated after PyTorch 1.8.1
 			stft_res = padded_signal.stft(self.nfft, hop_length = self.hop_length, win_length = self.win_length,
 										  window = self.window, center = False, return_complex=True)
-			if os.path.exists(f'/work/pipelines_over_speech_brain/stft_res_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt'):
-				torch.save(padded_signal, f'padded_signal_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt')
-				right_stft_res = torch.load(
-					f'/work/pipelines_over_speech_brain/stft_res_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt').cpu()
-				assert torch.allclose(stft_res, right_stft_res, atol=1e-5), f'stft_res {signal.shape[-1]}_{torch.abs(signal).sum()}, ' \
-															  f'{torch.max(torch.abs(stft_res - right_stft_res))}'
-			else:
-				raise Exception(signal.shape[-1], torch.abs(signal).sum())
+			# if os.path.exists(f'/work/pipelines_over_speech_brain/stft_res_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt'):
+			# 	torch.save(padded_signal, f'padded_signal_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt')
+			# 	right_stft_res = torch.load(
+			# 		f'/work/pipelines_over_speech_brain/stft_res_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt').cpu()
+			# 	assert torch.allclose(stft_res, right_stft_res, atol=1e-5), f'stft_res {signal.shape[-1]}_{torch.abs(signal).sum()}, ' \
+			# 												  f'{torch.max(torch.abs(stft_res - right_stft_res))}'
+			# else:
+			# 	raise Exception(signal.shape[-1], torch.abs(signal).sum())
 
 			stft_res = torch.view_as_real(stft_res)
 			real_squared, imag_squared = (stft_res * stft_res).unbind(dim = -1)
 
 		power_spectrum = real_squared + imag_squared
 
-		if os.path.exists(f'/work/pipelines_over_speech_brain/power_spectrum_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt'):
-			right_power_spectrum = torch.load(f'/work/pipelines_over_speech_brain/power_spectrum_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt').cpu()
-			assert torch.allclose(power_spectrum, right_power_spectrum, atol=1e-5), f'power_spectrum {signal.shape[-1]}_{torch.abs(signal).sum()}'
-		else:
-			raise Exception(signal.shape[-1], torch.abs(signal).sum())
+		# if os.path.exists(f'/work/pipelines_over_speech_brain/power_spectrum_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt'):
+		# 	right_power_spectrum = torch.load(f'/work/pipelines_over_speech_brain/power_spectrum_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt').cpu()
+		# 	assert torch.allclose(power_spectrum, right_power_spectrum, atol=1e-5), f'power_spectrum {signal.shape[-1]}_{torch.abs(signal).sum()}'
+		# else:
+		# 	raise Exception(signal.shape[-1], torch.abs(signal).sum())
 
 		log_mel_features = self.mel(power_spectrum).log()
 
-		if os.path.exists(f'/work/pipelines_over_speech_brain/log_mel_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt'):
-			right_log_mel_features = torch.load(f'/work/pipelines_over_speech_brain/log_mel_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt').cpu()
-			assert torch.allclose(log_mel_features, right_log_mel_features, atol=1e-5), f'log_mel {signal.shape[-1]}_{torch.abs(signal).sum()}'
-		else:
-			raise Exception(signal.shape[-1], torch.abs(signal).sum())
+		# if os.path.exists(f'/work/pipelines_over_speech_brain/log_mel_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt'):
+		# 	right_log_mel_features = torch.load(f'/work/pipelines_over_speech_brain/log_mel_{signal.shape[-1]}_{int(torch.abs(signal).sum())}.pt').cpu()
+		# 	assert torch.allclose(log_mel_features, right_log_mel_features, atol=1e-5), f'log_mel {signal.shape[-1]}_{torch.abs(signal).sum()}'
+		# else:
+		# 	raise Exception(signal.shape[-1], torch.abs(signal).sum())
 
 		return log_mel_features
 
@@ -794,10 +792,28 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 				return super().forward(x)
 		else:
 			assert self.track_running_stats is False
+			# right_mask = torch.load('/work/pipelines_over_speech_brain/mask_normalize.pt')
+			# print(torch.sum(right_mask.int().detach().cpu() - mask.int().detach().cpu()))
 			xlen = mask.int().sum(dim = -1, keepdim = True)
+			# right_xlen = torch.load('/work/pipelines_over_speech_brain/xlen_normalize.pt')
+			# print('MASKED mean dif:', torch.abs(right_xlen.detach().cpu() - xlen.detach().cpu()).max())
+
 			mean = (x * mask).sum(dim = -1, keepdim = True) / xlen
+			# right_mean = torch.load('/work/pipelines_over_speech_brain/mean_normalize.pt')
+			# print('MASKED mean dif:', torch.abs(right_mean.detach().cpu() - mean.detach().cpu()).max())
+
 			zero_mean_masked = mask * (x - mean)
+
+			# right_mean = torch.load('/work/pipelines_over_speech_brain/mean_masked_normalize.pt')
+			# print('MASKED mean dif:', torch.abs(right_mean.detach().cpu() - zero_mean_masked.detach().cpu()).max())
+
 			std = ((zero_mean_masked * zero_mean_masked).sum(dim = -1, keepdim = True) / xlen).sqrt()
+			# right_std = torch.load('/work/pipelines_over_speech_brain/std_normalize.pt')
+			# print('MASKED std dif:', torch.abs(right_std.detach().cpu() - std.detach().cpu()).max())
+
+			# right_dif = torch.load('/work/pipelines_over_speech_brain/dif.pt')
+			# print('MASKED dif dif:', torch.abs(right_dif.detach().cpu() - (zero_mean_masked.detach().cpu() / (std.detach().cpu() + self.eps))).max())
+
 			return zero_mean_masked / (std + self.eps)
 
 
@@ -830,6 +846,7 @@ def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, op
 
 	else:
 		model, optimizer = apex.amp.initialize(model, optimizers = optimizer, opt_level = opt_level, **kwargs) if optimizer is not None else (apex.amp.initialize(model, opt_level = opt_level, **kwargs), None)
+
 
 	model.train(model_training)
 	return model, optimizer

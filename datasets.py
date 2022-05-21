@@ -326,8 +326,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		xlen: shaping.B = torch.zeros(len(batch), dtype = torch.float32)
 		ylen: shaping.B = torch.zeros(len(batch), len(sample_y), dtype = torch.int64)
 
-		print(f'PADDED frontend from {[sample_x.shape for meta_s, sample_s, sample_x, *sample_y in batch]} '
-			  f'to {x.shape}')
+		# print(f'PADDED frontend from {[sample_x.shape for meta_s, sample_s, sample_x, *sample_y in batch]} '
+		# 	  f'to {x.shape}')
 
 		for k, (meta_s, sample_s, sample_x, *sample_y) in enumerate(batch):
 			xlen[k] = sample_x.shape[-1] / x.shape[-1] if x.shape[-1] > 0 else 1.0
@@ -405,6 +405,7 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 		self.shuffled = batches[shuffled_batch_indices]
 
 		right_batches = torch.load(f'/work/pipelines_over_speech_brain/batches_{epoch}.pt')
+
 		assert torch.equal(self.shuffled, right_batches), f'sampling problem {self.shuffled[0][0], right_batches[0][0]}'
 		print(f'BATCH PASSED - {self.shuffled[0][0]}')
 

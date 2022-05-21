@@ -195,6 +195,8 @@ def evaluate_model(
 			audio_path_.extend(m['audio_path'] for m in meta)
 			ref_.extend([pipeline.preprocess(m['ref']) for pipeline in text_pipelines] for m in meta)
 			hyp_.extend(zip(*hyp))
+
+			break
 		toc_apply_model = time.time()
 		time_sec_val_apply_model = toc_apply_model - tic
 		perf.update(dict(time_sec_val_apply_model = time_sec_val_apply_model), prefix = f'datasets_{val_dataset_name}')
@@ -555,8 +557,8 @@ def main(args):
 
 	if not args.train_data_path:
 		model.eval()
-		if not args.adapt_bn:
-			model.fuse_conv_bn_eval()
+		# if not args.adapt_bn:
+		# 	model.fuse_conv_bn_eval()
 		if args.world_size > 1:
 			model, *_ = models.distributed_data_parallel_and_autocast(model, args.local_rank, opt_level = args.fp16, synchronize_bn = args.synchronize_bn, keep_batchnorm_fp32 = args.fp16_keep_batchnorm_fp32)
 		elif args.device != 'cpu':
@@ -752,6 +754,8 @@ def main(args):
 			check_y = torch.load(f'/work/pipelines_over_speech_brain/y_{batch_idx + 1}.pt').unsqueeze(1)
 			check_ylen = torch.load(f'/work/pipelines_over_speech_brain/ylen_{batch_idx + 1}.pt').unsqueeze(1)
 
+			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
+
 			assert torch.equal(xlen.detach().cpu(), check_xlen.detach().cpu()), 'xlens failed'
 			assert torch.equal(y.detach().cpu(), check_y.detach().cpu()), 'y failed'
 			assert torch.equal(ylen.detach().cpu(), check_ylen.detach().cpu()), 'ylen failed'
@@ -764,7 +768,8 @@ def main(args):
 				f'MAX_DIF: {torch.max(torch.abs(x.cpu() - check_x.cpu()))}\n' \
 				f'VALUES: {len(equal_mask)}\n'
 
-			x, xlen, y, ylen = x.to(args.device, non_blocking = True), xlen.to(args.device, non_blocking = True), y.to(args.device, non_blocking = True), ylen.to(args.device, non_blocking = True)
+			print('INPUTS PASSED')
+
 			try:
 				#TODO check nan values in tensors, they can break running_stats in bn
 				log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen, step=(batch_idx + 1)).get, ['log_probs', 'olen', 'loss'])
@@ -776,7 +781,7 @@ def main(args):
 				if args.world_size > 1 or not oom_handler.try_recover(model.parameters(), _print=utils.get_root_logger_print(level=logging.ERROR)):
 					raise
 			example_weights = ylen[:, 0]
-			print('scaled losses -', (loss * example_weights))
+			# print('scaled losses -', (loss * example_weights))
 			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, loss.mean()
 			entropy = models.entropy(log_probs[0], olen[0], dim=1).mean()
 
@@ -795,42 +800,20 @@ def main(args):
 				if args.fp16:
 					with apex.amp.scale_loss(loss, optimizer) as scaled_loss:
 						scaled_loss.backward()
+
+					right_loss = torch.load(f'/work/pipelines_over_speech_brain/loss_{batch_idx + 1}.pt')
+					print(f'loss_dif - {torch.abs(loss - right_loss).max()}')
 				else:
 					print(f"Loss({loss.item()})")
 					loss.backward()
 
 					right_loss = torch.load(f'/work/pipelines_over_speech_brain/loss_{batch_idx + 1}.pt')
-					assert torch.allclose(loss, right_loss, atol=1e-5), f'loss_dif - {torch.abs(loss - right_loss).max()}'
+					print(f'loss_dif - {torch.abs(loss - right_loss).max()}')
 
 				if iteration % args.train_batch_accumulate_iterations == 0:
-					# grads = torch.load('/work/pipelines_over_speech_brain/grads.pt')
-					# for name, param in model.named_parameters():
-					# 	if param.requires_grad:
-					# 		right_param = grads[name]
-					# 		param_grad = param.grad.clone()
-					#
-					# 		assert torch.all(torch.isclose(param_grad, right_param, atol=1e-2)), \
-					# 			(f'grads - [{name}] - {param_grad.shape}, {right_param.shape}: '
-					# 			  f'{torch.max(torch.abs(param_grad - right_param))}')\
-
 					# torch.nn.utils.clip_grad_norm_(
 					# 	apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm, error_if_nonfinite = False
 					# )
-
-					right_optimizer = torch.load(f'/work/pipelines_over_speech_brain/optimizer_{batch_idx + 1}.pt')
-
-					print('OPTIMIZER CHECK')
-
-					for i in range(len(right_optimizer.param_groups[0]['params'])):
-						if i < len(optimizer.param_groups[0]['params']):
-							convasr_optim = optimizer.param_groups[0]['params'][i].shape
-						else:
-							convasr_optim = 'not_found'
-
-						speech_optim = right_optimizer.param_groups[0]['params'][i].shape
-
-						assert convasr_optim == speech_optim, \
-							f'optim shapes failed - {i} - {convasr_optim} / {speech_optim}'
 
 					optimizer.step()
 					optimizer.zero_grad()
@@ -839,13 +822,14 @@ def main(args):
 					print('STEP_WEIGHTS CHECK')
 
 					weights = torch.load(f'/work/pipelines_over_speech_brain/step_params_{batch_idx + 1}.pt')
+					weights_dif = []
 					for name, param in model.named_parameters():
 						if param.requires_grad:
-							right_param = weights[name]
+							right_param = weights['module.' + name]
 							param_grad = param.data
-							assert torch.all(torch.isclose(param_grad, right_param, atol=1e-5)), (
-								f'[{name}] - {param_grad.shape}, {right_param.shape}: '
-								f'{torch.max(torch.abs(param_grad - right_param))}')
+							weights_dif.append([torch.max(torch.abs(param_grad - right_param))])
+
+					print('WEIGHTS_MAX: ', max(weights_dif))
 
 				if iteration > 0 and iteration % args.log_iteration_interval == 0:
 					if args.world_size > 1:
@@ -864,7 +848,8 @@ def main(args):
 					logging.getLogger().error(f'Loss value is corrupted! {args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] | Rank: {args.rank} | Loss: {loss.item()}')
 			toc_bwd = time.time()
 
-			assert batch_idx < 3, '3 STEPS ENDED'
+			if iteration == 2:
+				raise Exception('STEP ENDED')
 
 			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = map(lambda sec: sec * 1000, [toc_data - tic, toc_fwd - toc_data, toc_bwd - toc_fwd, toc_bwd - toc_data])
 			perf.update(dict(time_ms_data = time_ms_data, time_ms_fwd = time_ms_fwd, time_ms_bwd = time_ms_bwd, time_ms_iteration = time_ms_data + time_ms_model), prefix = 'performance')
