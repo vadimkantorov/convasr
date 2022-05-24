@@ -848,7 +848,7 @@ def main(args):
 					logging.getLogger().error(f'Loss value is corrupted! {args.experiment_id} | epoch: {epoch:02d} iter: [{batch_idx: >6d} / {len(train_data_loader)} {iteration: >6d}] | Rank: {args.rank} | Loss: {loss.item()}')
 			toc_bwd = time.time()
 
-			if iteration == 2:
+			if iteration == 0:
 				raise Exception('STEP ENDED')
 
 			time_ms_data, time_ms_fwd, time_ms_bwd, time_ms_model = map(lambda sec: sec * 1000, [toc_data - tic, toc_fwd - toc_data, toc_bwd - toc_fwd, toc_bwd - toc_data])
@@ -1084,7 +1084,8 @@ if __name__ == '__main__':
 	parser.add_argument('--onnx-sample-time', type = int, default = 1024)
 	parser.add_argument('--onnx-opset', type = int, default = 12, choices = [9, 10, 11, 12, 13])
 	parser.add_argument('--onnx-export-params', type = bool, default = True)
-	parser.add_argument('--dropout', type = float, default = 0.2)
+	# parser.add_argument('--dropout', type = float, default = 0.2)
+	parser.add_argument('--dropout', type=float, default=0)
 	parser.add_argument('--githttp')
 	parser.add_argument('--vis-errors-audio', action = 'store_true')
 	parser.add_argument('--adapt-bn', action = 'store_true')
