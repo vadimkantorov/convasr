@@ -145,17 +145,17 @@ class ConvBn1d(nn.Module):
 			else:
 				residual_inputs = []
 
-			# right_bn_conv = torch.load(f'/work/pipelines_over_speech_brain/bn_conv_{i}_{j}_{step}.pt')
-			# bn_conv = conv(x)
+			right_bn_conv = torch.load(f'/work/pipelines_over_speech_brain/bn_conv_{i}_{j}_{step}.pt')
+			bn_conv = conv(x)
 
-			# assert torch.allclose(bn_conv.detach().cpu(), right_bn_conv.detach().cpu(), atol=1e-2), \
-			# 	f'bn_conv_{i}_{j}_{step}.pt - {torch.max(torch.abs(bn_conv.detach().cpu() - right_bn_conv.detach().cpu()))}'
+			assert torch.allclose(bn_conv.detach().cpu(), right_bn_conv.detach().cpu(), atol=1e-2), \
+				f'bn_conv_{i}_{j}_{step}.pt - {torch.max(torch.abs(bn_conv.detach().cpu() - right_bn_conv.detach().cpu()))}'
 
 			x = self.activation(bn(conv(x)), residual=residual_inputs)
-			# right_x = torch.load(f'/work/pipelines_over_speech_brain/activation_{i}_{j}_{step}.pt')
+			right_x = torch.load(f'/work/pipelines_over_speech_brain/activation_{i}_{j}_{step}.pt')
 
-			# assert torch.allclose(x.detach().cpu(), right_x.detach().cpu(), atol=1e-2), f'activation_{i}_{j}_{step}.pt - {torch.max(torch.abs(x - right_x))}'
-			# print(f'activation_{i}_{j}_{step}.pt - {torch.max(torch.abs(x.detach().cpu() - right_x.detach().cpu()))}')
+			assert torch.allclose(x.detach().cpu(), right_x.detach().cpu(), atol=1e-2), f'activation_{i}_{j}_{step}.pt - {torch.max(torch.abs(x - right_x))}'
+			print(f'activation_{i}_{j}_{step}.pt - {torch.max(torch.abs(x.detach().cpu() - right_x.detach().cpu()))}')
 
 			if self.temporal_mask and lengths_fraction is not None:
 				lengths = compute_output_lengths(x, lengths_fraction)

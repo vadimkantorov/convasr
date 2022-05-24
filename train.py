@@ -773,7 +773,7 @@ def main(args):
 			try:
 				#TODO check nan values in tensors, they can break running_stats in bn
 				log_probs, olen, loss = map(model(x, xlen, y = y, ylen = ylen, step=(batch_idx + 1)).get, ['log_probs', 'olen', 'loss'])
-				print(f"olen - {olen}, loss - {loss}")
+				# print(f"olen - {olen}, loss - {loss}")
 
 				oom_handler.reset()
 			except:
