@@ -770,6 +770,7 @@ def main(args):
 				f'VALUES: {len(equal_mask)}\n'
 
 			print('INPUTS PASSED', torch.max(torch.abs(x.cpu() - check_x.cpu())))
+			raise Exception
 
 			try:
 				#TODO check nan values in tensors, they can break running_stats in bn

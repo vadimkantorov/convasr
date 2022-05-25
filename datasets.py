@@ -252,6 +252,12 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		                                       backend = self.audio_backend, duration = self.max_duration,
 		                                       dtype = self.audio_dtype)
 
+		if os.path.exists(f'/work/pipelines_over_speech_brain/signal_{transcript[0]["audio_path"].replace("/", "_")}.pt'):
+			right_signal = torch.load(f'/work/pipelines_over_speech_brain/signal_{transcript[0]["audio_path"].replace("/", "_")}.pt').cpu()
+			# signal = right_signal
+		else:
+			raise Exception(signal.shape[-1], torch.abs(signal).sum())
+
 		transcript = [t for t in transcript if t['channel'] < len(signal)]
 
 		features = []

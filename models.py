@@ -626,6 +626,17 @@ class LogFilterBankFrontend(nn.Module):
 	def forward(self, signal: shaping.BT, path, mask: shaping.BT = None, **kwargs) -> shaping.BCT:
 		assert signal.ndim == 2
 
+		if os.path.exists(f'/work/pipelines_over_speech_brain/signal_{path.replace("/", "_")}.pt'):
+			right_signal = torch.load(f'/work/pipelines_over_speech_brain/signal_{path.replace("/", "_")}.pt').cpu()
+			assert torch.allclose(signal, right_signal, atol=5e-5), f'signal signal {path.replace("/", "_")}, ' \
+															 f'{torch.abs(signal - right_signal).max()}'
+
+			# ###
+			# signal = right_signal
+			# ###
+		else:
+			raise Exception(signal.shape[-1], torch.abs(signal).sum())
+
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
 
 		signal = normalize_signal(signal, denom_multiplier=self.debug_short_long_records_normalize_signal_multiplier) if self.normalize_signal else signal
@@ -661,6 +672,7 @@ class LogFilterBankFrontend(nn.Module):
 # 				# torch.save(padded_signal, f'padded_signal_{path.replace("/", "_")}.pt')
 				right_stft_res = torch.load(
 					f'/work/pipelines_over_speech_brain/stft_res_{path.replace("/", "_")}.pt').cpu()
+
 				assert torch.allclose(stft_res, right_stft_res, atol=1e-5), f'stft_res {signal.shape[-1]}_{torch.abs(signal).sum()}, ' \
 															  f'{torch.max(torch.abs(stft_res - right_stft_res))}'
 			else:
@@ -673,9 +685,6 @@ class LogFilterBankFrontend(nn.Module):
 
 		if os.path.exists(f'/work/pipelines_over_speech_brain/power_spectrum_{path.replace("/", "_")}.pt'):
 			right_power_spectrum = torch.load(f'/work/pipelines_over_speech_brain/power_spectrum_{path.replace("/", "_")}.pt').cpu()
-			###
-			power_spectrum = right_power_spectrum
-			###
 			assert torch.allclose(power_spectrum, right_power_spectrum, atol=1e-5), f'power_spectrum {signal.shape[-1]}_{torch.abs(signal).sum()}'
 		else:
 			raise Exception(signal.shape[-1], torch.abs(signal).sum())
