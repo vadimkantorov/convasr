@@ -277,7 +277,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 					# max_len = int(math.ceil(segment.shape[1] / 128)) * 128
 					# padded_segment = torch.zeros(1, max_len)
 					# padded_segment[0, :segment.shape[1]] = segment[0, :]
-					features.append(self.frontend(segment).squeeze(0))
+					features.append(self.frontend(segment, path=transcript[0]['audio_path']).squeeze(0))
 
 					# print(f'PADDED segment from {segment.shape} to {padded_segment.shape}')
 			else:

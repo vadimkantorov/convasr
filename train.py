@@ -749,6 +749,7 @@ def main(args):
 
 			print('FORWARD:', x.shape)
 
+			print('batch_idx:', batch_idx)
 			check_x = torch.load(f'/work/pipelines_over_speech_brain/x_frontend_{batch_idx + 1}.pt')
 			check_xlen = torch.load(f'/work/pipelines_over_speech_brain/xlen_{batch_idx + 1}.pt')
 			check_y = torch.load(f'/work/pipelines_over_speech_brain/y_{batch_idx + 1}.pt').unsqueeze(1)
@@ -768,7 +769,7 @@ def main(args):
 				f'MAX_DIF: {torch.max(torch.abs(x.cpu() - check_x.cpu()))}\n' \
 				f'VALUES: {len(equal_mask)}\n'
 
-			print('INPUTS PASSED')
+			print('INPUTS PASSED', torch.max(torch.abs(x.cpu() - check_x.cpu())))
 
 			try:
 				#TODO check nan values in tensors, they can break running_stats in bn
@@ -783,6 +784,8 @@ def main(args):
 			example_weights = ylen[:, 0]
 			# print('scaled losses -', (loss * example_weights))
 			loss, loss_cur = (loss * example_weights).mean() / args.train_batch_accumulate_iterations, loss.mean()
+			# torch.save(loss, 'loss_mean.pt')
+
 			entropy = models.entropy(log_probs[0], olen[0], dim=1).mean()
 
 			if args.world_size > 1:
@@ -807,29 +810,52 @@ def main(args):
 					print(f"Loss({loss.item()})")
 					loss.backward()
 
+					grads = {}
+					for name, param in model.decoder.named_parameters():
+						if param.requires_grad:
+							grads[name] = param.grad.clone()
+
+					# torch.save(grads, f'decoder_grads_{batch_idx + 1}.pt')
+					#
+					# raise Exception
+
 					right_loss = torch.load(f'/work/pipelines_over_speech_brain/loss_{batch_idx + 1}.pt')
 					print(f'loss_dif - {torch.abs(loss - right_loss).max()}')
 
 				if iteration % args.train_batch_accumulate_iterations == 0:
-					# torch.nn.utils.clip_grad_norm_(
-					# 	apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm, error_if_nonfinite = False
-					# )
-
+					torch.nn.utils.clip_grad_norm_(
+						apex.amp.master_params(optimizer) if args.fp16 else model.parameters(), args.max_norm, error_if_nonfinite = False
+					)
+					# print('OPTIM_CHECK')
+					# right_optim = torch.load(f'/work/pipelines_over_speech_brain/optimizer_{batch_idx + 1}.pt')
+					# print(max([torch.abs(x['momentum_buffer'] - y['momentum_buffer']).max() for x, y in zip(right_optim.state.values(), optimizer.state.values())]))
 					optimizer.step()
+
+					print('GRADS CHECK')
+					grads = torch.load(f'/work/pipelines_over_speech_brain/grads_{batch_idx + 1}.pt')
+					grads_dif = []
+					for name, param in model.named_parameters():
+						if param.requires_grad:
+							right_param = grads[name]
+							param_grad = param.grad.clone()
+							grads_dif.append([torch.max(torch.abs(param_grad.detach().cpu() - right_param.detach().cpu()))])
+
+					print('GRADS_MAX: ', max(grads_dif))
+
 					optimizer.zero_grad()
 					scheduler.step(iteration)
 
-					print('STEP_WEIGHTS CHECK')
-
-					weights = torch.load(f'/work/pipelines_over_speech_brain/step_params_{batch_idx + 1}.pt')
-					weights_dif = []
-					for name, param in model.named_parameters():
-						if param.requires_grad:
-							right_param = weights['module.' + name]
-							param_grad = param.data
-							weights_dif.append([torch.max(torch.abs(param_grad - right_param))])
-
-					print('WEIGHTS_MAX: ', max(weights_dif))
+					# print('STEP_WEIGHTS CHECK')
+					#
+					# weights = torch.load(f'/work/pipelines_over_speech_brain/step_params_{batch_idx + 1}.pt')
+					# weights_dif = []
+					# for name, param in model.named_parameters():
+					# 	if param.requires_grad:
+					# 		right_param = weights[name]
+					# 		param_grad = param.data
+					# 		weights_dif.append([torch.max(torch.abs(param_grad - right_param))])
+					#
+					# print('WEIGHTS_MAX: ', max(weights_dif))
 
 				if iteration > 0 and iteration % args.log_iteration_interval == 0:
 					if args.world_size > 1:
