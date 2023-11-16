@@ -706,8 +706,8 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 				# torch.std uses Bessel unbiased estimate by default, code below performs biased estimation.
 				x_minus_mean = x - mean
 				# NOTE: pow(2) cause onnxruntime warnings like "CUDA kernel not found in registries for Op type: Pow node name: Pow_76" To avoid this pow replaced by x*x
-				std = ((x_minus_mean * x_minus_mean).mean(dim=-1, keepdim=True)).sqrt()
-				return x_minus_mean / (std + self.eps)
+				std = ((x_minus_mean * x_minus_mean).mean(dim=-1, keepdim=True)).add(self.eps).sqrt()
+				return x_minus_mean / std
 			else:
 				return super().forward(x)
 		else:
@@ -715,8 +715,8 @@ class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 			xlen = mask.int().sum(dim = -1, keepdim = True)
 			mean = (x * mask).sum(dim = -1, keepdim = True) / xlen
 			zero_mean_masked = mask * (x - mean)
-			std = ((zero_mean_masked * zero_mean_masked).sum(dim = -1, keepdim = True) / xlen).sqrt()
-			return zero_mean_masked / (std + self.eps)
+			std = ((zero_mean_masked * zero_mean_masked).sum(dim = -1, keepdim = True) / xlen).add(self.eps).sqrt()
+			return zero_mean_masked / std
 
 
 def unpad(x, lens):
